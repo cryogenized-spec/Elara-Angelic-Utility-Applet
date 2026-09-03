@@ -1,6 +1,6 @@
 # Elara Angelic Utility Applet
 
-This README is the durable continuity record for the clean-room rebuild of Elara. It preserves project history, constraints, roadmap, verified implementation decisions, and handoff notes.
+This README is the durable continuity record for the clean-room rebuild of Elara. It preserves project history, constraints, roadmap, verified implementation decisions, deployment expectations, and handoff notes.
 
 ## Current project definition
 
@@ -41,6 +41,20 @@ The character has a dedicated master system-instruction source containing durabl
 Long-term notes/memory are a separate retrievable domain for notable events and past experiences. Ordinary conversation history is not automatically permanent memory. This preserves important experiences when model context windows turn over without creating a giant memory manager.
 
 Never combine provider calls, stream parsing, tool execution, Workspace access, character prompting, memory retrieval, persistence, diagnostics, and presentation into one manager/service/runtime.
+
+## Deployment architecture
+
+Elara is a Vite application and should be published to GitHub Pages as built static output, not by serving the source repository root.
+
+Canonical deployment path:
+
+`main` → GitHub Actions build → `dist/` artifact → GitHub Pages
+
+When Pages is enabled, use **Settings → Pages → Source → GitHub Actions**. The deployment workflow should build the application and publish only the generated `dist/` directory. Do not create a `gh-pages` source branch merely to hold compiled output.
+
+For the project-site URL form `https://<owner>.github.io/<repo>/`, Vite requires the corresponding repository base path in its build configuration. For a user/organization site or custom domain at the domain root, `/` is appropriate. The repository deployment workflow will own this setting when the exact Pages URL is finalized.
+
+GitHub's current Pages guidance supports custom Actions workflows, and Vite's current deployment guide specifically recommends GitHub Actions for Vite builds because the application requires a build step. citeturn472153search0turn472153search2
 
 ## 50-prompt roadmap
 
@@ -115,23 +129,21 @@ Prompt 26 complete: safety policy and enforcement boundaries. Custom safety sett
 
 Prompt 27 complete: production creative-context master system instruction for Elara, stored separately from ordinary conversation content, tool schemas, and future memory notes.
 
-## Runtime scaffold
+Prompts 28–32 complete: canonical Gemini request contract, normalized provider-error model, safe HTTP diagnostics contract, developer diagnostics presentation contract, and request timing/timeout contract.
 
-The repository now contains the executable runtime scaffold and declared dependency graph. A generated `package-lock.json` is intentionally not committed yet because it must come from an actual npm install in an environment that can persist the generated lockfile. Until then, CI uses `npm install` rather than fabricated `npm ci` state.
+## Runtime status
 
-The required runtime CI gates are now install → lint → typecheck → unit tests → build → Playwright Chromium E2E.
+The first executable vertical slice exists. It proves the application plumbing with a deterministic demo transport:
+
+Android-first UI → application turn boundary → normalized stream events → local persistence.
+
+The demo transport is temporary test/demo infrastructure, not an alternate Gemini implementation. The production provider remains the single canonical Gemini Interactions adapter and will enter through the same application-facing turn boundary.
+
+The repository does not contain a fabricated `package-lock.json`. Until a real lockfile is generated from npm and committed, CI uses `npm install`. Once a genuine lockfile exists, CI should switch to lockfile-aware caching and `npm ci`.
 
 ## External-source revalidation rule
 
-Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, or GitHub Action surfaces, re-check current official documentation/release state. Once generated, `package-lock.json` is authoritative for installed versions.
-
-Current Prompt 18–19 verification: Google's current Gemini documentation confirms native image input in Interactions and native PDF/document input; PDFs can be sent inline for smaller transient use, while the Files API is recommended for larger or repeatedly reused files. Google's PDF guidance also describes native multimodal understanding of text, images, diagrams, charts, and tables. citeturn467827search0turn467827search1turn467827search3turn467827search5
-
-Current Prompt 22 verification: Core Web Vitals “good” targets remain LCP ≤2.5s, INP ≤200ms, and CLS ≤0.1 at the 75th percentile. Elara additionally sets an internal initial-JavaScript budget of 200 KB compressed for the core shell. citeturn646477search1
-
-Current Prompt 23–25 package verification: Vite's current guide recommends `npm create vite@latest`; current npm package pages verify TypeScript 7.0.2, `@vitejs/plugin-react` 6.1.1, ESLint 10.9.1, Vitest 4.1.11, Playwright 1.62.1, and jsdom 30.0.1. citeturn962400search0turn847264search0turn847264search2turn847264search9turn339481search0turn339481search9turn339481search8
-
-Current Prompt 26 verification: Google's current Interactions overview says custom safety settings are not supported on the Interactions API, so Elara's safety layer must not pretend otherwise. citeturn962400search10
+Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, GitHub Pages, or GitHub Action surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
 
 ## Future-self handoff protocol
 

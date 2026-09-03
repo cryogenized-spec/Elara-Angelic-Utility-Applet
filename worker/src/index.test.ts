@@ -22,6 +22,43 @@ describe('Gemini Worker boundary', () => {
     createInteraction.mockReset();
   });
 
+  it('reports a healthy service without exposing protected values', async () => {
+    const request = new Request('https://worker.example/health', {
+      headers: { Origin: 'https://cryogenized-spec.github.io' },
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://cryogenized-spec.github.io');
+    expect(body).toEqual({
+      service: 'elara-gemini',
+      status: 'healthy',
+      api: true,
+      credentialConfigured: true,
+      originPolicyConfigured: true,
+    });
+    expect(JSON.stringify(body)).not.toContain('test-secret-key');
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('reports a degraded health state when protected configuration is incomplete', async () => {
+    const request = new Request('https://worker.example/health');
+
+    const response = await worker.fetch(request, { ...baseEnv, ALLOWED_ORIGINS: '' });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      service: 'elara-gemini',
+      status: 'degraded',
+      api: true,
+      credentialConfigured: true,
+      originPolicyConfigured: false,
+    });
+  });
+
   it('rejects a missing Worker credential before invoking Gemini', async () => {
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',

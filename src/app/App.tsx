@@ -8,6 +8,7 @@ import { Sidebar } from './components/Sidebar';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
 import { PortraitBanner } from './components/PortraitBanner';
+import '../ui/fonts.css';
 import './app.css';
 
 const makeMessage = (role: ChatMessage['role'], text: string): ChatMessage => ({

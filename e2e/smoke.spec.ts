@@ -11,11 +11,13 @@ test('loads the Elara shell', async ({ page }) => {
 test('collapses the Elara portrait when the sidebar opens', async ({ page }) => {
   await page.goto('');
   const banner = page.getByRole('region', { name: 'Elara portrait banner' });
+  const sidebar = page.getByRole('complementary', { name: 'Chat threads' });
   await expect(banner).toHaveClass(/elara-banner/);
 
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await expect(banner).toHaveClass(/is-collapsed/);
+  await expect(sidebar).toHaveClass(/is-open/);
 
-  await page.getByRole('button', { name: 'Close sidebar' }).click();
+  await sidebar.getByRole('button', { name: 'Close sidebar' }).click();
   await expect(banner).not.toHaveClass(/is-collapsed/);
 });

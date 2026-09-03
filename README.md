@@ -1,6 +1,6 @@
 # Elara Angelic Utility Applet
 
-This README is the durable handoff record for the clean-room rebuild of Elara. It exists so a future development iteration can resume without relying on human memory, chat context, or copied prompts.
+This README is the durable continuity record for the clean-room rebuild of Elara. It is intended to preserve project history, non-negotiable constraints, the 50-prompt roadmap, verified implementation decisions, and handoff notes so later development iterations do not depend on human memory or chat context.
 
 ## Current project definition
 
@@ -18,18 +18,18 @@ Android portrait UI → conversation state → one canonical Gemini Interactions
 
 1. One canonical Gemini execution path. Never add a legacy `generateContent` fallback or a second Gemini client/provider.
 2. Use Google's current Gemini Interactions API through `@google/genai`.
-3. Model settings are capability-driven. Never expose or send unsupported controls/fields.
-4. Do not let UI code construct raw Gemini requests, own persistence, manage OAuth internals, or handle secrets directly.
+3. Model settings are capability-driven. Never expose or send unsupported controls or fields.
+4. UI code must not construct raw Gemini requests, own persistence, manage OAuth internals, or handle secrets directly.
 5. Keep modules small and responsibility-focused. Do not recreate the previous application's monolithic manager/service/compatibility sprawl.
 6. Android portrait comes first: composer, keyboard behavior, scrolling, safe areas, dialogs, portrait, attachments, and touch targets must work on a narrow phone viewport before desktop polish.
 7. External data crossing trust boundaries must be validated.
 8. Provider/network failures must become explicit diagnosable states. No endless spinner.
 9. One authoritative persistence store per domain.
 10. Build vertically. A later feature must not become a prerequisite for proving core chat.
-11. Direct commits to `main` are the normal workflow for this project. Do not leave pull requests open. If a PR is ever required, merge it immediately after it is verified.
+11. Direct commits to `main` are the normal workflow. Do not leave pull requests open. If a PR is ever required, merge it immediately after verification.
 12. CI must be green before calling a milestone complete.
-13. Never silently accept deprecated Node.js, npm, package, SDK, CLI, or GitHub Action choices just because an older repository used them.
-14. Use `npx` for one-shot upstream CLI/scaffolding commands, using the current `@latest` entry point documented by that package.
+13. Never silently accept deprecated Node.js, npm, package, SDK, CLI, or GitHub Action choices because an older repository used them.
+14. Use `npx` for one-shot upstream CLI/scaffolding commands, using the package's current documented `@latest` entry point.
 15. Never invent a lockfile. Generate `package-lock.json` from the actual dependency graph with npm and commit it.
 
 ## Runtime and dependency policy
@@ -40,11 +40,11 @@ At implementation time, check the live npm registry/package pages for every new 
 
 The package lock is authoritative once dependencies are scaffolded. CI should use the committed lockfile and `npm ci`.
 
-The initial architecture selected current releases verified during Prompt 3: React 19, TypeScript 7, Vite 8, Tailwind CSS 4, Dexie 4, Zod 4, Vitest 4, Playwright 1, and `@google/genai` 2. The lockfile, not this paragraph, is the final authority for exact installed versions.
+The initial architecture selected current releases verified during Prompt 3: React 19, TypeScript 7, Vite 8, Tailwind CSS 4, Dexie 4, Zod 4, Vitest 4, Playwright 1, and `@google/genai` 2. The lockfile, not this paragraph, is the authority for exact installed versions once dependency installation occurs.
 
 ## Product requirements carried across the build
 
-Chat: create/continue conversations, send text, stream Gemini responses, display supported thinking summaries, cancel generation, recover from provider/network/timeout failures, retry only when safely retryable, and persist recoverable conversation state.
+Chat: create and continue conversations, send text, stream Gemini responses, display supported thinking summaries, cancel generation, recover from provider/network/timeout failures, retry only when safely retryable, and persist recoverable conversation state.
 
 Gemini: one Interactions implementation, one normalized request contract, one normalized stream-event contract, model selection, capability-driven generation settings, supported thinking controls, explicit creative/fictional system context, and preserved provider diagnostics.
 
@@ -56,7 +56,7 @@ Appearance: light/dark/system, custom background image, readability treatment be
 
 Persistence: local authoritative store, schema/version boundary, migrations, corruption-safe recovery, no competing storage authorities.
 
-Security: central configuration boundary, Lockbox classification for secrets/configuration, no browser-bundled application-owned Gemini secret, no secrets in logs/analytics/diagnostics/normal persisted state.
+Security: central configuration boundary, Lockbox classification for secrets/configuration, no browser-bundled application-owned Gemini secret, and no secrets in logs, analytics, diagnostics, or normal persisted state.
 
 Diagnostics/analytics: structured lifecycle state, HTTP/provider/network/timeout diagnostics, request IDs, timings, retry information, safe export, privacy-conscious analytics, and no message-content analytics by default.
 
@@ -66,7 +66,7 @@ Background later: evaluate Gemini-native Interactions background execution first
 
 ## The 50-prompt build sequence
 
-The sequence below is the durable roadmap. The numbered titles are reproduced exactly as preserved in the project planning record. The full original prose of every prompt is not recoverable from the currently active transcript, so this README intentionally does not fabricate quotations and present them as verbatim. The titles, requirements, milestones, and continuity rules here are the authoritative relay for future iterations.
+This is the durable roadmap. The numbered titles are preserved from the project planning record. Do not treat this README as a reason to restart already-completed work; current milestone status is recorded below.
 
 ### Prompt 1 — Repository Forensics
 Establish the clean-room repository forensics. Inspect the archived implementation as a reference specimen, document what is worth carrying forward, identify complexity and failure modes to avoid, and conclude with the minimal vertical chat spine. No source migration.
@@ -165,7 +165,7 @@ Expose high-value diagnostics in a controlled developer-facing UI. Never leak se
 Implement explicit request timing and timeout behavior so provider hangs become deterministic timeout states instead of indefinite spinners.
 
 ### Prompt 33 — Retry Policy
-Implement a conservative retry policy based on normalized retryability and idempotency. Do not blindly retry every error and do not create duplicate user messages/requests.
+Implement a conservative retry policy based on normalized retryability and idempotency. Do not blindly retry every error and do not create duplicate user messages or requests.
 
 ### Prompt 34 — Request Lifecycle State Machine
 Model request lifecycle explicitly from idle through sending/streaming/completed/cancelled/failure/timeout/retry where applicable. State transitions must be deterministic and testable.
@@ -218,7 +218,7 @@ Evaluate and implement Gemini-native Interactions background execution after the
 ### Prompt 50 — End-to-End Reliability Gate
 Perform the complete reliability pass across chat, streaming, persistence, diagnostics, attachments, appearance, security, OAuth/integrations where implemented, background execution where implemented, performance, tests, dependency hygiene, and CI. The repository is only considered complete for the current stage when the required quality gate is green.
 
-## Milestones and known state
+## Milestones and verified state
 
 Milestone 1 complete: clean-room repository exists and the archived app has been documented as reference material only.
 
@@ -226,21 +226,23 @@ Milestone 2 complete: product boundary is recorded in `docs/PRODUCT_BOUNDARY.md`
 
 Milestone 3 complete: technical architecture is recorded in `docs/ARCHITECTURE_DECISION.md`.
 
-Current runtime baseline: `.nvmrc` is `24`; CI resolved Node.js `24.20.0` and npm `11.19.0` during the live verification run on 2026-09-03.
+Prompt 4 is now complete: responsibility and dependency ownership rules are recorded in `docs/SYSTEM_BOUNDARIES.md`.
 
-CI lesson recorded: GitHub Actions npm caching requires a lockfile. Before dependencies existed, that caused a real CI failure. The correct response was to disable npm cache until the lockfile exists rather than fabricate a lockfile. Once `package-lock.json` lands, re-enable lockfile-aware npm caching and use `npm ci`.
+Runtime baseline verified in live CI: `.nvmrc` is `24`; GitHub Actions resolved Node.js `24.20.0` and npm `11.19.0` on 2026-09-03.
 
-Current CI state verified after that fix: run `33705746826` completed successfully.
+CI incident recorded: the first Node/npm cache configuration failed because the repository did not yet contain a dependency lockfile. The correct fix was to disable npm caching until a real lockfile exists. Do not fabricate a lockfile. Once dependencies are installed and `package-lock.json` exists, enable lockfile-aware npm caching and use `npm ci`.
 
-No open pull requests are present in this repository at the current handoff.
+The corrected foundation CI run `33705746826` completed successfully.
+
+The latest README/system-boundaries change has its own CI run and must be verified before declaring this milestone fully green.
 
 ## External-source revalidation rule
 
-This project deliberately does not trust the model's old knowledge for fast-moving dependencies or APIs. Before implementing or changing a relevant surface, re-check the live official source for that dependency/API.
+This project deliberately does not trust old model knowledge for fast-moving dependencies or APIs. Before implementing or changing a relevant surface, re-check the live official source for that dependency/API.
 
 For npm packages: check the npm package page/registry for the current `latest` version, release stability, engines, peer dependencies, and deprecation status. Use `npx` with the package's current documented CLI entry point. Generate the lockfile with npm. Do not paste old dependency versions from the archived application.
 
-For Node.js: keep Node 24 LTS as the production baseline unless live Node.js release status changes the support picture materially. Prefer the newest supported LTS over a Current line.
+For Node.js: keep Node 24 LTS as the production baseline unless live Node.js release status materially changes the support picture. Prefer the newest supported LTS over a Current line.
 
 For Gemini: re-check current Interactions request/response types, SDK version, API version, model IDs, model capabilities, streaming events, thinking controls, safety support, background execution, and error semantics before coding.
 
@@ -254,26 +256,16 @@ Do not carry forward the old project's architectural baggage: multiple Gemini pa
 
 ## Future-self handoff protocol
 
-Every future iteration must leave a durable handoff for the next iteration before declaring its work complete.
+This section is for a genuinely later development iteration when context continuity is actually lost. It is not an instruction to restart or jump to a particular prompt during the current build.
 
-Record: what changed, why it changed, what was verified, exact commit SHA(s), CI run ID(s), whether CI is green, any known failure or compromise, any external-source fact that needs re-verification, any migrations or compatibility concerns, and the exact next prompt/stage to execute.
+A future iteration must first inspect the repository's current README, milestone records, architecture documents, git history, current CI state, and actual source tree. It must determine the highest completed prompt from evidence rather than assuming the next prompt number from memory.
 
-Never leave the next iteration to infer critical decisions from scattered chat history. Update this README or a linked durable project note whenever a decision could materially affect future implementation.
+Every completed prompt must leave a concise handoff record containing: what changed; why it changed; files added/changed; important architectural decisions; external facts that were verified live; tests/lint/typecheck/build results; CI run/result; failures encountered and the fix; unresolved risks; exact commit SHA; and what the current iteration believes the next work should be after independently inspecting the repository.
 
-When an external dependency/API moves, record the old assumption, the newly verified reality, the date of verification, and the code/documentation affected.
+Do not overwrite previous handoff history. Append a new dated entry or update the relevant milestone record while preserving the prior evidence.
 
-When CI fails, preserve the actual cause and the corrective action in the handoff. Do not merely say “fixed CI.”
+The future iteration must repeat this discipline for the next iteration. The chain is: past self leaves evidence → current self verifies it → current self makes changes → current self leaves new evidence for the next future self.
 
-When a prompt is partially complete, explicitly mark the incomplete portion and do not mark the milestone complete.
+## Current implementation posture
 
-When you discover that an earlier architectural decision was wrong, document the evidence and the replacement decision before changing implementation. Avoid silent architectural drift.
-
-## Next work position
-
-Prompt 3 is complete. The next implementation stage is Prompt 4 — System Boundaries.
-
-The next iteration should first read this README, `docs/REPOSITORY_FORENSICS.md`, `docs/PRODUCT_BOUNDARY.md`, and `docs/ARCHITECTURE_DECISION.md`, then inspect the live repository tree and current CI state before writing code.
-
-Do not trust old package versions, old Gemini model lists, old API assumptions, or old Node versions. Re-verify them at the point of use.
-
-The goal is not to rebuild the old Elara application. The goal is to build a smaller, cleaner, current, testable Elara that keeps the useful product behavior while removing the architectural failure modes that made the previous repository difficult to maintain.
+The project is being built deliberately and incrementally. Do not restart completed work merely because the active chat context is new. Do not skip verification because a change looks small. Do not add advanced subsystems prematurely. Keep the repository simple, current, testable, and directly traceable to the roadmap above.

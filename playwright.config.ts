@@ -3,7 +3,11 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   projects: [
-    { name: 'chromium', use: { browserName: 'chromium' } },
+    {
+      name: 'chromium',
+      use: { browserName: 'chromium' },
+      testIgnore: /mobile-reliability\.spec\.ts/,
+    },
     {
       name: 'android-portrait',
       testMatch: /mobile-reliability\.spec\.ts/,

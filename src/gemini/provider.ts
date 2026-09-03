@@ -1,7 +1,7 @@
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiTurnPort, type GeminiTurnRequest, type GeminiUsage } from './contracts';
 import { normalizeGeminiError } from './errors';
 
-const WORKER_URL = (import.meta.env.VITE_GEMINI_WORKER_URL as string | undefined)?.trim() || '/api/gemini';
+const WORKER_URL = (import.meta.env.VITE_GEMINI_WORKER_URL as string | undefined)?.trim() || 'https://elara-gemini.cryogenized.workers.dev';
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};

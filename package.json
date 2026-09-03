@@ -11,10 +11,14 @@
     "prebuild": "npm run fonts:prepare",
     "fonts:prepare": "node scripts/prepare-fonts.mjs",
     "lint": "eslint .",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
+    "typecheck:web": "tsc -p tsconfig.json --noEmit",
+    "typecheck:worker": "tsc -p worker/tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "e2e": "playwright test",
+    "worker:dev": "wrangler dev --config worker/wrangler.toml",
+    "worker:types": "wrangler types --config worker/wrangler.toml worker/worker-configuration.d.ts",
     "reliability:check": "node scripts/reliability-gate.mjs"
   },
   "dependencies": {
@@ -33,6 +37,7 @@
     "jsdom": "30.0.1",
     "typescript": "7.0.2",
     "vite": "^8.1.0",
-    "vitest": "4.1.11"
+    "vitest": "4.1.11",
+    "wrangler": "4.129.0"
   }
 }

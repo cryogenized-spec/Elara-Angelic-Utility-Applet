@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
+import type { KeyboardEvent } from 'react';
 import { Icon } from '../../ui/icons';
 import type { ProviderStatus } from '../../domain/chat';
+import './composer.css';
 
 const MAX_HEIGHT = 132;
 
@@ -28,12 +30,11 @@ export function Composer({
     textarea.style.overflowY = textarea.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden';
   }, [draft]);
 
-  function handleKeyDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+  function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
     if (status === 'streaming') return;
     if (!draft.trim()) return;
 
-    // Enter remains deliberately explicit: Shift+Enter inserts a newline.
     event.preventDefault();
     onSend();
   }

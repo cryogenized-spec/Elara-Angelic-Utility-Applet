@@ -72,12 +72,13 @@ test.describe('Android portrait reliability', () => {
   });
 
   test('does not animate essential controls when reduced motion is requested', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('');
     const calendar = page.getByRole('button', { name: 'Calendar', exact: true });
     const surface = page.getByRole('region', { name: 'Calendar action surface' });
 
     const transition = await calendar.evaluate((element) => getComputedStyle(element).transitionDuration);
-    expect(transition).toMatch(/^0s|0(?:\.0+)?s$/);
+    expect(transition).toMatch(/^(?:0s|0(?:\.0+)?s)(?:,\s*(?:0s|0(?:\.0+)?s))*$/);
 
     await calendar.click();
     await expect(surface).toBeVisible();

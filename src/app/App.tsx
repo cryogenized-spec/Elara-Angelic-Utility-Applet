@@ -2,6 +2,10 @@ import { useEffect, useState } from 'react';
 import type { ChatMessage, ConversationState, ProviderStatus } from '../domain/chat';
 import { appendMessage, loadConversation, saveConversation } from '../persistence/conversation';
 import { demoTurnPort } from '../chat/demo-turn-port';
+import { Icon } from '../ui/icons';
+import { Sidebar } from './components/Sidebar';
+import { SettingsScreen } from './components/SettingsScreen';
+import { TopToolRail } from './components/TopToolRail';
 import './app.css';
 
 const makeMessage = (role: ChatMessage['role'], text: string): ChatMessage => ({
@@ -16,6 +20,9 @@ export function App() {
   const [draft, setDraft] = useState('');
   const [status, setStatus] = useState<ProviderStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [toolNotice, setToolNotice] = useState<string | null>(null);
 
   useEffect(() => {
     void loadConversation().then(setConversation).catch(() => setError('Could not load the local conversation.'));
@@ -27,6 +34,7 @@ export function App() {
 
     setDraft('');
     setError(null);
+    setToolNotice(null);
     setStatus('streaming');
 
     try {
@@ -64,27 +72,50 @@ export function App() {
     }
   }
 
+  function handleToolAction(id: string) {
+    if (id === 'new-chat') {
+      setConversation({ id: crypto.randomUUID(), messages: [] });
+      setToolNotice(null);
+      return;
+    }
+
+    const labels: Record<string, string> = { calendar: 'Calendar action surface', tasks: 'Tasks action surface', gmail: 'Gmail action surface' };
+    setToolNotice(`${labels[id] ?? 'Quick action'} ready — no prompt was added to chat.`);
+  }
+
+  if (settingsOpen) return <SettingsScreen onBack={() => setSettingsOpen(false)} />;
+
   return (
     <main className="app-shell">
-      <header className="topbar">
-        <div>
-          <div className="eyebrow">ANGELIC UTILITY APPLET</div>
-          <h1>Elara</h1>
-        </div>
-        <span className={`status status-${status}`}>{status}</span>
-      </header>
+      <div className="left-spine" aria-label="Application controls">
+        <button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}>
+          <Icon name="menu" size={21} />
+        </button>
+        <button className="glass-menu-button left-spine__settings" type="button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>
+          <Icon name="settings" size={20} />
+        </button>
+      </div>
+
+      <section className={`elara-banner${sidebarOpen ? ' is-collapsed' : ''}`} aria-label="Elara portrait banner">
+        <div className="elara-banner__art" role="img" aria-label="Elara portrait placeholder"><span>E</span></div>
+        <div className="elara-banner__copy"><span className="eyebrow">ANGELIC UTILITY APPLET</span><h1>Elara</h1><span className="presence"><i /> Online · ready</span></div>
+      </section>
+
+      <TopToolRail onAction={handleToolAction} />
+
+      {toolNotice && <div className="tool-notice" role="status">{toolNotice}</div>}
 
       <section className="conversation" aria-live="polite">
         {conversation.messages.length === 0 ? (
           <div className="empty-state">
-            <div className="portrait" aria-hidden="true">E</div>
-            <h2>Welcome back.</h2>
-            <p>The clean-room chat spine is alive. Send a message to exercise the local stream and persistence path.</p>
+            <span className="empty-state__kicker">ELARA / READY</span>
+            <h2>What shall we work on?</h2>
+            <p>Your conversation starts here. Utility actions stay outside the visible chat unless you choose to turn their results into conversation.</p>
           </div>
         ) : (
           conversation.messages.map((message) => (
             <article className={`message message-${message.role}`} key={message.id}>
-              <div className="message-label">{message.role}</div>
+              <div className="message-meta"><span>{message.role === 'assistant' ? 'Elara' : 'You'}</span><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>
               <div className="message-body">{message.text || '…'}</div>
             </article>
           ))
@@ -94,6 +125,7 @@ export function App() {
       {error && <div className="error" role="alert">{error}</div>}
 
       <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
+        <button className="composer__icon" type="button" aria-label="Attach image or document"><Icon name="paperclip" size={20} /></button>
         <textarea
           aria-label="Message Elara"
           value={draft}
@@ -102,10 +134,13 @@ export function App() {
           rows={1}
           disabled={status === 'streaming'}
         />
-        <button type="submit" disabled={!draft.trim() || status === 'streaming'}>
-          {status === 'streaming' ? '…' : 'Send'}
+        <button className="composer__icon" type="button" aria-label="Voice input"><Icon name="mic" size={20} /></button>
+        <button className="composer__send" type="submit" aria-label="Send message" disabled={!draft.trim() || status === 'streaming'}>
+          <Icon name="send" size={19} />
         </button>
       </form>
+
+      <Sidebar open={sidebarOpen} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => setConversation((current) => id === current.id ? current : { id, messages: [] })} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
     </main>
   );
 }

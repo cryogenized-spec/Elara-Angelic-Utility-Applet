@@ -1,4 +1,4 @@
-import type { AuthorizedGoogleRequest, GoogleOAuthAuthority } from '../oauth/contracts';
+import type { GoogleOAuthAuthority } from '../oauth/contracts';
 
 export interface GoogleTask {
   id: string;
@@ -11,26 +11,21 @@ export interface GoogleTask {
   updated?: string;
 }
 
-interface TasksResponse {
-  items?: Array<{
-    id?: string;
-    title?: string;
-    notes?: string;
-    due?: string;
-    status?: string;
-    parent?: string;
-    position?: string;
-    updated?: string;
-  }>;
-  nextPageToken?: string;
-}
+type TaskPayload = {
+  id?: string;
+  title?: string;
+  notes?: string;
+  due?: string;
+  status?: string;
+  parent?: string;
+  position?: string;
+  updated?: string;
+};
+
+type TasksResponse = { items?: TaskPayload[]; nextPageToken?: string };
+type TaskListsResponse = { items?: Array<{ id?: string; title?: string; updated?: string }>; nextPageToken?: string };
 
 export interface TaskListSummary { id: string; title: string; updated?: string; }
-
-interface TaskListsResponse {
-  items?: Array<{ id?: string; title?: string; updated?: string }>;
-  nextPageToken?: string;
-}
 
 export class GoogleTasksService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
@@ -47,7 +42,7 @@ export class GoogleTasksService {
     };
   }
 
-  async listTasks(taskListId: string, options: { pageToken?: string; showCompleted?: boolean; showDeleted?: boolean; showHidden?: boolean; dueMin?: string; dueMax?: string; updatedMin?: string; maxResults?: number } = {}): Promise<{ items: GoogleTask[]; nextPageToken?: string }> {
+  async listTasks(taskListId: string, options: { pageToken?: string; showCompleted?: boolean; showDeleted?: boolean; showHidden?: boolean; dueMin?: string; dueMax?: string; updatedMin?: string; completedMin?: string; completedMax?: string; maxResults?: number } = {}): Promise<{ items: GoogleTask[]; nextPageToken?: string }> {
     const access = await this.oauth.authorize('tasks.read');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(taskListId)}/tasks`);
     this.applyParams(url, options);
@@ -59,7 +54,7 @@ export class GoogleTasksService {
   async getTask(taskListId: string, taskId: string): Promise<GoogleTask> {
     const access = await this.oauth.authorize('tasks.read');
     const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(taskListId)}/tasks/${encodeURIComponent(taskId)}`);
-    const payload = await this.readJson<TasksResponse[number]>(response);
+    const payload = await this.readJson<TaskPayload>(response);
     return this.mapTask(payload);
   }
 
@@ -83,7 +78,7 @@ export class GoogleTasksService {
     if (parent) url.searchParams.set('parent', parent);
     if (previous) url.searchParams.set('previous', previous);
     const response = await access.fetch(url, { method: 'POST' });
-    const payload = await this.readJson<TasksResponse[number]>(response);
+    const payload = await this.readJson<TaskPayload>(response);
     return this.mapTask(payload);
   }
 
@@ -99,7 +94,7 @@ export class GoogleTasksService {
     if (params.parent) url.searchParams.set('parent', params.parent);
     if (params.previous) url.searchParams.set('previous', params.previous);
     const response = await access.fetch(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    const payload = await this.readJson<TasksResponse[number]>(response);
+    const payload = await this.readJson<TaskPayload>(response);
     return this.mapTask(payload);
   }
 
@@ -112,11 +107,11 @@ export class GoogleTasksService {
     if (!response.ok) throw new Error(`Google Tasks request failed (${response.status}).`);
   }
 
-  private mapTasks(items: Array<NonNullable<TasksResponse['items']>[number]>): GoogleTask[] {
-    return items.filter((item): item is Required<Pick<typeof item, 'id' | 'title'>> & typeof item => Boolean(item.id && item.title)).map((item) => this.mapTask(item));
+  private mapTasks(items: TaskPayload[]): GoogleTask[] {
+    return items.filter((item): item is Required<Pick<TaskPayload, 'id' | 'title'>> & TaskPayload => Boolean(item.id && item.title)).map((item) => this.mapTask(item));
   }
 
-  private mapTask(item: NonNullable<TasksResponse['items']>[number]): GoogleTask {
+  private mapTask(item: TaskPayload): GoogleTask {
     if (!item.id || !item.title) throw new Error('Google Tasks response contained an incomplete task.');
     return { id: item.id, title: item.title, notes: item.notes, due: item.due, status: item.status, parent: item.parent, position: item.position, updated: item.updated };
   }

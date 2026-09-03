@@ -1,6 +1,9 @@
 import Dexie, { type Table } from 'dexie';
 import type { ChatMessage, ConversationState, ConversationThread } from '../domain/chat';
 
+const PRIMARY_ID = 'primary';
+const DEFAULT_TITLE = 'New conversation';
+
 interface StoredThread extends ConversationThread {
   title: string;
 }
@@ -24,8 +27,6 @@ class ElaraDatabase extends Dexie {
 }
 
 const db = new ElaraDatabase();
-const PRIMARY_ID = 'primary';
-const DEFAULT_TITLE = 'New conversation';
 
 function threadFromConversation(conversation: ConversationState): StoredThread {
   return {

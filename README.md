@@ -236,11 +236,11 @@ Milestone 2 complete: product boundary is recorded in `docs/PRODUCT_BOUNDARY.md`
 
 Milestone 3 complete: technical architecture is recorded in `docs/ARCHITECTURE_DECISION.md`.
 
-Prompt 4 is now complete: responsibility and dependency ownership rules are recorded in `docs/SYSTEM_BOUNDARIES.md`.
+Prompt 4 is complete: responsibility and dependency ownership rules are recorded in `docs/SYSTEM_BOUNDARIES.md`.
 
 Prompts 5–7 are complete: canonical Gemini integration strategy, live model registry, and capability-driven settings are recorded in the Gemini architecture documents.
 
-Prompts 8–12 are the current foundation batch: streaming, thinking display, conversation data model, local persistence, and API Lockbox are now recorded in the corresponding architecture documents.
+Prompts 8–12 are **in progress in the current batch**. Do not mark them complete until each prompt artifact is present, the prompt-specific review is complete, and the corresponding CI verification has passed.
 
 Runtime baseline verified in live CI: `.nvmrc` is `24`; GitHub Actions resolved Node.js `24.20.0` and npm `11.19.0` on 2026-09-03.
 

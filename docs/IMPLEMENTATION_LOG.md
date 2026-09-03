@@ -45,14 +45,9 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Result:** Dexie/IndexedDB is the sole client persistence authority with explicit schema/migration/recovery/transaction boundaries.
 
 ### Prompt 12 — API Lockbox
-**Commit:** `03a3e3db7dbd86d2a846e4311405276892ddbc6c`  
+**Commit:** `03a3e3db7dbd86d2a846e4311405276892ddbc6c6`  
 **Changed:** `docs/API_LOCKBOX.md`  
 **Result:** Central secret/configuration ownership and explicit separation of Gemini/OAuth secrets, future tool schemas, Workspace access, character system prompt, and memory notes.
-
-### Related correction
-**Commit:** `58909eb1b7c42ff16cb65a8cc7e1f9cc362a852a`  
-**Changed:** `docs/SYSTEM_BOUNDARIES.md`  
-**Result:** Restored the full Prompt 4 responsibility/ownership ADR after an intermediate documentation edit.
 
 ## 2026-09-03 — Prompts 13–17
 
@@ -108,31 +103,19 @@ This file is the durable implementation handoff record for completed roadmap pro
 ### Prompt 22 — Performance Budget
 **Commit:** `d29c66ba26d7e5f7005edbaabb277b9942cfc4a1`  
 **Changed:** `docs/PERFORMANCE_BUDGET.md`  
-**Result:** Android-first budgets established for LCP, INP, CLS, initial JavaScript, startup, streaming render batching, persistence, attachments, memory, and layout stability. Core Web Vitals targets use current Google guidance: LCP ≤2.5s, INP ≤200ms, CLS ≤0.10 at p75. citeturn646477search1
+**Result:** Android-first budgets established for LCP, INP, CLS, initial JavaScript, startup, streaming render batching, persistence, attachments, memory, and layout stability. Core Web Vitals “good” targets remain LCP ≤2.5s, INP ≤200ms, and CLS ≤0.10 at p75. citeturn646477search1
 
-## Batch-level architectural result
+## 2026-09-03 — Prompt 23
 
-Prompts 18–22 complete the multimodal/visual/performance foundation without creating cross-domain ownership leaks:
-
-```text
-image/PDF files → attachment boundary → provider-ready representation
-portrait/background/theme → appearance boundary
-character identity/personality → separate master system instruction
-performance → enforced by the module creating the work
-
-all remain independent of:
-chat orchestration
-Gemini SDK translation
-tool execution
-Google Workspace services
-future memory/notes
-```
-
-The central rule remains: no all-purpose manager/service/runtime may absorb provider calls, stream parsing, tools, Workspace, persona prompting, memory retrieval, persistence, diagnostics, or presentation state.
+### Prompt 23 — Modular Code Rules
+**Commit:** `734d62f3ef4a49a75f459b7d3fa180a173a7498d`
+**Changed:** `docs/MODULAR_CODE_RULES.md`
+**Result:** Established binding implementation rules for single-responsibility modules, dependency direction, ownership boundaries, side-effect control, anti-patterns, UI composition, provider/persistence/security separation, testing, and change review. The rules explicitly prohibit a generic mega-manager/runtime and duplicate provider, persistence, OAuth, or server paths.
+**Live verification:** Vite's current guide continues to recommend `npm create vite@latest`; Vitest remains Vite-native and supports Node 24; Playwright's current installation guide supports Node 24 for E2E work. citeturn962400search0turn962400search2turn962400search13
 
 ## Runtime-scaffold status
 
-The repository still does not contain the actual npm dependency scaffold or generated `package-lock.json`. The current tooling path available in this development environment can write repository files and verify the repository gate, but cannot honestly run a local npm install/lint/typecheck/test/build against the GitHub worktree. No lockfile has been fabricated and no nonexistent runtime verification has been claimed. When the runtime scaffold is introduced, the package lock and actual lint/typecheck/test/build suite become mandatory CI gates.
+The repository still does not contain the actual npm dependency scaffold or generated `package-lock.json`. Prompt 25 is the first planned runtime scaffold step. The current development environment can write repository files and verify GitHub repository state, but cannot honestly run a local npm install/lint/typecheck/test/build against the GitHub worktree. No lockfile is fabricated. Once the scaffold exists, CI must run the actual install plus lint/typecheck/test/build gates using the real dependency graph.
 
 ## Future-self requirements preserved
 

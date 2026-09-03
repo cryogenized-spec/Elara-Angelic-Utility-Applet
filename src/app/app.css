@@ -15,8 +15,6 @@
   --glow: 0 12px 42px rgba(0,0,0,.34);
 }
 
-@import '../ui/fonts.css';
-
 * { box-sizing: border-box; }
 html, body, #root { min-height: 100%; margin: 0; }
 html { background: var(--bg); }

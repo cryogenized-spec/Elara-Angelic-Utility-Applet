@@ -15,21 +15,14 @@ export type GeminiStreamEvent =
   | { type: 'cancelled'; interactionId?: string }
   | { type: 'failed'; error: NormalizedProviderError };
 
-export interface GeminiUsage {
-  inputTokens?: number;
-  outputTokens?: number;
-  cachedTokens?: number;
-  thoughtsTokens?: number;
-  totalTokens?: number;
-}
+export interface GeminiUsage { inputTokens?: number; outputTokens?: number; cachedTokens?: number; thoughtsTokens?: number; totalTokens?: number; }
 
 export interface GeminiTurnRequest {
   model: string;
   input: string;
   previousInteractionId?: string;
   generationConfig?: EffectiveGeminiSettings;
+  systemInstruction?: string;
 }
 
-export interface GeminiTurnPort {
-  streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent>;
-}
+export interface GeminiTurnPort { streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent>; }

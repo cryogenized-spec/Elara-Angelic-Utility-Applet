@@ -17,6 +17,16 @@ class CharacterDatabase extends Dexie {
         Object.assign(record, normalizeCharacterProfile(record));
       });
     });
+    this.version(3).stores({ profiles: 'id, updatedAt' }).upgrade((tx) => {
+      return tx.table('profiles').toCollection().modify((record: CharacterProfile) => {
+        if (!record.artwork) return;
+        record.artwork = {
+          ...record.artwork,
+          focalX: migrateLegacyFocal(record.artwork.focalX),
+          focalY: migrateLegacyFocal(record.artwork.focalY),
+        };
+      });
+    });
   }
 }
 
@@ -57,6 +67,12 @@ function finiteDimension(value: number | undefined): number | undefined {
 
 function clampPercent(value: number | undefined): number {
   return Math.max(0, Math.min(100, Number.isFinite(value) ? Number(value) : 50));
+}
+
+function migrateLegacyFocal(value: number | undefined): number {
+  if (!Number.isFinite(value)) return 50;
+  if (value === 1) return 50;
+  return Math.max(0, Math.min(100, Number(value)));
 }
 
 export async function loadCharacterProfile(): Promise<CharacterProfile> {

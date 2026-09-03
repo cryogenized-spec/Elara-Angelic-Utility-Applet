@@ -19,7 +19,7 @@ jobs:
     name: Build Pages artifact
     runs-on: ubuntu-latest
     env:
-      VITE_GEMINI_WORKER_URL: ${{ vars.GEMINI_WORKER_URL }}
+      VITE_GEMINI_WORKER_URL: ${{ vars.GEMINI_WORKER_URL || 'https://elara-gemini.cryogenized.workers.dev' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -31,16 +31,9 @@ jobs:
           check-latest: true
           package-manager-cache: false
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
       - name: Verify public Gemini Worker configuration
         run: |
           set -euo pipefail
-          test -n "$VITE_GEMINI_WORKER_URL" || {
-            echo "GEMINI_WORKER_URL repository variable is required for the production Pages build."
-            exit 1
-          }
           case "$VITE_GEMINI_WORKER_URL" in
             https://*) ;;
             *)
@@ -48,6 +41,10 @@ jobs:
               exit 1
               ;;
           esac
+          echo "Using configured Gemini Worker endpoint: $VITE_GEMINI_WORKER_URL"
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
 
       - name: Build
         run: npm run build

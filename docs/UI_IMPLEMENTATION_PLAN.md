@@ -54,6 +54,14 @@ The Settings typography surface includes a live pangram preview and a **10–20p
 
 Custom Google Fonts are an explicit opt-in exception. Settings accepts a Google Fonts CSS2 stylesheet URL, validates that it is HTTPS and hosted on `fonts.googleapis.com/css2`, derives the first family name, and loads that stylesheet only after the user explicitly chooses it. The built-in path therefore stays self-hosted while custom fonts remain user-controlled external resources.
 
+## Conversation surface
+
+The conversation surface is a dedicated presentation component. Assistant messages are visually dominant and asymmetric, with lighter metadata and no SMS-style mirrored bubble treatment for Elara. User messages retain a compact bubble treatment on the opposite side.
+
+Assistant turns may carry a safe **execution summary** containing a short status label, duration, and numbered steps. The summary is collapsed by default and expands through an accessible chevron control. The numbered steps are application-provided execution summaries, not private model chain-of-thought.
+
+The empty state remains centered around Elara's presence and respects the selected global text size. Conversation messages use the configured typography size and preserve semantic timestamps. Scroll behavior remains native/intentional; Android keyboard-aware behavior is handled by the later composer pass.
+
 ## Vector graphics
 
 Interface icons are repository-owned SVG vectors or cleanly sourced open-source vector paths. The application must not depend on rasterized UI icons or remote image URLs for core controls. SVGs should use small, predictable path sets, explicit `viewBox` dimensions, accessible labels through surrounding controls, and consistent stroke geometry.
@@ -120,4 +128,4 @@ Every pass should leave lint, typecheck, unit tests, build, and applicable Playw
 
 ## Current pass state
 
-Pass 1 foundation and Pass 2 portrait presentation are implemented. The current branch includes the 9:16 body geometry, local built-in font assets, custom Google Fonts opt-in, live typography preview, shared hot-slider behavior, a landscape Elara banner with 1×–3× scale controls, four configurable ambient background treatments, and collapse/restore behavior that retains the selected presentation settings. Pass 2 remains subject to CI verification before moving to Pass 3.
+Pass 1 foundation, Pass 2 portrait presentation, and Pass 3 conversation surface are implemented. Pass 3 adds a dedicated AI-dominant conversation component, asymmetric assistant/user presentation, semantic timestamps, a safe numbered execution summary with duration, collapsed-by-default behavior, and an accessible expand/collapse interaction. Final completion remains subject to the CI gate for the current commits.

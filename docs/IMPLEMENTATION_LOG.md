@@ -59,7 +59,7 @@ This file is the durable implementation handoff record for completed roadmap pro
 ### Prompt 13 — Gemini Credential Architecture
 **Commit:** `6ee196007b941d736ae5e7237e63484db3b0b938`  
 **Changed:** `docs/GEMINI_CREDENTIAL_ARCHITECTURE.md`  
-**Result:** Browser never owns the application Gemini secret; protected credentials belong behind the Worker/security boundary. Cloudflare secret bindings, local secret-file rules, rotation, and future tool/Workspace credential separation are defined.
+**Result:** Browser never owns the application Gemini secret; protected credentials belong behind the Worker/security boundary.
 
 ### Prompt 14 — Mobile-First Shell
 **Commit:** `8f4cb7ac2e0a06f8110e8d19244e8bc9e10bef72`  
@@ -74,42 +74,66 @@ This file is the durable implementation handoff record for completed roadmap pro
 ### Prompt 16 — Voice-to-Text
 **Commit:** `59fa246b7c8027a80ba7a1ac8e9280eba6036e4e`  
 **Changed:** `docs/VOICE_TO_TEXT.md`  
-**Result:** Optional SpeechRecognition capability boundary with runtime feature detection, explicit states, cleanup, privacy, and graceful unsupported/permission/error handling. Browser support is treated as limited rather than assumed. citeturn957008search8
+**Result:** Optional SpeechRecognition capability boundary with runtime feature detection, explicit states, cleanup, privacy, and graceful unsupported/permission/error handling.
 
 ### Prompt 17 — Attachment System
 **Commit:** `8c370bcf0872b1f76d97f75efa110ac1d0e42349`  
 **Changed:** `docs/ATTACHMENT_SYSTEM.md`  
-**Result:** One attachment lifecycle for selection, validation, metadata, preview, progress, failure/removal, persistence references, and provider handoff. `accept` is treated as a picker hint, not validation. citeturn339022search1turn339022search5
+**Result:** One attachment lifecycle for selection, validation, metadata, preview, progress, failure/removal, persistence references, and provider handoff.
+
+## 2026-09-03 — Prompts 18–22
+
+### Prompt 18 — Image Input
+**Commit:** `c33efca9bb1cc303b54aa05ef96291382353142f`  
+**Changed:** `docs/GEMINI_IMAGE_INPUT.md`  
+**Result:** Images use the shared attachment lifecycle, stable logical attachment IDs, provider-owned transport selection, and no Gemini-specific logic in UI/persistence.
+**Live verification:** Current Google documentation confirms native image input through Interactions. Attachment transport remains abstract so inline data or a file-reference path can be selected without changing application state.
+
+### Prompt 19 — Document Input
+**Commit:** `ede536c8e2750c2b122430e58d893996539bd8ec`  
+**Changed:** `docs/GEMINI_DOCUMENT_INPUT.md`  
+**Result:** PDF-first document support is transport-neutral, with inline handling for smaller transient files and Files API/reference handling for larger or reused files. PDF semantics remain multimodal rather than browser-side text extraction.
+**Live verification:** Google's current documentation states Interactions accepts document inputs, recommends Files API for larger/reused files, and documents native PDF understanding across text, images, diagrams, charts, and tables. citeturn467827search0turn467827search1turn467827search5
+
+### Prompt 20 — Character Portrait
+**Commit:** `3d842b3782c92c3844250a5d12fd9f0ead138617`  
+**Changed:** `docs/CHARACTER_PORTRAIT.md`  
+**Result:** Durable default/custom/replacement/removal portrait state, accessible enlargement, and bounded 1x–3x presentation scaling. Portrait state is explicitly separate from chat attachments and the character system prompt.
+
+### Prompt 21 — Appearance System
+**Commit:** `3fbf1b3755165a0eda64859fc5a78a6887f92b56`  
+**Changed:** `docs/APPEARANCE_SYSTEM.md`  
+**Result:** One appearance boundary owns light/dark/system theme, custom background, readability treatment, and portrait presentation state, with safe fallbacks and no provider/storage logic in components.
+
+### Prompt 22 — Performance Budget
+**Commit:** `d29c66ba26d7e5f7005edbaabb277b9942cfc4a1`  
+**Changed:** `docs/PERFORMANCE_BUDGET.md`  
+**Result:** Android-first budgets established for LCP, INP, CLS, initial JavaScript, startup, streaming render batching, persistence, attachments, memory, and layout stability. Core Web Vitals targets use current Google guidance: LCP ≤2.5s, INP ≤200ms, CLS ≤0.10 at p75. citeturn646477search1
 
 ## Batch-level architectural result
 
-Prompts 13–17 establish the security and mobile-input foundation without introducing a monolith:
+Prompts 18–22 complete the multimodal/visual/performance foundation without creating cross-domain ownership leaks:
 
 ```text
-browser UI
-   ↓
-focused chat/application interfaces
-   ├── character master system instruction (separate)
-   ├── curated tool schemas (separate)
-   ├── future memory/notes retrieval (separate)
-   ├── attachment boundary
-   └── voice boundary
-          ↓
-canonical Gemini provider
-          ↓
-Worker/security boundary for protected credentials
+image/PDF files → attachment boundary → provider-ready representation
+portrait/background/theme → appearance boundary
+character identity/personality → separate master system instruction
+performance → enforced by the module creating the work
+
+all remain independent of:
+chat orchestration
+Gemini SDK translation
+tool execution
+Google Workspace services
+future memory/notes
 ```
 
-Future Google Workspace tooling continues to use the single OAuth authority and validated services. Nothing in this batch creates a second provider, second server runtime, or generic all-purpose manager.
+The central rule remains: no all-purpose manager/service/runtime may absorb provider calls, stream parsing, tools, Workspace, persona prompting, memory retrieval, persistence, diagnostics, or presentation state.
 
-## Runtime-scaffold limitation
+## Runtime-scaffold status
 
-The repository still does not contain the actual npm package scaffold or generated `package-lock.json`. The current environment cannot reach GitHub/npm directly for a legitimate package installation, so no lockfile has been fabricated and no lint/typecheck/build result has been claimed. The five prompts above therefore lock the implementation contracts and mobile/security behavior; the actual React/Vite runtime implementation must be generated from the live npm dependency graph in the next scaffold-capable phase.
-
-## Live verification for Prompts 13–17
-
-Cloudflare Workers documents encrypted secret bindings and explicitly distinguishes them from plaintext environment variables. Vite's current guide uses `npm create vite@latest`. CSS safe-area environment variables are standard, `SpeechRecognition` has limited browser availability, and file-input `accept` values are only selection hints. citeturn957008search0turn339022search0turn339022search3turn957008search8turn339022search1
+The repository still does not contain the actual npm dependency scaffold or generated `package-lock.json`. The current tooling path available in this development environment can write repository files and verify the repository gate, but cannot honestly run a local npm install/lint/typecheck/test/build against the GitHub worktree. No lockfile has been fabricated and no nonexistent runtime verification has been claimed. When the runtime scaffold is introduced, the package lock and actual lint/typecheck/test/build suite become mandatory CI gates.
 
 ## Future-self requirements preserved
 
-Every future implementation must retain these constraints: tool execution is allow-listed and validated; Workspace tools cannot bypass OAuth/scope/write-confirmation controls; the character master prompt is separate from user content and tool schemas; notable memories live in their own retrievable domain; attachments and voice are input boundaries rather than provider runtimes; and no all-purpose manager/service/runtime may absorb all of these concerns.
+Tool execution is allow-listed and validated. Workspace tools cannot bypass OAuth, scope, diagnostics, or write-confirmation controls. The character master prompt remains separate from user content and tool schemas. Notable memories remain a separate retrievable domain. Image/document input remains an attachment concern, not a second provider runtime. Appearance remains presentation-only. Performance ownership stays distributed to the modules that create the work.

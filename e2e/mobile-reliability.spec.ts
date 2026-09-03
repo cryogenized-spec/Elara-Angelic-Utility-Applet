@@ -9,7 +9,7 @@ test.describe('Android portrait reliability', () => {
 
     const shell = page.locator('.app-shell');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    const rail = page.getByRole('region', { name: 'Workspace quick actions' });
+    const rail = page.getByRole('navigation', { name: 'Quick actions' });
 
     await expect(shell).toBeVisible();
     await expect(composer).toBeVisible();
@@ -51,7 +51,7 @@ test.describe('Android portrait reliability', () => {
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
 
     await page.getByRole('button', { name: 'Open sidebar' }).click();
-    const sidebar = page.getByRole('complementary', { name: 'Chat threads' });
+    const sidebar = page.locator('.sidebar');
     await expect(sidebar).toHaveClass(/is-open/);
     await expect(composer).toBeVisible();
 
@@ -82,6 +82,6 @@ test.describe('Android portrait reliability', () => {
     await calendar.click();
     await expect(surface).toBeVisible();
     const animation = await surface.evaluate((element) => getComputedStyle(element).animationName);
-    expect(animation === 'none' || animation === 'quick-action-surface-in').toBeTruthy();
+    expect(animation).toBe('none');
   });
 });

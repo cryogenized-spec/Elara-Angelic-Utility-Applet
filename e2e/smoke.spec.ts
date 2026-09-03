@@ -24,6 +24,8 @@ test('collapses the Elara portrait when the sidebar opens', async ({ page }) => 
 
 test('shows local font choices and the 10–20px text size slider', async ({ page }) => {
   await page.goto('');
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Close sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Typography' }).click();
 
@@ -138,9 +140,11 @@ test('creates, searches, selects, renames, and restores conversation threads', a
   await expect(renameInput).toBeVisible();
   await renameInput.fill('Mountain Escape');
   await renameInput.press('Enter');
-  await expect(sidebar.getByRole('button', { name: /Mountain Escape/i })).toBeVisible();
 
-  await sidebar.getByRole('button', { name: /Mountain Escape/i }).click();
+  await search.fill('');
+  const renamedThread = sidebar.getByRole('button', { name: /Mountain Escape/i });
+  await expect(renamedThread).toBeVisible();
+  await renamedThread.click();
   await expect(page.getByText('Demo response received: Plan a weekend trip to the Drakensberg')).toBeVisible();
 
   await page.reload();

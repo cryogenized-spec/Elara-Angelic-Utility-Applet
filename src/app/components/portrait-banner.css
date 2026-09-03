@@ -160,6 +160,14 @@
   transform: translateX(8px);
 }
 
+@media (prefers-reduced-motion: reduce) {
+  .elara-banner,
+  .elara-banner__portrait,
+  .elara-banner__copy {
+    transition: none;
+  }
+}
+
 @media (min-width: 720px) {
   .elara-banner__portrait { width: 112px; }
 }

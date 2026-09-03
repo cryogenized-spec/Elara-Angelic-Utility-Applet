@@ -32,143 +32,89 @@ Android portrait UI → conversation state → one canonical Gemini Interactions
 14. Use `npx` for one-shot upstream CLIs with current documented `@latest` entry points.
 15. Never invent a lockfile; generate it with npm from the actual dependency graph.
 
-## Future architecture requirements to preserve now
+## Future architecture requirements
 
-Tool calling will use curated, explicit application capabilities. Model-visible schemas are allow-listed declarations; actual execution occurs only in validated application services. Google Workspace tools must remain behind the single Google OAuth authority, scope enforcement, diagnostics, and future write-confirmation rules.
+Tool calling is a curated application capability surface. Model-visible schemas are explicit allow-listed declarations; actual execution occurs only in validated application services. Tool schemas never contain secrets. Google Workspace capabilities use the single OAuth authority, centralized scope checks, diagnostics, and future write confirmation.
 
-The character has a dedicated master system-instruction source containing durable identity, personality, roleplay behavior, style, and rules. It is separate from user messages, tools, and ordinary conversation persistence. Prompt 27 will author the production creative-context instruction.
+The character has a dedicated master system-instruction source containing durable identity, personality, roleplay behavior, style, and rules. It is separate from user messages, ordinary conversation history, and tool schemas. Prompt 27 will author the production creative-context instruction.
 
-Long-term notes/memory are a separate retrievable domain for notable events and past experiences. Ordinary conversation history is not automatically permanent memory. This allows important history to survive context-window turnover without creating a giant memory manager.
+Long-term notes/memory are a separate retrievable domain for notable events and past experiences. Ordinary conversation history is not automatically permanent memory. This preserves important experiences when model context windows turn over without creating a giant memory manager.
 
-Never combine provider calls, stream parsing, tool execution, Google Workspace access, character prompting, memory retrieval, persistence, and diagnostics into one monolith.
+Never combine provider calls, stream parsing, tool execution, Workspace access, character prompting, memory retrieval, persistence, and diagnostics into one manager/service/runtime.
 
 ## 50-prompt roadmap
 
-The roadmap below is the authoritative sequence. Do not restart completed work merely because the chat context changes; use repository evidence.
+1. Repository Forensics
+2. Product Boundary
+3. Technical Architecture
+4. System Boundaries
+5. Gemini Integration Strategy
+6. Current Gemini Model Registry
+7. Gemini Settings Engine
+8. Streaming Architecture
+9. Thinking Display
+10. Conversation Data Model
+11. Local Persistence
+12. API Lockbox
+13. Gemini Credential Architecture
+14. Mobile-First Shell
+15. ChatGPT-Style Composer
+16. Voice-to-Text
+17. Attachment System
+18. Image Input
+19. Document Input
+20. Character Portrait
+21. Appearance System
+22. Performance Budget
+23. Modular Code Rules
+24. Testing Strategy
+25. Minimal Vertical Slice
+26. Gemini Safety Policy
+27. Creative-Context System Instruction
+28. Gemini Request Contract
+29. Provider Error Normalization
+30. HTTP Diagnostic Console
+31. Developer Diagnostics UI
+32. Request Timing and Timeout System
+33. Retry Policy
+34. Request Lifecycle State Machine
+35. Analytics Architecture
+36. Analytics Dashboard
+37. Google OAuth Architecture
+38. Google Scope Registry
+39. Incremental Authorization
+40. Stay Connected Semantics
+41. Google OAuth Settings UI
+42. Google Calendar Service
+43. Google Tasks Service
+44. Google Docs Service
+45. Google Chat Service
+46. Google Tool Boundary
+47. Google Write Confirmation
+48. OAuth Failure Diagnostics
+49. Gemini Native Background Execution
+50. End-to-End Reliability Gate
 
-### Prompt 1 — Repository Forensics
-Clean-room repository forensics and lessons from the archived specimen.
-### Prompt 2 — Product Boundary
-Exact initial product scope, exclusions, later scope, mobile-first rules, and success criterion.
-### Prompt 3 — Technical Architecture
-React/TypeScript/Vite, Tailwind, Dexie, Zod, Vitest, Playwright, `@google/genai`, Workers, and PWA foundation.
-### Prompt 4 — System Boundaries
-Responsibility ownership and directional dependencies.
-### Prompt 5 — Gemini Integration Strategy
-Single canonical Interactions provider boundary and exclusion of legacy execution paths.
-### Prompt 6 — Current Gemini Model Registry
-Live model registry and capability metadata.
-### Prompt 7 — Gemini Settings Engine
-Model-aware generation settings and unsupported-field prevention.
-### Prompt 8 — Streaming Architecture
-Canonical streaming lifecycle, deltas, completion, cancellation/failure, normalized events.
-### Prompt 9 — Thinking Display
-Separate normalized thinking-summary display semantics.
-### Prompt 10 — Conversation Data Model
-Minimal conversation/message schema and continuity metadata.
-### Prompt 11 — Local Persistence
-Dexie/IndexedDB authority, schema versions, migrations, recovery.
-### Prompt 12 — API Lockbox
-Central secret/configuration boundary.
-### Prompt 13 — Gemini Credential Architecture
-Secure Gemini credential mediation.
-### Prompt 14 — Mobile-First Shell
-Android portrait application shell.
-### Prompt 15 — ChatGPT-Style Composer
-Mobile multiline composer and keyboard behavior.
-### Prompt 16 — Voice-to-Text
-Voice input capability detection and failure handling.
-### Prompt 17 — Attachment System
-Attachment lifecycle.
-### Prompt 18 — Image Input
-Image attachment support.
-### Prompt 19 — Document Input
-PDF/document support.
-### Prompt 20 — Character Portrait
-Persistent portrait system.
-### Prompt 21 — Appearance System
-Theme, background, readability, persistence.
-### Prompt 22 — Performance Budget
-Mobile performance targets and enforcement.
-### Prompt 23 — Modular Code Rules
-Practical modularity rules.
-### Prompt 24 — Testing Strategy
-Unit/provider/persistence/diagnostics/e2e test strategy.
-### Prompt 25 — Minimal Vertical Slice
-First end-to-end chat path.
-### Prompt 26 — Gemini Safety Policy
-Safety policy against exact pinned API/SDK support.
-### Prompt 27 — Creative-Context System Instruction
-Production character/creative system instruction.
-### Prompt 28 — Gemini Request Contract
-Validated normalized provider request contract.
-### Prompt 29 — Provider Error Normalization
-Normalized provider diagnostics.
-### Prompt 30 — HTTP Diagnostic Console
-Detailed HTTP/network/provider diagnostics.
-### Prompt 31 — Developer Diagnostics UI
-Controlled developer-facing diagnostics UI.
-### Prompt 32 — Request Timing and Timeout System
-Explicit timeout behavior.
-### Prompt 33 — Retry Policy
-Conservative retry/idempotency policy.
-### Prompt 34 — Request Lifecycle State Machine
-Deterministic request states.
-### Prompt 35 — Analytics Architecture
-Privacy-conscious product analytics.
-### Prompt 36 — Analytics Dashboard
-Product health dashboard.
-### Prompt 37 — Google OAuth Architecture
-One Google authorization authority.
-### Prompt 38 — Google Scope Registry
-Central Workspace scope registry.
-### Prompt 39 — Incremental Authorization
-Feature-driven incremental scopes.
-### Prompt 40 — Stay Connected Semantics
-Persistent grant/silent recovery/disconnect.
-### Prompt 41 — Google OAuth Settings UI
-User-facing connection settings.
-### Prompt 42 — Google Calendar Service
-Calendar vertical slice.
-### Prompt 43 — Google Tasks Service
-Tasks vertical slice.
-### Prompt 44 — Google Docs Service
-Docs vertical slice.
-### Prompt 45 — Google Chat Service
-Chat vertical slice.
-### Prompt 46 — Google Tool Boundary
-Safe exposure of Google capabilities as tools.
-### Prompt 47 — Google Write Confirmation
-Confirmation before side effects.
-### Prompt 48 — OAuth Failure Diagnostics
-OAuth error normalization.
-### Prompt 49 — Gemini Native Background Execution
-Background execution evaluation/implementation.
-### Prompt 50 — End-to-End Reliability Gate
-Full reliability and quality gate.
+## Milestones
 
-## Milestones and verified state
+Prompts 1–4 complete. Prompts 5–7 complete with green CI.
 
-Milestones 1–4 complete.
+Prompts 8–12 are the active batch. They are not complete until the five architecture artifacts exist and CI has verified the final repository state.
 
-Prompts 5–7 complete with green CI.
-
-Prompts 8–12 are the current batch and are **not yet marked complete** in this README until their artifacts, commits, and CI results have all been verified.
-
-Node.js 24 LTS is the runtime baseline; live CI previously resolved Node.js 24.20.0 and npm 11.19.0 on 2026-09-03.
+Node.js 24 LTS is the runtime baseline. The current dependency policy requires live verification before new SDK/package choices.
 
 ## External-source revalidation rule
 
-Before implementing any fast-moving Gemini, npm, Node, Google OAuth, or GitHub Action surface, verify the current official documentation/release state. The lockfile, once created, is authoritative for installed dependency versions.
+Before changing Gemini, npm, Node, Google OAuth, or GitHub Action surfaces, re-check current official documentation/release state. The real generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
 
 ## Future-self handoff protocol
 
-This is only for a genuinely later context-loss iteration. It is not a current restart instruction.
+Only a genuinely later context-loss iteration uses this protocol. It is not a current restart instruction.
 
-A future iteration must inspect README, architecture docs, git history, CI, and the actual source tree; determine the highest completed prompt from evidence; make its changes; and leave the same evidence for the next iteration.
+A future iteration must inspect README, architecture docs, git history, CI, and the actual source tree; determine the highest completed prompt from evidence; make changes; and leave equivalent evidence for the next iteration.
 
-Every completed prompt must record what changed, why, files, key decisions, live facts verified, tests/lint/typecheck/build, CI result, failures/fixes, unresolved risks, exact commit SHA, and recommended next work.
+Every completed prompt must record what changed, why, files, decisions, live facts verified, tests/lint/typecheck/build, CI result, failures/fixes, unresolved risks, exact commit SHA, and recommended next work.
 
 ## Current implementation posture
 
-Build deliberately, directly, and incrementally. Do not add abstraction for abstraction's sake. Do not create compatibility facades for code that does not exist. Keep the system modular so future tools, Workspace integrations, character prompting, and memory can be added without changing the canonical Gemini spine.
+Build directly and incrementally. Do not recreate the archived architecture. Keep tool calling, Workspace integrations, character prompting, memory, persistence, diagnostics, and the canonical Gemini provider modular and independently testable.

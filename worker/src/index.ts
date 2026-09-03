@@ -34,7 +34,7 @@ function allowedOrigin(request: Request, env: Env): string | null {
 
 function corsHeaders(request: Request, env: Env): Headers {
   const headers = new Headers({
-    'Access-Control-Allow-Methods': 'POST, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
     'Vary': 'Origin',
   });
@@ -97,89 +97,36 @@ function toSafeEvent(raw: unknown): { name: string; data: SafeEvent } | null {
 
   if (eventType === 'interaction.created') {
     const interaction = asRecord(event.interaction);
-    return {
-      name: 'interaction.created',
-      data: {
-        event_type: eventType,
-        interaction: {
-          id: stringValue(interaction, 'id') ?? id,
-          status: stringValue(interaction, 'status'),
-          model: stringValue(interaction, 'model'),
-        },
-      },
-    };
+    return { name: 'interaction.created', data: { event_type: eventType, interaction: { id: stringValue(interaction, 'id') ?? id, status: stringValue(interaction, 'status'), model: stringValue(interaction, 'model') } } };
   }
 
   if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
-    return {
-      name: eventType,
-      data: { event_type: eventType, interaction_id: id, status: stringValue(event, 'status') ?? stringValue(asRecord(event.interaction), 'status') },
-    };
+    return { name: eventType, data: { event_type: eventType, interaction_id: id, status: stringValue(event, 'status') ?? stringValue(asRecord(event.interaction), 'status') } };
   }
 
   if (eventType === 'step.start') {
     const step = asRecord(event.step);
     const summary = Array.isArray(step.summary)
-      ? step.summary.map((item) => {
-          const record = asRecord(item);
-          return { text: stringValue(record, 'text') };
-        }).filter((item) => item.text)
+      ? step.summary.map((item) => ({ text: stringValue(asRecord(item), 'text') })).filter((item) => item.text)
       : [];
-    return {
-      name: 'step.start',
-      data: {
-        event_type: eventType,
-        interaction_id: id,
-        index: indexOf(event),
-        step: {
-          index: numberValue(step, 'index') ?? indexOf(event),
-          type: stringValue(step, 'type') ?? 'other',
-          summary,
-          signature: stringValue(step, 'signature'),
-        },
-      },
-    };
+    return { name: 'step.start', data: { event_type: eventType, interaction_id: id, index: indexOf(event), step: { index: numberValue(step, 'index') ?? indexOf(event), type: stringValue(step, 'type') ?? 'other', summary, signature: stringValue(step, 'signature') } } };
   }
 
   if (eventType === 'step.delta') {
     const delta = asRecord(event.delta);
     const deltaType = stringValue(delta, 'type');
     if (deltaType === 'text' || deltaType === 'thought_summary' || deltaType === 'thought_signature') {
-      return {
-        name: 'step.delta',
-        data: {
-          event_type: eventType,
-          interaction_id: id,
-          index: indexOf(event),
-          delta: {
-            type: deltaType,
-            text: stringValue(delta, 'text'),
-            signature: stringValue(delta, 'signature'),
-          },
-        },
-      };
+      return { name: 'step.delta', data: { event_type: eventType, interaction_id: id, index: indexOf(event), delta: { type: deltaType, text: stringValue(delta, 'text'), signature: stringValue(delta, 'signature') } } };
     }
     return null;
   }
 
-  if (eventType === 'step.stop') {
-    return { name: 'step.stop', data: { event_type: eventType, interaction_id: id, index: indexOf(event) } };
-  }
+  if (eventType === 'step.stop') return { name: 'step.stop', data: { event_type: eventType, interaction_id: id, index: indexOf(event) } };
 
   if (eventType === 'interaction.completed') {
     const interaction = asRecord(event.interaction);
     const usage = asRecord(interaction.usage);
-    return {
-      name: 'interaction.completed',
-      data: {
-        event_type: eventType,
-        interaction: {
-          id: stringValue(interaction, 'id') ?? id,
-          status: stringValue(interaction, 'status') ?? 'completed',
-          usage: Object.keys(usage).length > 0 ? usage : undefined,
-        },
-      },
-    };
+    return { name: 'interaction.completed', data: { event_type: eventType, interaction: { id: stringValue(interaction, 'id') ?? id, status: stringValue(interaction, 'status') ?? 'completed', usage: Object.keys(usage).length > 0 ? usage : undefined } } };
   }
 
   if (eventType === 'error') {
@@ -208,9 +155,7 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
   if (origin && !allowedOrigin(request, env)) return jsonResponse(request, env, { code: 'authz', message: 'Origin is not authorized.' }, 403);
 
   const contentType = request.headers.get('Content-Type') ?? '';
-  if (!contentType.toLowerCase().includes('application/json')) {
-    return jsonResponse(request, env, { code: 'validation', message: 'Content-Type must be application/json.' }, 415);
-  }
+  if (!contentType.toLowerCase().includes('application/json')) return jsonResponse(request, env, { code: 'validation', message: 'Content-Type must be application/json.' }, 415);
 
   const payload = await request.json().catch(() => null);
   const parsed = requestSchema.safeParse(payload);
@@ -256,9 +201,7 @@ export default {
     const pathname = new URL(request.url).pathname;
     if (pathname === '/health') return healthResponse(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-    if (request.method !== 'POST' || pathname !== '/api/gemini') {
-      return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
-    }
+    if (request.method !== 'POST' || pathname !== '/api/gemini') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
 
     try {
       return await handleGemini(request, env);

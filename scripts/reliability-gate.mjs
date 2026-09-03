@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const root = process.cwd();
@@ -28,26 +28,21 @@ for (const relative of requiredFiles) {
 }
 
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
-const expectedScripts = ['lint', 'typecheck', 'test', 'build', 'e2e'];
-for (const script of expectedScripts) {
+for (const script of ['lint', 'typecheck', 'test', 'build', 'e2e']) {
   if (typeof packageJson.scripts?.[script] !== 'string') throw new Error(`Reliability gate: missing npm script ${script}`);
 }
 
 const forbiddenProviderApis = /generateContent\s*\(/g;
-const sourceRoots = ['src'];
-for (const sourceRoot of sourceRoots) {
-  const stack = [join(root, sourceRoot)];
-  while (stack.length) {
-    const current = stack.pop();
-    const entries = (await import('node:fs/promises')).readdir(current, { withFileTypes: true });
-    for (const entry of entries) {
-      const path = join(current, entry.name);
-      if (entry.isDirectory()) stack.push(path);
-      if (!entry.isFile() || !/\.(ts|tsx|mts|cts)$/.test(entry.name)) continue;
-      const source = readFileSync(path, 'utf8');
-      if (forbiddenProviderApis.test(source)) throw new Error(`Reliability gate: forbidden legacy Gemini API in ${path}`);
-      forbiddenProviderApis.lastIndex = 0;
-    }
+const stack = [join(root, 'src')];
+while (stack.length) {
+  const current = stack.pop();
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    const path = join(current, entry.name);
+    if (entry.isDirectory()) stack.push(path);
+    if (!entry.isFile() || !/\.(ts|tsx|mts|cts)$/.test(entry.name)) continue;
+    const source = readFileSync(path, 'utf8');
+    if (forbiddenProviderApis.test(source)) throw new Error(`Reliability gate: forbidden legacy Gemini API in ${path}`);
+    forbiddenProviderApis.lastIndex = 0;
   }
 }
 

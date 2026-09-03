@@ -1,6 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ChatMessage, ConversationState, ProviderStatus } from '../domain/chat';
-import { appendMessage, loadConversation, saveConversation } from '../persistence/conversation';
+import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
+import {
+  appendMessage,
+  archiveThread,
+  createThread,
+  deleteThread,
+  loadConversation,
+  loadThreads,
+  renameThread,
+  saveConversation,
+} from '../persistence/conversation';
+import { demoThreadTitlePort } from '../chat/thread-title-port';
 import { demoTurnPort } from '../chat/demo-turn-port';
 import { Icon } from '../ui/icons';
 import { fontFamilyForCss, type FontSelection } from '../ui/fontRegistry';
@@ -15,15 +25,20 @@ import '../ui/fonts.css';
 import './app.css';
 import './mobile-viewport.css';
 
-const makeMessage = (role: ChatMessage['role'], text: string): ChatMessage => ({
+const ACTIVE_THREAD_KEY = 'elara.active-thread';
+const DEFAULT_TITLE = 'New conversation';
+
+const makeMessage = (role: ChatMessage['role'], text: string, conversationId: string): ChatMessage => ({
   id: `${role}-${crypto.randomUUID()}`,
   role,
   text,
+  conversationId,
   createdAt: Date.now(),
 });
 
 export function App() {
-  const [conversation, setConversation] = useState<ConversationState>({ id: 'primary', messages: [] });
+  const [conversation, setConversation] = useState<ConversationState>({ id: 'primary', title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] });
+  const [threads, setThreads] = useState<ConversationThread[]>([]);
   const [draft, setDraft] = useState('');
   const [status, setStatus] = useState<ProviderStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -39,10 +54,58 @@ export function App() {
   useVisualViewport();
 
   useEffect(() => {
-    void loadConversation().then(setConversation).catch(() => setError('Could not load the local conversation.'));
+    let cancelled = false;
+    void (async () => {
+      try {
+        const loadedThreads = await loadThreads();
+        const storedActive = window.localStorage.getItem(ACTIVE_THREAD_KEY);
+        const activeId = storedActive && loadedThreads.some((thread) => thread.id === storedActive) ? storedActive : (loadedThreads[0]?.id ?? 'primary');
+        const loadedConversation = await loadConversation(activeId);
+        if (cancelled) return;
+        setThreads(loadedThreads);
+        setConversation(loadedConversation);
+        window.localStorage.setItem(ACTIVE_THREAD_KEY, activeId);
+      } catch {
+        if (!cancelled) setError('Could not load the local conversation history.');
+      }
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
+
+  async function refreshThreads() {
+    setThreads(await loadThreads());
+  }
+
+  async function switchThread(id: string) {
+    cancel();
+    setError(null);
+    setDraft('');
+    try {
+      const nextConversation = await loadConversation(id);
+      setConversation(nextConversation);
+      window.localStorage.setItem(ACTIVE_THREAD_KEY, id);
+      await refreshThreads();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not open that conversation.');
+    }
+  }
+
+  async function startNewChat() {
+    cancel();
+    setError(null);
+    setDraft('');
+    try {
+      const nextConversation = await createThread();
+      setConversation(nextConversation);
+      window.localStorage.setItem(ACTIVE_THREAD_KEY, nextConversation.id);
+      await refreshThreads();
+      setSidebarOpen(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not create a new conversation.');
+    }
+  }
 
   async function send() {
     const text = draft.trim();
@@ -55,16 +118,30 @@ export function App() {
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
+    const conversationId = conversation.id;
 
     try {
-      const userMessage = makeMessage('user', text);
-      const withUser = await appendMessage(userMessage);
+      const userMessage = makeMessage('user', text, conversationId);
+      const withUser = await appendMessage(userMessage, conversationId);
       if (controller.signal.aborted) return;
-      setConversation(withUser);
+      let titled = withUser;
 
-      const assistantMessage = makeMessage('assistant', '');
+      if (withUser.title === DEFAULT_TITLE) {
+        try {
+          const generatedTitle = await demoThreadTitlePort.generateTitle(text);
+          titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() };
+          await saveConversation(titled);
+        } catch {
+          // A title is metadata; failure must not block the chat turn.
+        }
+      }
+
+      setConversation(titled);
+      await refreshThreads();
+
+      const assistantMessage = makeMessage('assistant', '', conversationId);
       let liveText = '';
-      const base = { ...withUser, messages: [...withUser.messages, assistantMessage] };
+      const base = { ...titled, messages: [...titled.messages, assistantMessage], updatedAt: Date.now() };
       setConversation(base);
 
       for await (const event of demoTurnPort.streamReply(text, controller.signal)) {
@@ -77,12 +154,14 @@ export function App() {
         } else if (event.type === 'completed') {
           const completed = {
             ...base,
+            updatedAt: Date.now(),
             messages: base.messages.map((message) => message.id === assistantMessage.id
               ? { ...message, text: liveText, executionSummary: { id: crypto.randomUUID(), steps: event.executionSteps, durationMs: event.durationMs } }
               : message),
           };
           await saveConversation(completed);
           setConversation(completed);
+          await refreshThreads();
         } else if (event.type === 'failed') {
           throw new Error(event.message);
         }
@@ -107,11 +186,40 @@ export function App() {
     setError(null);
   }
 
+  async function handleRename(id: string, title: string) {
+    try {
+      await renameThread(id, title);
+      await refreshThreads();
+      if (id === conversation.id) setConversation((current) => ({ ...current, title }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not rename that conversation.');
+    }
+  }
+
+  async function handleArchive(id: string) {
+    try {
+      await archiveThread(id);
+      await refreshThreads();
+      if (id === conversation.id) await startNewChat();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not archive that conversation.');
+    }
+  }
+
+  async function handleDelete(id: string) {
+    if (!window.confirm('Delete this conversation? This removes its local messages.')) return;
+    try {
+      await deleteThread(id);
+      await refreshThreads();
+      if (id === conversation.id) await startNewChat();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.');
+    }
+  }
+
   function handleToolAction(id: string) {
     if (id === 'new-chat') {
-      cancel();
-      setConversation({ id: crypto.randomUUID(), messages: [] });
-      setToolNotice(null);
+      void startNewChat();
       return;
     }
 
@@ -155,10 +263,18 @@ export function App() {
 
       <Composer draft={draft} status={status} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
 
-      <Sidebar open={sidebarOpen} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => {
-        cancel();
-        setConversation((current) => id === current.id ? current : { id, messages: [] });
-      }} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
+      <Sidebar
+        open={sidebarOpen}
+        threads={threads}
+        activeId={conversation.id}
+        onClose={() => setSidebarOpen(false)}
+        onSelect={(id) => void switchThread(id)}
+        onNewChat={() => void startNewChat()}
+        onRename={(id, title) => void handleRename(id, title)}
+        onArchive={(id) => void handleArchive(id)}
+        onDelete={(id) => void handleDelete(id)}
+        onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }}
+      />
     </main>
   );
 }

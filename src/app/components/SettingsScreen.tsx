@@ -5,16 +5,14 @@ import { BUILT_IN_FONTS, fontFamilyForCss, googleFontFamilyFromCss2Url, type Fon
 import { RangeSlider } from './RangeSlider';
 import type { PortraitBackground, PortraitScale } from './PortraitBanner';
 import type { GeminiSettings } from '../../gemini/settings-engine';
-import { defaultsForModel } from '../../gemini/settings-engine';
-import { GEMINI_MODELS, getGeminiModel } from '../../gemini/model-registry';
-import './api-lockbox.css';
+import { getGeminiModel } from '../../gemini/settings-engine';
+import { GEMINI_MODELS } from '../../gemini/model-registry';
 import './model-settings.css';
 
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },
   { id: 'typography', label: 'Typography', icon: 'type' as const },
   { id: 'model', label: 'Gemini', icon: 'chat' as const },
-  { id: 'security', label: 'API Lockbox', icon: 'shield' as const },
   { id: 'chat', label: 'Chat', icon: 'chat' as const },
 ] as const;
 type SettingsSection = typeof settingsSections[number]['id'];
@@ -39,13 +37,12 @@ function loadCustomGoogleFont(stylesheetUrl: string) {
 
 export function SettingsScreen({
   font, onFontChange, fontSize, onFontSizeChange, portraitScale, onPortraitScaleChange, portraitBackground, onPortraitBackgroundChange,
-  geminiApiConfigured, onSaveGeminiApiKey, onClearGeminiApiKey, selectedModel, geminiSettings, onModelChange, onGeminiSettingsChange, onResetGeminiSettings, onBack,
+  selectedModel, geminiSettings, onModelChange, onGeminiSettingsChange, onResetGeminiSettings, onBack,
 }: {
   font: FontSelection; onFontChange: (font: FontSelection) => void;
   fontSize: number; onFontSizeChange: (fontSize: number) => void;
   portraitScale: PortraitScale; onPortraitScaleChange: (scale: PortraitScale) => void;
   portraitBackground: PortraitBackground; onPortraitBackgroundChange: (background: PortraitBackground) => void;
-  geminiApiConfigured: boolean; onSaveGeminiApiKey: (apiKey: string) => Promise<void>; onClearGeminiApiKey: () => Promise<void>;
   selectedModel: string; geminiSettings: GeminiSettings;
   onModelChange: (model: string) => void; onGeminiSettingsChange: (settings: GeminiSettings) => void; onResetGeminiSettings: () => void;
   onBack: () => void;
@@ -53,10 +50,6 @@ export function SettingsScreen({
   const [section, setSection] = useState<SettingsSection>('appearance');
   const [customUrl, setCustomUrl] = useState('');
   const [customError, setCustomError] = useState<string | null>(null);
-  const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [lockboxBusy, setLockboxBusy] = useState(false);
-  const [lockboxMessage, setLockboxMessage] = useState<string | null>(null);
-
   const model = getGeminiModel(selectedModel);
 
   function applyCustomFont() {
@@ -66,22 +59,6 @@ export function SettingsScreen({
     const family = googleFontFamilyFromCss2Url(parsed.data);
     if (!family) { setCustomError('That link does not contain a readable Google font family.'); return; }
     loadCustomGoogleFont(parsed.data); onFontChange({ kind: 'custom', family, stylesheetUrl: parsed.data });
-  }
-
-  async function saveKey() {
-    setLockboxMessage(null);
-    if (!geminiApiKey.trim()) { setLockboxMessage('Enter a Gemini API key first.'); return; }
-    setLockboxBusy(true);
-    try { await onSaveGeminiApiKey(geminiApiKey); setGeminiApiKey(''); setLockboxMessage('Gemini API key saved to the local Lockbox.'); }
-    catch (cause) { setLockboxMessage(cause instanceof Error ? cause.message : 'Could not save the Gemini API key.'); }
-    finally { setLockboxBusy(false); }
-  }
-
-  async function clearKey() {
-    setLockboxMessage(null); setLockboxBusy(true);
-    try { await onClearGeminiApiKey(); setGeminiApiKey(''); setLockboxMessage('Gemini API key removed from the local Lockbox.'); }
-    catch (cause) { setLockboxMessage(cause instanceof Error ? cause.message : 'Could not clear the Gemini API key.'); }
-    finally { setLockboxBusy(false); }
   }
 
   function updateSetting(patch: Partial<GeminiSettings>) {
@@ -102,8 +79,7 @@ export function SettingsScreen({
 
           {section === 'model' && <div className="settings-copy"><span className="panel-kicker">GEMINI</span><h2>Model & generation</h2><p>The selected production model controls which generation settings are valid. Changes save automatically.</p><div className="model-settings"><div className="model-settings__field"><label htmlFor="gemini-model">Model</label><select id="gemini-model" className="model-settings__select" value={selectedModel} onChange={(event) => onModelChange(event.target.value)}>{GEMINI_MODELS.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select><span className="model-settings__hint">{model.id} · {model.inputTokenLimit.toLocaleString()} input · {model.outputTokenLimit.toLocaleString()} output tokens</span></div><div className="model-settings__field"><span>Thinking level</span><div className="model-settings__chips" role="radiogroup" aria-label="Thinking level">{model.thinkingLevels.map((level) => <button key={level} type="button" className={`model-settings__chip${geminiSettings.thinkingLevel === level ? ' is-active' : ''}`} role="radio" aria-checked={geminiSettings.thinkingLevel === level} onClick={() => updateSetting({ thinkingLevel: level })}>{level}</button>)}{!geminiSettings.thinkingLevel && <button type="button" className="model-settings__chip is-active" role="radio" aria-checked="true" onClick={() => updateSetting({ thinkingLevel: undefined })}>Provider default</button>}</div><span className="model-settings__hint">Supported levels only; switching models removes incompatible choices.</span></div><div className="model-settings__field"><label htmlFor="gemini-max-output">Max output tokens</label><input id="gemini-max-output" className="model-settings__input" type="number" min={1} max={model.outputTokenLimit} value={geminiSettings.maxOutputTokens ?? ''} placeholder="Provider default" onChange={(event) => updateSetting({ maxOutputTokens: event.target.value ? Number(event.target.value) : undefined })}/><span className="model-settings__hint">Capped automatically at {model.outputTokenLimit.toLocaleString()} for this model.</span></div><div className="model-settings__row"><div className="model-settings__field"><label htmlFor="gemini-seed">Seed</label><input id="gemini-seed" className="model-settings__input" type="number" min={0} step={1} value={geminiSettings.seed ?? ''} placeholder="Provider default" onChange={(event) => updateSetting({ seed: event.target.value ? Number(event.target.value) : undefined })}/></div><div className="model-settings__field"><label htmlFor="gemini-stop">Stop sequences</label><textarea id="gemini-stop" className="model-settings__textarea" value={geminiSettings.stopSequences.join('\n')} placeholder="One sequence per line" onChange={(event) => updateSetting({ stopSequences: event.target.value.split('\n').map((value) => value.trim()).filter(Boolean).slice(0, 5) })}/></div></div><div className="model-settings__field"><span>Thinking summaries</span><div className="model-settings__chips" role="radiogroup" aria-label="Thinking summaries"><button type="button" className={`model-settings__chip${geminiSettings.thinkingSummaries ? ' is-active' : ''}`} role="radio" aria-checked={geminiSettings.thinkingSummaries} onClick={() => updateSetting({ thinkingSummaries: true })}>Auto</button><button type="button" className={`model-settings__chip${!geminiSettings.thinkingSummaries ? ' is-active' : ''}`} role="radio" aria-checked={!geminiSettings.thinkingSummaries} onClick={() => updateSetting({ thinkingSummaries: false })}>Off</button></div></div><div className="model-settings__unsupported">Temperature, top-p and top-k are intentionally not offered here: the current Gemini 3 production guidance recommends removing those sampling controls, and the Interactions generation contract used by Elara does not expose them as model controls.</div>{model.notes && <div className="model-settings__hint">{model.notes}</div>}<div className="model-settings__actions"><button className="model-settings__button model-settings__button--reset" type="button" onClick={() => onResetGeminiSettings()}>Reset to {model.name} defaults</button></div><div className="model-settings__status" role="status">Settings save automatically.</div></div></div>}
 
-          {section === 'security' && <div className="settings-copy"><span className="panel-kicker">SECURITY</span><h2>API Lockbox</h2><p>Your Gemini key is stored locally in an encrypted IndexedDB record and is never rendered into ordinary chat state, diagnostics, or model-visible data.</p><div className="setting-card setting-card--security"><Icon name="shield" size={21}/><div><strong>{geminiApiConfigured ? 'Gemini key configured' : 'Gemini key not configured'}</strong><span>{geminiApiConfigured ? 'A key is present in the local Lockbox.' : 'Add a key below to enable live Gemini chat.'}</span></div></div><div className="lockbox-form"><label htmlFor="gemini-api-key">Gemini API key</label><input id="gemini-api-key" className="custom-font-input" type="password" value={geminiApiKey} onChange={(event) => setGeminiApiKey(event.target.value)} placeholder={geminiApiConfigured ? 'Enter a replacement key' : 'Paste your Gemini API key'} autoComplete="off" spellCheck={false}/><div className="lockbox-actions"><button className="custom-font-button" type="button" onClick={() => void saveKey()} disabled={lockboxBusy}>{lockboxBusy ? 'Saving…' : 'Save key'}</button>{geminiApiConfigured && <button className="lockbox-clear" type="button" onClick={() => void clearKey()} disabled={lockboxBusy}>Clear key</button>}</div>{lockboxMessage && <small className="custom-font-error" role="status">{lockboxMessage}</small>}</div></div>}
-          {section === 'chat' && <div className="settings-copy"><span className="panel-kicker">CONVERSATION</span><h2>Chat</h2><p>Startup behaviour, composer preferences, thread naming and conversation presentation will live here as their feature passes land.</p><div className="setting-card"><strong>Startup screen</strong><span>Chat / empty chat · last chat option planned</span></div></div>}
+          {section === 'chat' && <div className="settings-copy"><span className="panel-kicker">CONVERSATION</span><h2>Chat</h2><p>Startup behaviour, composer preferences, thread naming and conversation presentation will live here as their feature passes land.</p><div className="setting-card"><strong>Gemini transport</strong><span>Protected Worker boundary · provider credential remains server-side</span></div><div className="setting-card"><strong>Startup screen</strong><span>Chat / empty chat · last chat option planned</span></div></div>}
         </section>
       </div>
     </main>

@@ -21,9 +21,13 @@ import { TopToolRail } from './components/TopToolRail';
 import { PortraitBanner, type PortraitBackground, type PortraitScale } from './components/PortraitBanner';
 import { ConversationSurface } from './components/ConversationSurface';
 import { Composer } from './components/Composer';
+import { QuickActionSurface } from './components/QuickActionSurface';
+import { DEFAULT_QUICK_ACTIONS, demoQuickActionPort } from './quick-actions/defaults';
+import type { QuickActionId, QuickActionSurface as QuickActionSurfaceModel } from './quick-actions/contracts';
 import '../ui/fonts.css';
 import './app.css';
 import './mobile-viewport.css';
+import './quick-action-rail.css';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 const DEFAULT_TITLE = 'New conversation';
@@ -44,7 +48,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [toolNotice, setToolNotice] = useState<string | null>(null);
+  const [quickActionSurface, setQuickActionSurface] = useState<QuickActionSurfaceModel | null>(null);
   const [font, setFont] = useState<FontSelection>({ kind: 'built-in', family: 'Inter' });
   const [fontSize, setFontSize] = useState(15);
   const [portraitScale, setPortraitScale] = useState<PortraitScale>(2);
@@ -80,6 +84,7 @@ export function App() {
 
   async function switchThread(id: string) {
     cancel();
+    setQuickActionSurface(null);
     setError(null);
     setDraft('');
     try {
@@ -94,6 +99,7 @@ export function App() {
 
   async function startNewChat() {
     cancel();
+    setQuickActionSurface(null);
     setError(null);
     setDraft('');
     try {
@@ -112,8 +118,8 @@ export function App() {
     if (!text || status === 'streaming') return;
 
     setDraft('');
+    setQuickActionSurface(null);
     setError(null);
-    setToolNotice(null);
     setStatus('streaming');
 
     const controller = new AbortController();
@@ -217,14 +223,15 @@ export function App() {
     }
   }
 
-  function handleToolAction(id: string) {
-    if (id === 'new-chat') {
-      void startNewChat();
-      return;
+  async function handleQuickAction(id: QuickActionId) {
+    setError(null);
+    try {
+      const surface = await demoQuickActionPort.execute(id);
+      setQuickActionSurface(surface);
+    } catch (cause) {
+      setQuickActionSurface(null);
+      setError(cause instanceof Error ? cause.message : 'The quick action could not be opened.');
     }
-
-    const labels: Record<string, string> = { calendar: 'Calendar action surface', tasks: 'Tasks action surface', gmail: 'Gmail action surface' };
-    setToolNotice(`${labels[id] ?? 'Quick action'} ready — no prompt was added to chat.`);
   }
 
   if (settingsOpen) {
@@ -255,8 +262,8 @@ export function App() {
       </div>
 
       <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} />
-      <TopToolRail onAction={handleToolAction} />
-      {toolNotice && <div className="tool-notice" role="status">{toolNotice}</div>}
+      <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={quickActionSurface?.id ?? null} onAction={(id) => void handleQuickAction(id)} />
+      {quickActionSurface && <QuickActionSurface surface={quickActionSurface} onClose={() => setQuickActionSurface(null)} />}
 
       <ConversationSurface messages={conversation.messages} fontSize={fontSize} />
       {error && <div className="error" role="alert">{error}</div>}

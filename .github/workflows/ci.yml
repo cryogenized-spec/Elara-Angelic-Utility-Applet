@@ -9,6 +9,10 @@ on:
 permissions:
   contents: read
 
+env:
+  GEMINI_WORKER_URL: https://elara-gemini.cryogenized.workers.dev
+  PAGES_ORIGIN: https://cryogenized-spec.github.io
+
 jobs:
   runtime:
     name: Runtime verification
@@ -47,6 +51,35 @@ jobs:
           grep -q "Android portrait" docs/PRODUCT_BOUNDARY.md
           grep -q "One canonical Gemini provider implementation" docs/PRODUCT_BOUNDARY.md
           grep -q "Node.js 24 LTS" docs/ARCHITECTURE_DECISION.md
+
+      - name: Verify live Gemini Worker browser transport
+        shell: bash
+        run: |
+          set -euo pipefail
+          health_headers="$(mktemp)"
+          health_body="$(mktemp)"
+          curl --fail-with-body --silent --show-error --max-time 15 \
+            -D "$health_headers" \
+            -H "Origin: $PAGES_ORIGIN" \
+            "$GEMINI_WORKER_URL/health" > "$health_body"
+          grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$' "$health_headers"
+          grep -q '"api":true' "$health_body"
+          grep -q '"status":"healthy"' "$health_body"
+
+          options_headers="$(mktemp)"
+          curl --fail-with-body --silent --show-error --max-time 15 \
+            -D "$options_headers" \
+            -o /dev/null \
+            -X OPTIONS \
+            -H "Origin: $PAGES_ORIGIN" \
+            -H 'Access-Control-Request-Method: POST' \
+            -H 'Access-Control-Request-Headers: content-type' \
+            "$GEMINI_WORKER_URL/api/gemini"
+          grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$' "$options_headers"
+          grep -iq '^access-control-allow-methods: .*POST' "$options_headers"
+          grep -iq '^access-control-allow-headers: .*Content-Type' "$options_headers"
+
+          echo 'Live Worker browser transport verification passed.'
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund

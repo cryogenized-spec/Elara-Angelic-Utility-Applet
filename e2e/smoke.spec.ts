@@ -42,3 +42,29 @@ test('shows local font choices and the 10–20px text size slider', async ({ pag
   await expect(slider).toHaveValue('20');
   await expect(rangeSetting.locator('output')).toHaveText('20px');
 });
+
+test('controls portrait scale and background from Appearance settings', async ({ page }) => {
+  await page.goto('');
+  const banner = page.getByRole('region', { name: 'Elara portrait banner' });
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
+
+  const scale = page.getByRole('slider', { name: 'Portrait scale' });
+  const scaleSetting = scale.locator('xpath=..');
+  await expect(scale).toHaveValue('2');
+  await expect(scaleSetting.locator('output')).toHaveText('2×');
+  await scale.fill('3');
+  await expect(scale).toHaveValue('3');
+  await expect(scaleSetting.locator('output')).toHaveText('3×');
+
+  await page.getByRole('radio', { name: /Blue Hour/ }).click();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
+  await expect(banner).toHaveClass(/portrait-scale-3/);
+  await expect(banner).toHaveClass(/portrait-background-blue-hour/);
+
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await expect(banner).toHaveClass(/is-collapsed/);
+  await page.getByRole('complementary', { name: 'Chat threads' }).getByRole('button', { name: 'Close sidebar' }).click();
+  await expect(banner).toHaveClass(/portrait-scale-3/);
+  await expect(banner).toHaveClass(/portrait-background-blue-hour/);
+});

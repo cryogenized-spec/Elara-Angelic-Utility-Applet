@@ -29,7 +29,9 @@ test('shows local font choices and the 10–20px text size slider', async ({ pag
 
   await expect(page.getByText('The quick brown fox jumps over the lazy dog.').first()).toBeVisible();
   const slider = page.getByRole('slider', { name: 'Text size' });
+  const rangeSetting = slider.locator('xpath=..');
   await expect(slider).toHaveValue('15');
+  await expect(rangeSetting.locator('output')).toHaveText('15px');
 
   await slider.dispatchEvent('pointerdown');
   await expect(slider).toHaveClass(/is-hot/);
@@ -38,5 +40,5 @@ test('shows local font choices and the 10–20px text size slider', async ({ pag
 
   await slider.fill('20');
   await expect(slider).toHaveValue('20');
-  await expect(page.getByText('20px', { exact: true })).toBeVisible();
+  await expect(rangeSetting.locator('output')).toHaveText('20px');
 });

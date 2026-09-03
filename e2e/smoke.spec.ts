@@ -66,7 +66,7 @@ test('keeps multiline drafts bounded without requiring a live model call', async
   await expect(composer).toHaveCSS('max-height', '132px');
 });
 
-test('exposes Gemini model controls and the API Lockbox', async ({ page }) => {
+test('exposes Gemini model controls and states the protected transport boundary', async ({ page }) => {
   await page.goto('');
   await page.getByRole('button', { name: 'Open settings' }).click();
 
@@ -75,17 +75,16 @@ test('exposes Gemini model controls and the API Lockbox', async ({ page }) => {
   await expect(page.getByText(/Supported levels only/)).toBeVisible();
   await expect(page.getByText(/Settings save automatically/)).toBeVisible();
 
-  await page.getByRole('button', { name: 'API Lockbox' }).click();
-  await expect(page.getByLabel('Gemini API key')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'API Lockbox' })).toBeVisible();
+  await page.getByRole('button', { name: 'Chat' }).click();
+  await expect(page.getByText(/Protected Worker boundary/)).toBeVisible();
 });
 
-test('shows an explicit missing-key failure instead of fabricating a response', async ({ page }) => {
+test('shows an explicit Worker configuration failure instead of fabricating a response', async ({ page }) => {
   await page.goto('');
   const composer = page.getByRole('textbox', { name: 'Message Elara' });
   await composer.fill('Verify the live runtime boundary');
   await page.getByRole('button', { name: 'Send message' }).click();
-  await expect(page.getByRole('alert')).toContainText('No Gemini API key is configured');
+  await expect(page.getByRole('alert')).toContainText('Gemini Worker endpoint is not configured');
   await expect(page.getByText('Verify the live runtime boundary')).toBeVisible();
 });
 

@@ -1,14 +1,14 @@
-import { GoogleGenAI, type SafetySetting } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import { getGeminiApiKey } from '../security/lockbox';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiTurnPort, type GeminiTurnRequest, type GeminiUsage } from './contracts';
 import { normalizeGeminiError } from './errors';
 import { ELARA_SYSTEM_INSTRUCTION } from './creative-context';
 
-const SAFETY_SETTINGS: SafetySetting[] = [
-  { type: 'harassment', threshold: 'block_none' },
-  { type: 'hate_speech', threshold: 'block_none' },
-  { type: 'sexually_explicit', threshold: 'block_none' },
-  { type: 'dangerous_content', threshold: 'block_none' },
+const SAFETY_SETTINGS = [
+  { type: 'harassment' as const, threshold: 'block_none' as const },
+  { type: 'hate_speech' as const, threshold: 'block_none' as const },
+  { type: 'sexually_explicit' as const, threshold: 'block_none' as const },
+  { type: 'dangerous_content' as const, threshold: 'block_none' as const },
 ];
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }

@@ -11,7 +11,9 @@ import {
   saveConversation,
 } from '../persistence/conversation';
 import { demoThreadTitlePort } from '../chat/thread-title-port';
-import { demoTurnPort } from '../chat/demo-turn-port';
+import { geminiTurnPort } from '../gemini/provider';
+import { DEFAULT_GEMINI_MODEL } from '../gemini/contracts';
+import { hasGeminiApiKey, setGeminiApiKey, clearGeminiApiKey } from '../security/lockbox';
 import { Icon } from '../ui/icons';
 import { fontFamilyForCss, type FontSelection } from '../ui/fontRegistry';
 import { useVisualViewport } from '../ui/useVisualViewport';
@@ -31,7 +33,6 @@ import './quick-action-rail.css';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 const DEFAULT_TITLE = 'New conversation';
-
 const makeMessage = (role: ChatMessage['role'], text: string, conversationId: string): ChatMessage => ({
   id: `${role}-${crypto.randomUUID()}`,
   role,
@@ -53,6 +54,7 @@ export function App() {
   const [fontSize, setFontSize] = useState(15);
   const [portraitScale, setPortraitScale] = useState<PortraitScale>(2);
   const [portraitBackground, setPortraitBackground] = useState<PortraitBackground>('midnight');
+  const [geminiApiConfigured, setGeminiApiConfigured] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useVisualViewport();
@@ -61,13 +63,14 @@ export function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const loadedThreads = await loadThreads();
+        const [loadedThreads, configured] = await Promise.all([loadThreads(), hasGeminiApiKey()]);
         const storedActive = window.localStorage.getItem(ACTIVE_THREAD_KEY);
         const activeId = storedActive && loadedThreads.some((thread) => thread.id === storedActive) ? storedActive : (loadedThreads[0]?.id ?? 'primary');
         const loadedConversation = await loadConversation(activeId);
         if (cancelled) return;
         setThreads(loadedThreads);
         setConversation(loadedConversation);
+        setGeminiApiConfigured(configured);
         window.localStorage.setItem(ACTIVE_THREAD_KEY, activeId);
       } catch {
         if (!cancelled) setError('Could not load the local conversation history.');
@@ -78,50 +81,34 @@ export function App() {
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
 
-  async function refreshThreads() {
-    setThreads(await loadThreads());
-  }
+  async function refreshThreads() { setThreads(await loadThreads()); }
 
   async function switchThread(id: string) {
-    cancel();
-    setQuickActionSurface(null);
-    setError(null);
-    setDraft('');
+    cancel(); setQuickActionSurface(null); setError(null); setDraft('');
     try {
       const nextConversation = await loadConversation(id);
       setConversation(nextConversation);
       window.localStorage.setItem(ACTIVE_THREAD_KEY, id);
       await refreshThreads();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not open that conversation.');
-    }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not open that conversation.'); }
   }
 
   async function startNewChat() {
-    cancel();
-    setQuickActionSurface(null);
-    setError(null);
-    setDraft('');
+    cancel(); setQuickActionSurface(null); setError(null); setDraft('');
     try {
       const nextConversation = await createThread();
       setConversation(nextConversation);
       window.localStorage.setItem(ACTIVE_THREAD_KEY, nextConversation.id);
       await refreshThreads();
       setSidebarOpen(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not create a new conversation.');
-    }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not create a new conversation.'); }
   }
 
   async function send() {
     const text = draft.trim();
     if (!text || status === 'streaming') return;
 
-    setDraft('');
-    setQuickActionSurface(null);
-    setError(null);
-    setStatus('streaming');
-
+    setDraft(''); setQuickActionSurface(null); setError(null); setStatus('streaming');
     const controller = new AbortController();
     abortControllerRef.current = controller;
     const conversationId = conversation.id;
@@ -137,48 +124,64 @@ export function App() {
           const generatedTitle = await demoThreadTitlePort.generateTitle(text);
           titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() };
           await saveConversation(titled);
-        } catch {
-          // A title is metadata; failure must not block the chat turn.
-        }
+        } catch { /* title generation is metadata and never blocks chat */ }
       }
 
       setConversation(titled);
       await refreshThreads();
 
+      const previousInteractionId = [...titled.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
       const assistantMessage = makeMessage('assistant', '', conversationId);
       let liveText = '';
-      const base = { ...titled, messages: [...titled.messages, assistantMessage], updatedAt: Date.now() };
+      let interactionId: string | undefined;
+      const startedAt = Date.now();
+      const base = { ...titled, messages: [...titled.messages, assistantMessage], updatedAt: startedAt };
       setConversation(base);
 
-      for await (const event of demoTurnPort.streamReply(text, controller.signal)) {
-        if (event.type === 'text-delta') {
+      for await (const event of geminiTurnPort.streamReply({ model: DEFAULT_GEMINI_MODEL, input: text, previousInteractionId }, controller.signal)) {
+        if (event.type === 'interaction-created') interactionId = event.interactionId;
+        else if (event.type === 'text-delta') {
           liveText += event.text;
-          setConversation({
-            ...base,
-            messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message),
-          });
+          setConversation({ ...base, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message) });
         } else if (event.type === 'completed') {
+          interactionId = event.interactionId;
+          const completedAt = Date.now();
           const completed = {
             ...base,
-            updatedAt: Date.now(),
-            messages: base.messages.map((message) => message.id === assistantMessage.id
-              ? { ...message, text: liveText, executionSummary: { id: crypto.randomUUID(), steps: event.executionSteps, durationMs: event.durationMs } }
-              : message),
+            updatedAt: completedAt,
+            messages: base.messages.map((message) => message.id === assistantMessage.id ? {
+              ...message,
+              text: liveText,
+              providerTurn: {
+                provider: 'gemini' as const,
+                model: DEFAULT_GEMINI_MODEL,
+                interactionId: event.interactionId,
+                startedAt,
+                completedAt,
+                durationMs: event.durationMs,
+                usage: event.usage,
+              },
+              executionSummary: {
+                id: crypto.randomUUID(),
+                steps: ['Accepted the message and opened a Gemini Interaction.', 'Streamed model output through the canonical provider boundary.', 'Finalized and persisted the assistant turn.'],
+                durationMs: event.durationMs,
+              },
+            } : message),
           };
           await saveConversation(completed);
           setConversation(completed);
           await refreshThreads();
         } else if (event.type === 'failed') {
-          throw new Error(event.message);
+          throw new Error(`${event.error.message} [${event.error.code}]`);
+        } else if (event.type === 'cancelled') {
+          return;
         }
       }
 
-      if (!controller.signal.aborted) setStatus('idle');
+      if (!controller.signal.aborted && interactionId) setStatus('idle');
+      else if (!controller.signal.aborted) setStatus('idle');
     } catch (cause) {
-      if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) {
-        setStatus('idle');
-        return;
-      }
+      if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed');
       setError(cause instanceof Error ? cause.message : 'The response failed.');
     } finally {
@@ -186,102 +189,63 @@ export function App() {
     }
   }
 
-  function cancel() {
-    abortControllerRef.current?.abort();
-    setStatus('idle');
-    setError(null);
-  }
+  function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); }
 
   async function handleRename(id: string, title: string) {
-    try {
-      await renameThread(id, title);
-      await refreshThreads();
-      if (id === conversation.id) setConversation((current) => ({ ...current, title }));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not rename that conversation.');
-    }
+    try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id) setConversation((current) => ({ ...current, title })); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not rename that conversation.'); }
   }
 
   async function handleArchive(id: string) {
-    try {
-      await archiveThread(id);
-      await refreshThreads();
-      if (id === conversation.id) await startNewChat();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not archive that conversation.');
-    }
+    try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not archive that conversation.'); }
   }
 
   async function handleDelete(id: string) {
     if (!window.confirm('Delete this conversation? This removes its local messages.')) return;
-    try {
-      await deleteThread(id);
-      await refreshThreads();
-      if (id === conversation.id) await startNewChat();
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.');
-    }
+    try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); }
   }
 
   async function handleQuickAction(id: QuickActionId) {
     setError(null);
-    try {
-      const surface = await demoQuickActionPort.execute(id);
-      setQuickActionSurface(surface);
-    } catch (cause) {
-      setQuickActionSurface(null);
-      setError(cause instanceof Error ? cause.message : 'The quick action could not be opened.');
-    }
+    try { setQuickActionSurface(await demoQuickActionPort.execute(id)); }
+    catch (cause) { setQuickActionSurface(null); setError(cause instanceof Error ? cause.message : 'The quick action could not be opened.'); }
   }
 
+  async function handleSaveGeminiApiKey(apiKey: string) { await setGeminiApiKey(apiKey); setGeminiApiConfigured(true); }
+  async function handleClearGeminiApiKey() { await clearGeminiApiKey(); setGeminiApiConfigured(false); }
+
   if (settingsOpen) {
-    return (
-      <SettingsScreen
-        font={font}
-        onFontChange={setFont}
-        fontSize={fontSize}
-        onFontSizeChange={setFontSize}
-        portraitScale={portraitScale}
-        onPortraitScaleChange={setPortraitScale}
-        portraitBackground={portraitBackground}
-        onPortraitBackgroundChange={setPortraitBackground}
-        onBack={() => setSettingsOpen(false)}
-      />
-    );
+    return <SettingsScreen
+      font={font}
+      onFontChange={setFont}
+      fontSize={fontSize}
+      onFontSizeChange={setFontSize}
+      portraitScale={portraitScale}
+      onPortraitScaleChange={setPortraitScale}
+      portraitBackground={portraitBackground}
+      onPortraitBackgroundChange={setPortraitBackground}
+      geminiApiConfigured={geminiApiConfigured}
+      onSaveGeminiApiKey={handleSaveGeminiApiKey}
+      onClearGeminiApiKey={handleClearGeminiApiKey}
+      onBack={() => setSettingsOpen(false)}
+    />;
   }
 
   return (
     <main className="app-shell" style={{ fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
       <div className="left-spine" aria-label="Application controls">
-        <button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}>
-          <Icon name="menu" size={21} />
-        </button>
-        <button className="glass-menu-button left-spine__settings" type="button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}>
-          <Icon name="settings" size={20} />
-        </button>
+        <button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button>
+        <button className="glass-menu-button left-spine__settings" type="button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Icon name="settings" size={20} /></button>
       </div>
-
       <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} />
       <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={quickActionSurface?.id ?? null} onAction={(id) => void handleQuickAction(id)} />
       {quickActionSurface && <QuickActionSurface surface={quickActionSurface} onClose={() => setQuickActionSurface(null)} />}
-
       <ConversationSurface messages={conversation.messages} fontSize={fontSize} />
       {error && <div className="error" role="alert">{error}</div>}
-
       <Composer draft={draft} status={status} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
-
-      <Sidebar
-        open={sidebarOpen}
-        threads={threads}
-        activeId={conversation.id}
-        onClose={() => setSidebarOpen(false)}
-        onSelect={(id) => void switchThread(id)}
-        onNewChat={() => void startNewChat()}
-        onRename={(id, title) => void handleRename(id, title)}
-        onArchive={(id) => void handleArchive(id)}
-        onDelete={(id) => void handleDelete(id)}
-        onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }}
-      />
+      <Sidebar open={sidebarOpen} threads={threads} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => void switchThread(id)} onNewChat={() => void startNewChat()} onRename={(id, title) => void handleRename(id, title)} onArchive={(id) => void handleArchive(id)} onDelete={(id) => void handleDelete(id)} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
     </main>
   );
 }

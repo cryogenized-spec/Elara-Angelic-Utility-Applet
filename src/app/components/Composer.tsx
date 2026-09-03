@@ -16,6 +16,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
     <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
       <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={status === 'streaming'}><Icon name="paperclip" size={20} /></button>
       <textarea ref={textareaRef} aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={status === 'streaming'} enterKeyHint="send" />
+      <button className="composer__icon" type="button" aria-label="Voice input" disabled={status === 'streaming'}><Icon name="mic" size={20} /></button>
       <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}><span aria-hidden="true">M↓</span></button>
       <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={status !== 'streaming' && !draft.trim()}><Icon name={status === 'streaming' ? 'close' : 'send'} size={19} /></button>
     </form>

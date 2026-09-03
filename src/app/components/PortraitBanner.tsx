@@ -1,16 +1,18 @@
 import './portrait-banner.css';
 
 export type PortraitScale = 1 | 2 | 3;
+export type PortraitBackground = 'midnight' | 'blue-hour' | 'violet' | 'rose';
 
 interface PortraitBannerProps {
   collapsed: boolean;
   scale?: PortraitScale;
+  background?: PortraitBackground;
 }
 
-export function PortraitBanner({ collapsed, scale = 2 }: PortraitBannerProps) {
+export function PortraitBanner({ collapsed, scale = 2, background = 'midnight' }: PortraitBannerProps) {
   return (
     <section
-      className={`elara-banner${collapsed ? ' is-collapsed' : ''} portrait-scale-${scale}`}
+      className={`elara-banner portrait-background-${background}${collapsed ? ' is-collapsed' : ''} portrait-scale-${scale}`}
       aria-label="Elara portrait banner"
     >
       <div className="elara-banner__art" role="img" aria-label="Elara portrait placeholder">

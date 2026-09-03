@@ -1,4 +1,5 @@
 import type { NormalizedProviderError } from './errors';
+import type { EffectiveGeminiSettings } from './settings-engine';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
@@ -8,6 +9,7 @@ export type GeminiStreamEvent =
   | { type: 'step-start'; index: number; stepType: string }
   | { type: 'text-delta'; index: number; text: string }
   | { type: 'thought-summary-delta'; index: number; text: string }
+  | { type: 'thought-signature'; index: number; signature: string }
   | { type: 'step-stop'; index: number }
   | { type: 'completed'; interactionId: string; status: string; durationMs: number; usage?: GeminiUsage }
   | { type: 'cancelled'; interactionId?: string }
@@ -22,9 +24,10 @@ export interface GeminiUsage {
 }
 
 export interface GeminiTurnRequest {
-  model?: string;
+  model: string;
   input: string;
   previousInteractionId?: string;
+  generationConfig?: EffectiveGeminiSettings;
 }
 
 export interface GeminiTurnPort {

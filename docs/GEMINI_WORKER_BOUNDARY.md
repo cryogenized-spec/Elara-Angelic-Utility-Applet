@@ -49,7 +49,9 @@ Do not commit `worker/.dev.vars` or any other secret-bearing environment file.
 
 The Worker is configured by `worker/wrangler.toml` with a required `GEMINI_API_KEY` secret. Before the first deployment, set the secret through Wrangler or the Cloudflare dashboard and configure `ALLOWED_ORIGINS` to the exact production web origin. Cloudflare documents `wrangler secret put` for creating/updating deployed Worker secrets. citeturn277597search2turn277597search12
 
-The GitHub Pages frontend must be built with a non-secret `VITE_GEMINI_WORKER_URL` pointing to the deployed Worker. The URL is public configuration; the Gemini credential is not.
+The GitHub Pages frontend is built with the non-secret `VITE_GEMINI_WORKER_URL` value supplied from the GitHub Actions repository configuration variable `GEMINI_WORKER_URL`. The Pages workflow refuses to publish a production build when that variable is missing or is not HTTPS. GitHub configuration variables are intended for non-sensitive reusable build configuration; secrets are reserved for sensitive values. citeturn389144search0turn389144search1
+
+The production browser origin is the GitHub Pages site origin, while the Worker URL is the separately deployed `https://*.workers.dev` endpoint (or a future HTTPS custom domain). The Worker allowlist and the Pages build variable are intentionally separate: `ALLOWED_ORIGINS` protects inbound browser requests, while `GEMINI_WORKER_URL` tells the static frontend where to send them.
 
 ## Explicit non-goals
 

@@ -20,6 +20,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VITE_GEMINI_WORKER_URL: ${{ vars.GEMINI_WORKER_URL || 'https://elara-gemini.cryogenized.workers.dev' }}
+      GEMINI_WORKER_URL: ${{ vars.GEMINI_WORKER_URL || 'https://elara-gemini.cryogenized.workers.dev' }}
+      GEMINI_ALLOWED_ORIGIN: https://cryogenized-spec.github.io
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -45,6 +47,9 @@ jobs:
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Verify Gemini Worker production boundary
+        run: npm run verify:worker
 
       - name: Build
         run: npm run build

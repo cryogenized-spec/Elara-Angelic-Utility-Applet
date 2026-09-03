@@ -92,3 +92,23 @@ test('renders an assistant execution summary that expands into numbered safe ste
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(summary.locator('ol')).toBeHidden();
 });
+
+test('supports multiline drafts, bounded composer growth, and explicit cancellation', async ({ page }) => {
+  await page.goto('');
+  const composer = page.getByRole('textbox', { name: 'Message Elara' });
+
+  await composer.fill('First line');
+  await composer.press('Shift+Enter');
+  await composer.type('Second line');
+  await expect(composer).toHaveValue('First line\nSecond line');
+
+  await composer.press('Enter');
+  await expect(page.getByRole('button', { name: 'Cancel response' })).toBeVisible();
+  await expect(composer).toBeDisabled();
+  await page.getByRole('button', { name: 'Cancel response' }).click();
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+  await expect(composer).toBeEnabled();
+
+  await composer.fill(Array.from({ length: 60 }, (_, index) => `line ${index}`).join('\n'));
+  await expect(composer).toHaveCSS('max-height', '132px');
+});

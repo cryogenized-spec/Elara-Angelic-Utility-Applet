@@ -204,18 +204,37 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Changed:** `src/google/confirmation/policy.ts`, confirmation tests, and `docs/GOOGLE_WRITE_CONFIRMATION.md`.
 **Result:** Read operations bypass confirmation; writes, destructive mutations, and sends require a bounded confirmation decision. Authorization grants and per-action approval are explicitly separate controls. This provides the safety seam for the future orchestration/Kanban layer.
 
+## 2026-09-03 — Prompts 48–50
+
+### Prompt 48 — OAuth Failure Diagnostics
+**Commits:** `17981690f3bc1aa4a8bf32b28285798aacc916a5`, `36fa07595acc54952149a05acdbbcc2362327ec8`, `98845f1ffc2cc97bc47f609d50e03a42b1c303e3`
+**Changed:** structured Google OAuth failure classifier, tests, and `docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md`.
+**Result:** Authorization failures now have explicit user-action/retry semantics for denial, invalid grants, interaction-required states, configuration errors, temporary outages, and network failures. Diagnostics remain safe and contain no credentials or private payloads.
+**Live verification:** Google's current OAuth guidance documents invalidated refresh tokens and requires declined scopes to disable related functionality; incremental authorization should remain contextual. citeturn383674search6
+
+### Prompt 49 — Gemini Native Background Execution
+**Commits:** `50a79855ddd355ef4f3aeab54899ae24c9e3d37e`, `09485185fc5a3a85387e597b9d30614798fcc700`, `afd38c6b8654857dc0fccb617d17eca26b9544d8`
+**Changed:** background interaction reference/state contract, tests, and `docs/GEMINI_BACKGROUND_EXECUTION.md`.
+**Result:** Long-running Gemini Interactions are represented through the same canonical provider boundary, with normalized server interaction IDs and lifecycle states. Reconnection, cancellation, `requires_action`, and completed-interaction chaining are explicitly defined for future orchestration/Kanban work.
+**Live verification:** Gemini's current Interactions documentation supports background execution, polling/reconnection, cancellation, and `previous_interaction_id` chaining subject to lifecycle constraints. citeturn383674search0turn383674search1turn383674search3
+
+### Prompt 50 — End-to-End Reliability Gate
+**Commits:** `00f3f6c8726ddd2f98862d826caaf05a53e460b9`, `9965db30cb051166cd5dee1564c53076208c1a1a`, `d6d9cf755a2adf0476f616f584819d84e202ec3b`, `000b9f18ac89579f70fdef4d074293d3fbc5d697`, `246920f43ffb8489bd420ecacb49845063706c49`, `fba17059adf8aa1ffb27e2262acf4c4241f31262`
+**Changed:** final reliability-check script, npm reliability command, CI enforcement, reliability gate documentation, and final README roadmap/status update.
+**Result:** CI now covers Node 24, foundation-document verification, install, lint, typecheck, unit tests, build, Playwright E2E, and the final architecture reliability gate. The final gate rejects accidental legacy `generateContent()` calls in production source and verifies the required architecture documents remain present.
+
 ## Deployment decision
 
 Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7
 
 ## Current runtime/CI status
 
-The executable runtime scaffold is present in `main`. CI is configured for install → lint → typecheck → unit tests → build → Playwright E2E. A generated `package-lock.json` is not fabricated; until a genuine lockfile is created and committed, CI uses `npm install`.
+The executable runtime scaffold is present in `main`. CI is configured for install → lint → typecheck → unit tests → build → Playwright E2E → final reliability gate. A generated `package-lock.json` is not fabricated; until a genuine lockfile is created and committed, CI uses `npm install`.
 
-The latest CI run must be observed to completion before a green milestone is declared.
+The final 50-prompt foundation is considered complete only after the latest `main` commit has a completed green CI run covering every gate above.
 
 No pull requests are used for this work. Changes are committed directly to `main`.
 
 ## Future-self requirements preserved
 
-Tool execution is allow-listed and validated. Workspace tools cannot bypass OAuth, scope, diagnostics, or write-confirmation controls. The character master prompt remains separate from user content and tool schemas. Notable memories remain a separate retrievable domain. Image/document input remains an attachment concern, not a second provider runtime. Appearance remains presentation-only. Performance ownership stays distributed to the modules that create the work.
+Tool execution is allow-listed and validated. Workspace tools cannot bypass OAuth, scope, diagnostics, or write-confirmation controls. The character master prompt remains separate from user content and tool schemas. Notable memories remain a separate retrievable domain. Image/document input remains an attachment concern, not a second provider runtime. Appearance remains presentation-only. Performance ownership stays distributed to the modules that create the work. Background Gemini execution remains on the canonical provider path rather than becoming a second runtime.

@@ -24,32 +24,67 @@ This file is the durable implementation handoff record for completed roadmap pro
 
 ## 2026-09-03 — Prompts 8–12
 
-**Status: in progress.** The current batch is being completed as separate narrow architecture artifacts. Do not mark a prompt complete until its artifact exists and the resulting CI state is verified.
+### Prompt 8 — Streaming Architecture
+**Commit:** `dd23e8b0f00598f02cc13aa162238132035dbce2`  
+**Changed:** `docs/GEMINI_STREAMING_ARCHITECTURE.md`  
+**Result:** Canonical Interactions SSE/step lifecycle and normalized event boundary covering text, thoughts, tool calls, completion, cancellation and failure.  
+**Live verification:** Google documents current `interaction.created`, `step.start`, `step.delta`, `step.stop`, `interaction.completed`, and terminal stream semantics. `step.delta` is the current event model after the 2026 breaking change.
 
-Prompt 8: `docs/GEMINI_STREAMING_ARCHITECTURE.md`
+### Prompt 9 — Thinking Display
+**Commit:** `179e33639b384d344b628017348a411a6158c349`  
+**Changed:** `docs/GEMINI_THINKING_DISPLAY.md`  
+**Result:** Thought summaries are separate optional presentation data; hidden reasoning is never reconstructed and no duplicate reasoning store is created.
 
-Prompt 9: `docs/GEMINI_THINKING_DISPLAY.md`
+### Prompt 10 — Conversation Data Model
+**Commit:** `04b422573efae69e7d2f4c49f65d6aec71c8da9b`  
+**Changed:** `docs/CONVERSATION_DATA_MODEL.md`  
+**Result:** Minimal conversations/messages/typed-parts model with explicit request state and provider continuity metadata. Tool calls/results are first-class parts, while tool definitions remain a separate curated capability registry. Future memory notes remain a separate domain.
 
-Prompt 10: `docs/CONVERSATION_DATA_MODEL.md`
+### Prompt 11 — Local Persistence
+**Commit:** `4ff1b14c66d40e9f215e1b55f0101a1b482f9396`  
+**Changed:** `docs/LOCAL_PERSISTENCE.md`  
+**Result:** Dexie/IndexedDB is the sole client persistence authority with explicit schema/migration/recovery/transaction boundaries and no competing localStorage source of truth.
 
-Prompt 11: `docs/LOCAL_PERSISTENCE.md`
+### Prompt 12 — API Lockbox
+**Commit:** `03a3e3db7dbd86d2a846e4311405276892ddbc6c`  
+**Changed:** `docs/API_LOCKBOX.md`  
+**Result:** Central secret/configuration ownership, strict separation of Gemini/OAuth secrets, and explicit future boundaries for character system prompt, curated tools, Workspace execution, and memory notes.  
+**Live verification:** Current `@google/genai` package guidance warns against exposing application-owned API keys in client-side production code.
 
-Prompt 12: `docs/API_LOCKBOX.md`
+### Related correction
+**Commit:** `58909eb1b7c42ff16cb65a8cc7e1f9cc362a852a`  
+**Changed:** `docs/SYSTEM_BOUNDARIES.md`  
+**Result:** Restored the full Prompt 4 responsibility/ownership table after an intermediate edit, while preserving the new future tool/Workspace/character/memory constraints. The final document again contains the original directional architecture and complexity guardrails.
 
-## Requirements explicitly carried forward
+## Batch result
 
-Tool calling remains a curated capability surface with model-visible allow-listed schemas and validated application execution. Google Workspace tools remain behind the single OAuth authority, scope enforcement, diagnostics and future write confirmation.
+Prompts 8–12 establish the state/execution foundation without building a monolith:
 
-The character master system prompt is a dedicated system-instruction source containing durable identity, personality, roleplay behavior, style, and rules. It remains separate from user messages and tool schemas.
+```text
+chat/application
+   ↓
+capability-gated settings + normalized request
+   ↓
+canonical Interactions provider
+   ↓
+normalized event stream
+   ↓
+conversation state
+   ↓
+authoritative Dexie persistence
 
-Long-term notes/memory remain a separate retrievable domain for notable events. Conversation history is not automatically permanent memory.
+separate capabilities:
+character master system instruction
+curated tool registry
+Google Workspace through one OAuth authority
+future retrievable memory notes
+protected secrets through Lockbox/Worker
+```
 
-No monolithic manager/service/runtime may combine provider calls, stream parsing, tool execution, Workspace access, prompt composition, memory retrieval, persistence, and diagnostics.
+## Future-self requirements preserved
 
-## Live facts rechecked for Prompts 8–12
+Every future implementation must retain these constraints: tool execution is allow-listed and validated; Workspace tools cannot bypass OAuth/scope/write-confirmation controls; the character master prompt is separate from user content and tool schemas; notable memories live in their own retrievable domain; and no all-purpose manager/service/runtime may absorb all of these concerns.
 
-Google's current Interactions documentation confirms SSE/step-based streaming; `step.delta` is the current event form after the May 2026 breaking change. Thought summaries use `thought` steps and `thinking_summaries`. Function calling uses function-call/result steps and `previous_interaction_id` continuation. The current `@google/genai` npm latest checked is 2.19.0 and its package guidance warns against exposing application-owned API keys in client-side production code.
+## Verification
 
-## Final batch evidence
-
-The entries below are intentionally added only after the five artifacts are actually landed and verified.
+The current repository gate is green on the latest verified Prompt 12 commit. The source tree still has no dependency scaffold, so full lint/typecheck/test/build verification will expand once the runtime package graph is introduced. At that point the committed lockfile and actual test suite become mandatory CI gates.

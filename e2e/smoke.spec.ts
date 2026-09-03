@@ -1,5 +1,8 @@
 import { expect, test } from '@playwright/test';
 
+const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
+const pngFile = (name: string) => ({ name, mimeType: 'image/png', buffer: tinyPng });
+
 test('loads the Elara shell', async ({ page }) => {
   await page.goto('');
   await expect(page.getByRole('heading', { name: 'Elara' })).toBeVisible();
@@ -8,9 +11,9 @@ test('loads the Elara shell', async ({ page }) => {
   await expect(page.getByRole('img', { name: 'Elara portrait placeholder' })).toBeVisible();
 });
 
-test('collapses the Elara portrait when the sidebar opens', async ({ page }) => {
+test('collapses the Elara character banner when the sidebar opens', async ({ page }) => {
   await page.goto('');
-  const banner = page.getByRole('region', { name: 'Elara portrait banner' });
+  const banner = page.getByRole('region', { name: 'Elara character banner' });
   const sidebar = page.getByRole('complementary', { name: 'Chat threads' });
 
   await expect(banner).toHaveClass(/elara-banner/);
@@ -28,29 +31,177 @@ test('shows typography controls and applies the 10–20px text size range', asyn
 
   await expect(page.getByText('The quick brown fox jumps over the lazy dog.').first()).toBeVisible();
   const slider = page.getByRole('slider', { name: 'Text size' });
-  const rangeSetting = slider.locator('xpath=..');
   await expect(slider).toHaveValue('15');
-  await expect(rangeSetting.locator('output')).toHaveText('15px');
+  await expect(slider.locator('xpath=..').locator('output')).toHaveText('15px');
   await slider.fill('20');
   await expect(slider).toHaveValue('20');
-  await expect(rangeSetting.locator('output')).toHaveText('20px');
+  await expect(slider.locator('xpath=..').locator('output')).toHaveText('20px');
 });
 
-test('controls portrait scale and background from Appearance settings', async ({ page }) => {
+test('controls character presentation scale and banner background from Appearance settings', async ({ page }) => {
   await page.goto('');
-  const banner = page.getByRole('region', { name: 'Elara portrait banner' });
+  const banner = page.getByRole('region', { name: 'Elara character banner' });
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Appearance' }).click();
 
-  const scale = page.getByRole('slider', { name: 'Portrait scale' });
-  const scaleSetting = scale.locator('xpath=..');
+  const scale = page.getByRole('slider', { name: 'Character presentation scale' });
   await expect(scale).toHaveValue('2');
   await scale.fill('3');
-  await expect(scaleSetting.locator('output')).toHaveText('3×');
+  await expect(scale.locator('xpath=..').locator('output')).toHaveText('3×');
   await page.getByRole('radio', { name: /Blue Hour/ }).click();
   await page.getByRole('button', { name: 'Back to chat' }).click();
   await expect(banner).toHaveClass(/portrait-scale-3/);
   await expect(banner).toHaveClass(/portrait-background-blue-hour/);
+});
+
+test('character identity and master prompt persist independently of tool settings', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Character' }).click();
+
+  await page.getByLabel('AI character name').fill('Elara Prime');
+  await page.getByLabel('Master system prompt').fill('Be concise, perceptive, and warmly creative.');
+  await page.reload();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Character' }).click();
+
+  await expect(page.getByLabel('AI character name')).toHaveValue('Elara Prime');
+  await expect(page.getByLabel('Master system prompt')).toHaveValue('Be concise, perceptive, and warmly creative.');
+  await expect(page.getByText(/Tool schemas, exposed capabilities, tool-use rules, authorization, confirmation, provider transport, and security/)).toBeVisible();
+});
+
+test('switches between one active portrait or landscape artwork mode and persists focus', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Character' }).click();
+
+  const portrait = page.getByRole('radio', { name: /Portrait · 4:5/ });
+  const landscape = page.getByRole('radio', { name: /Landscape · 16:6/ });
+  await expect(portrait).toHaveAttribute('aria-checked', 'true');
+  await expect(landscape).toHaveAttribute('aria-checked', 'false');
+  await page.locator('input[type="file"]').setInputFiles(pngFile('elara.png'));
+  await expect(page.getByRole('img', { name: 'Current character artwork' })).toBeVisible();
+
+  await landscape.click();
+  await expect(landscape).toHaveAttribute('aria-checked', 'true');
+  await expect(portrait).toHaveAttribute('aria-checked', 'false');
+  const horizontal = page.getByRole('slider', { name: 'Horizontal focus' });
+  const vertical = page.getByRole('slider', { name: 'Vertical focus' });
+  await horizontal.fill('80');
+  await vertical.fill('25');
+  await page.reload();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Character' }).click();
+  await expect(page.getByRole('radio', { name: /Landscape · 16:6/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('slider', { name: 'Horizontal focus' })).toHaveValue('80');
+  await expect(page.getByRole('slider', { name: 'Vertical focus' })).toHaveValue('25');
+});
+
+test('chat background, speaker colours, and user surface style persist', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
+
+  const chatBackground = page.getByRole('radiogroup', { name: 'Chat background mode' });
+  await chatBackground.getByRole('radio', { name: 'Gradient' }).click();
+  await page.getByRole('button', { name: 'Violet', exact: true }).click();
+  await page.getByLabel('Background opacity').fill('0.72');
+  await page.getByLabel('Readability overlay').fill('0.64');
+  await page.getByLabel('Background blur').fill('4');
+  await page.getByLabel('Elara text colour hex').fill('#FF00AA');
+  await page.getByLabel('Elara text colour hex').blur();
+  await page.getByLabel('User text colour hex').fill('#00FFB0');
+  await page.getByLabel('User text colour hex').blur();
+  await page.getByRole('radiogroup', { name: 'User message surface style' }).getByRole('radio', { name: 'Gradient' }).click();
+  await page.getByLabel('Surface opacity').fill('0.66');
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
+  await expect(chatBackground.getByRole('radio', { name: 'Gradient' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByLabel('Elara text colour hex')).toHaveValue('#FF00AA');
+  await expect(page.getByLabel('User text colour hex')).toHaveValue('#00FFB0');
+  await expect(page.getByRole('radiogroup', { name: 'User message surface style' }).getByRole('radio', { name: 'Gradient' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByLabel('Surface opacity')).toHaveValue('0.66');
+});
+
+test('chat image background accepts the supported local image formats', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
+  await page.getByRole('radiogroup', { name: 'Chat background mode' }).getByRole('radio', { name: 'Image' }).click();
+  await page.locator('input[type="file"]').setInputFiles(pngFile('background.png'));
+  await page.reload();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
+  await expect(page.getByRole('radiogroup', { name: 'Chat background mode' }).getByRole('radio', { name: 'Image' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('button', { name: 'Choose background image' })).toBeVisible();
+});
+
+test('roleplay stays opt-in and reveals environment controls only when enabled', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Roleplay' }).click();
+
+  const toggle = page.getByRole('switch', { name: 'Roleplay mode off' });
+  await expect(toggle).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByLabel('Environment')).not.toBeVisible();
+  await toggle.click();
+  await expect(page.getByRole('switch', { name: 'Roleplay mode on' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByLabel('Environment')).toBeVisible();
+  await page.getByLabel('Environment').selectOption('poolside');
+  await page.getByLabel('Environment name').fill('Sunset villa');
+  await page.getByLabel('Environment description').fill('Open terrace beside a quiet pool.');
+  await page.getByLabel('Time of day').fill('Late afternoon');
+  await page.getByLabel('Weather').fill('Warm and clear');
+  await page.getByLabel('Atmosphere / mood').fill('Quiet and cinematic');
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Roleplay' }).click();
+  await expect(page.getByRole('switch', { name: 'Roleplay mode on' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByLabel('Environment')).toHaveValue('poolside');
+  await expect(page.getByLabel('Environment name')).toHaveValue('Sunset villa');
+  await expect(page.getByLabel('Environment description')).toHaveValue('Open terrace beside a quiet pool.');
+  await page.getByRole('switch', { name: 'Roleplay mode on' }).click();
+  await expect(page.getByLabel('Environment')).not.toBeVisible();
+});
+
+test('Markdown reference exposes exactly the supported composer syntax', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Markdown reference' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Markdown' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText('Italic')).toBeVisible();
+  await expect(dialog.getByText('Bold italic')).toBeVisible();
+  await expect(dialog.getByText('Roleplay action')).toBeVisible();
+  await expect(dialog.getByText(/Raw HTML, scripts, embeds, arbitrary CSS/)).toBeVisible();
+  await expect(dialog.getByRole('link', { name: /Full Markdown format documentation/ })).toHaveAttribute('href', /MARKDOWN_FORMAT\.md$/);
+  await dialog.getByRole('button', { name: 'Close Markdown reference' }).click();
+  await expect(dialog).not.toBeVisible();
+});
+
+test('normalizes a simulated Worker network failure without fabricating a response', async ({ page }) => {
+  await page.goto('');
+  await page.route('**/api/gemini', (route) => route.abort('failed'));
+  const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  await composer.fill('Verify the live runtime boundary');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.getByRole('alert')).toContainText('[GEMINI_UNKNOWN]');
+  await expect(page.getByText('Verify the live runtime boundary')).toBeVisible();
+});
+
+test('exposes Gemini model controls and the protected transport boundary', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+
+  await page.getByRole('button', { name: 'Gemini' }).click();
+  await expect(page.getByLabel('Model')).toBeVisible();
+  await expect(page.getByText(/Temperature, top-p and top-k are intentionally not offered/)).toBeVisible();
+  await expect(page.getByText(/Settings save automatically/)).toBeVisible();
+
+  await page.getByRole('button', { name: 'Chat', exact: true }).click();
+  await expect(page.getByText(/Protected Worker boundary/)).toBeVisible();
 });
 
 test('keeps multiline drafts bounded without requiring a live model call', async ({ page }) => {
@@ -64,28 +215,6 @@ test('keeps multiline drafts bounded without requiring a live model call', async
 
   await composer.fill(Array.from({ length: 60 }, (_, index) => `line ${index}`).join('\n'));
   await expect(composer).toHaveCSS('max-height', '132px');
-});
-
-test('exposes Gemini model controls and states the protected transport boundary', async ({ page }) => {
-  await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
-
-  await page.getByRole('button', { name: 'Gemini' }).click();
-  await expect(page.getByLabel('Model')).toBeVisible();
-  await expect(page.getByText(/Supported levels only/)).toBeVisible();
-  await expect(page.getByText(/Settings save automatically/)).toBeVisible();
-
-  await page.getByRole('button', { name: 'Chat', exact: true }).click();
-  await expect(page.getByText(/Protected Worker boundary/)).toBeVisible();
-});
-
-test('shows an explicit Worker configuration failure instead of fabricating a response', async ({ page }) => {
-  await page.goto('');
-  const composer = page.getByRole('textbox', { name: 'Message Elara' });
-  await composer.fill('Verify the live runtime boundary');
-  await page.getByRole('button', { name: 'Send message' }).click();
-  await expect(page.getByRole('alert')).toContainText('Gemini Worker endpoint is not configured');
-  await expect(page.getByText('Verify the live runtime boundary')).toBeVisible();
 });
 
 test('opens Workspace quick-action surfaces without injecting a chat prompt', async ({ page }) => {

@@ -9,7 +9,7 @@
   background: linear-gradient(120deg, rgba(18,21,31,.96), rgba(22,19,34,.8));
   box-shadow: var(--glow);
   isolation: isolate;
-  transition: height .3s ease, border-radius .3s ease, transform .3s ease;
+  transition: height .3s ease, border-radius .3s ease, transform .3s ease, background .3s ease;
 }
 
 .elara-banner::before {
@@ -113,8 +113,19 @@
 }
 
 .portrait-scale-1 { --portrait-scale: 1; }
-.portrait-scale-2 { --portrait-scale: 1.25; }
-.portrait-scale-3 { --portrait-scale: 1.5; }
+.portrait-scale-2 { --portrait-scale: 2; }
+.portrait-scale-3 { --portrait-scale: 3; }
+
+.portrait-background-midnight { --portrait-glow-a: rgba(110,168,255,.3); --portrait-glow-b: rgba(240,123,220,.2); }
+.portrait-background-blue-hour { --portrait-glow-a: rgba(68,139,255,.46); --portrait-glow-b: rgba(84,197,255,.18); }
+.portrait-background-violet { --portrait-glow-a: rgba(157,116,255,.36); --portrait-glow-b: rgba(240,123,220,.3); }
+.portrait-background-rose { --portrait-glow-a: rgba(255,111,174,.34); --portrait-glow-b: rgba(255,198,103,.18); }
+
+.elara-banner__art {
+  background:
+    radial-gradient(circle at 52% 38%, var(--portrait-glow-a), transparent 40%),
+    radial-gradient(circle at 68% 72%, var(--portrait-glow-b), transparent 45%);
+}
 
 .elara-banner.is-collapsed {
   height: 58px;

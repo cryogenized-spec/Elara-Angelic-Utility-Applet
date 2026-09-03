@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { z } from 'zod';
 import { Icon } from '../../ui/icons';
-import { ensureGoogleFont, fontFamilyForCss, GOOGLE_FONT_OPTIONS, type GoogleFontFamily } from '../../ui/fontLoader';
+import { BUILT_IN_FONTS, fontFamilyForCss, googleFontFamilyFromCss2Url, type FontSelection } from '../../ui/fontRegistry';
+import { RangeSlider } from './RangeSlider';
 
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },
@@ -11,13 +13,63 @@ const settingsSections = [
 
 type SettingsSection = typeof settingsSections[number]['id'];
 
-export function SettingsScreen({ font, onFontChange, onBack }: { font: GoogleFontFamily; onFontChange: (font: GoogleFontFamily) => void; onBack: () => void }) {
-  const [section, setSection] = useState<SettingsSection>('appearance');
+const css2UrlSchema = z.string().url().refine((value) => {
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && url.hostname === 'fonts.googleapis.com' && url.pathname === '/css2';
+  } catch {
+    return false;
+  }
+}, 'Use a Google Fonts CSS2 URL from fonts.googleapis.com.');
 
-  useEffect(() => { void ensureGoogleFont(font); }, [font]);
+function loadCustomGoogleFont(stylesheetUrl: string) {
+  const existing = document.querySelector<HTMLLinkElement>(`link[data-elara-custom-font="${stylesheetUrl}"]`);
+  if (existing) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = stylesheetUrl;
+  link.dataset.elaraCustomFont = stylesheetUrl;
+  document.head.appendChild(link);
+}
+
+export function SettingsScreen({
+  font,
+  onFontChange,
+  fontSize,
+  onFontSizeChange,
+  onBack,
+}: {
+  font: FontSelection;
+  onFontChange: (font: FontSelection) => void;
+  fontSize: number;
+  onFontSizeChange: (fontSize: number) => void;
+  onBack: () => void;
+}) {
+  const [section, setSection] = useState<SettingsSection>('appearance');
+  const [customUrl, setCustomUrl] = useState('');
+  const [customError, setCustomError] = useState<string | null>(null);
+
+  function applyCustomFont() {
+    setCustomError(null);
+    const parsed = css2UrlSchema.safeParse(customUrl.trim());
+    if (!parsed.success) {
+      setCustomError('Paste a valid Google Fonts CSS2 URL.');
+      return;
+    }
+
+    const family = googleFontFamilyFromCss2Url(parsed.data);
+    if (!family) {
+      setCustomError('That link does not contain a readable Google font family.');
+      return;
+    }
+
+    loadCustomGoogleFont(parsed.data);
+    onFontChange({ kind: 'custom', family, stylesheetUrl: parsed.data });
+    setCustomError(null);
+  }
 
   return (
-    <main className="settings-screen" style={{ fontFamily: fontFamilyForCss(font) }}>
+    <main className="settings-screen" style={{ fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
       <header className="settings-header">
         <button className="icon-button" type="button" aria-label="Back to chat" onClick={onBack}><Icon name="chevron" /></button>
         <div><div className="eyebrow">ELARA</div><h1>Settings</h1></div>
@@ -36,20 +88,62 @@ export function SettingsScreen({ font, onFontChange, onBack }: { font: GoogleFon
           {section === 'appearance' && (
             <div className="settings-copy"><span className="panel-kicker">SURFACE</span><h2>Appearance</h2><p>Control the ambient visual language without touching Elara's character definition.</p><div className="setting-card"><strong>Theme</strong><span>Dark · current design baseline</span></div></div>
           )}
+
           {section === 'typography' && (
-            <div className="settings-copy"><span className="panel-kicker">TYPE</span><h2>Typography</h2><p>Fonts load from Google's CSS2 web-font service at runtime. Normal browser HTTP caching can reuse the resources; a system fallback remains available during load or when offline.</p>
+            <div className="settings-copy">
+              <span className="panel-kicker">TYPE</span>
+              <h2>Typography</h2>
+              <p>Built-in fonts are shipped as locally hosted, Latin-subset WOFF2 assets. Custom Google Fonts remain an explicit opt-in link and are loaded only when you add one.</p>
+
+              <div className="typography-preview" style={{ fontFamily: fontFamilyForCss(font), fontSize: `${fontSize}px` }}>
+                <span className="typography-preview__label">LIVE PREVIEW</span>
+                <p>The quick brown fox jumps over the lazy dog.</p>
+                <p>0123456789 · Aa Bb Cc · crisp, readable, and ready for chat.</p>
+              </div>
+
+              <RangeSlider id="font-size" label="Text size" min={10} max={20} value={fontSize} valueLabel={`${fontSize}px`} onChange={onFontSizeChange} />
+
               <div className="font-options" role="radiogroup" aria-label="Font family">
-                {Object.values(GOOGLE_FONT_OPTIONS).map((option) => (
-                  <button key={option} className={`font-option${font === option ? ' is-active' : ''}`} type="button" role="radio" aria-checked={font === option} onClick={() => onFontChange(option)} style={{ fontFamily: fontFamilyForCss(option) }}>
-                    <span>{option}</span><small>The quick brown fox jumps over the lazy dog.</small>
+                {BUILT_IN_FONTS.map((option) => {
+                  const active = font.kind === 'built-in' && font.family === option.family;
+                  return (
+                    <button key={option.family} className={`font-option${active ? ' is-active' : ''}`} type="button" role="radio" aria-checked={active} onClick={() => onFontChange({ kind: 'built-in', family: option.family })} style={{ fontFamily: fontFamilyForCss(option.family) }}>
+                      <span>{option.family}</span>
+                      <small>The quick brown fox jumps over the lazy dog.</small>
+                    </button>
+                  );
+                })}
+                {font.kind === 'custom' && (
+                  <button className="font-option is-active" type="button" role="radio" aria-checked="true" style={{ fontFamily: fontFamilyForCss(font) }}>
+                    <span>{font.family}</span>
+                    <small>Custom Google font · loaded from your CSS2 link.</small>
                   </button>
-                ))}
+                )}
+              </div>
+
+              <div className="custom-font-card">
+                <div>
+                  <strong>Add a Google font</strong>
+                  <span>Paste the CSS2 stylesheet URL generated by Google Fonts.</span>
+                </div>
+                <input
+                  className="custom-font-input"
+                  value={customUrl}
+                  onChange={(event) => { setCustomUrl(event.target.value); setCustomError(null); }}
+                  placeholder="https://fonts.googleapis.com/css2?family=..."
+                  inputMode="url"
+                  aria-label="Google Fonts CSS2 URL"
+                />
+                <button className="custom-font-button" type="button" onClick={applyCustomFont}>Load font</button>
+                {customError && <small className="custom-font-error" role="alert">{customError}</small>}
               </div>
             </div>
           )}
+
           {section === 'security' && (
             <div className="settings-copy"><span className="panel-kicker">SECURITY</span><h2>API Lockbox</h2><p>The home for credential state and security diagnostics. Secrets remain outside presentation code and are never exposed through model-visible schemas.</p><div className="setting-card setting-card--security"><Icon name="shield" size={21}/><div><strong>Lockbox status</strong><span>Not configured in this UI foundation pass</span></div></div></div>
           )}
+
           {section === 'chat' && (
             <div className="settings-copy"><span className="panel-kicker">CONVERSATION</span><h2>Chat</h2><p>Startup behaviour, composer preferences, thread naming and conversation presentation will live here as their feature passes land.</p><div className="setting-card"><strong>Startup screen</strong><span>Chat / empty chat · last chat option planned</span></div></div>
           )}

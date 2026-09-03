@@ -174,9 +174,39 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Changed:** Central Google OAuth request contract, Calendar service boundary, event mapping, and a contract test proving the service requests the registered Calendar read capability. The service receives an authorized request capability rather than a raw token and does not own OAuth.
 **Live verification:** Google Calendar currently separates event-read and event-write scopes, and event mutation requires appropriate write authorization and calendar write access. citeturn616269search0turn616269search3
 
+## 2026-09-03 — Prompts 43–47
+
+### Prompt 43 — Google Tasks Service
+**Commits:** `9b50df55a4bd80de3d380800978f29932d0035e2`, `8706f7e50e7a706dcc22a7f55ed11f002261bd4e`, `ede460a6b2f45862e0ad29710a23aa07e2c07a54`, `ecd0d8af3ace3e7706213512430ed2f3218a8b31`
+**Changed:** `src/google/tasks/service.ts`, Tasks service tests, and `docs/GOOGLE_TASKS_SERVICE.md`.
+**Result:** Dedicated task-list/task retrieval plus create/update/delete/move/clear operations. Moving a task is a first-class operation because Google Tasks supports parent and sibling-position changes.
+**Live verification:** Google currently documents separate Tasks read-only and full-management scopes and exposes task move semantics for hierarchy/order control. citeturn756805search0turn455180search6turn455180search12
+
+### Prompt 44 — Google Docs Service
+**Commits:** `49758babaeab41fa2171ebf0e05d2a7f595ed0cd`, `de61c6be01b671d518c2efc812f1adf0c7f6c505`, `dfc1474a3954912a38da3153bfcace42627463c0`
+**Changed:** focused Docs get/create/batchUpdate boundary, test, and `docs/GOOGLE_DOCS_SERVICE.md`.
+**Result:** Docs editing is represented as explicit API update requests rather than hidden behind a monolithic editor abstraction.
+**Live verification:** Google's current Docs API exposes `documents.get`, `documents.create`, and atomic `documents.batchUpdate`. citeturn909083search1turn909083search3
+
+### Prompt 45 — Google Chat Service + Gmail acceleration
+**Commits:** `f58ddf9f0e6ac04cee0499e93d7811799c391c3c`, `f37f565100d30acc061a2969c45119731b66f3b8`, `515b5ad588827f4ab4938ac40e1ec786318c8c8f`, `f7175f68641b1df03e275440dd9e00a38ed18929`, `ef60d36c551199920894e031f436a1d6692da616`, `a5a60cf0d7e7b62f3bec9f20d1a0ab7e1955ebe6`
+**Changed:** focused Chat service/test, granular Gmail service/test, Gmail capabilities in the OAuth contract, and `docs/GOOGLE_GMAIL_SERVICE.md`.
+**Result:** Chat has separate list/get/create/update/delete message operations. Gmail is explicitly promoted to an orchestration-critical service with separate message/thread retrieval, label operations, label modification, trash/untrash, and send boundaries.
+**Live verification:** Google's current Gmail API exposes message/thread/label/draft resources with granular list/get/modify/trash/untrash/send operations and distinct Gmail scopes such as `gmail.readonly`, `gmail.modify`, `gmail.send`, and `gmail.labels`. citeturn909083search0turn909083search5turn909083search7turn757480search0
+
+### Prompt 46 — Google Tool Boundary
+**Commits:** `5bcff03c60b7f99e85d274eaaf779b958c061445`, `d36b7c88ba929d48d654e2ec2af4408e2f857be8`, `8e29de8f7b2c41bf025905f912805f6bb01c40da9`, `248a54d22fdec225731d4b17d814c9eda9907fd9`, `08912d047f0308fb3c3dc4010e1cb0c76208aa9b`
+**Changed:** `src/google/tools/contracts.ts`, `src/google/tools/registry.ts`, and `docs/GOOGLE_TOOL_BOUNDARY.md`.
+**Result:** Explicit model-visible allow-list across Calendar, Tasks, Docs, Chat, and Gmail. No arbitrary Google HTTP tool, OAuth tokens, provider endpoint URLs, or scope strings are exposed to the model. Tool risk classification maps separately to OAuth capability and later confirmation policy.
+
+### Prompt 47 — Google Write Confirmation
+**Commits:** `e419d2ae794760da102563304ee64e19a44e273f`, `5ef1dc6ea062d428b38d2d6ed7e1a4c5024f8e6a`, `c93178e3286d4c1df6ad03036cf89f7f0bcdbb46`
+**Changed:** `src/google/confirmation/policy.ts`, confirmation tests, and `docs/GOOGLE_WRITE_CONFIRMATION.md`.
+**Result:** Read operations bypass confirmation; writes, destructive mutations, and sends require a bounded confirmation decision. Authorization grants and per-action approval are explicitly separate controls. This provides the safety seam for the future orchestration/Kanban layer.
+
 ## Deployment decision
 
-Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist/` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7
+Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7
 
 ## Current runtime/CI status
 

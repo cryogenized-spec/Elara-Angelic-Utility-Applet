@@ -1,0 +1,21 @@
+.settings-screen {
+  height: 100dvh;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+}
+
+.settings-layout {
+  min-height: auto;
+}
+
+.settings-nav__item {
+  min-height: 44px;
+}
+
+.settings-nav__item > svg {
+  flex: 0 0 20px;
+  display: block;
+}

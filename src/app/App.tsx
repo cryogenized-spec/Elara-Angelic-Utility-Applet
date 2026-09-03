@@ -7,6 +7,7 @@ import { fontFamilyForCss, ensureGoogleFont, type GoogleFontFamily } from '../ui
 import { Sidebar } from './components/Sidebar';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
+import { PortraitBanner } from './components/PortraitBanner';
 import './app.css';
 
 const makeMessage = (role: ChatMessage['role'], text: string): ChatMessage => ({
@@ -104,10 +105,7 @@ export function App() {
         </button>
       </div>
 
-      <section className={`elara-banner${sidebarOpen ? ' is-collapsed' : ''}`} aria-label="Elara portrait banner">
-        <div className="elara-banner__art" role="img" aria-label="Elara portrait placeholder"><span>E</span></div>
-        <div className="elara-banner__copy"><span className="eyebrow">ANGELIC UTILITY APPLET</span><h1>Elara</h1><span className="presence"><i /> Online · ready</span></div>
-      </section>
+      <PortraitBanner collapsed={sidebarOpen} scale={2} />
 
       <TopToolRail onAction={handleToolAction} />
 

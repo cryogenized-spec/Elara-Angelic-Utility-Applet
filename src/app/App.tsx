@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
+import type { CharacterProfile } from '../domain/character';
 import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
+import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
 import { demoThreadTitlePort } from '../chat/thread-title-port';
 import { geminiTurnPort } from '../gemini/provider';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent } from '../gemini/contracts';
@@ -12,7 +14,7 @@ import { useVisualViewport } from '../ui/useVisualViewport';
 import { Sidebar } from './components/Sidebar';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
-import { PortraitBanner, type PortraitBackground, type PortraitScale } from './components/PortraitBanner';
+import { PortraitBanner } from './components/PortraitBanner';
 import { ConversationSurface } from './components/ConversationSurface';
 import { Composer } from './components/Composer';
 import { QuickActionSurface } from './components/QuickActionSurface';
@@ -38,10 +40,11 @@ export function App() {
   const [quickActionSurface, setQuickActionSurface] = useState<QuickActionSurfaceModel | null>(null);
   const [font, setFont] = useState<FontSelection>({ kind: 'built-in', family: 'Inter' });
   const [fontSize, setFontSize] = useState(15);
-  const [portraitScale, setPortraitScale] = useState<PortraitScale>(2);
-  const [portraitBackground, setPortraitBackground] = useState<PortraitBackground>('midnight');
+  const [portraitScale, setPortraitScale] = useState<1 | 2 | 3>(2);
+  const [portraitBackground, setPortraitBackground] = useState<'midnight' | 'blue-hour' | 'violet' | 'rose'>('midnight');
   const [geminiModel, setGeminiModel] = useState(DEFAULT_GEMINI_MODEL);
   const [geminiPerModelSettings, setGeminiPerModelSettings] = useState<Record<string, GeminiSettings>>({ [DEFAULT_GEMINI_MODEL]: defaultsForModel(DEFAULT_GEMINI_MODEL) });
+  const [character, setCharacter] = useState<CharacterProfile>({ id: 'primary', name: 'Elara', systemInstruction: '', artworkMode: 'portrait', artwork: null, updatedAt: 0 });
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useVisualViewport();
@@ -50,12 +53,12 @@ export function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const [loadedThreads, savedGeminiSettings] = await Promise.all([loadThreads(), loadGeminiSettings()]);
+        const [loadedThreads, savedGeminiSettings, loadedCharacter] = await Promise.all([loadThreads(), loadGeminiSettings(), loadCharacterProfile()]);
         const storedActive = window.localStorage.getItem(ACTIVE_THREAD_KEY);
         const activeId = storedActive && loadedThreads.some((thread) => thread.id === storedActive) ? storedActive : (loadedThreads[0]?.id ?? 'primary');
         const loadedConversation = await loadConversation(activeId);
         if (cancelled) return;
-        setThreads(loadedThreads); setConversation(loadedConversation); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel);
+        setThreads(loadedThreads); setConversation(loadedConversation); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel); setCharacter(loadedCharacter);
         window.localStorage.setItem(ACTIVE_THREAD_KEY, activeId);
       } catch { if (!cancelled) setError('Could not load the local conversation history.'); }
     })();
@@ -82,7 +85,7 @@ export function App() {
       const previousInteractionId = [...titled.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
       const assistantMessage = makeMessage('assistant', '', conversationId); const liveText = { value: '' }; const startedAt = Date.now();
       const base = { ...titled, messages: [...titled.messages, assistantMessage], updatedAt: startedAt }; setConversation(base);
-      for await (const event of geminiTurnPort.streamReply({ model: geminiModel, input: text, previousInteractionId, generationConfig }, controller.signal)) {
+      for await (const event of geminiTurnPort.streamReply({ model: geminiModel, input: text, previousInteractionId, generationConfig, systemInstruction: character.systemInstruction }, controller.signal)) {
         handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, interactionIdRef: () => undefined, startedAt, model: geminiModel, liveText });
         if (event.type === 'interaction-created') liveText.value = '';
         if (event.type === 'cancelled') return;
@@ -102,13 +105,14 @@ export function App() {
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }
   async function handleResetGeminiSettings() { await handleGeminiSettingsChange(defaultsForModel(geminiModel)); }
+  async function handleCharacterChange(next: CharacterProfile) { setCharacter(next); try { const saved = await saveCharacterProfile(next); setCharacter(saved); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save character settings.'); } }
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
 
-  if (settingsOpen) return <SettingsScreen font={font} onFontChange={setFont} fontSize={fontSize} onFontSizeChange={setFontSize} portraitScale={portraitScale} onPortraitScaleChange={setPortraitScale} portraitBackground={portraitBackground} onPortraitBackgroundChange={setPortraitBackground} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} onBack={() => setSettingsOpen(false)} />;
+  if (settingsOpen) return <SettingsScreen font={font} onFontChange={setFont} fontSize={fontSize} onFontSizeChange={setFontSize} portraitScale={portraitScale} onPortraitScaleChange={setPortraitScale} portraitBackground={portraitBackground} onPortraitBackgroundChange={setPortraitBackground} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} onBack={() => setSettingsOpen(false)} />;
 
   return <main className="app-shell" style={{ fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
     <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button><button className="glass-menu-button left-spine__settings" type="button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Icon name="settings" size={20} /></button></div>
-    <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} />
+    <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
     <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={quickActionSurface?.id ?? null} onAction={(id) => void handleQuickAction(id)} />
     {quickActionSurface && <QuickActionSurface surface={quickActionSurface} onClose={() => setQuickActionSurface(null)} />}
     <ConversationSurface messages={conversation.messages} fontSize={fontSize} />
@@ -135,16 +139,8 @@ type StreamContext = {
 function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
   const { assistantMessage, base, setConversation } = context;
   if (event.type === 'interaction-created') context.interactionIdRef(event.interactionId);
-  else if (event.type === 'text-delta') {
-    context.liveText.value += event.text;
-    const liveText = context.liveText.value;
-    setConversation({ ...base, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message) });
-  } else if (event.type === 'completed') {
-    context.interactionIdRef(event.interactionId);
-    const completedAt = Date.now();
-    const live = context.liveText.value;
-    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Accepted the message and opened a Gemini Interaction.', 'Streamed model output through the canonical provider boundary.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) };
-    void context.save(completed).then(context.refreshThreads).then(() => setConversation(completed)).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the assistant response.'));
-  } else if (event.type === 'failed') { context.setStatus('failed'); context.setError(`${event.error.message} [${event.error.code}]`); }
+  else if (event.type === 'text-delta') { context.liveText.value += event.text; const liveText = context.liveText.value; setConversation({ ...base, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message) }); }
+  else if (event.type === 'completed') { context.interactionIdRef(event.interactionId); const completedAt = Date.now(); const live = context.liveText.value; const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Accepted the message and opened a Gemini Interaction.', 'Streamed model output through the canonical provider boundary.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) }; void context.save(completed).then(context.refreshThreads).then(() => setConversation(completed)).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the assistant response.')); }
+  else if (event.type === 'failed') { context.setStatus('failed'); context.setError(`${event.error.message} [${event.error.code}]`); }
   else if (event.type === 'cancelled') context.setStatus('idle');
 }

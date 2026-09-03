@@ -97,7 +97,7 @@ export const geminiTurnPort: GeminiTurnPort = {
         }
 
         if (eventType === 'interaction.in_progress' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
-          const status = readString(event, 'status') ?? readString(asRecord(event.interaction), 'status') ?? eventType.replace('interaction.', '') || 'in_progress';
+          const status = readString(event, 'status') ?? readString(asRecord(event.interaction), 'status') ?? (eventType.replace('interaction.', '') || 'in_progress');
           if (interactionId) yield { type: 'interaction-status', interactionId, status };
           continue;
         }

@@ -3,14 +3,15 @@ import { describe, expect, it } from 'vitest';
 import { MarkdownText } from './MarkdownText';
 
 describe('MarkdownText security boundary', () => {
-  it('does not render raw HTML as active DOM', () => {
+  it('does not render raw HTML as active DOM while preserving ordinary text', () => {
     const html = renderToStaticMarkup(
-      <MarkdownText text={'<script>alert(1)</script><img src="x" onerror="alert(2)">Safe text'} />,
+      <MarkdownText text={'Safe text\n\n<script>alert(1)</script>\n\n<img src="x" onerror="alert(2)">'} />,
     );
 
-    expect(html).not.toContain('<script');
-    expect(html).not.toContain('onerror=');
     expect(html).toContain('Safe text');
+    expect(html).not.toContain('<script');
+    expect(html).not.toContain('<img');
+    expect(html).not.toContain('onerror=');
   });
 
   it('keeps safe HTTPS links and rejects unsafe schemes', () => {

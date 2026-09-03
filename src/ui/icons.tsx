@@ -15,7 +15,9 @@ export type IconName =
   | 'type'
   | 'palette'
   | 'chat'
-  | 'close';
+  | 'close'
+  | 'search'
+  | 'dots';
 
 const paths: Record<IconName, ReactNode> = {
   menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
@@ -33,6 +35,8 @@ const paths: Record<IconName, ReactNode> = {
   palette: <><path d="M12 3a9 9 0 0 0 0 18h1.2a1.8 1.8 0 0 0 1.2-3.1 1.8 1.8 0 0 1 1.2-3.1h1.8A3.6 3.6 0 0 0 22 11.2C22 6.7 17.5 3 12 3Z" /><path d="M7.5 9.5h.01M10 7h.01M14 7h.01M16.5 9.5h.01" /></>,
   chat: <><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v7a2.5 2.5 0 0 1-2.5 2.5H10l-4.5 4V15.5A2.5 2.5 0 0 1 4 13Z" /></>,
   close: <><path d="m6 6 12 12M18 6 6 18" /></>,
+  search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></>,
+  dots: <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></>,
 };
 
 export function Icon({ name, size = 20, strokeWidth = 1.7, style }: { name: IconName; size?: number; strokeWidth?: number; style?: CSSProperties }) {

@@ -21,3 +21,22 @@ test('collapses the Elara portrait when the sidebar opens', async ({ page }) => 
   await sidebar.getByRole('button', { name: 'Close sidebar' }).click();
   await expect(banner).not.toHaveClass(/is-collapsed/);
 });
+
+test('shows local font choices and the 10–20px text size slider', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Typography' }).click();
+
+  await expect(page.getByText('The quick brown fox jumps over the lazy dog.').first()).toBeVisible();
+  const slider = page.getByRole('slider', { name: 'Text size' });
+  await expect(slider).toHaveValue('15');
+
+  await slider.dispatchEvent('pointerdown');
+  await expect(slider).toHaveClass(/is-hot/);
+  await slider.dispatchEvent('pointerup');
+  await expect(slider).not.toHaveClass(/is-hot/);
+
+  await slider.fill('20');
+  await expect(slider).toHaveValue('20');
+  await expect(page.getByText('20px', { exact: true })).toBeVisible();
+});

@@ -1,17 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
 import {
-  appendMessage,
-  archiveThread,
-  createThread,
-  deleteThread,
-  loadConversation,
-  loadGeminiSettings,
-  loadThreads,
-  renameThread,
-  saveConversation,
-  saveGeminiSettings,
-  type StoredGeminiSettings,
+  appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread,
+  saveConversation, saveGeminiSettings, type StoredGeminiSettings,
 } from '../persistence/conversation';
 import { demoThreadTitlePort } from '../chat/thread-title-port';
 import { geminiTurnPort } from '../gemini/provider';
@@ -95,7 +86,7 @@ export function App() {
       if (withUser.title === DEFAULT_TITLE) { try { const generatedTitle = await demoThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch { /* title generation is metadata and never blocks chat */ } }
       setConversation(titled); await refreshThreads();
       const previousInteractionId = [...titled.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
-      const assistantMessage = makeMessage('assistant', '', conversationId); let liveText = ''; let interactionId: string | undefined; const startedAt = Date.now();
+      const assistantMessage = makeMessage('assistant', '', conversationId); let interactionId: string | undefined; const startedAt = Date.now();
       const base = { ...titled, messages: [...titled.messages, assistantMessage], updatedAt: startedAt }; setConversation(base);
       for await (const event of geminiTurnPort.streamReply({ model: geminiModel, input: text, previousInteractionId, generationConfig }, controller.signal)) {
         handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, interactionIdRef: (value) => { interactionId = value; }, startedAt, model: geminiModel });
@@ -132,11 +123,7 @@ export function App() {
     try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); }
   }
-
-  async function handleResetGeminiSettings() {
-    await handleGeminiSettingsChange(defaultsForModel(geminiModel));
-  }
-
+  async function handleResetGeminiSettings() { await handleGeminiSettingsChange(defaultsForModel(geminiModel)); }
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
 
   if (settingsOpen) return <SettingsScreen
@@ -164,7 +151,7 @@ export function App() {
 type StreamContext = {
   assistantMessage: ChatMessage;
   base: ConversationState;
-  setConversation: React.Dispatch<React.SetStateAction<ConversationState>>;
+  setConversation: Dispatch<SetStateAction<ConversationState>>;
   setStatus: (status: ProviderStatus) => void;
   setError: (error: string | null) => void;
   save: (conversation: ConversationState) => Promise<void>;
@@ -185,20 +172,8 @@ function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
     context.interactionIdRef(event.interactionId);
     const completedAt = Date.now();
     const live = base.messages.find((message) => message.id === assistantMessage.id)?.text ?? '';
-    const completed: ConversationState = {
-      ...base,
-      updatedAt: completedAt,
-      messages: base.messages.map((message) => message.id === assistantMessage.id ? {
-        ...message,
-        text: live,
-        providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage },
-        executionSummary: { id: crypto.randomUUID(), steps: ['Accepted the message and opened a Gemini Interaction.', 'Streamed model output through the canonical provider boundary.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs },
-      } : message),
-    };
+    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Accepted the message and opened a Gemini Interaction.', 'Streamed model output through the canonical provider boundary.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) };
     void context.save(completed).then(context.refreshThreads).then(() => setConversation(completed)).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the assistant response.'));
-  } else if (event.type === 'failed') {
-    context.setStatus('failed'); context.setError(`${event.error.message} [${event.error.code}]`);
-  } else if (event.type === 'cancelled') {
-    context.setStatus('idle');
-  }
+  } else if (event.type === 'failed') { context.setStatus('failed'); context.setError(`${event.error.message} [${event.error.code}]`); }
+  else if (event.type === 'cancelled') context.setStatus('idle');
 }

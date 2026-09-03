@@ -4,11 +4,24 @@
 
 Elara is a general-purpose AI companion with creative and conversational use cases. Safety is treated as an application policy and provider boundary, not as a collection of UI toggles that can accidentally change provider behavior.
 
-## Current Interactions constraint
+## Current Interactions safety configuration
 
-The Gemini Interactions API is the canonical provider for Elara. Google's current Interactions documentation states that custom safety settings are not supported in Interactions. Elara therefore must not expose a UI or request field pretending that per-request custom safety thresholds are available on this path. citeturn962400search10
+The Gemini Interactions API is the canonical provider for Elara. The current v1 Interactions request contract exposes `safety_settings`, including the four application-requested categories and the `block_none` threshold. Elara sends one centralized policy for harassment, hate speech, sexually explicit content, and dangerous content. The provider owns the translation to the SDK request shape; UI components do not construct safety settings. This policy is intentionally explicit because safety behavior must be observable in request tests rather than hidden in prompt text.
 
-Google's Gemini safety documentation describes the platform's safety filtering categories and indicates that application developers are responsible for choosing appropriate behavior for their use case. citeturn962400search4turn962400search8
+Google's current safety guidance still governs provider-side filtering and any platform-level restrictions that remain applicable. A `BLOCK_NONE` threshold in the application request does not mean the provider is obligated to satisfy every request or that application safety boundaries disappear.
+
+## Four-category runtime policy
+
+Elara's canonical runtime policy is:
+
+```text
+harassment         → BLOCK_NONE
+hate_speech        → BLOCK_NONE
+sexually_explicit  → BLOCK_NONE
+dangerous_content  → BLOCK_NONE
+```
+
+These values belong to the canonical Gemini provider policy module. They must not be duplicated across UI, chat orchestration, diagnostics, or tool code.
 
 ## Application policy
 
@@ -53,7 +66,7 @@ The model may propose a tool call, but the application is the authority that dec
 
 ## Workspace safety
 
-Google Calendar, Tasks, Docs, and Chat are future capabilities. They remain behind one OAuth authority, centralized scope checks, diagnostics, and explicit write confirmation where required.
+Google Calendar, Tasks, Docs, and Chat remain behind one OAuth authority, centralized scope checks, diagnostics, and explicit write confirmation where required.
 
 No conversational instruction can bypass OAuth state, scope requirements, revocation handling, or write confirmation.
 
@@ -61,7 +74,7 @@ No conversational instruction can bypass OAuth state, scope requirements, revoca
 
 Long-term memory is a separate retrievable domain. Memory promotion must not happen merely because a message exists in the conversation.
 
-Sensitive or unnecessary personal information should not be promoted into durable notes by default. The future memory policy must define retention, deletion, provenance, and user control explicitly.
+Sensitive or unnecessary personal information should not be promoted into durable notes by default. The memory policy must define retention, deletion, provenance, and user control explicitly.
 
 ## Diagnostics and safety incidents
 
@@ -73,7 +86,8 @@ Developer diagnostics may record category, status, timing, retryability, provide
 
 Tests must cover at least:
 
-- unsupported custom safety settings are never sent through the Interactions provider;
+- the canonical provider emits exactly the four requested `block_none` safety entries;
+- unsupported or unknown safety categories cannot silently enter the request policy;
 - unsafe tool execution cannot occur merely because the model emitted a function call;
 - missing OAuth/scope/confirmation blocks future Workspace writes;
 - safety failures produce explicit terminal states rather than indefinite loading;

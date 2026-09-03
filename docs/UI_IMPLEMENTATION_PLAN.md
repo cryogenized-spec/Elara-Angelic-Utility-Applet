@@ -80,7 +80,7 @@ Establish the 9:16 Android reference geometry, design tokens, spacing, radii, ty
 
 ### Pass 2 — Elara banner / portrait system
 
-Implement the landscape portrait banner, 1×–3× presentation scale, collapse-to-avatar behavior, restoration, configurable background hooks, and independent presentation-layer boundaries.
+Implement the landscape portrait banner, 1×–3× presentation scale, collapse-to-avatar behavior, restoration, configurable background hooks, and independent presentation-layer boundaries. The rebuilt pass exposes the presentation controls in Settings and verifies that scale/background survive sidebar collapse and restoration.
 
 ### Pass 3 — Conversation surface
 
@@ -120,4 +120,4 @@ Every pass should leave lint, typecheck, unit tests, build, and applicable Playw
 
 ## Current pass state
 
-Pass 1 is the first implementation target. The rebuilt foundation includes the 9:16 body geometry, left sidebar control, Elara banner treatment, horizontally scrolling quick-action rail, modular conversation surface, Android-oriented composer frame, separate Settings screen, local built-in font assets, custom Google Fonts opt-in, live typography preview, and shared hot-slider behavior.
+Pass 1 foundation and Pass 2 portrait presentation are implemented. The current branch includes the 9:16 body geometry, local built-in font assets, custom Google Fonts opt-in, live typography preview, shared hot-slider behavior, a landscape Elara banner with 1×–3× scale controls, four configurable ambient background treatments, and collapse/restore behavior that retains the selected presentation settings. Pass 2 remains subject to CI verification before moving to Pass 3.

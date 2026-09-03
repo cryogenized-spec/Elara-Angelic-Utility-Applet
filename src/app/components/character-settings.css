@@ -1,0 +1,27 @@
+.character-settings { display: grid; gap: 12px; }
+.character-card { display: grid; gap: 12px; }
+.character-card__heading { display: flex; justify-content: space-between; gap: 12px; }
+.character-card__heading strong, .character-card__heading span { display: block; }
+.character-card__heading strong { font-size: 13px; }
+.character-card__heading span { margin-top: 3px; color: var(--muted); font-size: 11px; }
+.character-field { display: grid; gap: 7px; }
+.character-field > span { font-size: 12px; font-weight: 600; }
+.character-field input, .character-prompt { width: 100%; border: 1px solid var(--line); border-radius: 13px; background: rgba(10,11,17,.72); color: var(--text); padding: 11px 12px; outline: none; }
+.character-field input:focus, .character-prompt:focus { border-color: rgba(110,168,255,.42); }
+.character-prompt { min-height: 260px; resize: vertical; line-height: 1.5; font-size: 12px; }
+.character-hint { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.art-mode-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.art-mode-switch button { min-height: 44px; border: 1px solid var(--line); border-radius: 13px; background: rgba(255,255,255,.03); color: rgba(255,255,255,.68); }
+.art-mode-switch button.is-active { color: var(--text); border-color: rgba(110,168,255,.46); background: rgba(110,168,255,.08); }
+.artwork-preview { position: relative; width: 100%; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: linear-gradient(135deg, rgba(110,168,255,.08), rgba(240,123,220,.05)); aspect-ratio: 4 / 5; }
+.artwork-preview--landscape { aspect-ratio: 16 / 6; }
+.artwork-preview img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.artwork-empty { width: 100%; height: 100%; display: grid; place-content: center; text-align: center; padding: 20px; color: rgba(255,255,255,.7); }
+.artwork-empty span, .artwork-empty small { display: block; }
+.artwork-empty small { margin-top: 5px; color: var(--muted); font-size: 10px; }
+.artwork-actions { display: flex; gap: 8px; }
+.artwork-actions button { min-height: 42px; padding: 0 13px; border-radius: 13px; border: 1px solid rgba(110,168,255,.34); background: rgba(110,168,255,.08); }
+.artwork-actions button.secondary { border-color: var(--line); background: transparent; color: var(--muted); }
+.focal-controls { display: grid; gap: 8px; }
+.focal-controls label { display: grid; gap: 5px; color: var(--muted); font-size: 10px; }
+.focal-controls input { accent-color: var(--slider-hot); }

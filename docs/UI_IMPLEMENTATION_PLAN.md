@@ -52,7 +52,7 @@ Only the weights supported by each variable font are retained in the generated W
 
 The Settings typography surface includes a live pangram preview and a **10–20px text-size slider**, defaulting to **15px**. Slider controls follow a shared interaction rule: the control changes to a bright/high-energy state while the pointer or keyboard adjustment is actively moving it, then returns to its normal muted state when interaction ends. This is the default slider behavior for future settings controls.
 
-Custom Google Fonts are an explicit opt-in exception. Settings accepts a Google Fonts CSS2 stylesheet URL, validates that it is HTTPS and hosted on `fonts.googleapis.com/css2`, derives the first family name, and loads that stylesheet only after the user explicitly chooses it. The built-in path therefore stays self-hosted while custom fonts remain user-controlled external resources.
+Custom Google Fonts are an explicit opt-in exception. Settings accepts a Google Fonts CSS2 stylesheet URL, validates that it is HTTPS and hosted at `fonts.googleapis.com/css2`, derives the first family name, and loads that stylesheet only after the user explicitly chooses it. The built-in path therefore stays self-hosted while custom fonts remain user-controlled external resources.
 
 ## Conversation surface
 
@@ -130,4 +130,4 @@ Every pass should leave lint, typecheck, unit tests, build, and applicable Playw
 
 ## Current pass state
 
-Pass 1 foundation, Pass 2 portrait presentation, and Pass 3 conversation surface are implemented. **Pass 4 is implemented as the Android composer/IME foundation:** bounded auto-growing multiline input, Enter/Shift+Enter behavior, explicit cancellation, VisualViewport-driven shell sizing, progressive VirtualKeyboard geometry updates, and latest-message stick-to-bottom behavior. Attachment and voice buttons remain capability entry points only; their concrete runtime boundaries are intentionally delivered by the attachment and voice capability passes. Final completion remains subject to the CI gate and later physical-device validation.
+Pass 1 foundation, Pass 2 portrait presentation, Pass 3 conversation surface, and Pass 4 Android composer/IME foundation are implemented. Pass 5 sidebar/thread lifecycle is implemented and verified in CI. **Pass 6 quick-action rail is now implemented:** Calendar, Tasks, and Gmail are exposed through a typed configurable action descriptor, dispatched through an application-level `QuickActionPort`, and presented in a dedicated non-chat surface. The temporary executable adapter reports authorization-required state instead of fabricating live Workspace data. No quick action injects a canned message into the conversation. Final completion remains subject to the CI gate and later physical-device validation.

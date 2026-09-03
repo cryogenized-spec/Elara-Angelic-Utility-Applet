@@ -9,7 +9,7 @@ const SAFETY_SETTINGS = [
   { category: 'hate_speech', threshold: 'block_none' },
   { category: 'sexually_explicit', threshold: 'block_none' },
   { category: 'dangerous_content', threshold: 'block_none' },
-] as const;
+];
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
@@ -27,13 +27,19 @@ function readNumber(record: Record<string, unknown>, key: string): number | unde
 
 function readUsage(raw: unknown): GeminiUsage | undefined {
   const usage = asRecord(raw);
-  const inputTokens = readNumber(usage, 'input_tokens') ?? readNumber(usage, 'prompt_token_count');
-  const outputTokens = readNumber(usage, 'output_tokens') ?? readNumber(usage, 'candidates_token_count');
+  const inputTokens = readNumber(usage, 'input_tokens') ?? readNumber(usage, 'prompt_tokens') ?? readNumber(usage, 'prompt_token_count') ?? readNumber(usage, 'total_input_tokens');
+  const outputTokens = readNumber(usage, 'output_tokens') ?? readNumber(usage, 'completion_tokens') ?? readNumber(usage, 'candidates_token_count') ?? readNumber(usage, 'total_output_tokens');
   const cachedTokens = readNumber(usage, 'cached_tokens') ?? readNumber(usage, 'cached_content_token_count');
-  const thoughtsTokens = readNumber(usage, 'thoughts_tokens');
+  const thoughtsTokens = readNumber(usage, 'thoughts_tokens') ?? readNumber(usage, 'total_thought_tokens');
   const totalTokens = readNumber(usage, 'total_tokens') ?? readNumber(usage, 'total_token_count');
   if ([inputTokens, outputTokens, cachedTokens, thoughtsTokens, totalTokens].every((value) => value === undefined)) return undefined;
   return { inputTokens, outputTokens, cachedTokens, thoughtsTokens, totalTokens };
+}
+
+function interactionIdFrom(event: Record<string, unknown>): string | undefined {
+  return readString(event, 'interaction_id')
+    ?? readString(event, 'interactionId')
+    ?? readString(asRecord(event.interaction), 'id');
 }
 
 function stepIndex(event: Record<string, unknown>): number {
@@ -82,7 +88,7 @@ export const geminiTurnPort: GeminiTurnPort = {
 
         const event = asRecord(rawEvent);
         const eventType = readString(event, 'event_type') ?? readString(event, 'type') ?? '';
-        const eventInteractionId = readString(event, 'interaction_id') ?? readString(event, 'interactionId');
+        const eventInteractionId = interactionIdFrom(event);
         if (eventInteractionId) interactionId = eventInteractionId;
 
         if (eventType === 'interaction.created') {
@@ -90,26 +96,35 @@ export const geminiTurnPort: GeminiTurnPort = {
           continue;
         }
 
-        if (eventType === 'interaction.status' || eventType === 'interaction.updated') {
-          const status = readString(event, 'status') ?? readString(asRecord(event.interaction), 'status') ?? 'in_progress';
+        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
+          const status = readString(event, 'status') ?? readString(asRecord(event.interaction), 'status') ?? eventType.replace('interaction.', '') || 'in_progress';
           if (interactionId) yield { type: 'interaction-status', interactionId, status };
           continue;
         }
 
         if (eventType === 'step.start') {
           yield { type: 'step-start', index: stepIndex(event), stepType: stepType(event) };
+          const step = asRecord(event.step);
+          const summaryParts = Array.isArray(step.summary) ? step.summary : [];
+          for (const summary of summaryParts) {
+            const summaryRecord = asRecord(summary);
+            const text = readString(summaryRecord, 'text');
+            if (text) yield { type: 'thought-summary-delta', index: stepIndex(event), text };
+          }
           continue;
         }
 
         if (eventType === 'step.delta') {
           const delta = asRecord(event.delta);
           const index = stepIndex(event);
+          const deltaType = readString(delta, 'type');
           const deltaText = readString(delta, 'text');
-          if (deltaText) {
-            const currentStepType = readString(delta, 'type') ?? stepType(event);
-            if (currentStepType === 'thought' || currentStepType === 'thought_summary') yield { type: 'thought-summary-delta', index, text: deltaText };
-            else yield { type: 'text-delta', index, text: deltaText };
+          if (deltaType === 'thought_signature') continue;
+          if (deltaType === 'thought_summary' && deltaText) {
+            yield { type: 'thought-summary-delta', index, text: deltaText };
+            continue;
           }
+          if (deltaText) yield { type: 'text-delta', index, text: deltaText };
           continue;
         }
 

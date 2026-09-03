@@ -79,13 +79,16 @@ test('renders an assistant execution summary that expands into numbered safe ste
   const summary = page.getByRole('region', { name: 'Execution summary' });
   await expect(summary).toBeVisible();
   await expect(summary.getByText(/ms$/)).toBeVisible();
-  await expect(summary.getByText('1', { exact: true })).toHaveCount(0);
 
-  await summary.getByRole('button', { name: /Execution summary/ }).click();
+  const toggle = summary.getByRole('button', { name: /Execution summary/ });
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
   await expect(summary.locator('ol')).toBeVisible();
   await expect(summary.locator('li')).toHaveCount(3);
   await expect(summary.locator('.execution-summary__step-index')).toHaveText(['1', '2', '3']);
 
-  await summary.getByRole('button', { name: /Execution summary/ }).click();
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await expect(summary.locator('ol')).toBeHidden();
 });

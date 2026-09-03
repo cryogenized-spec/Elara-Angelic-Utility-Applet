@@ -64,7 +64,7 @@ jobs:
             "$GEMINI_WORKER_URL/health" > "$health_body"
           status="$(awk 'NR==1 {print $2}' "$health_headers")"
           test "$status" = "200"
-          grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$' "$health_headers"
+          tr -d '\r' < "$health_headers" | grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$'
           grep -q '"api":true' "$health_body"
           grep -q '"status":"healthy"' "$health_body"
 
@@ -79,9 +79,9 @@ jobs:
             "$GEMINI_WORKER_URL/api/gemini"
           options_status="$(awk 'NR==1 {print $2}' "$options_headers")"
           test "$options_status" = "204"
-          grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$' "$options_headers"
-          grep -iq '^access-control-allow-methods: .*POST' "$options_headers"
-          grep -iq '^access-control-allow-headers: .*Content-Type' "$options_headers"
+          tr -d '\r' < "$options_headers" | grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$'
+          tr -d '\r' < "$options_headers" | grep -iq '^access-control-allow-methods: .*POST'
+          tr -d '\r' < "$options_headers" | grep -iq '^access-control-allow-headers: .*Content-Type'
 
           echo 'Live Worker browser transport verification passed.'
 

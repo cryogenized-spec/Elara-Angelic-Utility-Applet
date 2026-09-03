@@ -1,0 +1,154 @@
+.elara-banner {
+  --portrait-scale: 1;
+  position: relative;
+  height: clamp(142px, 24vw, 176px);
+  margin-left: 54px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 27px;
+  overflow: hidden;
+  background: linear-gradient(120deg, rgba(18,21,31,.96), rgba(22,19,34,.8));
+  box-shadow: var(--glow);
+  isolation: isolate;
+  transition: height .3s ease, border-radius .3s ease, transform .3s ease;
+}
+
+.elara-banner::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(100deg, rgba(110,168,255,.18), transparent 45%, rgba(240,123,220,.16));
+}
+
+.elara-banner::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--blue), var(--pink), transparent);
+  opacity: .9;
+}
+
+.elara-banner__art {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 52%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 52% 38%, rgba(110,168,255,.3), transparent 40%),
+    radial-gradient(circle at 68% 72%, rgba(240,123,220,.2), transparent 45%);
+}
+
+.elara-banner__portrait {
+  position: relative;
+  width: min(104px, 38vw);
+  aspect-ratio: 4 / 5;
+  transform: scale(var(--portrait-scale));
+  transform-origin: center;
+  transition: transform .3s ease, opacity .22s ease;
+}
+
+.elara-banner__halo {
+  position: absolute;
+  inset: 5% -9% 8%;
+  border-radius: 50%;
+  border: 1px solid rgba(255,255,255,.14);
+  box-shadow: 0 0 45px rgba(110,168,255,.18), inset 0 0 36px rgba(240,123,220,.09);
+}
+
+.elara-banner__silhouette {
+  position: absolute;
+  left: 50%;
+  bottom: 9%;
+  width: 64%;
+  aspect-ratio: 3 / 4;
+  transform: translateX(-50%);
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.22);
+  border-radius: 42% 42% 26% 26%;
+  background: linear-gradient(160deg, rgba(110,168,255,.24), rgba(240,123,220,.15));
+  box-shadow: 0 0 45px rgba(110,168,255,.18);
+  font-size: clamp(28px, 6vw, 42px);
+  font-weight: 650;
+  letter-spacing: -.06em;
+}
+
+.elara-banner__copy {
+  position: absolute;
+  right: 22px;
+  top: 27px;
+  width: 41%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 5px;
+  transition: opacity .2s ease, transform .3s ease;
+}
+
+.elara-banner h1 {
+  margin: 0;
+  font-size: clamp(28px, 7vw, 38px);
+  letter-spacing: -.05em;
+}
+
+.presence {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: rgba(255,255,255,.58);
+}
+
+.presence i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #78f2b2;
+  box-shadow: 0 0 13px rgba(120,242,178,.8);
+}
+
+.portrait-scale-1 { --portrait-scale: 1; }
+.portrait-scale-2 { --portrait-scale: 1.25; }
+.portrait-scale-3 { --portrait-scale: 1.5; }
+
+.elara-banner.is-collapsed {
+  height: 58px;
+  border-radius: 20px;
+}
+
+.elara-banner.is-collapsed .elara-banner__art {
+  width: 58px;
+}
+
+.elara-banner.is-collapsed .elara-banner__portrait {
+  width: 44px;
+  transform: scale(.92);
+}
+
+.elara-banner.is-collapsed .elara-banner__halo {
+  display: none;
+}
+
+.elara-banner.is-collapsed .elara-banner__silhouette {
+  width: 38px;
+  height: 38px;
+  aspect-ratio: 1;
+  bottom: 50%;
+  transform: translate(-50%, 50%);
+  border-radius: 50%;
+  font-size: 16px;
+}
+
+.elara-banner.is-collapsed .elara-banner__copy {
+  opacity: 0;
+  transform: translateX(8px);
+}
+
+@media (min-width: 720px) {
+  .elara-banner__portrait { width: 112px; }
+}

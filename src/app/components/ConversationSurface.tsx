@@ -1,5 +1,6 @@
 import type { ChatMessage } from '../../domain/chat';
 import { ExecutionSummary } from './ExecutionSummary';
+import './conversation-surface.css';
 
 export function ConversationSurface({ messages, fontSize }: { messages: ChatMessage[]; fontSize: number }) {
   if (messages.length === 0) {
@@ -20,7 +21,7 @@ export function ConversationSurface({ messages, fontSize }: { messages: ChatMess
         {messages.map((message) => (
           <article className={`message message-${message.role}`} key={message.id}>
             <header className="message-meta">
-              <span>{message.role === 'assistant' ? 'Elara' : 'You'}</span>
+              <span>{message.role === 'assistant' ? 'ELARA' : 'YOU'}</span>
               <time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
             </header>
             {message.role === 'assistant' && message.executionSummary && <ExecutionSummary summary={message.executionSummary} />}

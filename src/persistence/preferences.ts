@@ -21,9 +21,9 @@ export async function loadChatAppearance(): Promise<ChatAppearancePreferences> {
 }
 
 export async function saveChatAppearance(value: ChatAppearancePreferences): Promise<ChatAppearancePreferences> {
-  const next = { ...DEFAULT_CHAT_APPEARANCE, ...value, updatedAt: Date.now() } as PreferenceRecord;
-  await db.preferences.put({ id: 'chat-appearance', value: nextValue(next, DEFAULT_CHAT_APPEARANCE), updatedAt: next.updatedAt });
-  return nextValue(next, DEFAULT_CHAT_APPEARANCE);
+  const nextValue = { ...DEFAULT_CHAT_APPEARANCE, ...value };
+  await db.preferences.put({ id: 'chat-appearance', value: nextValue, updatedAt: Date.now() });
+  return nextValue;
 }
 
 export async function loadRoleplayPreferences(): Promise<RoleplayPreferences> {
@@ -32,11 +32,7 @@ export async function loadRoleplayPreferences(): Promise<RoleplayPreferences> {
 }
 
 export async function saveRoleplayPreferences(value: RoleplayPreferences): Promise<RoleplayPreferences> {
-  const next = { ...DEFAULT_ROLEPLAY, ...value, updatedAt: Date.now() } as PreferenceRecord;
-  await db.preferences.put({ id: 'roleplay', value: nextValue(next, DEFAULT_ROLEPLAY), updatedAt: next.updatedAt });
-  return nextValue(next, DEFAULT_ROLEPLAY);
-}
-
-function nextValue<T>(record: PreferenceRecord, defaults: T): T {
-  return record.value ? { ...defaults, ...record.value } : defaults;
+  const nextValue = { ...DEFAULT_ROLEPLAY, ...value };
+  await db.preferences.put({ id: 'roleplay', value: nextValue, updatedAt: Date.now() });
+  return nextValue;
 }

@@ -21,6 +21,12 @@ const requiredFiles = [
   'docs/GOOGLE_WRITE_CONFIRMATION.md',
   'docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md',
   'docs/GEMINI_BACKGROUND_EXECUTION.md',
+  'docs/NEXT_FEATURE_PHASE_PLAN.md',
+  'docs/MARKDOWN_FORMAT.md',
+  'src/app/components/MarkdownText.tsx',
+  'src/gemini/character-context.ts',
+  'src/persistence/character.ts',
+  'src/persistence/preferences.ts',
 ];
 
 for (const relative of requiredFiles) {
@@ -46,8 +52,20 @@ while (stack.length) {
   }
 }
 
+const markdownSource = readFileSync(join(root, 'src/app/components/MarkdownText.tsx'), 'utf8');
+if (!markdownSource.includes('skipHtml')) throw new Error('Reliability gate: restricted Markdown renderer must explicitly skip raw HTML.');
+if (!markdownSource.includes('safeMarkdownUrl')) throw new Error('Reliability gate: Markdown renderer must use the application safe-link boundary.');
+
+const characterContext = readFileSync(join(root, 'src/gemini/character-context.ts'), 'utf8');
+if (!characterContext.includes('CREATIVE ROLEPLAY CONTEXT')) throw new Error('Reliability gate: roleplay context boundary is missing.');
+
+const workerSource = readFileSync(join(root, 'worker/src/index.ts'), 'utf8');
+if (!workerSource.includes('systemInstruction')) throw new Error('Reliability gate: Worker request contract must carry the application-owned character instruction.');
+if (!workerSource.includes('system_instruction')) throw new Error('Reliability gate: Worker must map the character instruction to Gemini system_instruction.');
+if (!workerSource.includes('stream: true') || !workerSource.includes('store: true')) throw new Error('Reliability gate: canonical Gemini streaming/store semantics must remain enabled.');
+
 if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24') {
   throw new Error('Reliability gate: Node baseline must remain 24.');
 }
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, and no legacy generateContent() calls in src.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, no legacy generateContent() calls, restricted Markdown safety boundary, roleplay context boundary, and canonical Worker streaming contract.`);

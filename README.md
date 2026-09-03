@@ -54,7 +54,7 @@ When Pages is enabled, use **Settings → Pages → Source → GitHub Actions**.
 
 For the project-site URL form `https://<owner>.github.io/<repo>/`, Vite requires the corresponding repository base path in its build configuration. For a user/organization site or custom domain at the domain root, `/` is appropriate. The repository deployment workflow will own this setting when the exact Pages URL is finalized.
 
-GitHub's current Pages guidance supports custom Actions workflows, and Vite's current deployment guidance supports GitHub Actions for Vite builds. Cloudflare Pages remains a viable future alternative because it can build Vite and publish `dist`, but it is not the primary deployment target for this roadmap. citeturn472153search0turn472153search2turn287044search6turn287044search7
+GitHub's current Pages guidance supports custom Actions workflows, and Vite's current deployment guidance supports GitHub Actions for Vite builds. Cloudflare Pages remains a viable future alternative because it can build Vite and publish `dist`, but it is not the primary deployment target for this roadmap. citeturn472153search0turn472153search2turn275656search0turn275656search7
 
 ## 50-prompt roadmap
 
@@ -133,6 +133,8 @@ Prompts 28–32 complete: canonical Gemini request contract, normalized provider
 
 Prompts 33–37 complete as foundation contracts: bounded retry policy, explicit request lifecycle state machine, privacy-conscious analytics architecture, aggregate analytics dashboard contract, and one-authority Google OAuth architecture.
 
+Prompts 38–42 complete: central Google scope registry, demand-driven incremental authorization, stay-connected state semantics, Google OAuth settings UI contract, and the first concrete Google Calendar service boundary plus contract test.
+
 ## Runtime status
 
 The first executable vertical slice exists. It proves the application plumbing with a deterministic demo transport:
@@ -143,19 +145,15 @@ The demo transport is temporary test/demo infrastructure, not an alternate Gemin
 
 The repository does not contain a fabricated `package-lock.json`. Until a real lockfile is generated from npm and committed, CI uses `npm install`. Once a genuine lockfile exists, CI should switch to lockfile-aware caching and `npm ci`.
 
+## Google Workspace status
+
+Workspace access is now architecturally connected through one OAuth authority. Calendar is the first service boundary and currently defines read-only event listing through the registered Calendar event-read capability. Tokens remain outside feature services; mutating operations remain reserved for later write-confirmation work.
+
 ## External-source revalidation rule
 
 Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, GitHub Pages, or GitHub Action surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
 
-Current Prompt 18–19 verification: Google's current Gemini documentation confirms native image input in Interactions and native PDF/document input; PDFs can be sent inline for smaller transient use, while the Files API is recommended for larger or repeatedly reused files. Google's PDF guidance also describes native multimodal understanding of text, images, diagrams, charts, and tables. citeturn467827search0turn467827search1turn467827search3turn467827search5
-
-Current Prompt 22 verification: Core Web Vitals “good” targets remain LCP ≤2.5s, INP ≤200ms, and CLS ≤0.1 at the 75th percentile. Elara additionally sets an internal initial-JavaScript budget of 200 KB compressed for the core shell. citeturn646477search1
-
-Current Prompt 23–25 package verification: Vite's current guide recommends `npm create vite@latest`; current npm package pages verify TypeScript 7.0.2, `@vitejs/plugin-react` 6.1.1, ESLint 10.9.1, Vitest 4.1.11, Playwright 1.62.1, and jsdom 30.0.1. citeturn962400search0turn847264search0turn847264search2turn847264search9turn339481search0turn339481search9turn339481search8
-
-Current Prompt 26 verification: Google's current Interactions overview says custom safety settings are not supported on the Interactions API, so Elara's safety layer must not pretend otherwise. citeturn962400search10
-
-Current Prompt 37 verification: Google recommends narrowly scoped Workspace access and incremental authorization in context; secure redirect/origin handling and explicit treatment of denied or revoked grants are required. citeturn287044search0turn287044search3turn287044search5
+Google's current Calendar documentation recommends narrowly focused scopes and distinguishes event read/write permissions; contextual incremental authorization is a current Google recommendation. Sensitive or restricted scopes can also require additional verification. citeturn616269search0turn616269search1turn616269search5turn616269search8
 
 ## Future-self handoff protocol
 

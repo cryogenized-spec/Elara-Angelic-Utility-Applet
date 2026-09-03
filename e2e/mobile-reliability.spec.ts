@@ -64,6 +64,11 @@ test.describe('Android portrait reliability', () => {
     await page.goto('');
     await page.getByRole('button', { name: 'Open settings' }).click();
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
+    await page.getByRole('button', { name: 'Lockbox' }).click();
+    await expect(page.getByRole('heading', { name: 'API Lockbox' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Cloudflare Gemini Worker' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Test Worker' })).toBeVisible();
+    await expect(page.getByText('https://elara-gemini.cryogenized.workers.dev', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Typography' }).click();
     await expect(page.getByText('The quick brown fox jumps over the lazy dog.').first()).toBeVisible();
     await page.getByRole('button', { name: 'Back to chat' }).click();

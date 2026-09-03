@@ -15,7 +15,7 @@ const settingsSections = [
   { id: 'typography', label: 'Typography', icon: 'type' as const },
   { id: 'model', label: 'Gemini', icon: 'chat' as const },
   { id: 'chat', label: 'Chat', icon: 'chat' as const },
-  { id: 'security', label: 'Lockbox', icon: 'settings' as const },
+  { id: 'security', label: 'Lockbox', icon: 'shield' as const },
 ] as const;
 type SettingsSection = typeof settingsSections[number]['id'];
 

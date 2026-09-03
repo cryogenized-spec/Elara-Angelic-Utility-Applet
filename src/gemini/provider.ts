@@ -5,10 +5,10 @@ import { normalizeGeminiError } from './errors';
 import { ELARA_SYSTEM_INSTRUCTION } from './creative-context';
 
 const SAFETY_SETTINGS: SafetySetting[] = [
-  { category: 'harassment', threshold: 'block_none' },
-  { category: 'hate_speech', threshold: 'block_none' },
-  { category: 'sexually_explicit', threshold: 'block_none' },
-  { category: 'dangerous_content', threshold: 'block_none' },
+  { type: 'harassment', threshold: 'block_none' },
+  { type: 'hate_speech', threshold: 'block_none' },
+  { type: 'sexually_explicit', threshold: 'block_none' },
+  { type: 'dangerous_content', threshold: 'block_none' },
 ];
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }

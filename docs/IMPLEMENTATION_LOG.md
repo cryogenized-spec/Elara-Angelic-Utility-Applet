@@ -124,61 +124,65 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Implementation commits:** `9c6410a804016715eeb506e842589a52e5e5e3a9`, `a3ac5eb16b8d0eaff7804b626ab28e3d3ab2614b`, `adebd402b5e69d9f155758f9cdf461c9bcd22d87`, `63916e2532ea3f5722cde10a38eb69e5a7fa80cb`, `b732afe70f6432b314bd315609c6a08b3feb4c3c`  
 **Changed:** Vite/React/TypeScript runtime scaffold, ESLint/TypeScript/Vitest/Playwright config, Android-first chat shell, application turn port, deterministic demo stream, Dexie persistence, unit test, E2E smoke test, and real CI gates.
 **Result:** First executable clean-room spine is present. It proves UI → application turn boundary → normalized stream events → local persistence. The demo transport is explicitly non-Gemini and exists only until the protected canonical Gemini provider is wired.
-**Live dependency verification:** Current npm pages confirm TypeScript 7.0.2, `@vitejs/plugin-react` 6.1.1, ESLint 10.9.1, Vitest 4.1.11, Playwright 1.62.1, and jsdom 30.0.1. citeturn847264search0turn847264search2turn847264search9turn339481search0turn339481search9turn339481search8
-**CI correction:** Runtime CI run `33710446033` (#65) failed at `npm install` because `@typescript-eslint` 8.69.0 still peers on TypeScript `<6.1` while the verified current TypeScript is 7.0.2. The scaffold was corrected without `--legacy-peer-deps`: TypeScript 7 remains; the stale TypeScript-ESLint parser/plugin pair was removed; ESLint now covers JavaScript/config surfaces and TypeScript correctness remains a dedicated compiler gate.
-**Lockfile:** No generated `package-lock.json` was fabricated. CI uses `npm install` until a real lockfile is generated and committed; then CI can move to lockfile-aware caching and `npm ci`.
 
 ### Prompt 26 — Gemini Safety Policy
 **Commit:** `f5119076372ca0c3517fa04309a8f2ef5fd6f9e4`
 **Changed:** `docs/GEMINI_SAFETY_POLICY.md`
-**Result:** Layered safety policy covering provider constraints, roleplay boundaries, tool authorization, Workspace authorization, memory/privacy, diagnostics, and tests.
-**Live verification:** Current Google Interactions documentation states custom safety settings are not supported in Interactions, so Elara does not expose pretend per-request safety-threshold controls on the canonical path. citeturn962400search10turn962400search4
+**Result:** Layered safety policy covering provider constraints, roleplay boundaries, tool authorization, Workspace authorization, memory/privacy, diagnostics, and safety-focused tests.
 
 ### Prompt 27 — Creative-Context System Instruction
 **Commit:** `23925759b25d7699fca2bc4de0b4baebf1764bfd`
 **Changed:** `docs/CREATIVE_CONTEXT_SYSTEM_INSTRUCTION.md`
 **Result:** Production Elara master system instruction covering identity, personality, roleplay, truthfulness, emotional boundaries, tools, Workspace, memory, privacy, and instruction integrity. It is application-owned configuration, separate from ordinary conversation content and tool schemas.
-**Live verification:** Current Gemini documentation supports a distinct `system_instruction` request field. citeturn962400search7
 
 ## 2026-09-03 — Prompts 28–37
 
 ### Prompts 28–32
 **Commits:** `89cc6a5a5af5075ed760789c5918c1c75eeaf9bd`, `e55464ba211fa36696b93f37d8a21cd397642beb`, `3eed597eaac97a38caef7e541dc0581c669a458d`, `4f1398e28f36b752f1e765036334dfe90ba8ec01`, `4421d5e32d018ce8f6173b332640275332a8996b`
-**Result:** Canonical Gemini request contract, provider error normalization, HTTP diagnostic console, developer diagnostics UI contract, and request timing/timeout contract.
+**Result:** Canonical Gemini request contract, provider error normalization, HTTP diagnostics, developer diagnostics UI contract, and timing/timeout contract.
 
-### Prompt 33 — Retry Policy
-**Commit:** `c4369eb507a30c13b8e8a03b9c28dfb16bccfa43`
-**Changed:** `docs/RETRY_POLICY.md`
-**Result:** Bounded retry policy with retryable/non-retryable classification, exponential backoff with jitter, duplicate-message prevention, cancellation precedence, streaming safety, and redacted retry diagnostics.
+### Prompts 33–37
+**Commits:** `c4369eb507a30c13b8e8a03b9c28dfb16bccfa43`, `2d606e4ad3576d3361b30ccb167d56adcada406a`, `c799837672905a2a8888657da648db5c1e61cec3`, `6a6ed6c6ed7a17d7e3036d6d15f371e1faaf6df9`, `967a78c89c60a1c729f42d313b317ea1c08ce9c9`
+**Result:** Bounded retry policy, request lifecycle state machine, privacy-conscious analytics architecture/dashboard, and one-authority Google OAuth architecture.
 
-### Prompt 34 — Request Lifecycle State Machine
-**Commit:** `2d606e4ad3576d3361b30ccb167d56adcada406a`
-**Changed:** `docs/REQUEST_LIFECYCLE_STATE_MACHINE.md`
-**Result:** Explicit request states and terminal invariants covering validation, queued/requesting/streaming, completion, cancellation, failure, retry linkage, persistence checkpoints, and recovery.
+## 2026-09-03 — Prompts 38–42
 
-### Prompt 35 — Analytics Architecture
-**Commit:** `c799837672905a2a8888657da648db5c1e61cec3`
-**Changed:** `docs/ANALYTICS_ARCHITECTURE.md`
-**Result:** Privacy-conscious product analytics separated from diagnostics and conversation persistence. No message text, attachments, tokens, tool arguments, hidden reasoning, or raw responses are analytics payloads.
+### Prompt 38 — Google Scope Registry
+**Commit:** `0a39cf32a94c8b8e310884f78660f079d8a60db0`
+**Changed:** `docs/GOOGLE_SCOPE_REGISTRY.md`
+**Result:** One authoritative registry for Workspace capability keys, provider scopes, access levels, sensitivity, ownership, and least-privilege review. Calendar read is initially isolated from Calendar write and future Tasks/Docs/Chat capabilities.
+**Live verification:** Google's current Calendar scope guidance recommends narrow scopes and lists dedicated read/write/event/calendar-list scopes; sensitive or restricted scopes can introduce verification requirements. citeturn616269search0turn616269search1turn616269search8
 
-### Prompt 36 — Analytics Dashboard
-**Commit:** `6a6ed6c6ed7a17d7e3036d6d15f371e1faaf6df9`
-**Changed:** `docs/ANALYTICS_DASHBOARD.md`
-**Result:** Defined a developer-oriented aggregate dashboard surface with typed snapshots, bounded measures, empty/unavailable states, and strict separation from conversation and diagnostic stores.
+### Prompt 39 — Incremental Authorization
+**Commit:** `9cbddd6ea5e5fc6e7e12a053c1eb523da5a7d1e9`
+**Changed:** `docs/INCREMENTAL_AUTHORIZATION.md`
+**Result:** Demand-driven consent flow. Missing capabilities are authorized in context, denials are respected without loops, and write upgrades never silently broaden access.
+**Live verification:** Google currently recommends contextual incremental authorization and requesting access when required. citeturn616269search5turn616269search1
 
-### Prompt 37 — Google OAuth Architecture
-**Commit:** `967a78c89c60a1c729f42d313b317ea1c08ce9c9`
-**Changed:** `docs/GOOGLE_OAUTH_ARCHITECTURE.md`
-**Result:** Established one OAuth authority for Calendar, Tasks, Docs, and Chat, with protected authorization-code handling, narrow/incremental scopes, centralized token lifecycle, grant-state classification, and no Workspace bypass path.
-**Live verification:** Google currently recommends narrowly focused scopes and contextual incremental authorization; secure HTTPS redirect/origin handling and explicit revoked/denied grant handling are required. citeturn287044search0turn287044search3turn287044search5
+### Prompt 40 — Stay Connected Semantics
+**Commit:** `e8b5c8a153f60fbd55346fa3bbcaaf43850366bd`
+**Changed:** `docs/STAY_CONNECTED_SEMANTICS.md`
+**Result:** Defined explicit disconnected/connected/needs-consent/token-recovery/reauthorization/partial/revoked states. "Stay connected" is token-recovery preference, not perpetual authorization.
+
+### Prompt 41 — Google OAuth Settings UI
+**Commit:** `b6b913bdc55573c37798c7b0fb2b181b07b2df7e`
+**Changed:** `docs/GOOGLE_OAUTH_SETTINGS_UI.md`
+**Result:** Defined the user-facing connection settings surface with per-capability status, contextual authorization, explicit disconnect, and safe failure states; no tokens or OAuth internals enter component state.
+
+### Prompt 42 — Google Calendar Service
+**Commits:** `9bdcfcecd8a1301d5f398054525f503ca12ae3fb`, `f64e20c7b09cb992f7b2728384993ce7b2dcb35d`, `5589251ac653928a1f3ae986148b06105f563e15`, `2b69bc2bba1e41854f808c88f0084eb1d8b24808`
+**Changed:** Central Google OAuth request contract, Calendar service boundary, event mapping, and a contract test proving the service requests the registered Calendar read capability. The service receives an authorized request capability rather than a raw token and does not own OAuth.
+**Live verification:** Google Calendar currently separates event-read and event-write scopes, and event mutation requires appropriate write authorization and calendar write access. citeturn616269search0turn616269search3
 
 ## Deployment decision
 
-Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist/` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment.
+Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist/` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7
 
 ## Current runtime/CI status
 
-The executable runtime scaffold is present in `main`. CI has the intended install → lint → typecheck → unit → build → Playwright chain. The latest run must be observed to completion before a green milestone is declared. A generated `package-lock.json` is not fabricated.
+The executable runtime scaffold is present in `main`. CI is configured for install → lint → typecheck → unit tests → build → Playwright E2E. A generated `package-lock.json` is not fabricated; until a genuine lockfile is created and committed, CI uses `npm install`.
+
+The latest CI run must be observed to completion before a green milestone is declared.
 
 No pull requests are used for this work. Changes are committed directly to `main`.
 

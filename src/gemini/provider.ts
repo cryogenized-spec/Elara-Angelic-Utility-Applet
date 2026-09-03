@@ -49,6 +49,9 @@ async function readErrorResponse(response: Response): Promise<Error & { status?:
   } catch {
     // Keep the bounded text as the safe diagnostic message.
   }
+  if (response.status === 404) {
+    message = 'Gemini Worker endpoint is not configured. Set VITE_GEMINI_WORKER_URL for this deployment.';
+  }
   const error = new Error(message || `Gemini Worker returned HTTP ${response.status}`) as Error & { status?: number };
   error.status = response.status;
   return error;

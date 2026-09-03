@@ -22,11 +22,14 @@ const requestSchema = z.object({
 
 type SafeEvent = Record<string, unknown>;
 
+function configuredOrigins(env: Env): string[] {
+  return (env.ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+}
+
 function allowedOrigin(request: Request, env: Env): string | null {
   const origin = request.headers.get('Origin');
   if (!origin) return null;
-  const configured = (env.ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean);
-  return configured.includes(origin) ? origin : null;
+  return configuredOrigins(env).includes(origin) ? origin : null;
 }
 
 function corsHeaders(request: Request, env: Env): Headers {
@@ -44,6 +47,19 @@ function jsonResponse(request: Request, env: Env, body: unknown, status = 200): 
   const headers = corsHeaders(request, env);
   headers.set('Content-Type', 'application/json; charset=utf-8');
   return new Response(JSON.stringify(body), { status, headers });
+}
+
+function healthResponse(request: Request, env: Env): Response {
+  const hasCredential = Boolean(env.GEMINI_API_KEY);
+  const hasOriginPolicy = configuredOrigins(env).length > 0;
+  const status = hasCredential && hasOriginPolicy ? 'healthy' : 'degraded';
+  return jsonResponse(request, env, {
+    service: 'elara-gemini',
+    status,
+    api: true,
+    credentialConfigured: hasCredential,
+    originPolicyConfigured: hasOriginPolicy,
+  }, 200);
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -237,8 +253,10 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const pathname = new URL(request.url).pathname;
+    if (pathname === '/health') return healthResponse(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-    if (request.method !== 'POST' || new URL(request.url).pathname !== '/api/gemini') {
+    if (request.method !== 'POST' || pathname !== '/api/gemini') {
       return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
     }
 

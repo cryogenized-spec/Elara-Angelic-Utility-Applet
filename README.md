@@ -97,15 +97,21 @@ Never combine provider calls, stream parsing, tool execution, Workspace access, 
 
 ## Milestones
 
-Prompts 1–4 complete. Prompts 5–7 complete with green CI.
+Prompts 1–4 complete.
 
-Prompts 8–12 are the active batch. They are not complete until the five architecture artifacts exist and CI has verified the final repository state.
+Prompts 5–7 complete: canonical Gemini strategy, live model registry, capability-driven settings.
 
-Node.js 24 LTS is the runtime baseline. The current dependency policy requires live verification before new SDK/package choices.
+Prompts 8–12 complete: canonical streaming architecture, thinking-summary display boundary, minimal conversation data model, Dexie/IndexedDB persistence boundary, and API Lockbox.
+
+Related correction: Prompt 4's full ownership/dependency ADR was restored after an intermediate documentation edit, with future tool/Workspace/character/memory constraints preserved.
+
+Current next work: Prompt 13 — Gemini Credential Architecture.
+
+Node.js 24 LTS remains the runtime baseline. Live dependency/API verification remains mandatory for fast-moving surfaces.
 
 ## External-source revalidation rule
 
-Before changing Gemini, npm, Node, Google OAuth, or GitHub Action surfaces, re-check current official documentation/release state. The real generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
+Before changing Gemini, npm, Node, Google OAuth, or GitHub Action surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
 
 ## Future-self handoff protocol
 

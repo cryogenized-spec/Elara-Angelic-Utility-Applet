@@ -140,45 +140,45 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Result:** Production Elara master system instruction covering identity, personality, roleplay, truthfulness, emotional boundaries, tools, Workspace, memory, privacy, and instruction integrity. It is application-owned configuration, separate from ordinary conversation content and tool schemas.
 **Live verification:** Current Gemini documentation supports a distinct `system_instruction` request field. citeturn962400search7
 
-## 2026-09-03 — Prompts 28–32
+## 2026-09-03 — Prompts 28–37
 
-### Prompt 28 — Gemini Request Contract
-**Commit:** `89cc6a5a5af5075ed760789c5918c1c75eeaf9bd`
-**Changed:** `docs/GEMINI_REQUEST_CONTRACT.md`
-**Result:** Defined the only application-facing interaction request contract. Provider-specific translation stays inside the canonical Gemini adapter; character instruction, capability-filtered settings, allow-listed tools, multimodal references, continuity metadata, and streaming intent remain explicit inputs.
-**Live verification:** Google's current Interactions API documents `input`, `system_instruction`, `tools`, `generation_config`, `stream`, `store`, `background`, and `previous_interaction_id`; streaming and function-call continuation use the same Interactions endpoint. citeturn901754search0turn901754search1turn901754search3
+### Prompts 28–32
+**Commits:** `89cc6a5a5af5075ed760789c5918c1c75eeaf9bd`, `e55464ba211fa36696b93f37d8a21cd397642beb`, `3eed597eaac97a38caef7e541dc0581c669a458d`, `4f1398e28f36b752f1e765036334dfe90ba8ec01`, `4421d5e32d018ce8f6173b332640275332a8996b`
+**Result:** Canonical Gemini request contract, provider error normalization, HTTP diagnostic console, developer diagnostics UI contract, and request timing/timeout contract.
 
-### Prompt 29 — Provider Error Normalization
-**Commit:** `e55464ba211fa36696b93f37d8a21cd397642beb`
-**Changed:** `docs/PROVIDER_ERROR_NORMALIZATION.md`
-**Result:** Defined a stable safe error model spanning validation, auth, authorization, rate limits, timeout, cancellation, network, provider, unsupported capability, configuration, and unknown failures, with explicit retryability and redaction rules.
-**Live verification:** Google's current API error guidance distinguishes retryable/terminal classes including 429, 499, 500, 501, 503, and 504. citeturn901754search2
+### Prompt 33 — Retry Policy
+**Commit:** `c4369eb507a30c13b8e8a03b9c28dfb16bccfa43`
+**Changed:** `docs/RETRY_POLICY.md`
+**Result:** Bounded retry policy with retryable/non-retryable classification, exponential backoff with jitter, duplicate-message prevention, cancellation precedence, streaming safety, and redacted retry diagnostics.
 
-### Prompt 30 — HTTP Diagnostic Console
-**Commit:** `3eed597eaac97a38caef7e541dc0581c669a458d`
-**Changed:** `docs/HTTP_DIAGNOSTIC_CONSOLE.md`
-**Result:** Defined request-centric diagnostics with identifiers, timing, status/category/code, retryability, attempts, and transport outcome while explicitly excluding secrets, message content, attachment bytes, private memory, system prompts, and raw authorization data.
+### Prompt 34 — Request Lifecycle State Machine
+**Commit:** `2d606e4ad3576d3361b30ccb167d56adcada406a`
+**Changed:** `docs/REQUEST_LIFECYCLE_STATE_MACHINE.md`
+**Result:** Explicit request states and terminal invariants covering validation, queued/requesting/streaming, completion, cancellation, failure, retry linkage, persistence checkpoints, and recovery.
 
-### Prompt 31 — Developer Diagnostics UI
-**Commit:** `4f1398e28f36b752f1e765036334dfe90ba8ec01`
-**Changed:** `docs/DEVELOPER_DIAGNOSTICS_UI.md`
-**Result:** Defined a developer-only in-app diagnostics surface fed only by redacted diagnostic records, with clear states, timing, identifiers, bounded rendering, and no provider/security/persistence logic in presentation.
+### Prompt 35 — Analytics Architecture
+**Commit:** `c799837672905a2a8888657da648db5c1e61cec3`
+**Changed:** `docs/ANALYTICS_ARCHITECTURE.md`
+**Result:** Privacy-conscious product analytics separated from diagnostics and conversation persistence. No message text, attachments, tokens, tool arguments, hidden reasoning, or raw responses are analytics payloads.
 
-### Prompt 32 — Request Timing and Timeout System
-**Commit:** `4421d5e32d018ce8f6173b332640275332a8996b`
-**Changed:** `docs/REQUEST_TIMING_AND_TIMEOUTS.md`
-**Result:** Defined monotonic request timing, time-to-first-event, streaming idle-stall detection, absolute deadlines, explicit cancellation, and deterministic terminal states without infinite spinners.
-**Live verification:** Current Interactions documentation confirms SSE streaming and typed step events, making explicit first-event and terminal timing useful diagnostics. citeturn901754search1turn901754search0
+### Prompt 36 — Analytics Dashboard
+**Commit:** `6a6ed6c6ed7a17d7e3036d6d15f371e1faaf6df9`
+**Changed:** `docs/ANALYTICS_DASHBOARD.md`
+**Result:** Defined a developer-oriented aggregate dashboard surface with typed snapshots, bounded measures, empty/unavailable states, and strict separation from conversation and diagnostic stores.
+
+### Prompt 37 — Google OAuth Architecture
+**Commit:** `967a78c89c60a1c729f42d313b317ea1c08ce9c9`
+**Changed:** `docs/GOOGLE_OAUTH_ARCHITECTURE.md`
+**Result:** Established one OAuth authority for Calendar, Tasks, Docs, and Chat, with protected authorization-code handling, narrow/incremental scopes, centralized token lifecycle, grant-state classification, and no Workspace bypass path.
+**Live verification:** Google currently recommends narrowly focused scopes and contextual incremental authorization; secure HTTPS redirect/origin handling and explicit revoked/denied grant handling are required. citeturn287044search0turn287044search3turn287044search5
 
 ## Deployment decision
 
-Elara is a Vite application and should be deployed to GitHub Pages through GitHub Actions rather than publishing the repository root or maintaining a compiled `gh-pages` source branch.
+Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist/` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment.
 
-Canonical path: `main` → Actions build → `dist/` artifact → GitHub Pages. Configure **Settings → Pages → Source → GitHub Actions** when we enable the site. For a project-site URL (`owner.github.io/repository`), Vite's `base` must match the repository path; root-domain/custom-domain deployment uses `/`. citeturn472153search0turn472153search2
+## Current runtime/CI status
 
-## Current runtime status
-
-The executable runtime scaffold is in `main`. CI is now configured for install → lint → typecheck → unit tests → build → Playwright E2E, but the latest observed run after the Prompt 25 toolchain fixes was still executing at the time of this log update. Therefore the batch is implemented, but a final green CI conclusion is withheld until the active run completes.
+The executable runtime scaffold is present in `main`. CI has the intended install → lint → typecheck → unit → build → Playwright chain. The latest run must be observed to completion before a green milestone is declared. A generated `package-lock.json` is not fabricated.
 
 No pull requests are used for this work. Changes are committed directly to `main`.
 

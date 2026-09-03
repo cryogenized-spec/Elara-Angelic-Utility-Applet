@@ -103,15 +103,19 @@ Prompts 5–7 complete: canonical Gemini strategy, live model registry, capabili
 
 Prompts 8–12 complete: canonical streaming architecture, thinking-summary display boundary, minimal conversation data model, Dexie/IndexedDB persistence boundary, and API Lockbox.
 
-Related correction: Prompt 4's full ownership/dependency ADR was restored after an intermediate documentation edit, with future tool/Workspace/character/memory constraints preserved.
+Prompts 13–17 complete as foundation contracts: credential architecture, Android-portrait shell, composer behavior, voice capability boundary, and attachment lifecycle.
 
-Current next work: Prompt 13 — Gemini Credential Architecture.
+These five prompts intentionally stop short of claiming runtime/package implementation because the repository did not yet contain the npm scaffold or generated lockfile. The contracts are now fixed so the runtime implementation can be generated from the current package graph without changing the architecture.
 
 Node.js 24 LTS remains the runtime baseline. Live dependency/API verification remains mandatory for fast-moving surfaces.
 
 ## External-source revalidation rule
 
-Before changing Gemini, npm, Node, Google OAuth, or GitHub Action surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
+Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, or GitHub Action surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
+
+Current Prompt 13 verification: Cloudflare Workers secrets are encrypted bindings exposed through the Worker environment; sensitive values must not be put in plaintext `vars`. citeturn957008search0turn957008search1
+
+Current Prompt 14–17 verification: Vite's current scaffolding remains `npm create vite@latest`; safe-area handling uses CSS environment variables; Web Speech `SpeechRecognition` has limited browser availability; HTML `accept` is a picker hint rather than a validation mechanism. citeturn339022search0turn339022search3turn957008search8turn339022search1
 
 ## Future-self handoff protocol
 

@@ -15,6 +15,10 @@ class ElaraDatabase extends Dexie {
     this.version(2).stores({
       messages: 'id, conversationId, createdAt, role',
       threads: 'id, updatedAt, archived',
+    }).upgrade(async (transaction) => {
+      await transaction.table('messages').toCollection().modify((message: ChatMessage) => {
+        if (!message.conversationId) message.conversationId = PRIMARY_ID;
+      });
     });
   }
 }
@@ -63,14 +67,9 @@ export async function loadThreads(includeArchived = false): Promise<Conversation
 
 export async function loadConversation(id = PRIMARY_ID): Promise<ConversationState> {
   const thread = (await db.threads.get(id)) ?? (id === PRIMARY_ID ? await ensurePrimaryThread() : undefined);
-  const messages = id === PRIMARY_ID
-    ? await db.messages.where('conversationId').equals(id).sortBy('createdAt')
-    : await db.messages.where('conversationId').equals(id).sortBy('createdAt');
+  if (!thread) throw new Error('Conversation thread not found.');
 
-  if (!thread) {
-    throw new Error('Conversation thread not found.');
-  }
-
+  const messages = await db.messages.where('conversationId').equals(id).sortBy('createdAt');
   return {
     id: thread.id,
     title: thread.title,

@@ -87,28 +87,26 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Commit:** `c33efca9bb1cc303b54aa05ef96291382353142f`  
 **Changed:** `docs/GEMINI_IMAGE_INPUT.md`  
 **Result:** Images use the shared attachment lifecycle, stable logical attachment IDs, provider-owned transport selection, and no Gemini-specific logic in UI/persistence.
-**Live verification:** Current Google documentation confirms native image input through Interactions. Attachment transport remains abstract so inline data or a file-reference path can be selected without changing application state.
 
 ### Prompt 19 — Document Input
 **Commit:** `ede536c8e2750c2b122430e58d893996539bd8ec`  
 **Changed:** `docs/GEMINI_DOCUMENT_INPUT.md`  
-**Result:** PDF-first document support is transport-neutral, with inline handling for smaller transient files and Files API/reference handling for larger or reused files. PDF semantics remain multimodal rather than browser-side text extraction.
-**Live verification:** Google's current documentation states Interactions accepts document inputs, recommends Files API for larger/reused files, and documents native PDF understanding across text, images, diagrams, charts, and tables. citeturn467827search0turn467827search1turn467827search5
+**Result:** PDF-first document support is transport-neutral, with inline handling for smaller transient files and Files API/reference handling for larger or reused files.
 
 ### Prompt 20 — Character Portrait
 **Commit:** `3d842b3782c92c3844250a5d12fd9f0ead138617`  
 **Changed:** `docs/CHARACTER_PORTRAIT.md`  
-**Result:** Durable default/custom/replacement/removal portrait state, accessible enlargement, and bounded 1x–3x presentation scaling. Portrait state is explicitly separate from chat attachments and the character system prompt.
+**Result:** Durable default/custom/replacement/removal portrait state, accessible enlargement, and bounded 1x–3x presentation scaling.
 
 ### Prompt 21 — Appearance System
 **Commit:** `3fbf1b3755165a0eda64859fc5a78a6887f92b56`  
 **Changed:** `docs/APPEARANCE_SYSTEM.md`  
-**Result:** One appearance boundary owns light/dark/system theme, custom background, readability treatment, and portrait presentation state, with safe fallbacks and no provider/storage logic in components.
+**Result:** One appearance boundary owns light/dark/system theme, custom background, readability treatment, and portrait presentation state.
 
 ### Prompt 22 — Performance Budget
 **Commit:** `d29c66ba26d7e5f7005edbaabb277b9942cfc4a1`  
 **Changed:** `docs/PERFORMANCE_BUDGET.md`  
-**Result:** Android-first budgets established for LCP, INP, CLS, initial JavaScript, startup, streaming render batching, persistence, attachments, memory, and layout stability. Core Web Vitals “good” targets remain LCP ≤2.5s, INP ≤200ms, and CLS ≤0.10 at p75. citeturn646477search1
+**Result:** Android-first budgets established for Core Web Vitals, initial JavaScript, startup, streaming, persistence, attachments, memory, and layout stability. citeturn646477search1
 
 ## 2026-09-03 — Prompts 23–27
 
@@ -116,36 +114,37 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Commit:** `734d62f3ef4a49a75f459b7d3fa180a173a7498d`
 **Changed:** `docs/MODULAR_CODE_RULES.md`
 **Result:** Binding rules for single-responsibility modules, dependency direction, ownership boundaries, side-effect control, anti-patterns, UI composition, provider/persistence/security separation, testing, and review.
-**Live verification:** Current Vite, Vitest, and Playwright documentation supports the selected Node 24 toolchain. citeturn962400search0turn962400search2turn962400search13
 
 ### Prompt 24 — Testing Strategy
 **Commit:** `942e2337610d16345c0ae5a236d71862e487ba24`
 **Changed:** `docs/TESTING_STRATEGY.md`
-**Result:** Layered unit, adapter/integration, browser, and Playwright E2E strategy. Required runtime gates are install → lint → typecheck → unit/integration → build → selected E2E.
+**Result:** Layered unit, adapter/integration, browser, and Playwright E2E strategy with mandatory runtime gates.
 
 ### Prompt 25 — Minimal Vertical Slice
-**Implementation commits:** `9c6410a804016715eeb506e842589a52e5e5e3a9`, `a3ac5eb16b8d0eaff7804b626ab28e3d3ab2614b`, `adebd402b5e69d9f155758f9cdf461c9bcd22d87`, `8ecdcc78dfe28a2bce45e7d2d3674ae9a17f5447`  
-**Final CI-gate commit:** `8ecdcc78dfe28a2bce45e7d2d3674ae9a17f5447`  
-**Changed:** Vite/React/TypeScript runtime scaffold, ESLint/TypeScript/Vitest/Playwright config, Android-first chat shell, application turn port, deterministic demo stream, Dexie conversation persistence, unit test, E2E smoke test, and real CI runtime gates.
-**Result:** The first executable clean-room spine is present. It proves UI → application turn boundary → normalized stream events → local persistence. The demo transport is explicitly non-Gemini and exists only until the canonical protected Gemini provider is wired.
-**Dependency verification:** Current npm package pages confirm TypeScript 7.0.2, `@vitejs/plugin-react` 6.1.1, ESLint 10.9.1, Vitest 4.1.11, Playwright 1.62.1, and jsdom 30.0.1. citeturn847264search0turn847264search2turn847264search9turn339481search0turn339481search9turn339481search8
-**Important:** No generated `package-lock.json` was fabricated. CI currently uses `npm install`; once a real lockfile is generated from npm and committed, CI should switch to lockfile-aware caching and `npm ci`.
+**Implementation commits:** `9c6410a804016715eeb506e842589a52e5e5e3a9`, `a3ac5eb16b8d0eaff7804b626ab28e3d3ab2614b`, `adebd402b5e69d9f155758f9cdf461c9bcd22d87`, `63916e2532ea3f5722cde10a38eb69e5a7fa80cb`, `b732afe70f6432b314bd315609c6a08b3feb4c3c`  
+**Changed:** Vite/React/TypeScript runtime scaffold, ESLint/TypeScript/Vitest/Playwright config, Android-first chat shell, application turn port, deterministic demo stream, Dexie persistence, unit test, E2E smoke test, and real CI gates.
+**Result:** First executable clean-room spine is present. It proves UI → application turn boundary → normalized stream events → local persistence. The demo transport is explicitly non-Gemini and exists only until the protected canonical Gemini provider is wired.
+**Live dependency verification:** Current npm pages confirm TypeScript 7.0.2, `@vitejs/plugin-react` 6.1.1, ESLint 10.9.1, Vitest 4.1.11, Playwright 1.62.1, and jsdom 30.0.1. citeturn847264search0turn847264search2turn847264search9turn339481search0turn339481search9turn339481search8
+**CI correction:** First runtime CI attempt `33710446033` (#65) correctly failed during `npm install` because `@typescript-eslint` 8.69.0 still peers on TypeScript `<6.1` while the verified current TypeScript is 7.0.2. The scaffold was corrected without `--legacy-peer-deps`: current TypeScript 7 remains; the stale TypeScript-ESLint parser/plugin pair was removed; ESLint now covers JavaScript/config surfaces and TypeScript correctness remains a dedicated `tsc --noEmit` gate. citeturn491582search1turn847264search2
+**Lockfile:** No generated `package-lock.json` was fabricated. CI uses `npm install` until a real lockfile is generated and committed; then CI can move to lockfile-aware caching and `npm ci`.
 
 ### Prompt 26 — Gemini Safety Policy
 **Commit:** `f5119076372ca0c3517fa04309a8f2ef5fd6f9e4`
 **Changed:** `docs/GEMINI_SAFETY_POLICY.md`
-**Result:** Layered safety policy covering provider constraints, roleplay boundaries, tool execution authorization, Workspace authorization, memory/privacy, diagnostics, and safety-focused tests.
+**Result:** Layered safety policy covering provider constraints, roleplay boundaries, tool authorization, Workspace authorization, memory/privacy, diagnostics, and tests.
 **Live verification:** Current Google Interactions documentation states custom safety settings are not supported in Interactions, so Elara does not expose pretend per-request safety-threshold controls on the canonical path. citeturn962400search10turn962400search4
 
 ### Prompt 27 — Creative-Context System Instruction
 **Commit:** `23925759b25d7699fca2bc4de0b4baebf1764bfd`
 **Changed:** `docs/CREATIVE_CONTEXT_SYSTEM_INSTRUCTION.md`
-**Result:** Authored the production Elara master system instruction covering identity, personality, roleplay, truthfulness, emotional boundaries, tool behavior, Workspace constraints, memory separation, privacy, and instruction integrity. The instruction is application-owned configuration and remains separate from ordinary conversation messages and tool schemas.
+**Result:** Production Elara master system instruction covering identity, personality, roleplay, truthfulness, emotional boundaries, tools, Workspace, memory, privacy, and instruction integrity. It is application-owned configuration, separate from ordinary conversation content and tool schemas.
 **Live verification:** Current Gemini documentation supports a distinct `system_instruction` request field. citeturn962400search7
 
 ## Current runtime status
 
-Runtime scaffold exists and CI now attempts the actual install/lint/typecheck/unit-test/build/E2E chain. The repository does not yet have a committed generated lockfile, and the development environment used for this pass cannot honestly execute npm locally against the GitHub worktree. Therefore no local green claim is made until GitHub Actions proves the runtime chain.
+The runtime scaffold is in `main`, with CI configured to run install/lint/typecheck/unit-test/build/Playwright E2E. The latest observed CI run before this final bookkeeping correction failed at dependency installation; the toolchain fix above was then committed and must be verified by the subsequent GitHub Actions run before this milestone can honestly be called green.
+
+No pull requests are used for this work. Changes are committed directly to `main`.
 
 ## Future-self requirements preserved
 

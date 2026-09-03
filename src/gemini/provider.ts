@@ -1,7 +1,8 @@
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiTurnPort, type GeminiTurnRequest, type GeminiUsage } from './contracts';
 import { normalizeGeminiError } from './errors';
 
-const WORKER_URL = (import.meta.env.VITE_GEMINI_WORKER_URL as string | undefined)?.trim() || 'https://elara-gemini.cryogenized.workers.dev';
+const WORKER_BASE_URL = (import.meta.env.VITE_GEMINI_WORKER_URL as string | undefined)?.trim() || 'https://elara-gemini.cryogenized.workers.dev';
+const WORKER_URL = `${WORKER_BASE_URL.replace(/\/$/, '')}/api/gemini`;
 
 function asRecord(value: unknown): Record<string, unknown> {
   return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
@@ -50,7 +51,7 @@ async function readErrorResponse(response: Response): Promise<Error & { status?:
     // Keep the bounded text as the safe diagnostic message.
   }
   if (response.status === 404) {
-    message = 'Gemini Worker endpoint is not configured. Set VITE_GEMINI_WORKER_URL for this deployment.';
+    message = 'Gemini Worker API endpoint was not found.';
   }
   const error = new Error(message || `Gemini Worker returned HTTP ${response.status}`) as Error & { status?: number };
   error.status = response.status;

@@ -40,7 +40,7 @@ The character has a dedicated master system-instruction source containing durabl
 
 Long-term notes/memory are a separate retrievable domain for notable events and past experiences. Ordinary conversation history is not automatically permanent memory. This preserves important experiences when model context windows turn over without creating a giant memory manager.
 
-Never combine provider calls, stream parsing, tool execution, Workspace access, character prompting, memory retrieval, persistence, and diagnostics into one manager/service/runtime.
+Never combine provider calls, stream parsing, tool execution, Workspace access, character prompting, memory retrieval, persistence, diagnostics, and presentation into one manager/service/runtime.
 
 ## 50-prompt roadmap
 
@@ -105,7 +105,11 @@ Prompts 8–12 complete: canonical streaming architecture, thinking-summary disp
 
 Prompts 13–17 complete as foundation contracts: credential architecture, Android-portrait shell, composer behavior, voice capability boundary, and attachment lifecycle.
 
-These five prompts intentionally stop short of claiming runtime/package implementation because the repository did not yet contain the npm scaffold or generated lockfile. The contracts are now fixed so the runtime implementation can be generated from the current package graph without changing the architecture.
+Prompts 18–22 complete as foundation contracts: image input, PDF/document input, character portrait, appearance system, and mobile performance budget.
+
+These prompts establish the contracts ahead of runtime implementation; they do not fabricate an npm lockfile or claim local lint/typecheck/build results that were not actually run.
+
+Current next work: Prompt 23 — Modular Code Rules.
 
 Node.js 24 LTS remains the runtime baseline. Live dependency/API verification remains mandatory for fast-moving surfaces.
 
@@ -113,9 +117,9 @@ Node.js 24 LTS remains the runtime baseline. Live dependency/API verification re
 
 Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, or GitHub Action surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
 
-Current Prompt 13 verification: Cloudflare Workers secrets are encrypted bindings exposed through the Worker environment; sensitive values must not be put in plaintext `vars`. citeturn957008search0turn957008search1
+Current Prompt 18–19 verification: Google's current Gemini documentation confirms native image input in Interactions and native PDF/document input; PDFs can be sent inline for smaller transient use, while the Files API is recommended for larger or repeatedly reused files. Google's PDF guidance also describes native multimodal understanding of text, images, diagrams, charts, and tables. citeturn467827search0turn467827search1turn467827search3turn467827search5
 
-Current Prompt 14–17 verification: Vite's current scaffolding remains `npm create vite@latest`; safe-area handling uses CSS environment variables; Web Speech `SpeechRecognition` has limited browser availability; HTML `accept` is a picker hint rather than a validation mechanism. citeturn339022search0turn339022search3turn957008search8turn339022search1
+Current Prompt 22 verification: Core Web Vitals “good” targets remain LCP ≤2.5s, INP ≤200ms, and CLS ≤0.1 at the 75th percentile. Elara additionally sets an internal initial-JavaScript budget of 200 KB compressed for the core shell. citeturn646477search1
 
 ## Future-self handoff protocol
 
@@ -127,4 +131,4 @@ Every completed prompt must record what changed, why, files, decisions, live fac
 
 ## Current implementation posture
 
-Build directly and incrementally. Do not recreate the archived architecture. Keep tool calling, Workspace integrations, character prompting, memory, persistence, diagnostics, and the canonical Gemini provider modular and independently testable.
+Build directly and incrementally. Do not recreate the archived architecture. Keep tool calling, Workspace integrations, character prompting, memory, persistence, diagnostics, attachments, appearance, and the canonical Gemini provider modular and independently testable.

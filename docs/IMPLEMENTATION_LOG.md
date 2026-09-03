@@ -27,8 +27,7 @@ This file is the durable implementation handoff record for completed roadmap pro
 ### Prompt 8 — Streaming Architecture
 **Commit:** `dd23e8b0f00598f02cc13aa162238132035dbce2`  
 **Changed:** `docs/GEMINI_STREAMING_ARCHITECTURE.md`  
-**Result:** Canonical Interactions SSE/step lifecycle and normalized event boundary covering text, thoughts, tool calls, completion, cancellation and failure.  
-**Live verification:** Google documents current `interaction.created`, `step.start`, `step.delta`, `step.stop`, `interaction.completed`, and terminal stream semantics. `step.delta` is the current event model after the 2026 breaking change.
+**Result:** Canonical Interactions SSE/step lifecycle and normalized event boundary covering text, thoughts, tool calls, completion, cancellation and failure.
 
 ### Prompt 9 — Thinking Display
 **Commit:** `179e33639b384d344b628017348a411a6158c349`  
@@ -38,53 +37,79 @@ This file is the durable implementation handoff record for completed roadmap pro
 ### Prompt 10 — Conversation Data Model
 **Commit:** `04b422573efae69e7d2f4c49f65d6aec71c8da9b`  
 **Changed:** `docs/CONVERSATION_DATA_MODEL.md`  
-**Result:** Minimal conversations/messages/typed-parts model with explicit request state and provider continuity metadata. Tool calls/results are first-class parts, while tool definitions remain a separate curated capability registry. Future memory notes remain a separate domain.
+**Result:** Minimal conversations/messages/typed-parts model with explicit request state and provider continuity metadata. Tool calls/results are first-class parts; tool declarations stay separate. Future memory notes remain a separate domain.
 
 ### Prompt 11 — Local Persistence
 **Commit:** `4ff1b14c66d40e9f215e1b55f0101a1b482f9396`  
 **Changed:** `docs/LOCAL_PERSISTENCE.md`  
-**Result:** Dexie/IndexedDB is the sole client persistence authority with explicit schema/migration/recovery/transaction boundaries and no competing localStorage source of truth.
+**Result:** Dexie/IndexedDB is the sole client persistence authority with explicit schema/migration/recovery/transaction boundaries.
 
 ### Prompt 12 — API Lockbox
 **Commit:** `03a3e3db7dbd86d2a846e4311405276892ddbc6c`  
 **Changed:** `docs/API_LOCKBOX.md`  
-**Result:** Central secret/configuration ownership, strict separation of Gemini/OAuth secrets, and explicit future boundaries for character system prompt, curated tools, Workspace execution, and memory notes.  
-**Live verification:** Current `@google/genai` package guidance warns against exposing application-owned API keys in client-side production code.
+**Result:** Central secret/configuration ownership and explicit separation of Gemini/OAuth secrets, future tool schemas, Workspace access, character system prompt, and memory notes.
 
 ### Related correction
 **Commit:** `58909eb1b7c42ff16cb65a8cc7e1f9cc362a852a`  
 **Changed:** `docs/SYSTEM_BOUNDARIES.md`  
-**Result:** Restored the full Prompt 4 responsibility/ownership table after an intermediate edit, while preserving the new future tool/Workspace/character/memory constraints. The final document again contains the original directional architecture and complexity guardrails.
+**Result:** Restored the full Prompt 4 responsibility/ownership ADR after an intermediate documentation edit.
 
-## Batch result
+## 2026-09-03 — Prompts 13–17
 
-Prompts 8–12 establish the state/execution foundation without building a monolith:
+### Prompt 13 — Gemini Credential Architecture
+**Commit:** `6ee196007b941d736ae5e7237e63484db3b0b938`  
+**Changed:** `docs/GEMINI_CREDENTIAL_ARCHITECTURE.md`  
+**Result:** Browser never owns the application Gemini secret; protected credentials belong behind the Worker/security boundary. Cloudflare secret bindings, local secret-file rules, rotation, and future tool/Workspace credential separation are defined.
+
+### Prompt 14 — Mobile-First Shell
+**Commit:** `8f4cb7ac2e0a06f8110e8d19244e8bc9e10bef72`  
+**Changed:** `docs/MOBILE_FIRST_SHELL.md`  
+**Result:** Android portrait is the canonical layout with one conversation scroll surface, keyboard-safe composer placement, safe-area handling, accessibility requirements, and shared responsive components.
+
+### Prompt 15 — ChatGPT-Style Composer
+**Commit:** `90204d91680ec899ccd970a17305f35924efb92f`  
+**Changed:** `docs/CHAT_COMPOSER.md`  
+**Result:** Multiline composer, explicit send/cancel behavior, bounded growth, attachment/voice affordances, accessible states, and strict separation from persistence/provider/tool execution are defined.
+
+### Prompt 16 — Voice-to-Text
+**Commit:** `59fa246b7c8027a80ba7a1ac8e9280eba6036e4e`  
+**Changed:** `docs/VOICE_TO_TEXT.md`  
+**Result:** Optional SpeechRecognition capability boundary with runtime feature detection, explicit states, cleanup, privacy, and graceful unsupported/permission/error handling. Browser support is treated as limited rather than assumed. citeturn957008search8
+
+### Prompt 17 — Attachment System
+**Commit:** `8c370bcf0872b1f76d97f75efa110ac1d0e42349`  
+**Changed:** `docs/ATTACHMENT_SYSTEM.md`  
+**Result:** One attachment lifecycle for selection, validation, metadata, preview, progress, failure/removal, persistence references, and provider handoff. `accept` is treated as a picker hint, not validation. citeturn339022search1turn339022search5
+
+## Batch-level architectural result
+
+Prompts 13–17 establish the security and mobile-input foundation without introducing a monolith:
 
 ```text
-chat/application
+browser UI
    ↓
-capability-gated settings + normalized request
-   ↓
-canonical Interactions provider
-   ↓
-normalized event stream
-   ↓
-conversation state
-   ↓
-authoritative Dexie persistence
-
-separate capabilities:
-character master system instruction
-curated tool registry
-Google Workspace through one OAuth authority
-future retrievable memory notes
-protected secrets through Lockbox/Worker
+focused chat/application interfaces
+   ├── character master system instruction (separate)
+   ├── curated tool schemas (separate)
+   ├── future memory/notes retrieval (separate)
+   ├── attachment boundary
+   └── voice boundary
+          ↓
+canonical Gemini provider
+          ↓
+Worker/security boundary for protected credentials
 ```
+
+Future Google Workspace tooling continues to use the single OAuth authority and validated services. Nothing in this batch creates a second provider, second server runtime, or generic all-purpose manager.
+
+## Runtime-scaffold limitation
+
+The repository still does not contain the actual npm package scaffold or generated `package-lock.json`. The current environment cannot reach GitHub/npm directly for a legitimate package installation, so no lockfile has been fabricated and no lint/typecheck/build result has been claimed. The five prompts above therefore lock the implementation contracts and mobile/security behavior; the actual React/Vite runtime implementation must be generated from the live npm dependency graph in the next scaffold-capable phase.
+
+## Live verification for Prompts 13–17
+
+Cloudflare Workers documents encrypted secret bindings and explicitly distinguishes them from plaintext environment variables. Vite's current guide uses `npm create vite@latest`. CSS safe-area environment variables are standard, `SpeechRecognition` has limited browser availability, and file-input `accept` values are only selection hints. citeturn957008search0turn339022search0turn339022search3turn957008search8turn339022search1
 
 ## Future-self requirements preserved
 
-Every future implementation must retain these constraints: tool execution is allow-listed and validated; Workspace tools cannot bypass OAuth/scope/write-confirmation controls; the character master prompt is separate from user content and tool schemas; notable memories live in their own retrievable domain; and no all-purpose manager/service/runtime may absorb all of these concerns.
-
-## Verification
-
-The current repository gate is green on the latest verified Prompt 12 commit. The source tree still has no dependency scaffold, so full lint/typecheck/test/build verification will expand once the runtime package graph is introduced. At that point the committed lockfile and actual test suite become mandatory CI gates.
+Every future implementation must retain these constraints: tool execution is allow-listed and validated; Workspace tools cannot bypass OAuth/scope/write-confirmation controls; the character master prompt is separate from user content and tool schemas; notable memories live in their own retrievable domain; attachments and voice are input boundaries rather than provider runtimes; and no all-purpose manager/service/runtime may absorb all of these concerns.

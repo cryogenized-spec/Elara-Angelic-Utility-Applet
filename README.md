@@ -42,6 +42,16 @@ Long-term notes/memory are a separate retrievable domain for notable events and 
 
 Never combine provider calls, stream parsing, tool execution, Workspace access, character prompting, memory retrieval, persistence, diagnostics, and presentation into one manager/service/runtime.
 
+## Google Workspace orchestration direction
+
+Google Workspace is not being implemented as a collection of generic CRUD adapters. Calendar, Tasks, Gmail, Docs, and Chat are independent service boundaries feeding a future orchestration/Kanban layer.
+
+Calendar and Tasks receive special emphasis because the eventual Kanban system will let Elara manage work conversationally while the user retains a direct visual overview. Task hierarchy/position and Calendar event movement/partial updates therefore remain first-class operations rather than being collapsed into generic update calls.
+
+Gmail is equally important for orchestration. Message search, thread inspection, labels, label modifications, trash/untrash, drafts, and sending are separate operational concepts. Consequential operations remain subject to OAuth capability checks and the per-action write-confirmation layer.
+
+The future Kanban/orchestration layer must consume normalized, auditable operation records from these services. It must not own Google OAuth, provider endpoint logic, or service-specific credential handling.
+
 ## Deployment architecture
 
 Elara is a Vite application and should be published to GitHub Pages as built static output, not by serving the source repository root.
@@ -135,6 +145,8 @@ Prompts 33–37 complete as foundation contracts: bounded retry policy, explicit
 
 Prompts 38–42 complete: central Google scope registry, demand-driven incremental authorization, stay-connected state semantics, Google OAuth settings UI contract, and the first concrete Google Calendar service boundary plus contract test.
 
+Prompts 43–47 complete: granular Google Tasks service, focused Docs service, Google Chat service, orchestration-critical Gmail service, explicit model-visible Google tool registry, and a bounded write-confirmation policy for consequential operations.
+
 ## Runtime status
 
 The first executable vertical slice exists. It proves the application plumbing with a deterministic demo transport:
@@ -147,7 +159,7 @@ The repository does not contain a fabricated `package-lock.json`. Until a real l
 
 ## Google Workspace status
 
-Workspace access is now architecturally connected through one OAuth authority. Calendar is the first service boundary and currently defines read-only event listing through the registered Calendar event-read capability. Tokens remain outside feature services; mutating operations remain reserved for later write-confirmation work.
+Workspace access is now architecturally connected through one OAuth authority. Calendar, Tasks, Docs, Chat, and Gmail each have focused service boundaries. The model-visible Google tool surface is explicitly allow-listed, with OAuth capability mapping and separate write-confirmation classification. Gmail and Tasks are treated as especially important orchestration inputs because the future Kanban layer will need fine-grained task movement/state and email workflow control.
 
 ## External-source revalidation rule
 

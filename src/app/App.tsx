@@ -6,7 +6,6 @@ import { geminiTurnPort } from '../gemini/provider';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent } from '../gemini/contracts';
 import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import { getGeminiModel } from '../gemini/model-registry';
-import { hasGeminiApiKey, setGeminiApiKey, clearGeminiApiKey } from '../security/lockbox';
 import { Icon } from '../ui/icons';
 import { fontFamilyForCss, type FontSelection } from '../ui/fontRegistry';
 import { useVisualViewport } from '../ui/useVisualViewport';
@@ -41,7 +40,6 @@ export function App() {
   const [fontSize, setFontSize] = useState(15);
   const [portraitScale, setPortraitScale] = useState<PortraitScale>(2);
   const [portraitBackground, setPortraitBackground] = useState<PortraitBackground>('midnight');
-  const [geminiApiConfigured, setGeminiApiConfigured] = useState(false);
   const [geminiModel, setGeminiModel] = useState(DEFAULT_GEMINI_MODEL);
   const [geminiPerModelSettings, setGeminiPerModelSettings] = useState<Record<string, GeminiSettings>>({ [DEFAULT_GEMINI_MODEL]: defaultsForModel(DEFAULT_GEMINI_MODEL) });
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -52,12 +50,12 @@ export function App() {
     let cancelled = false;
     void (async () => {
       try {
-        const [loadedThreads, configured, savedGeminiSettings] = await Promise.all([loadThreads(), hasGeminiApiKey(), loadGeminiSettings()]);
+        const [loadedThreads, savedGeminiSettings] = await Promise.all([loadThreads(), loadGeminiSettings()]);
         const storedActive = window.localStorage.getItem(ACTIVE_THREAD_KEY);
         const activeId = storedActive && loadedThreads.some((thread) => thread.id === storedActive) ? storedActive : (loadedThreads[0]?.id ?? 'primary');
         const loadedConversation = await loadConversation(activeId);
         if (cancelled) return;
-        setThreads(loadedThreads); setConversation(loadedConversation); setGeminiApiConfigured(configured); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel);
+        setThreads(loadedThreads); setConversation(loadedConversation); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel);
         window.localStorage.setItem(ACTIVE_THREAD_KEY, activeId);
       } catch { if (!cancelled) setError('Could not load the local conversation history.'); }
     })();
@@ -101,14 +99,12 @@ export function App() {
   async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not archive that conversation.'); } }
   async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } }
   async function handleQuickAction(id: QuickActionId) { setError(null); try { setQuickActionSurface(await demoQuickActionPort.execute(id)); } catch (cause) { setQuickActionSurface(null); setError(cause instanceof Error ? cause.message : 'The quick action could not be opened.'); } }
-  async function handleSaveGeminiApiKey(apiKey: string) { await setGeminiApiKey(apiKey); setGeminiApiConfigured(true); }
-  async function handleClearGeminiApiKey() { await clearGeminiApiKey(); setGeminiApiConfigured(false); }
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }
   async function handleResetGeminiSettings() { await handleGeminiSettingsChange(defaultsForModel(geminiModel)); }
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
 
-  if (settingsOpen) return <SettingsScreen font={font} onFontChange={setFont} fontSize={fontSize} onFontSizeChange={setFontSize} portraitScale={portraitScale} onPortraitScaleChange={setPortraitScale} portraitBackground={portraitBackground} onPortraitBackgroundChange={setPortraitBackground} geminiApiConfigured={geminiApiConfigured} onSaveGeminiApiKey={handleSaveGeminiApiKey} onClearGeminiApiKey={handleClearGeminiApiKey} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} onBack={() => setSettingsOpen(false)} />;
+  if (settingsOpen) return <SettingsScreen font={font} onFontChange={setFont} fontSize={fontSize} onFontSizeChange={setFontSize} portraitScale={portraitScale} onPortraitScaleChange={setPortraitScale} portraitBackground={portraitBackground} onPortraitBackgroundChange={setPortraitBackground} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} onBack={() => setSettingsOpen(false)} />;
 
   return <main className="app-shell" style={{ fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
     <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button><button className="glass-menu-button left-spine__settings" type="button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Icon name="settings" size={20} /></button></div>

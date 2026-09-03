@@ -75,7 +75,7 @@ test('exposes Gemini model controls and states the protected transport boundary'
   await expect(page.getByText(/Supported levels only/)).toBeVisible();
   await expect(page.getByText(/Settings save automatically/)).toBeVisible();
 
-  await page.getByRole('button', { name: 'Chat' }).click();
+  await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(page.getByText(/Protected Worker boundary/)).toBeVisible();
 });
 

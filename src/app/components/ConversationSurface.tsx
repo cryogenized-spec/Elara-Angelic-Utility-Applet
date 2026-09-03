@@ -1,8 +1,35 @@
+import { useEffect, useRef } from 'react';
 import type { ChatMessage } from '../../domain/chat';
 import { ExecutionSummary } from './ExecutionSummary';
 import './conversation-surface.css';
 
 export function ConversationSurface({ messages, fontSize }: { messages: ChatMessage[]; fontSize: number }) {
+  const conversationRef = useRef<HTMLElement>(null);
+  const shouldStickToEndRef = useRef(true);
+
+  function rememberScrollPosition() {
+    const element = conversationRef.current;
+    if (!element) return;
+    shouldStickToEndRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160;
+  }
+
+  function scrollToEnd() {
+    const element = conversationRef.current;
+    if (!element || !shouldStickToEndRef.current) return;
+    element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' });
+  }
+
+  useEffect(() => {
+    scrollToEnd();
+  }, [messages.length, messages.at(-1)?.text]);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return undefined;
+    viewport.addEventListener('resize', scrollToEnd);
+    return () => viewport.removeEventListener('resize', scrollToEnd);
+  }, []);
+
   if (messages.length === 0) {
     return (
       <section className="conversation" aria-label="Conversation">
@@ -16,7 +43,7 @@ export function ConversationSurface({ messages, fontSize }: { messages: ChatMess
   }
 
   return (
-    <section className="conversation" aria-label="Conversation" aria-live="polite">
+    <section ref={conversationRef} className="conversation" aria-label="Conversation" aria-live="polite" onScroll={rememberScrollPosition}>
       <div className="conversation__stream">
         {messages.map((message) => (
           <article className={`message message-${message.role}`} key={message.id}>

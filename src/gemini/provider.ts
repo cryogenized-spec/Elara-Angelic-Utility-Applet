@@ -1,10 +1,10 @@
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, type SafetySetting } from '@google/genai';
 import { getGeminiApiKey } from '../security/lockbox';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiTurnPort, type GeminiTurnRequest, type GeminiUsage } from './contracts';
 import { normalizeGeminiError } from './errors';
 import { ELARA_SYSTEM_INSTRUCTION } from './creative-context';
 
-const SAFETY_SETTINGS = [
+const SAFETY_SETTINGS: SafetySetting[] = [
   { category: 'harassment', threshold: 'block_none' },
   { category: 'hate_speech', threshold: 'block_none' },
   { category: 'sexually_explicit', threshold: 'block_none' },
@@ -78,9 +78,10 @@ export const geminiTurnPort: GeminiTurnPort = {
         if (eventInteractionId) interactionId = eventInteractionId;
 
         if (eventType === 'interaction.created') {
-          yield { type: 'interaction-created', interactionId: interactionId ?? 'unknown', model: request.model || DEFAULT_GEMINI_MODEL }; continue;
+          const model = readString(asRecord(event.interaction), 'model') ?? request.model || DEFAULT_GEMINI_MODEL;
+          yield { type: 'interaction-created', interactionId: interactionId ?? 'unknown', model }; continue;
         }
-        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
+        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
           const status = readString(event, 'status') ?? readString(asRecord(event.interaction), 'status') ?? (eventType.replace('interaction.', '') || 'in_progress');
           if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue;
         }
@@ -90,12 +91,15 @@ export const geminiTurnPort: GeminiTurnPort = {
           const step = asRecord(event.step);
           const summaryParts = Array.isArray(step.summary) ? step.summary : [];
           for (const summary of summaryParts) { const text = readString(asRecord(summary), 'text'); if (text) yield { type: 'thought-summary-delta', index, text }; }
+          const signature = readString(step, 'signature');
+          if (signature) yield { type: 'thought-signature', index, signature };
           continue;
         }
         if (eventType === 'step.delta') {
           const delta = asRecord(event.delta); const index = stepIndex(event); const deltaType = readString(delta, 'type'); const deltaText = readString(delta, 'text');
           if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; continue; }
           if (deltaType === 'thought_summary') { if (deltaText) yield { type: 'thought-summary-delta', index, text: deltaText }; continue; }
+          if (deltaType === 'text') { if (deltaText) yield { type: 'text-delta', index, text: deltaText }; continue; }
           if (deltaText) yield { type: 'text-delta', index, text: deltaText };
           continue;
         }
@@ -105,6 +109,13 @@ export const geminiTurnPort: GeminiTurnPort = {
           interactionId = readString(interaction, 'id') ?? interactionId;
           const status = readString(interaction, 'status') ?? 'completed';
           yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: readUsage(interaction.usage) ?? readUsage(event.usage) };
+          return;
+        }
+        if (eventType === 'error') {
+          const providerError = asRecord(event.error);
+          const message = readString(providerError, 'message') ?? 'Gemini returned a streaming error.';
+          const normalized = normalizeGeminiError(new Error(message), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) });
+          yield { type: 'failed', error: normalized };
           return;
         }
       }

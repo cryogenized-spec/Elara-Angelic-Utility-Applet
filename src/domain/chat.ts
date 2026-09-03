@@ -1,6 +1,24 @@
 export type ChatRole = 'user' | 'assistant' | 'system';
 export type ProviderStatus = 'idle' | 'streaming' | 'failed';
 
+export interface ProviderUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  cachedTokens?: number;
+  thoughtsTokens?: number;
+  totalTokens?: number;
+}
+
+export interface ProviderTurnMetadata {
+  provider: 'gemini';
+  model: string;
+  interactionId: string;
+  startedAt: number;
+  completedAt: number;
+  durationMs: number;
+  usage?: ProviderUsage;
+}
+
 export interface ExecutionSummary {
   id: string;
   steps: string[];
@@ -14,6 +32,7 @@ export interface ChatMessage {
   createdAt: number;
   conversationId?: string;
   executionSummary?: ExecutionSummary;
+  providerTurn?: ProviderTurnMetadata;
 }
 
 export interface ConversationState {

@@ -68,3 +68,24 @@ test('controls portrait scale and background from Appearance settings', async ({
   await expect(banner).toHaveClass(/portrait-scale-3/);
   await expect(banner).toHaveClass(/portrait-background-blue-hour/);
 });
+
+test('renders an assistant execution summary that expands into numbered safe steps', async ({ page }) => {
+  await page.goto('');
+  const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  await composer.fill('Show me a useful demo turn');
+  await page.getByRole('button', { name: 'Send message' }).click();
+
+  await expect(page.getByText('Demo response received: Show me a useful demo turn')).toBeVisible();
+  const summary = page.getByRole('region', { name: 'Execution summary' });
+  await expect(summary).toBeVisible();
+  await expect(summary.getByText(/ms$/)).toBeVisible();
+  await expect(summary.getByText('1', { exact: true })).toHaveCount(0);
+
+  await summary.getByRole('button', { name: /Execution summary/ }).click();
+  await expect(summary.locator('ol')).toBeVisible();
+  await expect(summary.locator('li')).toHaveCount(3);
+  await expect(summary.locator('.execution-summary__step-index')).toHaveText(['1', '2', '3']);
+
+  await summary.getByRole('button', { name: /Execution summary/ }).click();
+  await expect(summary.locator('ol')).toBeHidden();
+});

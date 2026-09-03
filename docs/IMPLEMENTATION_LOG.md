@@ -24,35 +24,28 @@ This file is the durable implementation handoff record for completed roadmap pro
 
 ## 2026-09-03 — Prompts 8–12
 
-Batch status: **in progress** until all five prompt artifacts exist and final CI verification is green.
+Batch status: **in progress**.
 
-### Prompt 8 — Streaming Architecture
-Planned artifact: `docs/GEMINI_STREAMING_ARCHITECTURE.md`.
+The five artifacts are being landed directly on `main`. Completion records, exact commit SHAs, and CI results will be added only after all five artifacts exist and the repository gate is green.
 
-### Prompt 9 — Thinking Display
-Planned artifact: `docs/GEMINI_THINKING_DISPLAY.md`.
+Required artifacts:
 
-### Prompt 10 — Conversation Data Model
-Planned artifact: `docs/CONVERSATION_DATA_MODEL.md`.
+- `docs/GEMINI_STREAMING_ARCHITECTURE.md`
+- `docs/GEMINI_THINKING_DISPLAY.md`
+- `docs/CONVERSATION_DATA_MODEL.md`
+- `docs/LOCAL_PERSISTENCE.md`
+- `docs/API_LOCKBOX.md`
 
-### Prompt 11 — Local Persistence
-Planned artifact: `docs/LOCAL_PERSISTENCE.md`.
+## Foundation constraints
 
-### Prompt 12 — API Lockbox
-Planned artifact: `docs/API_LOCKBOX.md`.
+Tool calling is a curated capability surface: model-visible schemas are allow-listed application capabilities; execution occurs only in validated services. Google Workspace capabilities stay behind the one OAuth authority, scope checks, and future write confirmation.
 
-## Foundation constraints carried into this batch
+The character master system prompt is a dedicated system-instruction source separate from user messages and tool schemas.
 
-Tool calling remains a curated capability surface: model-visible schemas are allow-listed application capabilities; execution occurs only in validated services. Google Workspace capabilities stay behind the one OAuth authority, scope checks, and future write confirmation.
+Long-term notes/memory are a separate retrievable domain for notable events. Conversation history is not silently turned into permanent memory, and memory must not become a second database or giant chat manager.
 
-The character master system prompt is separate from user messages and tool schemas and belongs to a controlled system-instruction builder.
+No monolithic manager/service/runtime may own provider calls, stream parsing, tool execution, Workspace access, prompt composition, memory retrieval, persistence, and diagnostics together.
 
-Long-term notes/memory belong to a separate retrievable domain for notable events. They must not turn conversation management into a monolithic memory engine.
-
-No all-purpose manager/service/runtime may own provider calls, stream parsing, tool execution, Workspace access, prompt composition, memory retrieval, persistence, and diagnostics together.
-
-## Live facts rechecked for this batch
+## Live facts rechecked
 
 Google's current Interactions documentation specifies SSE streaming with step-based events; `step.delta` is current after the May 2026 breaking change. Thought summaries use `thought` steps and `thinking_summaries`. Function calling uses function-call/result steps with `previous_interaction_id` continuation. The current `@google/genai` npm latest is 2.19.0 and its documentation warns against exposing application-owned production API keys in browser code.
-
-The batch completion section below is intentionally empty until the actual changes land.

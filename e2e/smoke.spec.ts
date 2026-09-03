@@ -80,7 +80,7 @@ test('renders an assistant execution summary that expands into numbered safe ste
   await expect(summary).toBeVisible();
   await expect(summary.getByText(/ms$/)).toBeVisible();
 
-  const toggle = summary.getByRole('button', { name: /Execution summary/ });
+  const toggle = summary.getByRole('button', { name: 'Execution summary' });
   await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-expanded', 'true');
@@ -111,4 +111,38 @@ test('supports multiline drafts, bounded composer growth, and explicit cancellat
 
   await composer.fill(Array.from({ length: 60 }, (_, index) => `line ${index}`).join('\n'));
   await expect(composer).toHaveCSS('max-height', '132px');
+});
+
+test('creates, searches, selects, renames, and restores conversation threads', async ({ page }) => {
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  const sidebar = page.getByRole('complementary', { name: 'Chat threads' });
+
+  await sidebar.getByRole('button', { name: 'New chat' }).click();
+  const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  await composer.fill('Plan a weekend trip to the Drakensberg');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.getByText('Demo response received: Plan a weekend trip to the Drakensberg')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await expect(sidebar.getByText(/Plan Weekend Trip Drakensberg/i)).toBeVisible();
+
+  const search = sidebar.getByRole('textbox', { name: 'Search chats' });
+  await search.fill('drakensberg');
+  await expect(sidebar.getByText(/Plan Weekend Trip Drakensberg/i)).toBeVisible();
+
+  const renamedThread = sidebar.getByRole('button', { name: /Plan Weekend Trip Drakensberg/i });
+  const row = renamedThread.locator('..');
+  await row.locator('summary').click();
+  await row.getByRole('button', { name: 'Rename' }).click();
+  const renameInput = row.getByRole('textbox', { name: 'Thread name' });
+  await renameInput.fill('Mountain Escape');
+  await renameInput.press('Enter');
+  await expect(sidebar.getByRole('button', { name: /Mountain Escape/i })).toBeVisible();
+
+  await sidebar.getByRole('button', { name: /Mountain Escape/i }).click();
+  await expect(page.getByText('Demo response received: Plan a weekend trip to the Drakensberg')).toBeVisible();
+
+  await page.reload();
+  await expect(page.getByText('Demo response received: Plan a weekend trip to the Drakensberg')).toBeVisible();
 });

@@ -48,7 +48,10 @@ The archived `Elara-Companion-current` repository is a reference specimen only. 
 
 Development is being conducted through numbered implementation prompts. Each prompt should make a small, verifiable change and leave the repository in a working state.
 
-The first phase is forensic architecture and the minimal vertical chat slice. Large subsystems must not be introduced before the core request/stream/persistence path is proven.
+Prompt 1 established the clean-room repository forensics and architectural direction.
+Prompt 2 defines the exact initial product boundary in `docs/PRODUCT_BOUNDARY.md`.
+
+The first implementation phase is the minimal vertical chat slice. Large subsystems must not be introduced before the core request/stream/persistence path is proven.
 
 ## Gemini safety and creative context
 
@@ -56,6 +59,8 @@ The application is intended for legal fictional and creative writing/roleplay. T
 
 A single centralized system instruction will explicitly establish the fictional/creative context without attempting to override provider safety policy.
 
-## Current status
+## Product boundary
 
-Prompt 1: repository forensics and clean-room architecture definition.
+The authoritative v1 product scope is documented in [`docs/PRODUCT_BOUNDARY.md`](docs/PRODUCT_BOUNDARY.md). New implementation work must be checked against that document before adding scope.
+
+The v1 success criterion is deliberately simple: open Elara on Android portrait, start a conversation, send a message, receive a streamed Gemini response with supported thinking summaries, persist it, close/reopen the app, recover the conversation, and receive useful diagnostics rather than an indefinite spinner when network/provider/timeout failures occur.

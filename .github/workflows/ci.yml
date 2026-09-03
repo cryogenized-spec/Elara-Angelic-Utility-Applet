@@ -10,8 +10,8 @@ permissions:
   contents: read
 
 jobs:
-  repository-gate:
-    name: Repository gate
+  runtime:
+    name: Runtime verification
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -42,8 +42,29 @@ jobs:
           test -f docs/ARCHITECTURE_DECISION.md
           test -f docs/SYSTEM_BOUNDARIES.md
           test -f .nvmrc
+          test -f package.json
           grep -q "One canonical Gemini execution path" README.md
           grep -q "Android portrait" docs/PRODUCT_BOUNDARY.md
           grep -q "One canonical Gemini provider implementation" docs/PRODUCT_BOUNDARY.md
           grep -q "Node.js 24 LTS" docs/ARCHITECTURE_DECISION.md
-          echo "Foundation repository gate passed."
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: End-to-end tests
+        run: npm run e2e -- --project=chromium

@@ -1,20 +1,30 @@
-import { Icon, type IconName } from '../../ui/icons';
+import { Icon } from '../../ui/icons';
+import { DEFAULT_QUICK_ACTIONS } from '../quick-actions/defaults';
+import type { QuickActionId } from '../quick-actions/contracts';
 
-export type QuickTool = { id: string; label: string; icon: IconName };
+export type QuickTool = typeof DEFAULT_QUICK_ACTIONS[number];
 
-const defaultTools: QuickTool[] = [
-  { id: 'calendar', label: 'Calendar', icon: 'calendar' },
-  { id: 'tasks', label: 'Tasks', icon: 'tasks' },
-  { id: 'gmail', label: 'Gmail', icon: 'mail' },
-  { id: 'new-chat', label: 'New chat', icon: 'plus' },
-];
-
-export function TopToolRail({ onAction }: { onAction: (id: string) => void }) {
+export function TopToolRail({
+  tools = DEFAULT_QUICK_ACTIONS,
+  onAction,
+  activeId = null,
+}: {
+  tools?: readonly QuickTool[];
+  onAction: (id: QuickActionId) => void;
+  activeId?: QuickActionId | null;
+}) {
   return (
     <nav className="tool-rail" aria-label="Quick actions">
       <div className="tool-rail__track">
-        {defaultTools.map((tool) => (
-          <button className="tool-pill" type="button" key={tool.id} onClick={() => onAction(tool.id)}>
+        {tools.map((tool) => (
+          <button
+            className={`tool-pill${activeId === tool.id ? ' is-active' : ''}`}
+            type="button"
+            key={tool.id}
+            aria-pressed={activeId === tool.id}
+            title={tool.description}
+            onClick={() => onAction(tool.id)}
+          >
             <Icon name={tool.icon} size={17} />
             <span>{tool.label}</span>
           </button>

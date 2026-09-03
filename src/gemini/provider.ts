@@ -36,8 +36,8 @@ function buildGenerationConfig(request: GeminiTurnRequest) {
   const config = request.generationConfig;
   if (!config) return undefined;
   const generationConfig: Record<string, unknown> = {};
-  if (config.thinkingLevel) generationConfig.thinking_level = config.thinkingLevel;
-  if (config.thinkingSummaries) generationConfig.thinking_summaries = config.thinkingSummaries;
+  if (config.thinkingLevel !== undefined) generationConfig.thinking_level = config.thinkingLevel;
+  if (config.thinkingSummaries !== undefined) generationConfig.thinking_summaries = config.thinkingSummaries;
   if (config.maxOutputTokens !== undefined) generationConfig.max_output_tokens = config.maxOutputTokens;
   if (config.seed !== undefined) generationConfig.seed = config.seed;
   if (config.stopSequences?.length) generationConfig.stop_sequences = config.stopSequences;

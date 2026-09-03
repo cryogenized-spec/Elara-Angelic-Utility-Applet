@@ -22,46 +22,39 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Result:** Model-aware settings gate for thinking, thought summaries, output limits, sampling controls, and technical fields; unsupported settings cannot reach the provider.
 **CI:** run `33706769076` (#13) — success.
 
-## 2026-09-03 — Prompts 8–12 batch
+## 2026-09-03 — Prompts 8–12
 
-The following five prompts are being completed as separate narrow architecture artifacts. Each prompt must be individually committed and CI-verified before the next is treated as complete.
+These five prompts are currently being implemented as separate, narrow architecture artifacts. Each one will be individually committed and its CI run verified before the final batch record marks it complete.
 
 ### Prompt 8 — Streaming Architecture
-**Changed:** `docs/GEMINI_STREAMING_ARCHITECTURE.md`
-**Scope:** Canonical Interactions SSE parsing and normalized event contract. Covers interaction creation/status, step lifecycle, model text deltas, thought summaries/signatures, function-call lifecycle, completion/usage, cancellation, and failure. Tool calls are represented as normalized events now so future tool execution and Google Workspace integrations do not require a second stream architecture.
+`docs/GEMINI_STREAMING_ARCHITECTURE.md` will define the canonical Interactions SSE event parser and normalized stream contract, including text, thought summaries/signatures, function calls, completion, cancellation, and failure.
 
 ### Prompt 9 — Thinking Display
-**Changed:** `docs/GEMINI_THINKING_DISPLAY.md`
-**Scope:** Provider-supplied thought summaries are a separate, optional presentation concern. Hidden reasoning is never reconstructed. The UI consumes normalized summary events only.
+`docs/GEMINI_THINKING_DISPLAY.md` will define thought-summary presentation as a separate consumer of normalized provider events. Hidden reasoning will never be reconstructed.
 
 ### Prompt 10 — Conversation Data Model
-**Changed:** `docs/CONVERSATION_DATA_MODEL.md`
-**Scope:** Minimal conversation, message, typed-part, request-state, and provider-continuity model. Typed parts leave room for attachments, thinking summaries, and tool calls/results without an opaque monolithic content record.
+`docs/CONVERSATION_DATA_MODEL.md` will define conversations, ordered messages, typed message parts, request state, and provider continuity metadata, with forward-compatible placeholders for attachments and tool calls/results.
 
 ### Prompt 11 — Local Persistence
-**Changed:** `docs/LOCAL_PERSISTENCE.md`
-**Scope:** Dexie/IndexedDB is the sole browser persistence authority. Defines schema ownership, transactions, migrations, streaming recovery checkpoints, corruption handling, and separation of future memory notes from ordinary chat history.
+`docs/LOCAL_PERSISTENCE.md` will define Dexie/IndexedDB as the single authoritative browser persistence layer, with schema versions, transactions, migrations, and corruption-safe recovery.
 
 ### Prompt 12 — API Lockbox
-**Changed:** `docs/API_LOCKBOX.md`
-**Scope:** Central secret/configuration ownership. Gemini credentials, Google OAuth material, Worker bindings and signing secrets never enter normal UI state, conversation data, analytics, diagnostics or exports. Also reserves separate owners for the character system prompt, curated tool schemas, Google Workspace services, and future memory notes.
+`docs/API_LOCKBOX.md` will define centralized secret ownership and the separation of Gemini credentials, Google OAuth material, character master prompt, curated tool schemas, Workspace services, and future memory notes.
 
 ## Future architecture constraints recorded in this batch
 
-Tool calling: curated schemas describe an explicit allow-list of application capabilities; the model requests a tool, validated application code executes it, and normalized results return to Gemini. The browser cannot invent or execute arbitrary model-requested functions.
+Tool calling must remain curated and validated: schemas describe an allow-list, the model requests a capability, application code validates and executes it, and normalized results return to Gemini. Google Workspace tools must additionally pass through one OAuth authority, scope checks, and write confirmation where applicable.
 
-Google Workspace: Calendar, Tasks, Docs, and Chat remain downstream of one Google OAuth authority and a centralized tool boundary. Services cannot create parallel authorization flows or bypass scope/write-confirmation rules.
+The character master system prompt is a dedicated system-instruction source for durable identity, personality, roleplay behavior, style, and rules. It is separate from user messages, tool schemas, and conversation history.
 
-Character: durable personality, identity, roleplay behavior, and style belong in a dedicated master system-instruction source, separate from user messages and tool schemas. Prompt 27 will author its production content; the foundation already reserves its ownership boundary.
+Long-term memory/notes are a separate retrievable domain for notable events. Conversation history is not silently turned into permanent memory, and memory must not become a second database or a giant chat manager.
 
-Memory: notable past experiences can later be promoted to a separate retrievable notes domain. The memory layer must not become a hidden second conversation database or a giant chat manager.
-
-Modularity: do not combine provider calls, stream parsing, tool execution, Workspace access, prompt composition, memory retrieval, persistence, and diagnostics into a single manager/service/runtime.
+No monolithic manager/service/runtime may own provider calls, stream parsing, tool execution, Workspace access, prompt composition, memory retrieval, persistence, and diagnostics together.
 
 ## Live facts rechecked for this batch
 
-Google's current Interactions documentation specifies SSE streaming with step-based events and explicit completion events. The current breaking-change documentation confirms `step.delta` is the current delta event. Thought summaries are exposed through `thought` steps and `thinking_summaries`. Function calling is implemented as function-call steps followed by function results and can be continued with `previous_interaction_id`. Google's current SDK guidance remains `@google/genai` 2.19.0 and warns against exposing application-owned production API keys in browser code.
+Google's current Interactions documentation specifies SSE streaming with step-based events; `step.delta` is the current delta event after the May 2026 breaking change. Thought summaries use `thought` steps and `thinking_summaries`. Function calling uses function-call/result steps with `previous_interaction_id` continuation. The current `@google/genai` npm latest is 2.19.0 and its documentation warns against exposing application-owned production API keys in browser code.
 
-## Verification status
+## Verification
 
-Prompt-specific commit SHAs and CI run IDs for Prompts 8–12 will be inserted only after their actual commits and green CI results. This prevents the continuity record from getting ahead of the repository state.
+The final batch entry will be updated only after the individual prompt commits and their CI checks exist, preventing the continuity record from claiming work that has not actually landed.

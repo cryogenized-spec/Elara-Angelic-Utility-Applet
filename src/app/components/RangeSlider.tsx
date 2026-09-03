@@ -32,7 +32,7 @@ export function RangeSlider({ id, label, value, min, max, step = 1, valueLabel, 
         value={value}
         aria-label={label}
         onChange={(event) => onChange(Number(event.target.value))}
-        onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setHot(true); }}
+        onPointerDown={() => setHot(true)}
         onPointerUp={() => setHot(false)}
         onPointerCancel={() => setHot(false)}
         onKeyDown={(event) => {

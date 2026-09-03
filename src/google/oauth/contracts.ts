@@ -11,6 +11,9 @@ export const googleCapabilityKeySchema = z.enum([
   'docs.write',
   'chat.read',
   'chat.write',
+  'gmail.read',
+  'gmail.modify',
+  'gmail.send',
 ]);
 
 export type GoogleCapabilityKey = z.infer<typeof googleCapabilityKeySchema>;

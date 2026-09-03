@@ -32,6 +32,16 @@ Android portrait UI → conversation state → one canonical Gemini Interactions
 14. Use `npx` for one-shot upstream CLI/scaffolding commands, using the package's current documented `@latest` entry point.
 15. Never invent a lockfile. Generate `package-lock.json` from the actual dependency graph with npm and commit it.
 
+## Future architecture requirements to preserve now
+
+These requirements are intentionally recorded before their implementation prompts so future work cannot accidentally design them out of the foundation:
+
+- **Tool calling:** Gemini may later receive curated function/tool declarations. Tool schemas are application-owned capabilities, not arbitrary browser-exposed functions. The model can request a tool; only a validated application service may execute it. Tool schemas, execution, OAuth, diagnostics, and write confirmation remain separate owners.
+- **Google Workspace:** Calendar, Tasks, Docs, and Chat will later be exposed through the single Google OAuth authority and Google tool boundary. No Workspace service may create its own OAuth flow or bypass scope checks.
+- **Character master system prompt:** The companion's durable character identity, personality, roleplay behavior, style, and behavioral rules belong in a dedicated system-instruction source. They are not user messages and are not tool schemas. The prompt builder must compose them into the provider request without turning the UI into a prompt engine.
+- **Long-term notes/memory:** Notable past experiences will later be promoted into a separate retrievable memory/notes domain. Ordinary conversation history is not automatically permanent memory. Memory retrieval/insertion must remain modular and explicit so context-window changes do not erase important user-approved history.
+- **No monolithic orchestration:** Never collapse tool execution, Workspace access, prompt construction, memory retrieval, chat state, provider calls, persistence, and diagnostics into one manager/service/runtime. Each concern needs a clear owner and narrow contract.
+
 ## Runtime and dependency policy
 
 Node.js 24 LTS is the production baseline. `.nvmrc` contains `24`. GitHub Actions resolves the latest patch release in that LTS line. Do not use an EOL Node line, and do not switch to a Current Node major merely because its number is higher.
@@ -228,13 +238,11 @@ Milestone 3 complete: technical architecture is recorded in `docs/ARCHITECTURE_D
 
 Prompt 4 is now complete: responsibility and dependency ownership rules are recorded in `docs/SYSTEM_BOUNDARIES.md`.
 
+Prompts 5–7 are complete: canonical Gemini integration strategy, live model registry, and capability-driven settings are recorded in the Gemini architecture documents.
+
+Prompts 8–12 are the current foundation batch: streaming, thinking display, conversation data model, local persistence, and API Lockbox are now recorded in the corresponding architecture documents.
+
 Runtime baseline verified in live CI: `.nvmrc` is `24`; GitHub Actions resolved Node.js `24.20.0` and npm `11.19.0` on 2026-09-03.
-
-CI incident recorded: the first Node/npm cache configuration failed because the repository did not yet contain a dependency lockfile. The correct fix was to disable npm caching until a real lockfile exists. Do not fabricate a lockfile. Once dependencies are installed and `package-lock.json` exists, enable lockfile-aware npm caching and use `npm ci`.
-
-The corrected foundation CI run `33705746826` completed successfully.
-
-The latest README/system-boundaries change has its own CI run and must be verified before declaring this milestone fully green.
 
 ## External-source revalidation rule
 

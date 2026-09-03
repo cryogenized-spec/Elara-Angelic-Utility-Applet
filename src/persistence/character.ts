@@ -4,6 +4,8 @@ import { DEFAULT_CHARACTER_PROFILE, type CharacterArtworkReference, type Charact
 const MAX_NAME_LENGTH = 80;
 const MAX_INSTRUCTION_LENGTH = 50_000;
 const MAX_ARTWORK_DATA_URL_LENGTH = 8_000_000;
+const SAFE_ARTWORK_DATA_URL = /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i;
+const SAFE_ARTWORK_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
 class CharacterDatabase extends Dexie {
   profiles!: Table<CharacterProfile, string>;
@@ -35,9 +37,8 @@ export function normalizeCharacterProfile(input: Partial<CharacterProfile> | nul
 }
 
 function normalizeArtwork(value: CharacterArtworkReference): CharacterArtworkReference | null {
-  if (!value.id || !value.mimeType || !value.name || typeof value.dataUrl !== 'string') return null;
-  if (!value.dataUrl.startsWith('data:image/')) return null;
-  if (value.dataUrl.length > MAX_ARTWORK_DATA_URL_LENGTH) return null;
+  if (!value.id || !value.name || !SAFE_ARTWORK_MIME_TYPES.has(value.mimeType)) return null;
+  if (typeof value.dataUrl !== 'string' || value.dataUrl.length > MAX_ARTWORK_DATA_URL_LENGTH || !SAFE_ARTWORK_DATA_URL.test(value.dataUrl)) return null;
   return {
     id: String(value.id),
     mimeType: value.mimeType,
@@ -45,8 +46,8 @@ function normalizeArtwork(value: CharacterArtworkReference): CharacterArtworkRef
     width: finiteDimension(value.width),
     height: finiteDimension(value.height),
     dataUrl: value.dataUrl,
-    focalX: clampUnit(value.focalX),
-    focalY: clampUnit(value.focalY),
+    focalX: clampPercent(value.focalX),
+    focalY: clampPercent(value.focalY),
   };
 }
 
@@ -54,8 +55,8 @@ function finiteDimension(value: number | undefined): number | undefined {
   return value !== undefined && Number.isFinite(value) && value > 0 ? Math.round(value) : undefined;
 }
 
-function clampUnit(value: number | undefined): number {
-  return Math.max(0, Math.min(1, Number.isFinite(value) ? Number(value) : 0.5));
+function clampPercent(value: number | undefined): number {
+  return Math.max(0, Math.min(100, Number.isFinite(value) ? Number(value) : 50));
 }
 
 export async function loadCharacterProfile(): Promise<CharacterProfile> {

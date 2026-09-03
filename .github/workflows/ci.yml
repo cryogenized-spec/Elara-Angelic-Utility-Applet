@@ -22,7 +22,7 @@ jobs:
         with:
           node-version-file: .nvmrc
           check-latest: true
-          cache: npm
+          package-manager-cache: false
 
       - name: Verify runtime baseline
         shell: bash

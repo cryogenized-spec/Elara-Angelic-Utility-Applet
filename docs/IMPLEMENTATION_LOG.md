@@ -125,7 +125,7 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Changed:** Vite/React/TypeScript runtime scaffold, ESLint/TypeScript/Vitest/Playwright config, Android-first chat shell, application turn port, deterministic demo stream, Dexie persistence, unit test, E2E smoke test, and real CI gates.
 **Result:** First executable clean-room spine is present. It proves UI → application turn boundary → normalized stream events → local persistence. The demo transport is explicitly non-Gemini and exists only until the protected canonical Gemini provider is wired.
 **Live dependency verification:** Current npm pages confirm TypeScript 7.0.2, `@vitejs/plugin-react` 6.1.1, ESLint 10.9.1, Vitest 4.1.11, Playwright 1.62.1, and jsdom 30.0.1. citeturn847264search0turn847264search2turn847264search9turn339481search0turn339481search9turn339481search8
-**CI correction:** First runtime CI attempt `33710446033` (#65) correctly failed during `npm install` because `@typescript-eslint` 8.69.0 still peers on TypeScript `<6.1` while the verified current TypeScript is 7.0.2. The scaffold was corrected without `--legacy-peer-deps`: current TypeScript 7 remains; the stale TypeScript-ESLint parser/plugin pair was removed; ESLint now covers JavaScript/config surfaces and TypeScript correctness remains a dedicated `tsc --noEmit` gate. citeturn491582search1turn847264search2
+**CI correction:** Runtime CI run `33710446033` (#65) failed at `npm install` because `@typescript-eslint` 8.69.0 still peers on TypeScript `<6.1` while the verified current TypeScript is 7.0.2. The scaffold was corrected without `--legacy-peer-deps`: TypeScript 7 remains; the stale TypeScript-ESLint parser/plugin pair was removed; ESLint now covers JavaScript/config surfaces and TypeScript correctness remains a dedicated compiler gate.
 **Lockfile:** No generated `package-lock.json` was fabricated. CI uses `npm install` until a real lockfile is generated and committed; then CI can move to lockfile-aware caching and `npm ci`.
 
 ### Prompt 26 — Gemini Safety Policy
@@ -140,9 +140,45 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Result:** Production Elara master system instruction covering identity, personality, roleplay, truthfulness, emotional boundaries, tools, Workspace, memory, privacy, and instruction integrity. It is application-owned configuration, separate from ordinary conversation content and tool schemas.
 **Live verification:** Current Gemini documentation supports a distinct `system_instruction` request field. citeturn962400search7
 
+## 2026-09-03 — Prompts 28–32
+
+### Prompt 28 — Gemini Request Contract
+**Commit:** `89cc6a5a5af5075ed760789c5918c1c75eeaf9bd`
+**Changed:** `docs/GEMINI_REQUEST_CONTRACT.md`
+**Result:** Defined the only application-facing interaction request contract. Provider-specific translation stays inside the canonical Gemini adapter; character instruction, capability-filtered settings, allow-listed tools, multimodal references, continuity metadata, and streaming intent remain explicit inputs.
+**Live verification:** Google's current Interactions API documents `input`, `system_instruction`, `tools`, `generation_config`, `stream`, `store`, `background`, and `previous_interaction_id`; streaming and function-call continuation use the same Interactions endpoint. citeturn901754search0turn901754search1turn901754search3
+
+### Prompt 29 — Provider Error Normalization
+**Commit:** `e55464ba211fa36696b93f37d8a21cd397642beb`
+**Changed:** `docs/PROVIDER_ERROR_NORMALIZATION.md`
+**Result:** Defined a stable safe error model spanning validation, auth, authorization, rate limits, timeout, cancellation, network, provider, unsupported capability, configuration, and unknown failures, with explicit retryability and redaction rules.
+**Live verification:** Google's current API error guidance distinguishes retryable/terminal classes including 429, 499, 500, 501, 503, and 504. citeturn901754search2
+
+### Prompt 30 — HTTP Diagnostic Console
+**Commit:** `3eed597eaac97a38caef7e541dc0581c669a458d`
+**Changed:** `docs/HTTP_DIAGNOSTIC_CONSOLE.md`
+**Result:** Defined request-centric diagnostics with identifiers, timing, status/category/code, retryability, attempts, and transport outcome while explicitly excluding secrets, message content, attachment bytes, private memory, system prompts, and raw authorization data.
+
+### Prompt 31 — Developer Diagnostics UI
+**Commit:** `4f1398e28f36b752f1e765036334dfe90ba8ec01`
+**Changed:** `docs/DEVELOPER_DIAGNOSTICS_UI.md`
+**Result:** Defined a developer-only in-app diagnostics surface fed only by redacted diagnostic records, with clear states, timing, identifiers, bounded rendering, and no provider/security/persistence logic in presentation.
+
+### Prompt 32 — Request Timing and Timeout System
+**Commit:** `4421d5e32d018ce8f6173b332640275332a8996b`
+**Changed:** `docs/REQUEST_TIMING_AND_TIMEOUTS.md`
+**Result:** Defined monotonic request timing, time-to-first-event, streaming idle-stall detection, absolute deadlines, explicit cancellation, and deterministic terminal states without infinite spinners.
+**Live verification:** Current Interactions documentation confirms SSE streaming and typed step events, making explicit first-event and terminal timing useful diagnostics. citeturn901754search1turn901754search0
+
+## Deployment decision
+
+Elara is a Vite application and should be deployed to GitHub Pages through GitHub Actions rather than publishing the repository root or maintaining a compiled `gh-pages` source branch.
+
+Canonical path: `main` → Actions build → `dist/` artifact → GitHub Pages. Configure **Settings → Pages → Source → GitHub Actions** when we enable the site. For a project-site URL (`owner.github.io/repository`), Vite's `base` must match the repository path; root-domain/custom-domain deployment uses `/`. citeturn472153search0turn472153search2
+
 ## Current runtime status
 
-The runtime scaffold is in `main`, with CI configured to run install/lint/typecheck/unit-test/build/Playwright E2E. The latest observed CI run before this final bookkeeping correction failed at dependency installation; the toolchain fix above was then committed and must be verified by the subsequent GitHub Actions run before this milestone can honestly be called green.
+The executable runtime scaffold is in `main`. CI is now configured for install → lint → typecheck → unit tests → build → Playwright E2E, but the latest observed run after the Prompt 25 toolchain fixes was still executing at the time of this log update. Therefore the batch is implemented, but a final green CI conclusion is withheld until the active run completes.
 
 No pull requests are used for this work. Changes are committed directly to `main`.
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ConversationThread } from '../../domain/chat';
 import { Icon } from '../../ui/icons';
+import './sidebar.css';
 
 function formatThreadTime(timestamp: number): string {
   const date = new Date(timestamp);

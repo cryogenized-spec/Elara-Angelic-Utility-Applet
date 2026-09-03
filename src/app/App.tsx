@@ -3,7 +3,7 @@ import type { ChatMessage, ConversationState, ProviderStatus } from '../domain/c
 import { appendMessage, loadConversation, saveConversation } from '../persistence/conversation';
 import { demoTurnPort } from '../chat/demo-turn-port';
 import { Icon } from '../ui/icons';
-import { fontFamilyForCss, ensureGoogleFont, type GoogleFontFamily } from '../ui/fontLoader';
+import { fontFamilyForCss, type FontSelection } from '../ui/fontRegistry';
 import { Sidebar } from './components/Sidebar';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
@@ -25,15 +25,12 @@ export function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [toolNotice, setToolNotice] = useState<string | null>(null);
-  const [font, setFont] = useState<GoogleFontFamily>('Inter');
+  const [font, setFont] = useState<FontSelection>({ kind: 'built-in', family: 'Inter' });
+  const [fontSize, setFontSize] = useState(15);
 
   useEffect(() => {
     void loadConversation().then(setConversation).catch(() => setError('Could not load the local conversation.'));
   }, []);
-
-  useEffect(() => {
-    void ensureGoogleFont(font);
-  }, [font]);
 
   async function send() {
     const text = draft.trim();
@@ -91,11 +88,11 @@ export function App() {
   }
 
   if (settingsOpen) {
-    return <SettingsScreen font={font} onFontChange={setFont} onBack={() => setSettingsOpen(false)} />;
+    return <SettingsScreen font={font} onFontChange={setFont} fontSize={fontSize} onFontSizeChange={setFontSize} onBack={() => setSettingsOpen(false)} />;
   }
 
   return (
-    <main className="app-shell" style={{ fontFamily: fontFamilyForCss(font) }}>
+    <main className="app-shell" style={{ fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
       <div className="left-spine" aria-label="Application controls">
         <button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}>
           <Icon name="menu" size={21} />

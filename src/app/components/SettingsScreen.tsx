@@ -11,14 +11,13 @@ const settingsSections = [
 
 type SettingsSection = typeof settingsSections[number]['id'];
 
-export function SettingsScreen({ onBack }: { onBack: () => void }) {
+export function SettingsScreen({ font, onFontChange, onBack }: { font: GoogleFontFamily; onFontChange: (font: GoogleFontFamily) => void; onBack: () => void }) {
   const [section, setSection] = useState<SettingsSection>('appearance');
-  const [font, setFont] = useState<GoogleFontFamily>('Inter');
 
   useEffect(() => { void ensureGoogleFont(font); }, [font]);
 
   return (
-    <main className="settings-screen">
+    <main className="settings-screen" style={{ fontFamily: fontFamilyForCss(font) }}>
       <header className="settings-header">
         <button className="icon-button" type="button" aria-label="Back to chat" onClick={onBack}><Icon name="chevron" /></button>
         <div><div className="eyebrow">ELARA</div><h1>Settings</h1></div>
@@ -38,10 +37,10 @@ export function SettingsScreen({ onBack }: { onBack: () => void }) {
             <div className="settings-copy"><span className="panel-kicker">SURFACE</span><h2>Appearance</h2><p>Control the ambient visual language without touching Elara's character definition.</p><div className="setting-card"><strong>Theme</strong><span>Dark · current design baseline</span></div></div>
           )}
           {section === 'typography' && (
-            <div className="settings-copy"><span className="panel-kicker">TYPE</span><h2>Typography</h2><p>Fonts are loaded from Google's CSS2 web-font service and selected at runtime. The browser handles normal HTTP caching; a system fallback remains available during load.</p>
+            <div className="settings-copy"><span className="panel-kicker">TYPE</span><h2>Typography</h2><p>Fonts load from Google's CSS2 web-font service at runtime. Normal browser HTTP caching can reuse the resources; a system fallback remains available during load or when offline.</p>
               <div className="font-options" role="radiogroup" aria-label="Font family">
-                {(Object.values(GOOGLE_FONT_OPTIONS)).map((option) => (
-                  <button key={option} className={`font-option${font === option ? ' is-active' : ''}`} type="button" role="radio" aria-checked={font === option} onClick={() => setFont(option)} style={{ fontFamily: fontFamilyForCss(option) }}>
+                {Object.values(GOOGLE_FONT_OPTIONS).map((option) => (
+                  <button key={option} className={`font-option${font === option ? ' is-active' : ''}`} type="button" role="radio" aria-checked={font === option} onClick={() => onFontChange(option)} style={{ fontFamily: fontFamilyForCss(option) }}>
                     <span>{option}</span><small>The quick brown fox jumps over the lazy dog.</small>
                   </button>
                 ))}

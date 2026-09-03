@@ -13,6 +13,7 @@ import { ConversationSurface } from './components/ConversationSurface';
 import { Composer } from './components/Composer';
 import '../ui/fonts.css';
 import './app.css';
+import './mobile-viewport.css';
 
 const makeMessage = (role: ChatMessage['role'], text: string): ChatMessage => ({
   id: `${role}-${crypto.randomUUID()}`,

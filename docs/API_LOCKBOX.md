@@ -20,6 +20,14 @@ Consumers receive the minimum capability required for an operation. No component
 
 Although `@google/genai` supports browser initialization, production Elara must not bundle an application-owned Gemini secret into the client. The protected credential is supplied at the approved Worker/security boundary.
 
+## Cloudflare Worker health
+
+The Settings Lockbox includes a safe health surface for the deployed Cloudflare Gemini Worker. The browser calls `GET /health`, which is non-generative and therefore does not consume a Gemini model request merely to test service liveness.
+
+The health response exposes only non-secret state: service identity, healthy/degraded status, whether the protected Gemini credential is configured, whether an origin policy is configured, and an API marker. The UI maps those results to **Healthy** (green), **Alert** (yellow), or **Failure / offline** (red), while retaining a neutral not-checked state and a transient checking state.
+
+The health panel remains presentational. It does not access `GEMINI_API_KEY`, OAuth tokens, system instructions, conversation content, or raw provider errors.
+
 ## Google Workspace
 
 OAuth access material remains under one authorization authority. Calendar, Tasks, Docs, and Chat services receive narrow authenticated capabilities rather than raw tokens. Later tool calls cannot bypass scope enforcement.

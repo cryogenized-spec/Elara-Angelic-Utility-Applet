@@ -1,62 +1,57 @@
-const workerUrl = (process.env.GEMINI_WORKER_URL || '').trim().replace(/\/$/, '');
-const expectedOrigin = (process.env.GEMINI_ALLOWED_ORIGIN || 'https://cryogenized-spec.github.io').trim();
+const workerUrl = (process.env.GEMINI_WORKER_URL || 'https://elara-gemini.cryogenized.workers.dev').replace(/\/$/, '');
+const origin = process.env.PAGES_ORIGIN || 'https://cryogenized-spec.github.io';
 
-if (!/^https:\/\//.test(workerUrl)) {
-  throw new Error('GEMINI_WORKER_URL must be an HTTPS URL.');
-}
-
-async function readJson(response) {
-  const text = await response.text();
+async function request(url, init) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15_000);
   try {
-    return JSON.parse(text);
-  } catch {
-    throw new Error(`Worker returned non-JSON content (HTTP ${response.status}).`);
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
   }
 }
 
-console.log(`Verifying Gemini Worker: ${workerUrl}`);
+async function main() {
+  const health = await request(`${workerUrl}/health`, {
+    headers: { Origin: origin },
+  });
+  if (!health.ok) {
+    throw new Error(`Worker health check failed with HTTP ${health.status}.`);
+  }
+  const healthBody = await health.text();
+  if (!healthBody.includes('"api":true') || !healthBody.includes('"status":"healthy"')) {
+    throw new Error(`Worker health response is not healthy: ${healthBody}`);
+  }
+  const healthAllowOrigin = health.headers.get('access-control-allow-origin');
+  if (healthAllowOrigin !== origin) {
+    throw new Error(`Worker health CORS origin mismatch: ${healthAllowOrigin ?? '(missing)'}`);
+  }
 
-const healthResponse = await fetch(`${workerUrl}/health`, {
-  headers: {
-    Accept: 'application/json',
-    Origin: expectedOrigin,
-  },
+  const options = await request(`${workerUrl}/api/gemini`, {
+    method: 'OPTIONS',
+    headers: {
+      Origin: origin,
+      'Access-Control-Request-Method': 'POST',
+      'Access-Control-Request-Headers': 'content-type',
+    },
+  });
+  if (options.status !== 204) {
+    throw new Error(`Worker preflight failed with HTTP ${options.status}.`);
+  }
+  if (options.headers.get('access-control-allow-origin') !== origin) {
+    throw new Error('Worker preflight CORS origin mismatch.');
+  }
+  if (!(options.headers.get('access-control-allow-methods') || '').toUpperCase().includes('POST')) {
+    throw new Error('Worker preflight does not allow POST.');
+  }
+  if (!(options.headers.get('access-control-allow-headers') || '').toLowerCase().includes('content-type')) {
+    throw new Error('Worker preflight does not allow Content-Type.');
+  }
+
+  console.log('Live Worker browser transport verification passed.');
+}
+
+main().catch((error) => {
+  console.error(error instanceof Error ? error.message : error);
+  process.exit(1);
 });
-
-if (!healthResponse.ok) {
-  throw new Error(`Worker health endpoint returned HTTP ${healthResponse.status}.`);
-}
-
-const health = await readJson(healthResponse);
-if (health?.api !== true || health?.status !== 'healthy') {
-  throw new Error(`Worker health is not healthy: ${JSON.stringify({ api: health?.api ?? null, status: health?.status ?? null })}`);
-}
-
-const allowOrigin = healthResponse.headers.get('access-control-allow-origin');
-if (allowOrigin !== expectedOrigin) {
-  throw new Error(`Worker CORS origin mismatch: expected ${expectedOrigin}, received ${allowOrigin ?? 'missing'}.`);
-}
-
-const preflightResponse = await fetch(workerUrl, {
-  method: 'OPTIONS',
-  headers: {
-    Origin: expectedOrigin,
-    'Access-Control-Request-Method': 'POST',
-    'Access-Control-Request-Headers': 'content-type',
-  },
-});
-
-if (!preflightResponse.ok) {
-  throw new Error(`Worker CORS preflight returned HTTP ${preflightResponse.status}.`);
-}
-
-const preflightOrigin = preflightResponse.headers.get('access-control-allow-origin');
-const preflightMethods = preflightResponse.headers.get('access-control-allow-methods') || '';
-if (preflightOrigin !== expectedOrigin) {
-  throw new Error(`Preflight CORS origin mismatch: expected ${expectedOrigin}, received ${preflightOrigin ?? 'missing'}.`);
-}
-if (!preflightMethods.split(',').map((value) => value.trim()).includes('POST')) {
-  throw new Error(`Preflight CORS methods do not permit POST: ${preflightMethods || 'missing'}.`);
-}
-
-console.log('Gemini Worker health, production CORS, and POST preflight checks passed.');

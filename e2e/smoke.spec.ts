@@ -154,7 +154,7 @@ test('creates, searches, selects, renames, and restores conversation threads', a
 test('opens Workspace quick-action surfaces without injecting a chat prompt', async ({ page }) => {
   await page.goto('');
   const conversation = page.getByRole('region', { name: 'Conversation' });
-  const before = await conversation.locator('[data-message-id]').count();
+  const before = await conversation.locator('.message').count();
 
   const calendar = page.getByRole('button', { name: 'Calendar' });
   await expect(calendar).toBeVisible();
@@ -164,7 +164,7 @@ test('opens Workspace quick-action surfaces without injecting a chat prompt', as
   await expect(surface).toBeVisible();
   await expect(surface.getByText('Calendar is wired to the application capability boundary.')).toBeVisible();
   await expect(surface.getByText('Capability · calendar.events.read')).toBeVisible();
-  await expect(conversation.locator('[data-message-id]')).toHaveCount(before);
+  await expect(conversation.locator('.message')).toHaveCount(before);
 
   await surface.getByRole('button', { name: 'Close Calendar action surface' }).click();
   await expect(surface).toBeHidden();

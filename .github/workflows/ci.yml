@@ -15,7 +15,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
+
+      - name: Set up Node.js LTS
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          check-latest: true
+          cache: npm
+
+      - name: Verify runtime baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          npm --version
+          test "$(node -p 'process.versions.node.split(".")[0]')" = "24"
 
       - name: Verify required foundation documents
         shell: bash
@@ -24,7 +39,10 @@ jobs:
           test -f README.md
           test -f docs/REPOSITORY_FORENSICS.md
           test -f docs/PRODUCT_BOUNDARY.md
+          test -f docs/ARCHITECTURE_DECISION.md
+          test -f .nvmrc
           grep -q "One Gemini API method" README.md
           grep -q "Android portrait" docs/PRODUCT_BOUNDARY.md
           grep -q "One canonical Gemini provider implementation" docs/PRODUCT_BOUNDARY.md
+          grep -q "Node.js 24 LTS" docs/ARCHITECTURE_DECISION.md
           echo "Foundation repository gate passed."

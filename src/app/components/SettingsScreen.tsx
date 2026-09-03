@@ -9,6 +9,7 @@ import { getGeminiModel } from '../../gemini/model-registry';
 import { GEMINI_MODELS } from '../../gemini/model-registry';
 import { WorkerHealthPanel } from './WorkerHealthPanel';
 import './model-settings.css';
+import './settings-fixes.css';
 
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },

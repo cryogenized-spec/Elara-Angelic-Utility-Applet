@@ -150,3 +150,29 @@ test('creates, searches, selects, renames, and restores conversation threads', a
   await page.reload();
   await expect(page.getByText('Demo response received: Plan a weekend trip to the Drakensberg')).toBeVisible();
 });
+
+test('opens Workspace quick-action surfaces without injecting a chat prompt', async ({ page }) => {
+  await page.goto('');
+  const conversation = page.getByRole('region', { name: 'Conversation' });
+  const before = await conversation.locator('[data-message-id]').count();
+
+  const calendar = page.getByRole('button', { name: 'Calendar' });
+  await expect(calendar).toBeVisible();
+  await calendar.click();
+
+  const surface = page.getByRole('region', { name: 'Calendar action surface' });
+  await expect(surface).toBeVisible();
+  await expect(surface.getByText('Calendar is wired to the application capability boundary.')).toBeVisible();
+  await expect(surface.getByText('Capability · calendar.events.read')).toBeVisible();
+  await expect(conversation.locator('[data-message-id]')).toHaveCount(before);
+
+  await surface.getByRole('button', { name: 'Close Calendar action surface' }).click();
+  await expect(surface).toBeHidden();
+
+  await page.getByRole('button', { name: 'Tasks' }).click();
+  await expect(page.getByRole('region', { name: 'Tasks action surface' })).toBeVisible();
+  await page.getByRole('button', { name: 'Gmail' }).click();
+  await expect(page.getByRole('region', { name: 'Gmail action surface' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Calendar' })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Gmail' })).toHaveAttribute('aria-pressed', 'true');
+});

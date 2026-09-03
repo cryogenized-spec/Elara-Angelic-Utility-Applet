@@ -138,7 +138,7 @@ export const geminiTurnPort: GeminiTurnPort = {
               const interaction = asRecord(event.interaction);
               const id = readString(interaction, 'id') ?? interactionId ?? 'unknown';
               interactionId = id;
-              yield { type: 'interaction-created', interactionId: id, model: readString(interaction, 'model') ?? request.model || DEFAULT_GEMINI_MODEL };
+              yield { type: 'interaction-created', interactionId: id, model: readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL) };
               continue;
             }
 

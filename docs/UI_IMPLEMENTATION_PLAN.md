@@ -72,7 +72,9 @@ The character portrait is separate artwork, not a UI vector requirement.
 
 The composer is designed for Android portrait first. It must remain above the software keyboard, and the conversation must maintain visibility of the latest relevant message while typing.
 
-Implementation will use modern viewport/inset behavior rather than fixed keyboard-height offsets. The UI should react to the visual viewport/IME state, preserve focus, avoid layout jumps, and keep scrolling intentional. This behavior is validated on physical Android/PWA testing as a separate reliability pass.
+Implementation uses the broadly available VisualViewport API as the primary runtime signal and keeps the newer VirtualKeyboard API progressive rather than mandatory. The app derives visual viewport height/offset metrics into CSS variables and sizes the shell to the currently visible viewport, avoiding fixed keyboard-height assumptions. The VirtualKeyboard API is used only when available for geometry-change notifications. citeturn850901search1turn850901search5
+
+Enter submits a non-empty draft; Shift+Enter inserts a newline. The textarea grows up to a bounded height and then becomes internally scrollable. Submission, cancellation and focus remain in the composer/application boundary; provider and persistence details stay outside the component.
 
 ## Motion and visual language
 
@@ -128,4 +130,4 @@ Every pass should leave lint, typecheck, unit tests, build, and applicable Playw
 
 ## Current pass state
 
-Pass 1 foundation, Pass 2 portrait presentation, and Pass 3 conversation surface are implemented. Pass 3 adds a dedicated AI-dominant conversation component, asymmetric assistant/user presentation, semantic timestamps, a safe numbered execution summary with duration, collapsed-by-default behavior, and an accessible expand/collapse interaction. Final completion remains subject to the CI gate for the current commits.
+Pass 1 foundation, Pass 2 portrait presentation, and Pass 3 conversation surface are implemented. **Pass 4 is implemented as the Android composer/IME foundation:** bounded auto-growing multiline input, Enter/Shift+Enter behavior, explicit cancellation, VisualViewport-driven shell sizing, progressive VirtualKeyboard geometry updates, and latest-message stick-to-bottom behavior. Attachment and voice buttons remain capability entry points only; their concrete runtime boundaries are intentionally delivered by the attachment and voice capability passes. Final completion remains subject to the CI gate and later physical-device validation.

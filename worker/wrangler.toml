@@ -1,0 +1,9 @@
+name = "elara-gemini"
+main = "src/index.ts"
+compatibility_date = "2026-09-03"
+
+[vars]
+ALLOWED_ORIGINS = ""
+
+[secrets]
+required = ["GEMINI_API_KEY"]

@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  repository-gate:
+    name: Repository gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Verify required foundation documents
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f README.md
+          test -f docs/REPOSITORY_FORENSICS.md
+          test -f docs/PRODUCT_BOUNDARY.md
+          grep -q "One Gemini API method" README.md
+          grep -q "Android portrait" docs/PRODUCT_BOUNDARY.md
+          grep -q "One canonical Gemini provider implementation" docs/PRODUCT_BOUNDARY.md
+          echo "Foundation repository gate passed."

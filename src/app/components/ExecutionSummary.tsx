@@ -6,10 +6,11 @@ export function ExecutionSummary({ summary }: { summary: ExecutionSummaryData })
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <section className={`execution-summary${expanded ? ' is-expanded' : ''}`}>
+    <section className={`execution-summary${expanded ? ' is-expanded' : ''}`} aria-label="Execution summary">
       <button
         className="execution-summary__toggle"
         type="button"
+        aria-label="Execution summary"
         aria-expanded={expanded}
         onClick={() => setExpanded((current) => !current)}
       >

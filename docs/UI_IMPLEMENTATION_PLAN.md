@@ -80,7 +80,9 @@ Enter submits a non-empty draft; Shift+Enter inserts a newline. The textarea gro
 
 The palette is predominantly black/deep-charcoal with white typography. Blue and pink are restrained accent/piping colors. Glass and frosted surfaces provide depth without turning the app into a neon dashboard.
 
-Motion should be short and purposeful: sidebar slide, portrait collapse/restore, tool-rail interactions, focus states, and lightweight state transitions. Motion must never obscure the conversation or create input lag.
+Motion should be short and purposeful: sidebar slide, portrait collapse/restore, tool-rail interactions, focus states, and lightweight state transitions. Motion must never obscure the conversation or create input lag. **Reduced-motion preferences are honored with `prefers-reduced-motion`; non-essential transitions and entry animations must be removed or toned down when the preference is active.** citeturn520817search1
+
+Glass blur is progressive enhancement. Translucent surfaces must remain readable when `backdrop-filter` is unavailable; current MDN compatibility guidance lists `backdrop-filter` as Baseline 2024. citeturn520817search0
 
 ## Eight implementation passes
 
@@ -110,7 +112,7 @@ Implement configurable quick tools and action surfaces for Calendar, Tasks, Gmai
 
 ### Pass 7 — Visual polish + motion
 
-Tune the glass treatment, piping, typography, portrait composition, focus/pressed states, animations, accessibility contrast, touch targets, and perceived responsiveness.
+Tune the glass treatment, piping, typography, portrait composition, focus/pressed states, animations, accessibility contrast, touch targets, and perceived responsiveness. Honor `prefers-reduced-motion` and use standards-based touch sizing on coarse pointers.
 
 ### Pass 8 — Physical-device reliability
 
@@ -130,4 +132,4 @@ Every pass should leave lint, typecheck, unit tests, build, and applicable Playw
 
 ## Current pass state
 
-Pass 1 foundation, Pass 2 portrait presentation, Pass 3 conversation surface, and Pass 4 Android composer/IME foundation are implemented. Pass 5 sidebar/thread lifecycle is implemented and verified in CI. **Pass 6 quick-action rail is now implemented:** Calendar, Tasks, and Gmail are exposed through a typed configurable action descriptor, dispatched through an application-level `QuickActionPort`, and presented in a dedicated non-chat surface. The temporary executable adapter reports authorization-required state instead of fabricating live Workspace data. No quick action injects a canned message into the conversation. Final completion remains subject to the CI gate and later physical-device validation.
+Pass 1 foundation, Pass 2 portrait presentation, Pass 3 conversation surface, and Pass 4 Android composer/IME foundation are implemented. Pass 5 sidebar/thread lifecycle is implemented and verified in CI. **Pass 6 quick-action rail and Pass 7 visual polish are now implemented in the working tree:** Calendar, Tasks, and Gmail are exposed through typed configurable action descriptors and an application-level `QuickActionPort`; the rail has explicit active/focus/pressed behavior, coarse-pointer touch sizing, and reduced-motion treatment; the portrait presentation also suppresses non-essential transitions under reduced-motion preference. The combined state remains subject to the CI gate and later physical-device validation.

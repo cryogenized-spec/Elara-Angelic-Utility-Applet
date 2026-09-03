@@ -23,7 +23,7 @@
     "reliability:check": "node scripts/reliability-gate.mjs"
   },
   "dependencies": {
-    "@google/genai": "^2.19.0",
+    "@google/genai": "2.21.0",
     "dexie": "^4.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

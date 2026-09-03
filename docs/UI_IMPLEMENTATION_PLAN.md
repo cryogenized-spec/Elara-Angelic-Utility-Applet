@@ -46,13 +46,13 @@ The API Lockbox belongs in Settings as a dedicated security surface, but secrets
 
 ## Typography and Google Fonts
 
-The application will provide a small curated set of Google-hosted UI font options rather than bundling font files into the repository. The initial candidates are **Inter**, **Manrope**, and **Outfit**.
+The built-in typography choices are **Inter**, **Manrope**, and **Outfit**. They are Google Fonts, but Elara's normal built-in path does **not** load Google Fonts at runtime. The build step downloads the pinned font sources, subsets the Latin character ranges with `pyftsubset`, emits WOFF2 assets, and Vite serves those assets locally with `font-display: swap`.
 
-The current Google Fonts CSS2 API supports requesting one or more families, explicit weight sets, and `display=swap`. The recommended wiring for Elara is a runtime stylesheet link to the CSS2 endpoint for the selected family, with a normal system sans-serif fallback. The browser downloads the stylesheet and then downloads the appropriate font resource; normal browser HTTP caching is responsible for reuse. citeturn765993search1turn765993search2
+Only the weights supported by each variable font are retained in the generated WOFF2. The source metadata for all three families identifies them as OFL fonts in the Google Fonts repository. citeturn384711search1turn1108file0turn1109file0
 
-The application should not pretend this is equivalent to bundling local font files. A browser cache is not an offline guarantee. The service worker/offline strategy must therefore treat remote Google font availability as an enhancement and preserve a usable system-font fallback. `font-display: swap` is selected so text remains visible while the font loads. citeturn533491search1turn533491search7
+The Settings typography surface includes a live pangram preview and a **10–20px text-size slider**, defaulting to **15px**. Slider controls follow a shared interaction rule: the control changes to a bright/high-energy state while the pointer or keyboard adjustment is actively moving it, then returns to its normal muted state when interaction ends. This is the default slider behavior for future settings controls.
 
-When this surface is completed, font selection should load only the chosen family/weights needed by the UI. Google explicitly recommends requesting only the styles/weights actually used to reduce latency and payload size. citeturn765993search1
+Custom Google Fonts are an explicit opt-in exception. Settings accepts a Google Fonts CSS2 stylesheet URL, validates that it is HTTPS and hosted on `fonts.googleapis.com/css2`, derives the first family name, and loads that stylesheet only after the user explicitly chooses it. The built-in path therefore stays self-hosted while custom fonts remain user-controlled external resources.
 
 ## Vector graphics
 
@@ -76,7 +76,7 @@ Motion should be short and purposeful: sidebar slide, portrait collapse/restore,
 
 ### Pass 1 — UI foundation and geometry
 
-Establish the 9:16 Android reference geometry, design tokens, spacing, radii, typography hierarchy, glass surface primitives, safe-area behavior, layering/z-index, and core responsive rules. Establish the initial Elara banner, sidebar shell, quick-action rail, conversation area, and composer frame using clean modular React components.
+Establish the 9:16 Android reference geometry, design tokens, spacing, radii, typography hierarchy, glass surface primitives, safe-area behavior, layering/z-index, and core responsive rules. Establish the initial Elara banner, sidebar shell, quick-action rail, conversation area, and composer frame using clean modular React components. Typography in this pass includes the locally hosted built-in font pipeline, the live preview, the 10–20px text-size slider, and the shared hot-slider interaction rule.
 
 ### Pass 2 — Elara banner / portrait system
 
@@ -120,4 +120,4 @@ Every pass should leave lint, typecheck, unit tests, build, and applicable Playw
 
 ## Current pass state
 
-Pass 1 is the first implementation target. The initial foundation should already include the 9:16 body geometry, left sidebar control, Elara banner treatment, horizontally scrolling quick-action rail, modular conversation surface, Android-oriented composer frame, and a separate Settings screen with the API Lockbox home and Google-font selection foundation.
+Pass 1 is the first implementation target. The rebuilt foundation includes the 9:16 body geometry, left sidebar control, Elara banner treatment, horizontally scrolling quick-action rail, modular conversation surface, Android-oriented composer frame, separate Settings screen, local built-in font assets, custom Google Fonts opt-in, live typography preview, and shared hot-slider behavior.

@@ -1,18 +1,4 @@
-.composer textarea {
-  display: block;
-  max-height: 132px;
-  min-height: 42px;
-  overflow-y: hidden;
-}
-
-.composer__send.is-cancel {
-  color: var(--text);
-  background: rgba(240, 123, 220, .14);
-  border-color: rgba(240, 123, 220, .3);
-}
-
-.composer__icon:disabled,
-.composer textarea:disabled {
-  cursor: not-allowed;
-  opacity: .55;
-}
+.composer textarea { display: block; max-height: 132px; min-height: 42px; overflow-y: hidden; }
+.composer__send.is-cancel { color: var(--text); background: rgba(240, 123, 220, .14); border-color: rgba(240, 123, 220, .3); }
+.composer__icon:disabled, .composer textarea:disabled { cursor: not-allowed; opacity: .55; }
+.composer__markdown { font-size: 10px; font-weight: 700; letter-spacing: -.03em; }

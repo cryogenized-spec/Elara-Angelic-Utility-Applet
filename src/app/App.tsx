@@ -101,7 +101,7 @@ export function App() {
       const assistantMessage = makeMessage('assistant', '', conversationId); const liveText = { value: '' }; const startedAt = Date.now();
       const base = { ...titled, messages: [...titled.messages, assistantMessage], updatedAt: startedAt }; setConversation(base);
       for await (const event of geminiTurnPort.streamReply({ model: geminiModel, input: text, previousInteractionId, generationConfig, systemInstruction }, controller.signal)) {
-        handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, interactionIdRef: () => undefined, startedAt, model: geminiModel, liveText });
+        handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText });
         if (event.type === 'interaction-created') liveText.value = '';
         if (event.type === 'cancelled') return;
       }
@@ -141,13 +141,12 @@ export function App() {
   </main>;
 }
 
-type StreamContext = { assistantMessage: ChatMessage; base: ConversationState; setConversation: Dispatch<SetStateAction<ConversationState>>; setStatus: (status: ProviderStatus) => void; setError: (error: string | null) => void; save: (conversation: ConversationState) => Promise<void>; refreshThreads: () => Promise<void>; interactionIdRef: (value: string) => void; startedAt: number; model: string; liveText: { value: string } };
+type StreamContext = { assistantMessage: ChatMessage; base: ConversationState; setConversation: Dispatch<SetStateAction<ConversationState>>; setStatus: (status: ProviderStatus) => void; setError: (error: string | null) => void; save: (conversation: ConversationState) => Promise<void>; refreshThreads: () => Promise<void>; startedAt: number; model: string; liveText: { value: string } };
 
 function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
   const { assistantMessage, base, setConversation } = context;
-  if (event.type === 'interaction-created') context.interactionIdRef(event.interactionId);
-  else if (event.type === 'text-delta') { context.liveText.value += event.text; const liveText = context.liveText.value; setConversation({ ...base, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message) }); }
-  else if (event.type === 'completed') { context.interactionIdRef(event.interactionId); const completedAt = Date.now(); const live = context.liveText.value; const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Accepted the message and opened a Gemini Interaction.', 'Streamed model output through the canonical provider boundary.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) }; void context.save(completed).then(context.refreshThreads).then(() => setConversation(completed)).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the assistant response.')); }
+  if (event.type === 'text-delta') { context.liveText.value += event.text; const liveText = context.liveText.value; setConversation({ ...base, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message) }); }
+  else if (event.type === 'completed') { const completedAt = Date.now(); const live = context.liveText.value; const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Accepted the message and opened a Gemini Interaction.', 'Streamed model output through the canonical provider boundary.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) }; void context.save(completed).then(context.refreshThreads).then(() => setConversation(completed)).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the assistant response.')); }
   else if (event.type === 'failed') { context.setStatus('failed'); context.setError(`${event.error.message} [${event.error.code}]`); }
   else if (event.type === 'cancelled') context.setStatus('idle');
 }

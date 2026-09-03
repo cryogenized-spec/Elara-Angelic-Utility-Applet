@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { Icon } from '../../ui/icons';
 import { BUILT_IN_FONTS, fontFamilyForCss, googleFontFamilyFromCss2Url, type FontSelection } from '../../ui/fontRegistry';
 import { RangeSlider } from './RangeSlider';
+import type { PortraitBackground, PortraitScale } from './PortraitBanner';
 
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },
@@ -22,6 +23,13 @@ const css2UrlSchema = z.string().url().refine((value) => {
   }
 }, 'Use a Google Fonts CSS2 URL from fonts.googleapis.com.');
 
+const portraitBackgrounds: Array<{ id: PortraitBackground; label: string; description: string }> = [
+  { id: 'midnight', label: 'Midnight', description: 'Balanced blue/pink ambient glow.' },
+  { id: 'blue-hour', label: 'Blue Hour', description: 'Cooler blue atmospheric emphasis.' },
+  { id: 'violet', label: 'Violet', description: 'Deeper violet with pink highlights.' },
+  { id: 'rose', label: 'Rose', description: 'Warmer rose and soft amber glow.' },
+];
+
 function loadCustomGoogleFont(stylesheetUrl: string) {
   const existing = document.querySelector<HTMLLinkElement>(`link[data-elara-custom-font="${stylesheetUrl}"]`);
   if (existing) return;
@@ -37,12 +45,20 @@ export function SettingsScreen({
   onFontChange,
   fontSize,
   onFontSizeChange,
+  portraitScale,
+  onPortraitScaleChange,
+  portraitBackground,
+  onPortraitBackgroundChange,
   onBack,
 }: {
   font: FontSelection;
   onFontChange: (font: FontSelection) => void;
   fontSize: number;
   onFontSizeChange: (fontSize: number) => void;
+  portraitScale: PortraitScale;
+  onPortraitScaleChange: (scale: PortraitScale) => void;
+  portraitBackground: PortraitBackground;
+  onPortraitBackgroundChange: (background: PortraitBackground) => void;
   onBack: () => void;
 }) {
   const [section, setSection] = useState<SettingsSection>('appearance');
@@ -65,7 +81,6 @@ export function SettingsScreen({
 
     loadCustomGoogleFont(parsed.data);
     onFontChange({ kind: 'custom', family, stylesheetUrl: parsed.data });
-    setCustomError(null);
   }
 
   return (
@@ -86,7 +101,45 @@ export function SettingsScreen({
 
         <section className="settings-panel" aria-live="polite">
           {section === 'appearance' && (
-            <div className="settings-copy"><span className="panel-kicker">SURFACE</span><h2>Appearance</h2><p>Control the ambient visual language without touching Elara's character definition.</p><div className="setting-card"><strong>Theme</strong><span>Dark · current design baseline</span></div></div>
+            <div className="settings-copy">
+              <span className="panel-kicker">PRESENCE</span>
+              <h2>Elara presentation</h2>
+              <p>The portrait is a presentation layer. Its scale and ambient treatment are independent of Elara's character definition.</p>
+
+              <RangeSlider
+                id="portrait-scale"
+                label="Portrait scale"
+                min={1}
+                max={3}
+                value={portraitScale}
+                valueLabel={`${portraitScale}×`}
+                minLabel="1×"
+                maxLabel="3×"
+                onChange={(value) => onPortraitScaleChange(Math.min(3, Math.max(1, value)) as PortraitScale)}
+              />
+
+              <div className="background-picker">
+                <div className="background-picker__header"><strong>Banner background</strong><span>Ambient backdrop only · does not change the portrait asset.</span></div>
+                <div className="background-options" role="radiogroup" aria-label="Portrait background">
+                  {portraitBackgrounds.map((option) => {
+                    const active = portraitBackground === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        className={`background-option background-option--${option.id}${active ? ' is-active' : ''}`}
+                        onClick={() => onPortraitBackgroundChange(option.id)}
+                      >
+                        <span>{option.label}</span>
+                        <small>{option.description}</small>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
           )}
 
           {section === 'typography' && (

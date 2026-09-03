@@ -45,7 +45,7 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Result:** Dexie/IndexedDB is the sole client persistence authority with explicit schema/migration/recovery/transaction boundaries.
 
 ### Prompt 12 — API Lockbox
-**Commit:** `03a3e3db7dbd86d2a846e4311405276892ddbc6c`  
+**Commit:** `03a3e3db7dbd86d2a846e4311405276892ddbc6c6`  
 **Changed:** `docs/API_LOCKBOX.md`  
 **Result:** Central secret/configuration ownership and explicit separation of Gemini/OAuth secrets, future tool schemas, Workspace access, character system prompt, and memory notes.
 
@@ -110,25 +110,42 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Changed:** `docs/PERFORMANCE_BUDGET.md`  
 **Result:** Android-first budgets established for LCP, INP, CLS, initial JavaScript, startup, streaming render batching, persistence, attachments, memory, and layout stability. Core Web Vitals “good” targets remain LCP ≤2.5s, INP ≤200ms, and CLS ≤0.10 at p75. citeturn646477search1
 
-## 2026-09-03 — Prompt 23
+## 2026-09-03 — Prompts 23–27
 
 ### Prompt 23 — Modular Code Rules
 **Commit:** `734d62f3ef4a49a75f459b7d3fa180a173a7498d`
 **Changed:** `docs/MODULAR_CODE_RULES.md`
-**Result:** Established binding implementation rules for single-responsibility modules, dependency direction, ownership boundaries, side-effect control, anti-patterns, UI composition, provider/persistence/security separation, testing, and change review. The rules explicitly prohibit a generic mega-manager/runtime and duplicate provider, persistence, OAuth, or server paths.
-**Live verification:** Vite's current guide recommends `npm create vite@latest`; Vitest remains Vite-native and supports Node 24; Playwright's current installation guide supports Node 24 for E2E work. citeturn962400search0turn962400search2turn962400search13
-
-## 2026-09-03 — Prompt 24
+**Result:** Binding rules for single-responsibility modules, dependency direction, ownership boundaries, side-effect control, anti-patterns, UI composition, provider/persistence/security separation, testing, and review.
+**Live verification:** Current Vite, Vitest, and Playwright documentation supports the selected Node 24 toolchain. citeturn962400search0turn962400search2turn962400search13
 
 ### Prompt 24 — Testing Strategy
 **Commit:** `942e2337610d16345c0ae5a236d71862e487ba24`
 **Changed:** `docs/TESTING_STRATEGY.md`
-**Result:** Defined layered unit, adapter/integration, browser, and Playwright E2E testing with contract-focused assertions for Gemini, persistence, security/privacy, attachments, appearance, cancellation, failures, and Android-first UX. Required runtime milestone gates are install → lint → typecheck → unit/integration → build → selected E2E. Live external services remain opt-in rather than required CI dependencies.
-**Live verification:** Current Vitest documentation describes it as Vite-powered and compatible with modern Node; Playwright's current documentation supports Node 24 and Android/mobile emulation workflows. citeturn962400search2turn962400search13
+**Result:** Layered unit, adapter/integration, browser, and Playwright E2E strategy. Required runtime gates are install → lint → typecheck → unit/integration → build → selected E2E.
 
-## Runtime-scaffold status
+### Prompt 25 — Minimal Vertical Slice
+**Implementation commits:** `9c6410a804016715eeb506e842589a52e5e5e3a9`, `a3ac5eb16b8d0eaff7804b626ab28e3d3ab2614b`, `adebd402b5e69d9f155758f9cdf461c9bcd22d87`, `8ecdcc78dfe28a2bce45e7d2d3674ae9a17f5447`  
+**Final CI-gate commit:** `8ecdcc78dfe28a2bce45e7d2d3674ae9a17f5447`  
+**Changed:** Vite/React/TypeScript runtime scaffold, ESLint/TypeScript/Vitest/Playwright config, Android-first chat shell, application turn port, deterministic demo stream, Dexie conversation persistence, unit test, E2E smoke test, and real CI runtime gates.
+**Result:** The first executable clean-room spine is present. It proves UI → application turn boundary → normalized stream events → local persistence. The demo transport is explicitly non-Gemini and exists only until the canonical protected Gemini provider is wired.
+**Dependency verification:** Current npm package pages confirm TypeScript 7.0.2, `@vitejs/plugin-react` 6.1.1, ESLint 10.9.1, Vitest 4.1.11, Playwright 1.62.1, and jsdom 30.0.1. citeturn847264search0turn847264search2turn847264search9turn339481search0turn339481search9turn339481search8
+**Important:** No generated `package-lock.json` was fabricated. CI currently uses `npm install`; once a real lockfile is generated from npm and committed, CI should switch to lockfile-aware caching and `npm ci`.
 
-The repository still does not contain the actual npm dependency scaffold or generated `package-lock.json`. Prompt 25 is the first planned runtime scaffold step. The current development environment can write repository files and verify GitHub repository state, but cannot honestly run a local npm install/lint/typecheck/test/build against the GitHub worktree. No lockfile is fabricated. Once the scaffold exists, CI must run the actual install plus lint/typecheck/test/build gates using the real dependency graph.
+### Prompt 26 — Gemini Safety Policy
+**Commit:** `f5119076372ca0c3517fa04309a8f2ef5fd6f9e4`
+**Changed:** `docs/GEMINI_SAFETY_POLICY.md`
+**Result:** Layered safety policy covering provider constraints, roleplay boundaries, tool execution authorization, Workspace authorization, memory/privacy, diagnostics, and safety-focused tests.
+**Live verification:** Current Google Interactions documentation states custom safety settings are not supported in Interactions, so Elara does not expose pretend per-request safety-threshold controls on the canonical path. citeturn962400search10turn962400search4
+
+### Prompt 27 — Creative-Context System Instruction
+**Commit:** `23925759b25d7699fca2bc4de0b4baebf1764bfd`
+**Changed:** `docs/CREATIVE_CONTEXT_SYSTEM_INSTRUCTION.md`
+**Result:** Authored the production Elara master system instruction covering identity, personality, roleplay, truthfulness, emotional boundaries, tool behavior, Workspace constraints, memory separation, privacy, and instruction integrity. The instruction is application-owned configuration and remains separate from ordinary conversation messages and tool schemas.
+**Live verification:** Current Gemini documentation supports a distinct `system_instruction` request field. citeturn962400search7
+
+## Current runtime status
+
+Runtime scaffold exists and CI now attempts the actual install/lint/typecheck/unit-test/build/E2E chain. The repository does not yet have a committed generated lockfile, and the development environment used for this pass cannot honestly execute npm locally against the GitHub worktree. Therefore no local green claim is made until GitHub Actions proves the runtime chain.
 
 ## Future-self requirements preserved
 

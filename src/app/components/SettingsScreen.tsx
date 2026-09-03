@@ -5,7 +5,7 @@ import { BUILT_IN_FONTS, fontFamilyForCss, googleFontFamilyFromCss2Url, type Fon
 import { RangeSlider } from './RangeSlider';
 import type { PortraitBackground, PortraitScale } from './PortraitBanner';
 import type { GeminiSettings } from '../../gemini/settings-engine';
-import { getGeminiModel } from '../../gemini/settings-engine';
+import { getGeminiModel } from '../../gemini/model-registry';
 import { GEMINI_MODELS } from '../../gemini/model-registry';
 import './model-settings.css';
 

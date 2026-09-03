@@ -18,13 +18,22 @@ Only the OAuth authority owns grant state, token handling, and scope authorizati
 
 ## Initial Workspace capabilities
 
-Calendar is the first implemented Workspace capability. The preferred initial read capability is `calendar.events.readonly` for event-reading operations. Write-capable Calendar operations must request an explicit write scope and must also pass application write-confirmation policy before mutation.
+Calendar is the first implemented Workspace capability. Calendar event reads are isolated from Calendar writes. Tasks and Gmail have now been brought forward as first-class orchestration dependencies; Docs remains a focused document boundary. Future Chat entries continue using this same registry.
 
-Future Tasks, Docs, and Chat entries will be added to this same registry rather than creating service-specific OAuth registries.
+The current application capability keys are:
+
+- `calendar.events.read` / `calendar.events.write`
+- `calendar.list.read` / `calendar.settings.read`
+- `tasks.read` / `tasks.write`
+- `docs.read` / `docs.write`
+- `chat.read` / `chat.write`
+- `gmail.read` / `gmail.modify` / `gmail.send`
+
+The registry deliberately uses application-owned capability names so the rest of the code does not depend on provider scope strings. Gmail's current Google scope catalog includes separate read-only, modify, send, labels, metadata, and settings scopes; the exact provider mapping should be narrowed further when each Gmail operation is promoted to a production capability. citeturn757480search0turn757480search1
 
 ## Verification and least privilege
 
-Google's current documentation recommends the narrowest practical scopes and explains that sensitive/restricted scopes can trigger verification requirements. Scope choice must therefore follow the exact feature operation rather than requesting broad Calendar or Drive-like access up front. citeturn616269search0turn616269search1turn616269search8
+Google's current documentation recommends the narrowest practical scopes and explains that sensitive/restricted scopes can trigger verification requirements. Scope choice must therefore follow the exact feature operation rather than requesting broad Calendar, Gmail, or Drive-like access up front. citeturn616269search0turn616269search1turn616269search8turn757480search0
 
 ## Non-goals
 

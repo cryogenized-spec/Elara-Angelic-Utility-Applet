@@ -15,10 +15,19 @@ const PRESETS: Array<{ id: RoleplayPreferences['environmentPreset']; label: stri
 export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferences; onChange: (value: RoleplayPreferences) => void }) {
   return <div className="roleplay-settings">
     <div className="setting-card roleplay-toggle-card">
-      <div><strong>Roleplay Mode</strong><span>Creative/fictional context with explicit scene-format conventions.</span></div>
-      <button type="button" className={`toggle-switch${value.enabled ? ' is-on' : ''}`} role="switch" aria-checked={value.enabled} onClick={() => onChange({ ...value, enabled: !value.enabled })}>
-        <span className="toggle-switch__knob" />
-        <span className="sr-only">{value.enabled ? 'Roleplay mode on' : 'Roleplay mode off'}</span>
+      <div className="roleplay-toggle-card__copy">
+        <strong>Roleplay Mode</strong>
+        <span>Creative/fictional context with explicit scene-format conventions.</span>
+      </div>
+      <button
+        type="button"
+        className={`toggle-switch${value.enabled ? ' is-on' : ''}`}
+        role="switch"
+        aria-label={value.enabled ? 'Roleplay mode enabled' : 'Roleplay mode disabled'}
+        aria-checked={value.enabled}
+        onClick={() => onChange({ ...value, enabled: !value.enabled })}
+      >
+        <span className="toggle-switch__knob" aria-hidden="true" />
       </button>
     </div>
 

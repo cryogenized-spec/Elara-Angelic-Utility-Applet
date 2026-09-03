@@ -7,7 +7,7 @@ import { fontFamilyForCss, type FontSelection } from '../ui/fontRegistry';
 import { Sidebar } from './components/Sidebar';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
-import { PortraitBanner } from './components/PortraitBanner';
+import { PortraitBanner, type PortraitBackground, type PortraitScale } from './components/PortraitBanner';
 import '../ui/fonts.css';
 import './app.css';
 
@@ -28,6 +28,8 @@ export function App() {
   const [toolNotice, setToolNotice] = useState<string | null>(null);
   const [font, setFont] = useState<FontSelection>({ kind: 'built-in', family: 'Inter' });
   const [fontSize, setFontSize] = useState(15);
+  const [portraitScale, setPortraitScale] = useState<PortraitScale>(2);
+  const [portraitBackground, setPortraitBackground] = useState<PortraitBackground>('midnight');
 
   useEffect(() => {
     void loadConversation().then(setConversation).catch(() => setError('Could not load the local conversation.'));
@@ -89,7 +91,19 @@ export function App() {
   }
 
   if (settingsOpen) {
-    return <SettingsScreen font={font} onFontChange={setFont} fontSize={fontSize} onFontSizeChange={setFontSize} onBack={() => setSettingsOpen(false)} />;
+    return (
+      <SettingsScreen
+        font={font}
+        onFontChange={setFont}
+        fontSize={fontSize}
+        onFontSizeChange={setFontSize}
+        portraitScale={portraitScale}
+        onPortraitScaleChange={setPortraitScale}
+        portraitBackground={portraitBackground}
+        onPortraitBackgroundChange={setPortraitBackground}
+        onBack={() => setSettingsOpen(false)}
+      />
+    );
   }
 
   return (
@@ -103,7 +117,7 @@ export function App() {
         </button>
       </div>
 
-      <PortraitBanner collapsed={sidebarOpen} scale={2} />
+      <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} />
 
       <TopToolRail onAction={handleToolAction} />
 

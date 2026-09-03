@@ -36,7 +36,7 @@ Android portrait UI → conversation state → one canonical Gemini Interactions
 
 Tool calling is a curated application capability surface. Model-visible schemas are explicit allow-listed declarations; actual execution occurs only in validated application services. Tool schemas never contain secrets. Google Workspace capabilities use the single OAuth authority, centralized scope checks, diagnostics, and future write confirmation.
 
-The character has a dedicated master system-instruction source containing durable identity, personality, roleplay behavior, style, and rules. It is separate from user messages, ordinary conversation history, and tool schemas. Prompt 27 will author the production creative-context instruction.
+The character has a dedicated master system-instruction source containing durable identity, personality, roleplay behavior, style, and rules. It is separate from user messages, ordinary conversation history, and tool schemas. Prompt 27 now provides the production creative-context instruction.
 
 Long-term notes/memory are a separate retrievable domain for notable events and past experiences. Ordinary conversation history is not automatically permanent memory. This preserves important experiences when model context windows turn over without creating a giant memory manager.
 
@@ -107,19 +107,31 @@ Prompts 13–17 complete as foundation contracts: credential architecture, Andro
 
 Prompts 18–22 complete as foundation contracts: image input, PDF/document input, character portrait, appearance system, and mobile performance budget.
 
-These prompts establish the contracts ahead of runtime implementation; they do not fabricate an npm lockfile or claim local lint/typecheck/build results that were not actually run.
+Prompts 23–24 complete: modular code rules and layered testing strategy.
 
-Current next work: Prompt 23 — Modular Code Rules.
+Prompt 25 complete: first executable Vite/React vertical slice with a mobile-first shell, application turn boundary, normalized demo streaming events, Dexie persistence, unit test, and Playwright smoke test. The demo transport is explicitly non-Gemini and temporary; it does not create a second Gemini path.
 
-Node.js 24 LTS remains the runtime baseline. Live dependency/API verification remains mandatory for fast-moving surfaces.
+Prompt 26 complete: safety policy and enforcement boundaries. Custom safety settings are not exposed because the current Interactions API does not support custom safety settings.
+
+Prompt 27 complete: production creative-context master system instruction for Elara, stored separately from ordinary conversation content, tool schemas, and future memory notes.
+
+## Runtime scaffold
+
+The repository now contains the executable runtime scaffold and declared dependency graph. A generated `package-lock.json` is intentionally not committed yet because it must come from an actual npm install in an environment that can persist the generated lockfile. Until then, CI uses `npm install` rather than fabricated `npm ci` state.
+
+The required runtime CI gates are now install → lint → typecheck → unit tests → build → Playwright Chromium E2E.
 
 ## External-source revalidation rule
 
-Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, or GitHub Action surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
+Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, or GitHub Action surfaces, re-check current official documentation/release state. Once generated, `package-lock.json` is authoritative for installed versions.
 
 Current Prompt 18–19 verification: Google's current Gemini documentation confirms native image input in Interactions and native PDF/document input; PDFs can be sent inline for smaller transient use, while the Files API is recommended for larger or repeatedly reused files. Google's PDF guidance also describes native multimodal understanding of text, images, diagrams, charts, and tables. citeturn467827search0turn467827search1turn467827search3turn467827search5
 
 Current Prompt 22 verification: Core Web Vitals “good” targets remain LCP ≤2.5s, INP ≤200ms, and CLS ≤0.1 at the 75th percentile. Elara additionally sets an internal initial-JavaScript budget of 200 KB compressed for the core shell. citeturn646477search1
+
+Current Prompt 23–25 package verification: Vite's current guide recommends `npm create vite@latest`; current npm package pages verify TypeScript 7.0.2, `@vitejs/plugin-react` 6.1.1, ESLint 10.9.1, Vitest 4.1.11, Playwright 1.62.1, and jsdom 30.0.1. citeturn962400search0turn847264search0turn847264search2turn847264search9turn339481search0turn339481search9turn339481search8
+
+Current Prompt 26 verification: Google's current Interactions overview says custom safety settings are not supported on the Interactions API, so Elara's safety layer must not pretend otherwise. citeturn962400search10
 
 ## Future-self handoff protocol
 

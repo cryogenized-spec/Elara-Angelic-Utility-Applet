@@ -8,6 +8,7 @@ import { Sidebar } from './components/Sidebar';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
 import { PortraitBanner, type PortraitBackground, type PortraitScale } from './components/PortraitBanner';
+import { ConversationSurface } from './components/ConversationSurface';
 import '../ui/fonts.css';
 import './app.css';
 
@@ -61,17 +62,20 @@ export function App() {
             ...base,
             messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message),
           });
+        } else if (event.type === 'completed') {
+          const completed = {
+            ...base,
+            messages: base.messages.map((message) => message.id === assistantMessage.id
+              ? { ...message, text: liveText, executionSummary: { id: crypto.randomUUID(), steps: event.executionSteps, durationMs: event.durationMs } }
+              : message),
+          };
+          await saveConversation(completed);
+          setConversation(completed);
         } else if (event.type === 'failed') {
           throw new Error(event.message);
         }
       }
 
-      const completed = {
-        ...base,
-        messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message),
-      };
-      await saveConversation(completed);
-      setConversation(completed);
       setStatus('idle');
     } catch (cause) {
       setStatus('failed');
@@ -118,44 +122,17 @@ export function App() {
       </div>
 
       <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} />
-
       <TopToolRail onAction={handleToolAction} />
-
       {toolNotice && <div className="tool-notice" role="status">{toolNotice}</div>}
 
-      <section className="conversation" aria-live="polite">
-        {conversation.messages.length === 0 ? (
-          <div className="empty-state">
-            <span className="empty-state__kicker">ELARA / READY</span>
-            <h2>What shall we work on?</h2>
-            <p>Your conversation starts here. Utility actions stay outside the visible chat unless you choose to turn their results into conversation.</p>
-          </div>
-        ) : (
-          conversation.messages.map((message) => (
-            <article className={`message message-${message.role}`} key={message.id}>
-              <div className="message-meta"><span>{message.role === 'assistant' ? 'Elara' : 'You'}</span><time>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></div>
-              <div className="message-body">{message.text || '…'}</div>
-            </article>
-          ))
-        )}
-      </section>
-
+      <ConversationSurface messages={conversation.messages} fontSize={fontSize} />
       {error && <div className="error" role="alert">{error}</div>}
 
       <form className="composer" onSubmit={(event) => { event.preventDefault(); void send(); }}>
         <button className="composer__icon" type="button" aria-label="Attach image or document"><Icon name="paperclip" size={20} /></button>
-        <textarea
-          aria-label="Message Elara"
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          placeholder="Message Elara…"
-          rows={1}
-          disabled={status === 'streaming'}
-        />
+        <textarea aria-label="Message Elara" value={draft} onChange={(event) => setDraft(event.target.value)} placeholder="Message Elara…" rows={1} disabled={status === 'streaming'} />
         <button className="composer__icon" type="button" aria-label="Voice input"><Icon name="mic" size={20} /></button>
-        <button className="composer__send" type="submit" aria-label="Send message" disabled={!draft.trim() || status === 'streaming'}>
-          <Icon name="send" size={19} />
-        </button>
+        <button className="composer__send" type="submit" aria-label="Send message" disabled={!draft.trim() || status === 'streaming'}><Icon name="send" size={19} /></button>
       </form>
 
       <Sidebar open={sidebarOpen} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => setConversation((current) => id === current.id ? current : { id, messages: [] })} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />

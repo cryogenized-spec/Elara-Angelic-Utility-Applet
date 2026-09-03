@@ -1,16 +1,16 @@
 # Elara Angelic Utility Applet
 
-This README is the durable continuity record for the clean-room rebuild of Elara. It is intended to preserve project history, non-negotiable constraints, the 50-prompt roadmap, verified implementation decisions, and handoff notes so later development iterations do not depend on human memory or chat context.
+This README is the durable continuity record for the clean-room rebuild of Elara. It preserves project history, constraints, roadmap, verified implementation decisions, and handoff notes.
 
 ## Current project definition
 
-Elara is a mobile-first AI companion/chat application centered on Google's current Gemini Interactions API.
+Elara is a mobile-first AI companion/chat application centered on Google's Gemini Interactions API.
 
 The repository is a clean-room rebuild. The archived `Elara-Companion-current` repository is reference material only: use it for lessons, feature history, and proven UX ideas, but do not migrate its architecture, source layout, compatibility layers, or legacy execution paths.
 
-The primary runtime target is Android portrait. Desktop is a secondary adaptation.
+Primary runtime target: Android portrait. Desktop is secondary.
 
-The v1 spine is deliberately small:
+Canonical spine:
 
 Android portrait UI → conversation state → one canonical Gemini Interactions provider → normalized streaming events → local persistence.
 
@@ -19,261 +19,156 @@ Android portrait UI → conversation state → one canonical Gemini Interactions
 1. One canonical Gemini execution path. Never add a legacy `generateContent` fallback or a second Gemini client/provider.
 2. Use Google's current Gemini Interactions API through `@google/genai`.
 3. Model settings are capability-driven. Never expose or send unsupported controls or fields.
-4. UI code must not construct raw Gemini requests, own persistence, manage OAuth internals, or handle secrets directly.
-5. Keep modules small and responsibility-focused. Do not recreate the previous application's monolithic manager/service/compatibility sprawl.
-6. Android portrait comes first: composer, keyboard behavior, scrolling, safe areas, dialogs, portrait, attachments, and touch targets must work on a narrow phone viewport before desktop polish.
+4. UI must not construct raw Gemini requests, own persistence, manage OAuth internals, or handle secrets.
+5. Keep modules small and responsibility-focused; no monolithic managers/services.
+6. Android portrait comes first.
 7. External data crossing trust boundaries must be validated.
-8. Provider/network failures must become explicit diagnosable states. No endless spinner.
+8. Provider/network failures must become explicit diagnosable states; no endless spinner.
 9. One authoritative persistence store per domain.
-10. Build vertically. A later feature must not become a prerequisite for proving core chat.
-11. Direct commits to `main` are the normal workflow. Do not leave pull requests open. If a PR is ever required, merge it immediately after verification.
-12. CI must be green before calling a milestone complete.
-13. Never silently accept deprecated Node.js, npm, package, SDK, CLI, or GitHub Action choices because an older repository used them.
-14. Use `npx` for one-shot upstream CLI/scaffolding commands, using the package's current documented `@latest` entry point.
-15. Never invent a lockfile. Generate `package-lock.json` from the actual dependency graph with npm and commit it.
+10. Build vertically; later capabilities must not block proof of core chat.
+11. Direct commits to `main` are normal. Do not leave pull requests open.
+12. CI must be green before a milestone is called complete.
+13. Revalidate live Node/npm/package/SDK/CLI/GitHub Action choices before use.
+14. Use `npx` for one-shot upstream CLIs with current documented `@latest` entry points.
+15. Never invent a lockfile; generate it with npm from the actual dependency graph.
 
 ## Future architecture requirements to preserve now
 
-These requirements are intentionally recorded before their implementation prompts so future work cannot accidentally design them out of the foundation:
+Tool calling will use curated, explicit application capabilities. Model-visible schemas are allow-listed declarations; actual execution occurs only in validated application services. Google Workspace tools must remain behind the single Google OAuth authority, scope enforcement, diagnostics, and future write-confirmation rules.
 
-- **Tool calling:** Gemini may later receive curated function/tool declarations. Tool schemas are application-owned capabilities, not arbitrary browser-exposed functions. The model can request a tool; only a validated application service may execute it. Tool schemas, execution, OAuth, diagnostics, and write confirmation remain separate owners.
-- **Google Workspace:** Calendar, Tasks, Docs, and Chat will later be exposed through the single Google OAuth authority and Google tool boundary. No Workspace service may create its own OAuth flow or bypass scope checks.
-- **Character master system prompt:** The companion's durable character identity, personality, roleplay behavior, style, and behavioral rules belong in a dedicated system-instruction source. They are not user messages and are not tool schemas. The prompt builder must compose them into the provider request without turning the UI into a prompt engine.
-- **Long-term notes/memory:** Notable past experiences will later be promoted into a separate retrievable memory/notes domain. Ordinary conversation history is not automatically permanent memory. Memory retrieval/insertion must remain modular and explicit so context-window changes do not erase important user-approved history.
-- **No monolithic orchestration:** Never collapse tool execution, Workspace access, prompt construction, memory retrieval, chat state, provider calls, persistence, and diagnostics into one manager/service/runtime. Each concern needs a clear owner and narrow contract.
+The character has a dedicated master system-instruction source containing durable identity, personality, roleplay behavior, style, and rules. It is separate from user messages, tools, and ordinary conversation persistence. Prompt 27 will author the production creative-context instruction.
 
-## Runtime and dependency policy
+Long-term notes/memory are a separate retrievable domain for notable events and past experiences. Ordinary conversation history is not automatically permanent memory. This allows important history to survive context-window turnover without creating a giant memory manager.
 
-Node.js 24 LTS is the production baseline. `.nvmrc` contains `24`. GitHub Actions resolves the latest patch release in that LTS line. Do not use an EOL Node line, and do not switch to a Current Node major merely because its number is higher.
+Never combine provider calls, stream parsing, tool execution, Google Workspace access, character prompting, memory retrieval, persistence, and diagnostics into one monolith.
 
-At implementation time, check the live npm registry/package pages for every new dependency. Prefer stable releases. Inspect `engines` and peer dependencies. Treat deprecation warnings as issues to investigate rather than noise.
+## 50-prompt roadmap
 
-The package lock is authoritative once dependencies are scaffolded. CI should use the committed lockfile and `npm ci`.
-
-The initial architecture selected current releases verified during Prompt 3: React 19, TypeScript 7, Vite 8, Tailwind CSS 4, Dexie 4, Zod 4, Vitest 4, Playwright 1, and `@google/genai` 2. The lockfile, not this paragraph, is the authority for exact installed versions once dependency installation occurs.
-
-## Product requirements carried across the build
-
-Chat: create and continue conversations, send text, stream Gemini responses, display supported thinking summaries, cancel generation, recover from provider/network/timeout failures, retry only when safely retryable, and persist recoverable conversation state.
-
-Gemini: one Interactions implementation, one normalized request contract, one normalized stream-event contract, model selection, capability-driven generation settings, supported thinking controls, explicit creative/fictional system context, and preserved provider diagnostics.
-
-Input: mobile multiline composer, Android keyboard friendliness, voice-to-text, attachment picker, image attachments, document attachments with PDF as a primary target, previews, validation, progress, failure handling, and removal.
-
-Character: persistent portrait, default portrait, custom upload, replacement/removal, enlarged viewing, and 1x–3x scaling.
-
-Appearance: light/dark/system, custom background image, readability treatment behind chat, and persisted appearance state.
-
-Persistence: local authoritative store, schema/version boundary, migrations, corruption-safe recovery, no competing storage authorities.
-
-Security: central configuration boundary, Lockbox classification for secrets/configuration, no browser-bundled application-owned Gemini secret, and no secrets in logs, analytics, diagnostics, or normal persisted state.
-
-Diagnostics/analytics: structured lifecycle state, HTTP/provider/network/timeout diagnostics, request IDs, timings, retry information, safe export, privacy-conscious analytics, and no message-content analytics by default.
-
-Google later: Google OAuth, Calendar, Tasks, Docs, and Chat. Google Keep is explicitly out of scope.
-
-Background later: evaluate Gemini-native Interactions background execution first. Add Cloudflare Workflows only if a concrete requirement remains after that evaluation.
-
-## The 50-prompt build sequence
-
-This is the durable roadmap. The numbered titles are preserved from the project planning record. Do not treat this README as a reason to restart already-completed work; current milestone status is recorded below.
+The roadmap below is the authoritative sequence. Do not restart completed work merely because the chat context changes; use repository evidence.
 
 ### Prompt 1 — Repository Forensics
-Establish the clean-room repository forensics. Inspect the archived implementation as a reference specimen, document what is worth carrying forward, identify complexity and failure modes to avoid, and conclude with the minimal vertical chat spine. No source migration.
-
+Clean-room repository forensics and lessons from the archived specimen.
 ### Prompt 2 — Product Boundary
-Define the exact initial product boundary for Elara Angelic Utility Applet: what v1 must include, what is explicitly out of scope, what is planned later, the non-negotiable mobile-first and one-Gemini-path rules, and the core success criterion.
-
+Exact initial product scope, exclusions, later scope, mobile-first rules, and success criterion.
 ### Prompt 3 — Technical Architecture
-Select and accept the smallest maintainable architecture: React + TypeScript + Vite, Tailwind CSS, Dexie/IndexedDB, Zod, Vitest, Playwright, `@google/genai` with Gemini Interactions only, Cloudflare Workers as the thin server boundary, and standards-based PWA tooling. Reject unnecessary Next.js, Express, duplicate providers, premature Workflows, and framework-heavy abstractions.
-
+React/TypeScript/Vite, Tailwind, Dexie, Zod, Vitest, Playwright, `@google/genai`, Workers, and PWA foundation.
 ### Prompt 4 — System Boundaries
-Define the responsibility boundaries and ownership rules so UI, chat, Gemini, persistence, attachments, appearance, diagnostics, analytics, Google, security, and Worker concerns remain separated without creating an abstraction maze.
-
+Responsibility ownership and directional dependencies.
 ### Prompt 5 — Gemini Integration Strategy
-Design the single canonical Gemini provider integration around the current Interactions API and `@google/genai`. Eliminate legacy execution paths and define the provider boundary, request direction, response direction, and error ownership.
-
+Single canonical Interactions provider boundary and exclusion of legacy execution paths.
 ### Prompt 6 — Current Gemini Model Registry
-Build the current Gemini model registry from live, verified model information. Record supported models and model capability metadata so the UI and request builder are data-driven rather than hard-coded around assumptions.
-
+Live model registry and capability metadata.
 ### Prompt 7 — Gemini Settings Engine
-Design model-aware generation settings. A selected model must determine which controls are visible and which request fields can be emitted. Unsupported settings must disappear from the UI and never reach the provider.
-
+Model-aware generation settings and unsupported-field prevention.
 ### Prompt 8 — Streaming Architecture
-Define and implement the canonical streaming model for Interactions responses, including lifecycle, text deltas, completion, cancellation, failure, and normalized internal events.
-
+Canonical streaming lifecycle, deltas, completion, cancellation/failure, normalized events.
 ### Prompt 9 — Thinking Display
-Implement supported Gemini thinking-summary handling as a separate normalized event/display concern. Never assume every model emits the same thinking capabilities.
-
+Separate normalized thinking-summary display semantics.
 ### Prompt 10 — Conversation Data Model
-Define the minimal conversation/message schema needed for v1 chat, including identity, ordering, timestamps, roles, content, generation state, provider continuity identifiers where needed, and recoverable failure state.
-
+Minimal conversation/message schema and continuity metadata.
 ### Prompt 11 — Local Persistence
-Implement local-first persistence using Dexie over IndexedDB as the single authoritative client persistence layer. Include versioning, migrations, and recovery boundaries.
-
+Dexie/IndexedDB authority, schema versions, migrations, recovery.
 ### Prompt 12 — API Lockbox
-Define the central Lockbox/configuration boundary. Secrets must never leak into the normal browser application state, diagnostics, analytics, logs, or persisted conversation data.
-
+Central secret/configuration boundary.
 ### Prompt 13 — Gemini Credential Architecture
-Define how the Gemini credential is supplied through the secure boundary and Worker/API mediation without embedding an application-owned Gemini secret in the browser bundle. Keep secret ownership centralized.
-
+Secure Gemini credential mediation.
 ### Prompt 14 — Mobile-First Shell
-Implement the Android-portrait-first application shell. Treat narrow portrait as the design baseline and make desktop a secondary responsive adaptation.
-
+Android portrait application shell.
 ### Prompt 15 — ChatGPT-Style Composer
-Implement the modern mobile composer: multiline text input, send/cancel states, keyboard-friendly behavior, attachment affordance, and correct scrolling/safe-area behavior.
-
+Mobile multiline composer and keyboard behavior.
 ### Prompt 16 — Voice-to-Text
-Implement browser-supported voice-to-text input with graceful capability detection, permissions, user feedback, and failure handling.
-
+Voice input capability detection and failure handling.
 ### Prompt 17 — Attachment System
-Design the attachment lifecycle: pick, validate, preview, progress, failure, remove, and handoff into the provider boundary. Keep attachment ownership independent from chat rendering.
-
+Attachment lifecycle.
 ### Prompt 18 — Image Input
-Implement image attachment support and the normalized representation needed for Gemini multimodal input, including limits, validation, previews, and diagnostics.
-
+Image attachment support.
 ### Prompt 19 — Document Input
-Implement document attachment support, with PDF as a primary target, including file validation, metadata, supported-type handling, progress/failure states, and provider handoff.
-
+PDF/document support.
 ### Prompt 20 — Character Portrait
-Implement persistent character portrait support: default portrait, custom upload, replacement/removal, enlarged viewing, and 1x–3x scaling.
-
+Persistent portrait system.
 ### Prompt 21 — Appearance System
-Implement light, dark, and system appearance plus custom background support, readability treatment, and persisted appearance settings.
-
+Theme, background, readability, persistence.
 ### Prompt 22 — Performance Budget
-Define and enforce a realistic mobile performance budget: bundle size, startup, render cost, persistence cost, stream rendering behavior, memory, and attachment handling. Avoid unnecessary dependencies and work.
-
+Mobile performance targets and enforcement.
 ### Prompt 23 — Modular Code Rules
-Turn the architectural ownership rules into practical coding rules. Keep modules small, dependencies directional, responsibilities explicit, and shared helpers narrow. Prevent generic dumping-ground modules.
-
+Practical modularity rules.
 ### Prompt 24 — Testing Strategy
-Define the test pyramid and boundaries: unit tests, provider contract tests, persistence tests, diagnostics tests, and a small number of high-value Playwright end-to-end flows. Prefer behavior over historical topology.
-
+Unit/provider/persistence/diagnostics/e2e test strategy.
 ### Prompt 25 — Minimal Vertical Slice
-Prove the first end-to-end product path: Android portrait app → conversation state → canonical Interactions provider → normalized stream → thinking summary → persistence → reopen/recover → useful failure state instead of an infinite spinner.
-
+First end-to-end chat path.
 ### Prompt 26 — Gemini Safety Policy
-Define the application's Gemini safety policy against the exact capabilities of the pinned Interactions API/SDK. Where configurable safety settings are actually supported, use the intended policy for the four relevant categories; never send unsupported safety fields.
-
+Safety policy against exact pinned API/SDK support.
 ### Prompt 27 — Creative-Context System Instruction
-Centralize a system instruction that establishes fictional/creative roleplay context without attempting to override provider safety policy or facilitate illegal activity.
-
+Production character/creative system instruction.
 ### Prompt 28 — Gemini Request Contract
-Define and validate the normalized request contract that sits between application chat state and the canonical Gemini Interactions implementation. Make unsupported fields impossible to leak through accidentally.
-
+Validated normalized provider request contract.
 ### Prompt 29 — Provider Error Normalization
-Normalize Gemini/provider errors while preserving exact HTTP/provider details needed for diagnostics. Separate safe public diagnostics from secrets and message content.
-
+Normalized provider diagnostics.
 ### Prompt 30 — HTTP Diagnostic Console
-Build the diagnostic model and console for HTTP 400/401/403/404/408/409/413/415/422/429/500/502/503/504 plus network, gateway, provider, and timeout failures. Preserve request ID, timings, retries, retryability, and provider status where available.
-
+Detailed HTTP/network/provider diagnostics.
 ### Prompt 31 — Developer Diagnostics UI
-Expose high-value diagnostics in a controlled developer-facing UI. Never leak secrets, credentials, or user message contents into diagnostic records or exports.
-
+Controlled developer-facing diagnostics UI.
 ### Prompt 32 — Request Timing and Timeout System
-Implement explicit request timing and timeout behavior so provider hangs become deterministic timeout states instead of indefinite spinners.
-
+Explicit timeout behavior.
 ### Prompt 33 — Retry Policy
-Implement a conservative retry policy based on normalized retryability and idempotency. Do not blindly retry every error and do not create duplicate user messages or requests.
-
+Conservative retry/idempotency policy.
 ### Prompt 34 — Request Lifecycle State Machine
-Model request lifecycle explicitly from idle through sending/streaming/completed/cancelled/failure/timeout/retry where applicable. State transitions must be deterministic and testable.
-
+Deterministic request states.
 ### Prompt 35 — Analytics Architecture
-Build privacy-conscious product analytics as a separate concern from diagnostics. Do not collect message content by default; record only useful product-level events and metadata.
-
+Privacy-conscious product analytics.
 ### Prompt 36 — Analytics Dashboard
-Create the analytics view needed to understand product health while preserving the privacy boundary. Keep analytics distinct from detailed developer diagnostics.
-
+Product health dashboard.
 ### Prompt 37 — Google OAuth Architecture
-Design one Google OAuth authority for later Workspace capabilities, with persistent grant metadata and centralized scope ownership.
-
+One Google authorization authority.
 ### Prompt 38 — Google Scope Registry
-Create the centralized Google scope registry for Calendar, Tasks, Docs, and Chat. Keep Google Keep excluded.
-
+Central Workspace scope registry.
 ### Prompt 39 — Incremental Authorization
-Implement incremental authorization so new Google capability scopes are requested only when the corresponding feature is used, while already-granted scopes are retained.
-
+Feature-driven incremental scopes.
 ### Prompt 40 — Stay Connected Semantics
-Define “authorize once” correctly: persist consent/grant state, use silent/non-interactive token recovery when possible, distinguish expired access tokens from revoked consent, and provide explicit disconnect.
-
+Persistent grant/silent recovery/disconnect.
 ### Prompt 41 — Google OAuth Settings UI
-Build the user-facing Google connection/settings UI around the one OAuth authority, persisted grant state, incremental capabilities, and explicit disconnect/recovery behavior.
-
+User-facing connection settings.
 ### Prompt 42 — Google Calendar Service
-Implement the Google Calendar capability as a vertical slice attached to the existing OAuth boundary. Do not create a second authorization system.
-
+Calendar vertical slice.
 ### Prompt 43 — Google Tasks Service
-Implement the Google Tasks capability as a vertical slice attached to the same OAuth authority and scope registry.
-
+Tasks vertical slice.
 ### Prompt 44 — Google Docs Service
-Implement the Google Docs capability through the established Google boundary, validating inputs/outputs and keeping the service independent of UI state.
-
+Docs vertical slice.
 ### Prompt 45 — Google Chat Service
-Implement the Google Chat capability through the same OAuth and service boundary. Keep permissions/scopes explicit.
-
+Chat vertical slice.
 ### Prompt 46 — Google Tool Boundary
-Define how Google capability calls can later be exposed to the companion/tooling system without allowing arbitrary UI-driven API access. Keep authorization, validation, diagnostics, and service ownership centralized.
-
+Safe exposure of Google capabilities as tools.
 ### Prompt 47 — Google Write Confirmation
-Require appropriate confirmation for side-effecting Google writes so the user understands what will change before mutations occur.
-
+Confirmation before side effects.
 ### Prompt 48 — OAuth Failure Diagnostics
-Normalize and expose OAuth failures with useful status/state information while keeping tokens and sensitive authorization data out of diagnostics.
-
+OAuth error normalization.
 ### Prompt 49 — Gemini Native Background Execution
-Evaluate and implement Gemini-native Interactions background execution after the foreground chat path is proven. Only add extra durable orchestration such as Cloudflare Workflows if a concrete requirement remains.
-
+Background execution evaluation/implementation.
 ### Prompt 50 — End-to-End Reliability Gate
-Perform the complete reliability pass across chat, streaming, persistence, diagnostics, attachments, appearance, security, OAuth/integrations where implemented, background execution where implemented, performance, tests, dependency hygiene, and CI. The repository is only considered complete for the current stage when the required quality gate is green.
+Full reliability and quality gate.
 
 ## Milestones and verified state
 
-Milestone 1 complete: clean-room repository exists and the archived app has been documented as reference material only.
+Milestones 1–4 complete.
 
-Milestone 2 complete: product boundary is recorded in `docs/PRODUCT_BOUNDARY.md`.
+Prompts 5–7 complete with green CI.
 
-Milestone 3 complete: technical architecture is recorded in `docs/ARCHITECTURE_DECISION.md`.
+Prompts 8–12 are the current batch and are **not yet marked complete** in this README until their artifacts, commits, and CI results have all been verified.
 
-Prompt 4 is complete: responsibility and dependency ownership rules are recorded in `docs/SYSTEM_BOUNDARIES.md`.
-
-Prompts 5–7 are complete: canonical Gemini integration strategy, live model registry, and capability-driven settings are recorded in the Gemini architecture documents.
-
-Prompts 8–12 are **in progress in the current batch**. Do not mark them complete until each prompt artifact is present, the prompt-specific review is complete, and the corresponding CI verification has passed.
-
-Runtime baseline verified in live CI: `.nvmrc` is `24`; GitHub Actions resolved Node.js `24.20.0` and npm `11.19.0` on 2026-09-03.
+Node.js 24 LTS is the runtime baseline; live CI previously resolved Node.js 24.20.0 and npm 11.19.0 on 2026-09-03.
 
 ## External-source revalidation rule
 
-This project deliberately does not trust old model knowledge for fast-moving dependencies or APIs. Before implementing or changing a relevant surface, re-check the live official source for that dependency/API.
-
-For npm packages: check the npm package page/registry for the current `latest` version, release stability, engines, peer dependencies, and deprecation status. Use `npx` with the package's current documented CLI entry point. Generate the lockfile with npm. Do not paste old dependency versions from the archived application.
-
-For Node.js: keep Node 24 LTS as the production baseline unless live Node.js release status materially changes the support picture. Prefer the newest supported LTS over a Current line.
-
-For Gemini: re-check current Interactions request/response types, SDK version, API version, model IDs, model capabilities, streaming events, thinking controls, safety support, background execution, and error semantics before coding.
-
-For Google OAuth: re-check current Google Identity Services/OAuth guidance and the exact scopes/service requirements before implementing or changing Calendar, Tasks, Docs, or Chat integrations.
-
-## What to carry forward from the archived application
-
-Carry forward proven UX concepts and functional lessons: mobile chat/composer patterns, streaming, supported thinking summaries, model-aware settings, character portrait, custom background/appearance, local persistence, multimodal attachments, structured diagnostics, incremental Google authorization, Lockbox classification, and later background execution.
-
-Do not carry forward the old project's architectural baggage: multiple Gemini paths, legacy GenerateContent runtime, duplicate provider abstractions, Express server infrastructure without a demonstrated need, multiple background runtimes, long-term memory/consolidation, Workspace/artifact/revision systems, large plugin registries, automation infrastructure, Google Keep, or compatibility facades retained solely for history.
+Before implementing any fast-moving Gemini, npm, Node, Google OAuth, or GitHub Action surface, verify the current official documentation/release state. The lockfile, once created, is authoritative for installed dependency versions.
 
 ## Future-self handoff protocol
 
-This section is for a genuinely later development iteration when context continuity is actually lost. It is not an instruction to restart or jump to a particular prompt during the current build.
+This is only for a genuinely later context-loss iteration. It is not a current restart instruction.
 
-A future iteration must first inspect the repository's current README, milestone records, architecture documents, git history, current CI state, and actual source tree. It must determine the highest completed prompt from evidence rather than assuming the next prompt number from memory.
+A future iteration must inspect README, architecture docs, git history, CI, and the actual source tree; determine the highest completed prompt from evidence; make its changes; and leave the same evidence for the next iteration.
 
-Every completed prompt must leave a concise handoff record containing: what changed; why it changed; files added/changed; important architectural decisions; external facts that were verified live; tests/lint/typecheck/build results; CI run/result; failures encountered and the fix; unresolved risks; exact commit SHA; and what the current iteration believes the next work should be after independently inspecting the repository.
-
-Do not overwrite previous handoff history. Append a new dated entry or update the relevant milestone record while preserving the prior evidence.
-
-The future iteration must repeat this discipline for the next iteration. The chain is: past self leaves evidence → current self verifies it → current self makes changes → current self leaves new evidence for the next future self.
+Every completed prompt must record what changed, why, files, key decisions, live facts verified, tests/lint/typecheck/build, CI result, failures/fixes, unresolved risks, exact commit SHA, and recommended next work.
 
 ## Current implementation posture
 
-The project is being built deliberately and incrementally. Do not restart completed work merely because the active chat context is new. Do not skip verification because a change looks small. Do not add advanced subsystems prematurely. Keep the repository simple, current, testable, and directly traceable to the roadmap above.
+Build deliberately, directly, and incrementally. Do not add abstraction for abstraction's sake. Do not create compatibility facades for code that does not exist. Keep the system modular so future tools, Workspace integrations, character prompting, and memory can be added without changing the canonical Gemini spine.

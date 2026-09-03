@@ -45,9 +45,14 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Result:** Dexie/IndexedDB is the sole client persistence authority with explicit schema/migration/recovery/transaction boundaries.
 
 ### Prompt 12 — API Lockbox
-**Commit:** `03a3e3db7dbd86d2a846e4311405276892ddbc6c6`  
+**Commit:** `03a3e3db7dbd86d2a846e4311405276892ddbc6c`  
 **Changed:** `docs/API_LOCKBOX.md`  
 **Result:** Central secret/configuration ownership and explicit separation of Gemini/OAuth secrets, future tool schemas, Workspace access, character system prompt, and memory notes.
+
+### Related correction
+**Commit:** `58909eb1b7c42ff16cb65a8cc7e1f9cc362a852a`  
+**Changed:** `docs/SYSTEM_BOUNDARIES.md`  
+**Result:** Restored the full Prompt 4 responsibility/ownership ADR after an intermediate documentation edit.
 
 ## 2026-09-03 — Prompts 13–17
 
@@ -111,7 +116,15 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Commit:** `734d62f3ef4a49a75f459b7d3fa180a173a7498d`
 **Changed:** `docs/MODULAR_CODE_RULES.md`
 **Result:** Established binding implementation rules for single-responsibility modules, dependency direction, ownership boundaries, side-effect control, anti-patterns, UI composition, provider/persistence/security separation, testing, and change review. The rules explicitly prohibit a generic mega-manager/runtime and duplicate provider, persistence, OAuth, or server paths.
-**Live verification:** Vite's current guide continues to recommend `npm create vite@latest`; Vitest remains Vite-native and supports Node 24; Playwright's current installation guide supports Node 24 for E2E work. citeturn962400search0turn962400search2turn962400search13
+**Live verification:** Vite's current guide recommends `npm create vite@latest`; Vitest remains Vite-native and supports Node 24; Playwright's current installation guide supports Node 24 for E2E work. citeturn962400search0turn962400search2turn962400search13
+
+## 2026-09-03 — Prompt 24
+
+### Prompt 24 — Testing Strategy
+**Commit:** `942e2337610d16345c0ae5a236d71862e487ba24`
+**Changed:** `docs/TESTING_STRATEGY.md`
+**Result:** Defined layered unit, adapter/integration, browser, and Playwright E2E testing with contract-focused assertions for Gemini, persistence, security/privacy, attachments, appearance, cancellation, failures, and Android-first UX. Required runtime milestone gates are install → lint → typecheck → unit/integration → build → selected E2E. Live external services remain opt-in rather than required CI dependencies.
+**Live verification:** Current Vitest documentation describes it as Vite-powered and compatible with modern Node; Playwright's current documentation supports Node 24 and Android/mobile emulation workflows. citeturn962400search2turn962400search13
 
 ## Runtime-scaffold status
 

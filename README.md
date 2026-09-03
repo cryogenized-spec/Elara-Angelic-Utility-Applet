@@ -181,11 +181,11 @@ Implement the canonical landscape banner, 1×–3× presentation scaling, collap
 
 ### Pass 3 — Conversation surface
 
-Implement AI-dominant message presentation, empty-chat composition, grouped messages, timestamps, execution/thinking summaries with expansion controls, and reliable conversation scrolling.
+Implement AI-dominant message presentation, empty-chat composition, grouped messages, timestamps, execution/thinking summaries with expansion controls, and reliable conversation scrolling. **Completed.**
 
 ### Pass 4 — Android composer and keyboard behavior
 
-Implement multiline text, send, voice-to-text, attachment entry points, focus management, visual-viewport/IME handling, latest-message visibility and stable scrolling while the Android keyboard is open.
+Implement multiline text, send, voice-to-text, attachment entry points, focus management, visual-viewport/IME handling, latest-message visibility and stable scrolling while the Android keyboard is open. **Implemented as the current UI milestone:** bounded auto-growing multiline input, Enter/Shift+Enter behavior, explicit cancellation, VisualViewport-driven shell sizing, progressive VirtualKeyboard geometry updates, and latest-message stick-to-bottom behavior. Attachment and voice controls remain capability entry points until their dedicated runtime passes are wired.
 
 ### Pass 5 — Sidebar menu and chat threads
 
@@ -231,15 +231,13 @@ The top toolbar is horizontally scrollable rather than compressing all utilities
 
 ## Typography and Google Fonts
 
-The UI intentionally offers a small curated set of Google-hosted font choices: **Inter**, **Manrope**, and **Outfit**. They are not bundled into the application.
+The UI intentionally offers a small curated set of Google-hosted font choices: **Inter**, **Manrope**, and **Outfit**. The built-in fonts are shipped locally as Latin-subset WOFF2 assets prepared during the build; custom Google Fonts remain an explicit opt-in external resource. The build path keeps normal chat typography independent of network availability.
 
-The wiring uses Google's documented CSS2 API: `https://fonts.googleapis.com/css2?family=...&display=swap`, requesting only the weights the UI needs. Google documents that the browser receives a stylesheet tailored to the request and then fetches the appropriate font resources; the browser's normal HTTP cache is therefore the reuse mechanism. citeturn765993search1turn765993search2
+The custom-font path uses Google's documented CSS2 API and loads a user-supplied stylesheet only after it passes HTTPS/host/path validation. citeturn765993search1turn765993search2
 
-This is deliberately different from self-hosting font files. A browser cache is not an offline guarantee. The app therefore keeps a system-font fallback and uses `font-display: swap` so readable text remains available while a selected web font loads. citeturn533491search1turn533491search7
+Local built-in font loading uses `font-display: swap` with system fallbacks so readable text remains available while assets load. citeturn533491search1turn533491search7
 
-The initial implementation contains a small font loader that dynamically adds one Google CSS2 stylesheet link per selected family. It records loaded families in-memory to avoid duplicate DOM work. Later Settings persistence will preserve the selected family as an application setting.
-
-Google recommends requesting only the styles and weights actually used so the delivered font payload remains small. citeturn765993search1
+The typography surface provides a live pangram preview and a 10–20px text-size control. Google recommends requesting only the styles and weights actually used so delivered font payloads remain small. citeturn765993search1
 
 ## Vector policy
 
@@ -275,4 +273,4 @@ Every completed prompt must record what changed, why, files, decisions, live fac
 
 Build directly and incrementally. Do not recreate the archived architecture. Keep tool calling, Workspace integrations, character prompting, memory, persistence, diagnostics, attachments, appearance, background execution, and the canonical Gemini provider modular and independently testable.
 
-**Current UI milestone:** Pass 1 implementation is underway. The first pass establishes the visual geometry and surface boundaries while keeping the existing deterministic chat transport intact for verification.
+**Current UI milestone:** Pass 1 foundation, Pass 2 portrait presentation, Pass 3 conversation surface, and Pass 4 Android composer/IME foundation are implemented. The app now uses VisualViewport-derived metrics for the visible viewport, keeps the composer bounded and keyboard-safe, supports multiline drafts with explicit Enter/Shift+Enter semantics, provides cancellation during the active demo stream, and preserves latest-message visibility while the conversation changes. The attachment and voice controls remain entry points only until their dedicated capability implementations are wired. Physical-device keyboard validation remains part of Pass 8.

@@ -4,6 +4,7 @@ import { Icon } from '../../ui/icons';
 import { BUILT_IN_FONTS, fontFamilyForCss, googleFontFamilyFromCss2Url, type FontSelection } from '../../ui/fontRegistry';
 import { RangeSlider } from './RangeSlider';
 import type { PortraitBackground, PortraitScale } from './PortraitBanner';
+import './api-lockbox.css';
 
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },
@@ -142,54 +143,15 @@ export function SettingsScreen({
 
         <section className="settings-panel" aria-live="polite">
           {section === 'appearance' && (
-            <div className="settings-copy">
-              <span className="panel-kicker">PRESENCE</span>
-              <h2>Elara presentation</h2>
-              <p>The portrait is a presentation layer. Its scale and ambient treatment are independent of Elara's character definition.</p>
-              <RangeSlider id="portrait-scale" label="Portrait scale" min={1} max={3} value={portraitScale} valueLabel={`${portraitScale}×`} minLabel="1×" maxLabel="3×" onChange={(value) => onPortraitScaleChange(Math.min(3, Math.max(1, value)) as PortraitScale)} />
-              <div className="background-picker">
-                <div className="background-picker__header"><strong>Banner background</strong><span>Ambient backdrop only · does not change the portrait asset.</span></div>
-                <div className="background-options" role="radiogroup" aria-label="Portrait background">
-                  {portraitBackgrounds.map((option) => {
-                    const active = portraitBackground === option.id;
-                    return <button key={option.id} type="button" role="radio" aria-checked={active} className={`background-option background-option--${option.id}${active ? ' is-active' : ''}`} onClick={() => onPortraitBackgroundChange(option.id)}><span>{option.label}</span><small>{option.description}</small></button>;
-                  })}
-                </div>
-              </div>
-            </div>
+            <div className="settings-copy"><span className="panel-kicker">PRESENCE</span><h2>Elara presentation</h2><p>The portrait is a presentation layer. Its scale and ambient treatment are independent of Elara's character definition.</p><RangeSlider id="portrait-scale" label="Portrait scale" min={1} max={3} value={portraitScale} valueLabel={`${portraitScale}×`} minLabel="1×" maxLabel="3×" onChange={(value) => onPortraitScaleChange(Math.min(3, Math.max(1, value)) as PortraitScale)} /><div className="background-picker"><div className="background-picker__header"><strong>Banner background</strong><span>Ambient backdrop only · does not change the portrait asset.</span></div><div className="background-options" role="radiogroup" aria-label="Portrait background">{portraitBackgrounds.map((option) => { const active = portraitBackground === option.id; return <button key={option.id} type="button" role="radio" aria-checked={active} className={`background-option background-option--${option.id}${active ? ' is-active' : ''}`} onClick={() => onPortraitBackgroundChange(option.id)}><span>{option.label}</span><small>{option.description}</small></button>; })}</div></div></div>
           )}
 
           {section === 'typography' && (
-            <div className="settings-copy">
-              <span className="panel-kicker">TYPE</span>
-              <h2>Typography</h2>
-              <p>Built-in fonts are shipped as locally hosted, Latin-subset WOFF2 assets. Custom Google Fonts remain an explicit opt-in link and are loaded only when you add one.</p>
-              <div className="typography-preview" style={{ fontFamily: fontFamilyForCss(font), fontSize: `${fontSize}px` }}><span className="typography-preview__label">LIVE PREVIEW</span><p>The quick brown fox jumps over the lazy dog.</p><p>0123456789 · Aa Bb Cc · crisp, readable, and ready for chat.</p></div>
-              <RangeSlider id="font-size" label="Text size" min={10} max={20} value={fontSize} valueLabel={`${fontSize}px`} onChange={onFontSizeChange} />
-              <div className="font-options" role="radiogroup" aria-label="Font family">
-                {BUILT_IN_FONTS.map((option) => { const active = font.kind === 'built-in' && font.family === option.family; return <button key={option.family} className={`font-option${active ? ' is-active' : ''}`} type="button" role="radio" aria-checked={active} onClick={() => onFontChange({ kind: 'built-in', family: option.family })} style={{ fontFamily: fontFamilyForCss(option.family) }}><span>{option.family}</span><small>The quick brown fox jumps over the lazy dog.</small></button>; })}
-                {font.kind === 'custom' && <button className="font-option is-active" type="button" role="radio" aria-checked="true" style={{ fontFamily: fontFamilyForCss(font) }}><span>{font.family}</span><small>Custom Google font · loaded from your CSS2 link.</small></button>}
-              </div>
-              <div className="custom-font-card"><div><strong>Add a Google font</strong><span>Paste the CSS2 stylesheet URL generated by Google Fonts.</span></div><input className="custom-font-input" value={customUrl} onChange={(event) => { setCustomUrl(event.target.value); setCustomError(null); }} placeholder="https://fonts.googleapis.com/css2?family=..." inputMode="url" aria-label="Google Fonts CSS2 URL"/><button className="custom-font-button" type="button" onClick={applyCustomFont}>Load font</button>{customError && <small className="custom-font-error" role="alert">{customError}</small>}</div>
-            </div>
+            <div className="settings-copy"><span className="panel-kicker">TYPE</span><h2>Typography</h2><p>Built-in fonts are shipped as locally hosted, Latin-subset WOFF2 assets. Custom Google Fonts remain an explicit opt-in link and are loaded only when you add one.</p><div className="typography-preview" style={{ fontFamily: fontFamilyForCss(font), fontSize: `${fontSize}px` }}><span className="typography-preview__label">LIVE PREVIEW</span><p>The quick brown fox jumps over the lazy dog.</p><p>0123456789 · Aa Bb Cc · crisp, readable, and ready for chat.</p></div><RangeSlider id="font-size" label="Text size" min={10} max={20} value={fontSize} valueLabel={`${fontSize}px`} onChange={onFontSizeChange} /><div className="font-options" role="radiogroup" aria-label="Font family">{BUILT_IN_FONTS.map((option) => { const active = font.kind === 'built-in' && font.family === option.family; return <button key={option.family} className={`font-option${active ? ' is-active' : ''}`} type="button" role="radio" aria-checked={active} onClick={() => onFontChange({ kind: 'built-in', family: option.family })} style={{ fontFamily: fontFamilyForCss(option.family) }}><span>{option.family}</span><small>The quick brown fox jumps over the lazy dog.</small></button>; })}{font.kind === 'custom' && <button className="font-option is-active" type="button" role="radio" aria-checked="true" style={{ fontFamily: fontFamilyForCss(font) }}><span>{font.family}</span><small>Custom Google font · loaded from your CSS2 link.</small></button>}</div><div className="custom-font-card"><div><strong>Add a Google font</strong><span>Paste the CSS2 stylesheet URL generated by Google Fonts.</span></div><input className="custom-font-input" value={customUrl} onChange={(event) => { setCustomUrl(event.target.value); setCustomError(null); }} placeholder="https://fonts.googleapis.com/css2?family=..." inputMode="url" aria-label="Google Fonts CSS2 URL"/><button className="custom-font-button" type="button" onClick={applyCustomFont}>Load font</button>{customError && <small className="custom-font-error" role="alert">{customError}</small>}</div></div>
           )}
 
           {section === 'security' && (
-            <div className="settings-copy">
-              <span className="panel-kicker">SECURITY</span>
-              <h2>API Lockbox</h2>
-              <p>Your Gemini key is stored locally in an encrypted IndexedDB record and is never rendered into ordinary chat state, diagnostics, or model-visible data. This is a user-supplied BYOK credential; the future Worker boundary can replace the transport without changing this UI.</p>
-              <div className="setting-card setting-card--security">
-                <Icon name="shield" size={21}/>
-                <div><strong>{geminiApiConfigured ? 'Gemini key configured' : 'Gemini key not configured'}</strong><span>{geminiApiConfigured ? 'A key is present in the local Lockbox.' : 'Add a key below to enable live Gemini chat.'}</span></div>
-              </div>
-              <div className="lockbox-form">
-                <label htmlFor="gemini-api-key">Gemini API key</label>
-                <input id="gemini-api-key" className="custom-font-input" type="password" value={geminiApiKey} onChange={(event) => setGeminiApiKey(event.target.value)} placeholder={geminiApiConfigured ? 'Enter a replacement key' : 'Paste your Gemini API key'} autoComplete="off" spellCheck={false} />
-                <div className="lockbox-actions"><button className="custom-font-button" type="button" onClick={() => void saveKey()} disabled={lockboxBusy}>{lockboxBusy ? 'Saving…' : 'Save key'}</button>{geminiApiConfigured && <button className="lockbox-clear" type="button" onClick={() => void clearKey()} disabled={lockboxBusy}>Clear key</button>}</div>
-                {lockboxMessage && <small className="custom-font-error" role="status">{lockboxMessage}</small>}
-              </div>
-            </div>
+            <div className="settings-copy"><span className="panel-kicker">SECURITY</span><h2>API Lockbox</h2><p>Your Gemini key is stored locally in an encrypted IndexedDB record and is never rendered into ordinary chat state, diagnostics, or model-visible data. This is a user-supplied BYOK credential; the future Worker boundary can replace the transport without changing this UI.</p><div className="setting-card setting-card--security"><Icon name="shield" size={21}/><div><strong>{geminiApiConfigured ? 'Gemini key configured' : 'Gemini key not configured'}</strong><span>{geminiApiConfigured ? 'A key is present in the local Lockbox.' : 'Add a key below to enable live Gemini chat.'}</span></div></div><div className="lockbox-form"><label htmlFor="gemini-api-key">Gemini API key</label><input id="gemini-api-key" className="custom-font-input" type="password" value={geminiApiKey} onChange={(event) => setGeminiApiKey(event.target.value)} placeholder={geminiApiConfigured ? 'Enter a replacement key' : 'Paste your Gemini API key'} autoComplete="off" spellCheck={false}/><div className="lockbox-actions"><button className="custom-font-button" type="button" onClick={() => void saveKey()} disabled={lockboxBusy}>{lockboxBusy ? 'Saving…' : 'Save key'}</button>{geminiApiConfigured && <button className="lockbox-clear" type="button" onClick={() => void clearKey()} disabled={lockboxBusy}>Clear key</button>}</div>{lockboxMessage && <small className="custom-font-error" role="status">{lockboxMessage}</small>}</div></div>
           )}
 
           {section === 'chat' && (

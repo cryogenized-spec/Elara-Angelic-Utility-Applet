@@ -8,8 +8,8 @@ const validArtwork = {
   width: 1200,
   height: 1500,
   dataUrl: 'data:image/png;base64,AAAA',
-  focalX: 2,
-  focalY: -1,
+  focalX: 200,
+  focalY: -50,
 };
 
 describe('character profile normalization', () => {
@@ -26,17 +26,19 @@ describe('character profile normalization', () => {
     expect(value.name).toBe('Elara');
     expect(value.systemInstruction).toBe('  Be warm.  ');
     expect(value.artworkMode).toBe('landscape');
-    expect(value.artwork?.focalX).toBe(1);
+    expect(value.artwork?.focalX).toBe(100);
     expect(value.artwork?.focalY).toBe(0);
   });
 
-  it('drops malformed artwork instead of persisting unsafe references', () => {
-    const value = normalizeCharacterProfile({
-      artworkMode: 'portrait',
-      artwork: { ...validArtwork, dataUrl: 'https://example.com/image.png' },
-    });
+  it('uses the 0–100 percent focal coordinate convention', () => {
+    const value = normalizeCharacterProfile({ artwork: { ...validArtwork, focalX: 50, focalY: 75 } });
+    expect(value.artwork?.focalX).toBe(50);
+    expect(value.artwork?.focalY).toBe(75);
+  });
 
-    expect(value.artwork).toBeNull();
-    expect(value.artworkMode).toBe('portrait');
+  it('drops malformed or browser-active artwork instead of persisting unsafe references', () => {
+    expect(normalizeCharacterProfile({ artworkMode: 'portrait', artwork: { ...validArtwork, dataUrl: 'https://example.com/image.png' } }).artwork).toBeNull();
+    expect(normalizeCharacterProfile({ artworkMode: 'portrait', artwork: { ...validArtwork, mimeType: 'image/svg+xml', dataUrl: 'data:image/svg+xml;base64,AAAA' } as never }).artwork).toBeNull();
+    expect(normalizeCharacterProfile({ artworkMode: 'portrait', artwork: { ...validArtwork, dataUrl: 'data:image/png;base64,not!base64' } }).artwork).toBeNull();
   });
 });

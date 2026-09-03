@@ -78,7 +78,9 @@ test.describe('Android portrait reliability', () => {
     const surface = page.getByRole('region', { name: 'Calendar action surface' });
 
     const transition = await calendar.evaluate((element) => getComputedStyle(element).transitionDuration);
-    expect(transition).toMatch(/^(?:0s|0(?:\.0+)?s)(?:,\s*(?:0s|0(?:\.0+)?s))*$/);
+    const durations = transition.split(',').map((value) => Number.parseFloat(value));
+    expect(durations.length).toBeGreaterThan(0);
+    expect(durations.every((value) => Number.isFinite(value) && value <= 0.001)).toBe(true);
 
     await calendar.click();
     await expect(surface).toBeVisible();

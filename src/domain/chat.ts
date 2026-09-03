@@ -12,10 +12,22 @@ export interface ChatMessage {
   role: ChatRole;
   text: string;
   createdAt: number;
+  conversationId?: string;
   executionSummary?: ExecutionSummary;
 }
 
 export interface ConversationState {
   id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
   messages: ChatMessage[];
+}
+
+export interface ConversationThread {
+  id: string;
+  title: string;
+  createdAt: number;
+  updatedAt: number;
+  archived: boolean;
 }

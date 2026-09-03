@@ -1,7 +1,0 @@
-.lockbox-form { margin-top: 16px; padding: 15px; border: 1px solid rgba(110,168,255,.18); border-radius: 17px; background: rgba(255,255,255,.035); }
-.lockbox-form label { display: block; margin-bottom: 7px; color: rgba(255,255,255,.78); font-size: 11px; font-weight: 600; }
-.lockbox-form .custom-font-input { width: 100%; min-height: 44px; }
-.lockbox-actions { display: flex; gap: 8px; margin-top: 9px; flex-wrap: wrap; }
-.lockbox-clear { min-height: 42px; padding: 0 14px; border: 1px solid rgba(255,96,120,.22); border-radius: 13px; background: rgba(120,24,44,.2); color: #ff9eab; font-size: 11px; }
-.lockbox-clear:hover { border-color: rgba(255,96,120,.42); background: rgba(120,24,44,.32); }
-.lockbox-actions button:disabled { opacity: .45; cursor: not-allowed; }

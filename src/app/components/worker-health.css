@@ -1,0 +1,19 @@
+.worker-health { display: grid; gap: 12px; margin-top: 18px; padding: 14px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.035); }
+.worker-health__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.worker-health__header h2 { margin: 4px 0 5px; color: var(--text); font-size: 16px; line-height: 1.2; }
+.worker-health__header p { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; max-width: 460px; }
+.worker-health__status { display: inline-flex; align-items: center; gap: 7px; flex: 0 0 auto; min-height: 30px; padding: 0 10px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.worker-health__dot { width: 9px; height: 9px; border-radius: 50%; background: rgba(255,255,255,.35); box-shadow: 0 0 0 3px rgba(255,255,255,.05); }
+.worker-health[data-state='healthy'] .worker-health__status { color: #9be6b0; border-color: rgba(75,190,105,.35); background: rgba(75,190,105,.07); }
+.worker-health[data-state='healthy'] .worker-health__dot { background: #4fc26f; box-shadow: 0 0 0 3px rgba(79,194,111,.12); }
+.worker-health[data-state='degraded'] .worker-health__status { color: #ffd37a; border-color: rgba(255,190,75,.35); background: rgba(255,190,75,.07); }
+.worker-health[data-state='degraded'] .worker-health__dot { background: #ffbe4b; box-shadow: 0 0 0 3px rgba(255,190,75,.12); }
+.worker-health[data-state='offline'] .worker-health__status { color: #ff9d9d; border-color: rgba(255,90,90,.35); background: rgba(255,90,90,.07); }
+.worker-health[data-state='offline'] .worker-health__dot { background: #ff5d5d; box-shadow: 0 0 0 3px rgba(255,93,93,.12); }
+.worker-health__endpoint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 9px 10px; border: 1px solid var(--line); border-radius: 11px; background: rgba(10,11,16,.62); color: rgba(255,255,255,.75); font: 500 10px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.worker-health__actions { display: flex; align-items: center; gap: 8px; }
+.worker-health__button { min-height: 44px; }
+.worker-health__button:disabled { opacity: .65; cursor: progress; }
+.worker-health__detail { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+@media (max-width: 560px) { .worker-health__header { flex-direction: column; } .worker-health__status { justify-self: start; } }
+@media (prefers-reduced-motion: reduce) { .worker-health__button { transition: none; } }

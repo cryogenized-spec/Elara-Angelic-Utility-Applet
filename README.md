@@ -34,7 +34,7 @@ Android portrait UI → conversation state → one canonical Gemini Interactions
 
 ## Future architecture requirements
 
-Tool calling is a curated application capability surface. Model-visible schemas are explicit allow-listed declarations; actual execution occurs only in validated application services. Tool schemas never contain secrets. Google Workspace capabilities use the single OAuth authority, centralized scope checks, diagnostics, and future write confirmation.
+Tool calling is a curated application capability surface. Model-visible schemas are explicit allow-listed declarations; actual execution occurs in validated application services. Tool schemas never contain secrets. Google Workspace capabilities use the single OAuth authority, centralized scope checks, diagnostics, and future write confirmation.
 
 The character has a dedicated master system-instruction source containing durable identity, personality, roleplay behavior, style, and rules. It is separate from user messages, ordinary conversation history, and tool schemas. Prompt 27 now provides the production creative-context instruction.
 
@@ -147,6 +147,8 @@ Prompts 38–42 complete: central Google scope registry, demand-driven increment
 
 Prompts 43–47 complete: granular Google Tasks service, focused Docs service, Google Chat service, orchestration-critical Gmail service, explicit model-visible Google tool registry, and a bounded write-confirmation policy for consequential operations.
 
+Prompts 48–50 complete: structured Google OAuth failure diagnostics, native Gemini Interactions background-execution contract, and an enforceable final reliability gate covering architecture invariants plus lint/typecheck/unit/build/E2E CI.
+
 ## Runtime status
 
 The first executable vertical slice exists. It proves the application plumbing with a deterministic demo transport:
@@ -159,13 +161,17 @@ The repository does not contain a fabricated `package-lock.json`. Until a real l
 
 ## Google Workspace status
 
-Workspace access is now architecturally connected through one OAuth authority. Calendar, Tasks, Docs, Chat, and Gmail each have focused service boundaries. The model-visible Google tool surface is explicitly allow-listed, with OAuth capability mapping and separate write-confirmation classification. Gmail and Tasks are treated as especially important orchestration inputs because the future Kanban layer will need fine-grained task movement/state and email workflow control.
+Workspace access is architecturally connected through one OAuth authority. Calendar, Tasks, Docs, Chat, and Gmail each have focused service boundaries. The model-visible Google tool surface is explicitly allow-listed, with OAuth capability mapping and separate write-confirmation classification. Gmail and Tasks are treated as especially important orchestration inputs because the future Kanban layer will need fine-grained task movement/state and email workflow control.
+
+Gemini native background execution is now defined as another lifecycle around the same canonical provider boundary. Long-running work can be represented by a server-side interaction reference and later surfaced to orchestration/Kanban without creating a second model client.
 
 ## External-source revalidation rule
 
 Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, GitHub Pages, or GitHub Action surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
 
 Google's current Calendar documentation recommends narrowly focused scopes and distinguishes event read/write permissions; contextual incremental authorization is a current Google recommendation. Sensitive or restricted scopes can also require additional verification. citeturn616269search0turn616269search1turn616269search5turn616269search8
+
+The current Gemini Interactions documentation supports background execution, polling/reconnection, cancellation, and `previous_interaction_id` chaining after the prior interaction is no longer active. citeturn383674search0turn383674search1turn383674search3
 
 ## Future-self handoff protocol
 
@@ -177,4 +183,4 @@ Every completed prompt must record what changed, why, files, decisions, live fac
 
 ## Current implementation posture
 
-Build directly and incrementally. Do not recreate the archived architecture. Keep tool calling, Workspace integrations, character prompting, memory, persistence, diagnostics, attachments, appearance, and the canonical Gemini provider modular and independently testable.
+Build directly and incrementally. Do not recreate the archived architecture. Keep tool calling, Workspace integrations, character prompting, memory, persistence, diagnostics, attachments, appearance, background execution, and the canonical Gemini provider modular and independently testable.

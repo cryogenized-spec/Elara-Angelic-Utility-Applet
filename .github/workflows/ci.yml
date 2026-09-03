@@ -68,3 +68,6 @@ jobs:
 
       - name: End-to-end tests
         run: npm run e2e -- --project=chromium
+
+      - name: Final reliability gate
+        run: npm run reliability:check

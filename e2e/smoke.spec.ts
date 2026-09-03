@@ -125,17 +125,17 @@ test('creates, searches, selects, renames, and restores conversation threads', a
   await expect(page.getByText('Demo response received: Plan a weekend trip to the Drakensberg')).toBeVisible();
 
   await page.getByRole('button', { name: 'Open sidebar' }).click();
-  await expect(sidebar.getByText(/Plan Weekend Trip Drakensberg/i)).toBeVisible();
+  const generatedTitle = sidebar.getByRole('button', { name: /Plan Weekend Trip Drakensberg/i });
+  await expect(generatedTitle).toBeVisible();
 
   const search = sidebar.getByRole('textbox', { name: 'Search chats' });
   await search.fill('drakensberg');
-  await expect(sidebar.getByText(/Plan Weekend Trip Drakensberg/i)).toBeVisible();
+  await expect(generatedTitle).toBeVisible();
 
-  const renamedThread = sidebar.getByRole('button', { name: /Plan Weekend Trip Drakensberg/i });
-  const row = renamedThread.locator('..');
-  await row.locator('summary').click();
-  await row.getByRole('button', { name: 'Rename' }).click();
-  const renameInput = row.getByRole('textbox', { name: 'Thread name' });
+  await generatedTitle.locator('xpath=following-sibling::details').locator('summary').click();
+  await sidebar.getByRole('button', { name: 'Rename' }).click();
+  const renameInput = sidebar.getByRole('textbox', { name: 'Thread name' });
+  await expect(renameInput).toBeVisible();
   await renameInput.fill('Mountain Escape');
   await renameInput.press('Enter');
   await expect(sidebar.getByRole('button', { name: /Mountain Escape/i })).toBeVisible();

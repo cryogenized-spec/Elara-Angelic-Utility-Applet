@@ -50,8 +50,17 @@ Development is being conducted through numbered implementation prompts. Each pro
 
 Prompt 1 established the clean-room repository forensics and architectural direction.
 Prompt 2 defines the exact initial product boundary in `docs/PRODUCT_BOUNDARY.md`.
+Prompt 3 accepts the technical architecture in `docs/ARCHITECTURE_DECISION.md`, including the Node.js 24 LTS baseline and current dependency/CI policy.
 
 The first implementation phase is the minimal vertical chat slice. Large subsystems must not be introduced before the core request/stream/persistence path is proven.
+
+## Runtime and dependency baseline
+
+Node.js 24 LTS is the production baseline. `.nvmrc` is authoritative for local tooling and GitHub Actions resolves the latest patch for that LTS line. We do not use EOL Node releases.
+
+Project tooling should use current `npx` commands where an upstream CLI is required. Dependencies are verified against current npm releases before installation and committed through `package-lock.json`; CI installs from the lockfile and must run the full required quality gate as the implementation grows.
+
+The repository does not copy dependency versions from the archived Elara application.
 
 ## Gemini safety and creative context
 

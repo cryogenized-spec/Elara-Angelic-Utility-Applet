@@ -23,10 +23,11 @@ const db = new PreferencesDatabase();
 
 export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences> | null | undefined): ChatAppearancePreferences {
   const merged = { ...DEFAULT_CHAT_APPEARANCE, ...(value ?? {}) };
+  const backgroundMode: ChatAppearancePreferences['chatBackgroundMode'] = merged.chatBackgroundMode === 'gradient' || merged.chatBackgroundMode === 'image' ? merged.chatBackgroundMode : 'solid';
   return {
     ...merged,
-    chatBackgroundMode: merged.chatBackgroundMode === 'gradient' || merged.chatBackgroundMode === 'image' ? merged.chatBackgroundMode : 'solid',
-    chatBackgroundValue: typeof merged.chatBackgroundValue === 'string' ? merged.chatBackgroundValue.slice(0, 8_000_000) : DEFAULT_CHAT_APPEARANCE.chatBackgroundValue,
+    chatBackgroundMode: backgroundMode,
+    chatBackgroundValue: normalizeBackgroundValue(backgroundMode, merged.chatBackgroundValue),
     chatBackgroundOpacity: clamp(merged.chatBackgroundOpacity, 0, 1, DEFAULT_CHAT_APPEARANCE.chatBackgroundOpacity),
     chatBackgroundOverlay: clamp(merged.chatBackgroundOverlay, 0, 0.9, DEFAULT_CHAT_APPEARANCE.chatBackgroundOverlay),
     chatBackgroundBlur: clamp(merged.chatBackgroundBlur, 0, 24, DEFAULT_CHAT_APPEARANCE.chatBackgroundBlur),
@@ -73,6 +74,14 @@ export async function saveRoleplayPreferences(value: RoleplayPreferences): Promi
   const nextValue = normalizeRoleplay(value);
   await db.preferences.put({ id: 'roleplay', value: nextValue, updatedAt: Date.now() });
   return nextValue;
+}
+
+function normalizeBackgroundValue(mode: ChatAppearancePreferences['chatBackgroundMode'], value: string): string {
+  if (mode === 'solid') return safeHex(value, DEFAULT_CHAT_APPEARANCE.chatBackgroundValue);
+  if (mode === 'gradient') return value === 'violet' || value === 'rose' || value === 'midnight' ? value : 'midnight';
+  if (typeof value !== 'string' || value.length > 6_000_000) return '';
+  if (!/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(value)) return '';
+  return value;
 }
 
 function clamp(value: number, min: number, max: number, fallback: number): number {

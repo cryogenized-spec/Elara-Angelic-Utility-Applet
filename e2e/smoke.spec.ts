@@ -25,7 +25,7 @@ test('collapses the Elara portrait when the sidebar opens', async ({ page }) => 
 test('shows local font choices and the 10–20px text size slider', async ({ page }) => {
   await page.goto('');
   await page.getByRole('button', { name: 'Open sidebar' }).click();
-  await page.getByRole('button', { name: 'Close sidebar' }).click();
+  await page.getByRole('complementary', { name: 'Chat threads' }).getByRole('button', { name: 'Close sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Typography' }).click();
 

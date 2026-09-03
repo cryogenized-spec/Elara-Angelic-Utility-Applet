@@ -8,10 +8,12 @@ type RangeSliderProps = {
   max: number;
   step?: number;
   valueLabel: string;
+  minLabel?: string;
+  maxLabel?: string;
   onChange: (value: number) => void;
 };
 
-export function RangeSlider({ id, label, value, min, max, step = 1, valueLabel, onChange }: RangeSliderProps) {
+export function RangeSlider({ id, label, value, min, max, step = 1, valueLabel, minLabel, maxLabel, onChange }: RangeSliderProps) {
   const [hot, setHot] = useState(false);
 
   return (
@@ -30,7 +32,7 @@ export function RangeSlider({ id, label, value, min, max, step = 1, valueLabel, 
         value={value}
         aria-label={label}
         onChange={(event) => onChange(Number(event.target.value))}
-        onPointerDown={() => setHot(true)}
+        onPointerDown={(event) => { event.currentTarget.setPointerCapture(event.pointerId); setHot(true); }}
         onPointerUp={() => setHot(false)}
         onPointerCancel={() => setHot(false)}
         onKeyDown={(event) => {
@@ -39,7 +41,7 @@ export function RangeSlider({ id, label, value, min, max, step = 1, valueLabel, 
         onKeyUp={() => setHot(false)}
         onBlur={() => setHot(false)}
       />
-      <div className="range-setting__scale" aria-hidden="true"><span>{min}px</span><span>{max}px</span></div>
+      <div className="range-setting__scale" aria-hidden="true"><span>{minLabel ?? min}</span><span>{maxLabel ?? max}</span></div>
     </div>
   );
 }

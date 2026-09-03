@@ -58,16 +58,18 @@ jobs:
           set -euo pipefail
           health_headers="$(mktemp)"
           health_body="$(mktemp)"
-          curl --fail-with-body --silent --show-error --max-time 15 \
+          curl --silent --show-error --max-time 15 \
             -D "$health_headers" \
             -H "Origin: $PAGES_ORIGIN" \
             "$GEMINI_WORKER_URL/health" > "$health_body"
+          status="$(awk 'NR==1 {print $2}' "$health_headers")"
+          test "$status" = "200"
           grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$' "$health_headers"
           grep -q '"api":true' "$health_body"
           grep -q '"status":"healthy"' "$health_body"
 
           options_headers="$(mktemp)"
-          curl --fail-with-body --silent --show-error --max-time 15 \
+          curl --silent --show-error --max-time 15 \
             -D "$options_headers" \
             -o /dev/null \
             -X OPTIONS \
@@ -75,6 +77,8 @@ jobs:
             -H 'Access-Control-Request-Method: POST' \
             -H 'Access-Control-Request-Headers: content-type' \
             "$GEMINI_WORKER_URL/api/gemini"
+          options_status="$(awk 'NR==1 {print $2}' "$options_headers")"
+          test "$options_status" = "204"
           grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$' "$options_headers"
           grep -iq '^access-control-allow-methods: .*POST' "$options_headers"
           grep -iq '^access-control-allow-headers: .*Content-Type' "$options_headers"

@@ -24,19 +24,17 @@ This file is the durable implementation handoff record for completed roadmap pro
 
 ## 2026-09-03 — Prompts 8–12
 
-Batch status: **in progress**.
+**Status: implementation in progress.**
 
-The five artifacts are being landed directly on `main`. Completion records, exact commit SHAs, and CI results will be added only after all five artifacts exist and the repository gate is green.
+The following artifacts are to be landed directly on `main` and then verified:
 
-Required artifacts:
+1. `docs/GEMINI_STREAMING_ARCHITECTURE.md`
+2. `docs/GEMINI_THINKING_DISPLAY.md`
+3. `docs/CONVERSATION_DATA_MODEL.md`
+4. `docs/LOCAL_PERSISTENCE.md`
+5. `docs/API_LOCKBOX.md`
 
-- `docs/GEMINI_STREAMING_ARCHITECTURE.md`
-- `docs/GEMINI_THINKING_DISPLAY.md`
-- `docs/CONVERSATION_DATA_MODEL.md`
-- `docs/LOCAL_PERSISTENCE.md`
-- `docs/API_LOCKBOX.md`
-
-## Foundation constraints
+## Foundation constraints for this batch
 
 Tool calling is a curated capability surface: model-visible schemas are allow-listed application capabilities; execution occurs only in validated services. Google Workspace capabilities stay behind the one OAuth authority, scope checks, and future write confirmation.
 
@@ -49,3 +47,5 @@ No monolithic manager/service/runtime may own provider calls, stream parsing, to
 ## Live facts rechecked
 
 Google's current Interactions documentation specifies SSE streaming with step-based events; `step.delta` is current after the May 2026 breaking change. Thought summaries use `thought` steps and `thinking_summaries`. Function calling uses function-call/result steps with `previous_interaction_id` continuation. The current `@google/genai` npm latest is 2.19.0 and its documentation warns against exposing application-owned production API keys in browser code.
+
+Final completion records will be added after actual commits and CI verification.

@@ -6,7 +6,10 @@
   "engines": { "node": ">=24.0.0" },
   "scripts": {
     "dev": "vite",
+    "predev": "npm run fonts:prepare",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
+    "prebuild": "npm run fonts:prepare",
+    "fonts:prepare": "node scripts/prepare-fonts.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",

@@ -78,7 +78,7 @@ export const geminiTurnPort: GeminiTurnPort = {
         if (eventInteractionId) interactionId = eventInteractionId;
 
         if (eventType === 'interaction.created') {
-          const model = readString(asRecord(event.interaction), 'model') ?? request.model || DEFAULT_GEMINI_MODEL;
+          const model = readString(asRecord(event.interaction), 'model') ?? (request.model || DEFAULT_GEMINI_MODEL);
           yield { type: 'interaction-created', interactionId: interactionId ?? 'unknown', model }; continue;
         }
         if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {

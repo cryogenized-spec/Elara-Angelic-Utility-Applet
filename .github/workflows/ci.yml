@@ -40,8 +40,9 @@ jobs:
           test -f docs/REPOSITORY_FORENSICS.md
           test -f docs/PRODUCT_BOUNDARY.md
           test -f docs/ARCHITECTURE_DECISION.md
+          test -f docs/SYSTEM_BOUNDARIES.md
           test -f .nvmrc
-          grep -q "One Gemini API method" README.md
+          grep -q "One canonical Gemini execution path" README.md
           grep -q "Android portrait" docs/PRODUCT_BOUNDARY.md
           grep -q "One canonical Gemini provider implementation" docs/PRODUCT_BOUNDARY.md
           grep -q "Node.js 24 LTS" docs/ARCHITECTURE_DECISION.md

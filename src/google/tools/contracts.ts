@@ -3,6 +3,8 @@ import { z } from 'zod';
 export const googleToolNameSchema = z.enum([
   'calendar.listEvents', 'calendar.getEvent', 'calendar.createEvent', 'calendar.updateEvent', 'calendar.patchEvent', 'calendar.moveEvent', 'calendar.deleteEvent',
   'tasks.listTaskLists', 'tasks.listTasks', 'tasks.getTask', 'tasks.createTask', 'tasks.updateTask', 'tasks.moveTask', 'tasks.deleteTask', 'tasks.clearCompleted',
+  'docs.getDocument', 'docs.createDocument', 'docs.batchUpdate',
+  'chat.listMessages', 'chat.getMessage', 'chat.createMessage', 'chat.updateMessage', 'chat.deleteMessage',
   'gmail.listMessages', 'gmail.getMessage', 'gmail.listThreads', 'gmail.getThread', 'gmail.listLabels', 'gmail.getLabel', 'gmail.modifyMessage', 'gmail.modifyThread', 'gmail.trashMessage', 'gmail.untrashMessage', 'gmail.trashThread', 'gmail.untrashThread', 'gmail.createLabel', 'gmail.updateLabel', 'gmail.deleteLabel', 'gmail.sendMessage',
 ]);
 

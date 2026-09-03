@@ -1,0 +1,17 @@
+html, body, #root { overflow: hidden; }
+
+.app-shell {
+  height: var(--elara-visual-viewport-height, 100dvh);
+  min-height: 0;
+  max-height: 100dvh;
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+
+.conversation {
+  scroll-padding-bottom: 18px;
+  overscroll-behavior-y: contain;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation { scroll-behavior: auto; }
+}

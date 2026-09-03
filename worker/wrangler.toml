@@ -1,6 +1,11 @@
 name = "elara-gemini"
 main = "src/index.ts"
 compatibility_date = "2026-09-03"
+workers_dev = true
+preview_urls = false
+
+[vars]
+ALLOWED_ORIGINS = "https://cryogenized-spec.github.io"
 
 [secrets]
 required = ["GEMINI_API_KEY"]

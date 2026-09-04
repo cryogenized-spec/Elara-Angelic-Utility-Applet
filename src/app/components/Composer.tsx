@@ -186,7 +186,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
             <VttMeter />
             <Icon name="mic" size={20} />
           </button>
-          <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || (status !== 'streaming' && !draft.trim())} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
+          <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
             <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
           </button>
         </footer>
@@ -213,7 +213,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
         <VttMeter />
         <Icon name="mic" size={20} />
       </button>
-      <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || (status !== 'streaming' && !draft.trim())}>
+      <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()}>
         <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
       </button>
     </form>

@@ -1,1 +1,0 @@
-PWA repair is complete: normalized icon paths now match the manifest and service-worker shell references, and the shell cache version has been bumped to v2.

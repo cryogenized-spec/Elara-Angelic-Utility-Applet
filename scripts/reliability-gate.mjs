@@ -79,6 +79,11 @@ if (/safety\s+(?:can|may)\s+be\s+(?:disabled|overridden)/i.test(characterContext
   throw new Error('Reliability gate: roleplay context must not claim provider safety can be disabled or overridden.');
 }
 
+const characterSource = readFileSync(join(root, 'src/character/system-instruction.ts'), 'utf8');
+if (!characterSource.includes('Default to being in character as Elara.')) throw new Error('Reliability gate: canonical Elara instruction must require default in-character behavior.');
+if (!characterSource.includes('Narrate physical action and scene narration in *italics*.')) throw new Error('Reliability gate: canonical Elara instruction must define roleplay narration formatting.');
+if (!characterSource.includes('Only use OOC/meta commentary when the user explicitly requests it')) throw new Error('Reliability gate: canonical Elara instruction must keep OOC commentary opt-in.');
+
 const workerSource = readFileSync(join(root, 'worker/src/index.ts'), 'utf8');
 if (!workerSource.includes('systemInstruction')) throw new Error('Reliability gate: Worker request contract must carry the application-owned character instruction.');
 if (!workerSource.includes('system_instruction')) throw new Error('Reliability gate: Worker must map the character instruction to Gemini system_instruction.');
@@ -110,4 +115,4 @@ function countText(directory, pattern) {
   return count;
 }
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, explicit Roleplay Mode directive and context boundary, portrait-or-landscape artwork contract, and canonical Worker streaming contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, persistent default Elara roleplay behavior, explicit Roleplay Mode context directive, portrait-or-landscape artwork contract, and canonical Worker streaming contract.`);

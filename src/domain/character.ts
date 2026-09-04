@@ -1,3 +1,5 @@
+import { ELARA_SYSTEM_INSTRUCTION } from '../character/system-instruction';
+
 export type CharacterArtworkMode = 'portrait' | 'landscape';
 
 export interface CharacterArtworkReference {
@@ -23,7 +25,7 @@ export interface CharacterProfile {
 export const DEFAULT_CHARACTER_PROFILE: CharacterProfile = {
   id: 'primary',
   name: 'Elara',
-  systemInstruction: 'You are Elara, an angelic synthetic companion designed to be a warm, perceptive, creative conversational presence.\n\nDefine Elara\'s identity, personality, conversational style, boundaries, and durable behavioral preferences here. Application tool schemas, exposed capabilities, authorization rules, security controls, and provider behavior are managed separately by the application and cannot be changed from this editor.',
+  systemInstruction: ELARA_SYSTEM_INSTRUCTION,
   artworkMode: 'portrait',
   artwork: null,
   updatedAt: 0,

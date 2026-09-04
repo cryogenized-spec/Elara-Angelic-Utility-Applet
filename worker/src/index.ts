@@ -4,7 +4,6 @@ import { ELARA_SYSTEM_INSTRUCTION } from '../../src/gemini/creative-context';
 import { googleToolNameSchema } from '../../src/google/tools/contracts';
 import { googleGeminiFunctionDeclarations } from '../../src/google/tools/gemini-declarations';
 import { handleGoogleOAuthRequest, type GoogleOAuthEnv } from './google-oauth';
-import { transcribeAudio } from './transcription';
 
 export interface Env extends GoogleOAuthEnv { GEMINI_API_KEY: string; ALLOWED_ORIGINS?: string; }
 
@@ -29,6 +28,9 @@ const requestSchema = z.object({
 type SafeEvent = Record<string, unknown>;
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
 
+const VTT_MAX_AUDIO_BYTES = 2 * 1024 * 1024;
+const VTT_ALLOWED_MIME_TYPES = new Set(['audio/webm', 'audio/webm;codecs=opus', 'audio/ogg', 'audio/ogg;codecs=opus']);
+
 function configuredOrigins(env: Env): string[] { return (env.ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean); }
 function allowedOrigin(request: Request, env: Env): string | null { const origin = request.headers.get('Origin'); if (!origin) return null; return configuredOrigins(env).includes(origin) ? origin : null; }
 function corsHeaders(request: Request, env: Env): Headers { const headers = new Headers({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Elara-Google-Capability, X-Elara-Google-Target', Vary: 'Origin' }); const origin = allowedOrigin(request, env); if (origin) { headers.set('Access-Control-Allow-Origin', origin); headers.set('Access-Control-Allow-Credentials', 'true'); } return headers; }
@@ -41,7 +43,6 @@ function interactionId(event: Record<string, unknown>): string | undefined { ret
 function indexOf(event: Record<string, unknown>): number { return numberValue(event, 'index') ?? numberValue(asRecord(event.step), 'index') ?? 0; }
 function sse(eventName: string, data: SafeEvent): string { return `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`; }
 function selectedTools(toolNames: readonly string[] | undefined) { if (!toolNames?.length) return undefined; const allowed = new Set(toolNames); return googleGeminiFunctionDeclarations.filter((tool) => allowed.has(tool.name)); }
-function geminiClient(env: Env) { return new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, apiVersion: 'v1' }); }
 
 function toGenerationConfig(config: z.infer<typeof requestSchema>['generationConfig']) {
   if (!config) return undefined;
@@ -103,7 +104,7 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
   const requestedTools = parsed.data.tools;
   const tools = selectedTools(requestedTools);
   if (requestedTools?.length && (!tools || tools.length !== new Set(requestedTools).size)) return jsonResponse(request, env, { code: 'validation', message: 'Request referenced an unregistered Gemini tool.' }, 400);
-  const client = geminiClient(env);
+  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, apiVersion: 'v1' });
   const systemInstruction = parsed.data.systemInstruction?.trim() || ELARA_SYSTEM_INSTRUCTION;
   const input = parsed.data.toolResult
     ? [{ type: 'function_result' as const, name: parsed.data.toolResult.name, call_id: parsed.data.toolResult.callId, result: [{ type: 'text' as const, text: JSON.stringify(parsed.data.toolResult.result) }] }]
@@ -137,13 +138,19 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
               if (pending && pending.arguments.length > 100_000) pending.arguments = '';
             }
           }
+
           const safe = toSafeEvent(rawEvent);
           if (safe) controller.enqueue(encoder.encode(sse(safe.name, safe.data)));
+
           if (eventType === 'step.stop') {
             const pending = pendingFunctions.get(stepIndex);
             if (pending) {
               pendingFunctions.delete(stepIndex);
-              if (!pending.arguments) { controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini produced an invalid or oversized function-call argument stream.' } }))); waitingForToolResult = false; break; }
+              if (!pending.arguments) {
+                controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini produced an invalid or oversized function-call argument stream.' } })));
+                waitingForToolResult = false;
+                break;
+              }
               try {
                 const args = JSON.parse(pending.arguments) as unknown;
                 if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.');
@@ -151,19 +158,32 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
                 if (!currentInteractionId) throw new Error('Function call has no interaction identity.');
                 controller.enqueue(encoder.encode(sse('tool-call', { event_type: 'tool-call', interaction_id: currentInteractionId, index: stepIndex, call_id: pending.callId, name: toolName, arguments: args })));
                 waitingForToolResult = true;
-              } catch { controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini produced invalid registered function arguments.' } }))); waitingForToolResult = false; break; }
+              } catch {
+                controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini produced invalid registered function arguments.' } })));
+                waitingForToolResult = false;
+                break;
+              }
             }
           }
-          if (eventType === 'interaction.requires_action') { waitingForToolResult = true; break; }
+          if (eventType === 'interaction.requires_action') {
+            waitingForToolResult = true;
+            break;
+          }
           if (eventType === 'interaction.completed' || eventType === 'error') break;
         }
         controller.close();
         void waitingForToolResult;
-      } catch { controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini streaming failed.' } }))); controller.close(); }
+      } catch {
+        controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini streaming failed.' } })));
+        controller.close();
+      }
     },
   });
+
   const headers = corsHeaders(request, env);
-  headers.set('Content-Type', 'text/event-stream; charset=utf-8'); headers.set('Cache-Control', 'no-cache, no-transform'); headers.set('Connection', 'keep-alive');
+  headers.set('Content-Type', 'text/event-stream; charset=utf-8');
+  headers.set('Cache-Control', 'no-cache, no-transform');
+  headers.set('Connection', 'keep-alive');
   return new Response(body, { status: 200, headers });
 }
 
@@ -171,20 +191,32 @@ async function handleTranscribe(request: Request, env: Env): Promise<Response> {
   if (!env.GEMINI_API_KEY) return jsonResponse(request, env, { code: 'configuration', message: 'Gemini Worker credential is not configured.' }, 503);
   const origin = request.headers.get('Origin');
   if (origin && !allowedOrigin(request, env)) return jsonResponse(request, env, { code: 'authz', message: 'Origin is not authorized.' }, 403);
-  const mimeType = request.headers.get('Content-Type') ?? '';
-  const length = Number(request.headers.get('Content-Length') ?? '0');
-  if (length > 2 * 1024 * 1024) return jsonResponse(request, env, { code: 'validation', message: 'Audio payload exceeds the VTT size limit.' }, 413);
-  if (!mimeType.toLowerCase().startsWith('audio/')) return jsonResponse(request, env, { code: 'validation', message: 'Content-Type must be an audio MIME type.' }, 415);
-  try {
-    const audio = await request.arrayBuffer();
-    if (audio.byteLength > 2 * 1024 * 1024) return jsonResponse(request, env, { code: 'validation', message: 'Audio payload exceeds the VTT size limit.' }, 413);
-    const transcript = await transcribeAudio(geminiClient(env), audio, mimeType);
-    return jsonResponse(request, env, { transcript });
-  } catch (cause) {
-    const message = cause instanceof Error ? cause.message : 'Voice transcription failed.';
-    const status = /unsupported|size limit|empty/i.test(message) ? 400 : 502;
-    return jsonResponse(request, env, { code: status === 400 ? 'validation' : 'provider', message }, status);
-  }
+  const contentType = (request.headers.get('Content-Type') ?? '').toLowerCase();
+  if (!VTT_ALLOWED_MIME_TYPES.has(contentType)) return jsonResponse(request, env, { code: 'validation', message: 'Unsupported VTT audio type.' }, 415);
+  const contentLength = Number(request.headers.get('Content-Length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > VTT_MAX_AUDIO_BYTES) return jsonResponse(request, env, { code: 'validation', message: 'VTT audio capture is too large.' }, 413);
+  if (!request.body) return jsonResponse(request, env, { code: 'validation', message: 'VTT audio body is required.' }, 400);
+
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength < 2048) return jsonResponse(request, env, { code: 'empty', message: 'No speech was detected.' }, 422);
+  if (bytes.byteLength > VTT_MAX_AUDIO_BYTES) return jsonResponse(request, env, { code: 'validation', message: 'VTT audio capture is too large.' }, 413);
+
+  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, apiVersion: 'v1' });
+  const audioFile = await client.files.upload({
+    file: new Blob([bytes], { type: contentType }),
+    config: { mimeType: contentType },
+  });
+  if (!audioFile.uri || !audioFile.mimeType) return jsonResponse(request, env, { code: 'provider', message: 'Gemini did not return a usable uploaded audio file.' }, 502);
+
+  const interaction = await client.interactions.create({
+    model: 'gemini-3.5-transcribe',
+    input: [{ type: 'audio', uri: audioFile.uri, mime_type: audioFile.mimeType }],
+    generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
+    store: false,
+  });
+  const transcript = typeof interaction.output_text === 'string' ? interaction.output_text.trim() : '';
+  if (!transcript) return jsonResponse(request, env, { code: 'empty', message: 'No speech was detected.' }, 422);
+  return jsonResponse(request, env, { transcript });
 }
 
 export default { async fetch(request: Request, env: Env): Promise<Response> {
@@ -194,7 +226,11 @@ export default { async fetch(request: Request, env: Env): Promise<Response> {
   if (pathname === '/health') return healthResponse(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
   if (request.method !== 'POST') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
-  if (pathname === '/api/transcribe') return handleTranscribe(request, env);
-  if (pathname !== '/api/gemini') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
-  try { return await handleGemini(request, env); } catch { return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502); }
+  try {
+    if (pathname === '/api/gemini') return await handleGemini(request, env);
+    if (pathname === '/api/transcribe') return await handleTranscribe(request, env);
+    return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
+  } catch {
+    return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502);
+  }
 } };

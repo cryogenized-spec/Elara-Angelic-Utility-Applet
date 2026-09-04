@@ -1,39 +1,35 @@
-export interface GeminiTranscriptionClient {
-  files: {
-    upload(params: { file: Blob; config: { mime_type: string } }): Promise<{ name?: string; uri?: string; mimeType?: string }>;
-    delete(params: { name: string }): Promise<unknown>;
-  };
-  interactions: {
-    create(params: {
-      model: string;
-      input: Array<{ type: 'audio'; uri: string; mime_type: string }>;
-      generation_config: { transcription_config: { mode: 'smart' } };
-    }): Promise<{ output_text?: string }>;
-  };
-}
+import type { VttCapture } from './recording';
 
-const MAX_AUDIO_BYTES = 2 * 1024 * 1024;
-const SUPPORTED_MIME_TYPES = new Set(['audio/webm', 'audio/ogg', 'audio/opus', 'audio/wav']);
+const WORKER_URL = (import.meta.env.VITE_GEMINI_WORKER_URL ?? 'https://elara-gemini.cryogenized.workers.dev').replace(/\/$/, '');
 
-export async function transcribeAudio(client: GeminiTranscriptionClient, audio: ArrayBuffer, mimeType: string): Promise<string> {
-  if (audio.byteLength === 0 || audio.byteLength > MAX_AUDIO_BYTES) throw new Error('Audio payload is empty or exceeds the VTT size limit.');
-  const normalizedMimeType = mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
-  if (!SUPPORTED_MIME_TYPES.has(normalizedMimeType)) throw new Error('Unsupported VTT audio format.');
+export class VttTranscriptionError extends Error {
+  readonly code: string;
 
-  const file = await client.files.upload({ file: new Blob([audio], { type: normalizedMimeType }), config: { mime_type: normalizedMimeType } });
-  if (!file.uri || !file.name) throw new Error('Gemini did not return a usable transcription file.');
-  try {
-    const interaction = await client.interactions.create({
-      model: 'gemini-3.5-transcribe',
-      input: [{ type: 'audio', uri: file.uri, mime_type: normalizedMimeType }],
-      generation_config: { transcription_config: { mode: 'smart' } },
-    });
-    const transcript = interaction.output_text?.trim() ?? '';
-    if (!transcript) throw new Error('No speech was detected.');
-    return transcript;
-  } finally {
-    await client.files.delete({ name: file.name }).catch(() => undefined);
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'VttTranscriptionError';
+    this.code = code;
   }
 }
 
-export const VTT_MAX_AUDIO_BYTES = MAX_AUDIO_BYTES;
+export async function transcribeVttCapture(capture: VttCapture, signal?: AbortSignal): Promise<string> {
+  const response = await fetch(`${WORKER_URL}/api/transcribe`, {
+    method: 'POST',
+    headers: { 'Content-Type': capture.mimeType },
+    body: capture.blob,
+    signal,
+  });
+
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+    const code = typeof record.code === 'string' ? record.code : 'provider';
+    const message = typeof record.message === 'string' ? record.message : 'Voice transcription failed.';
+    throw new VttTranscriptionError(code, message);
+  }
+
+  const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
+  const transcript = typeof record.transcript === 'string' ? record.transcript.trim() : '';
+  if (!transcript) throw new VttTranscriptionError('empty', 'No speech was detected.');
+  return transcript;
+}

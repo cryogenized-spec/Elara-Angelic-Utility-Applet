@@ -20,7 +20,8 @@ export type IconName =
   | 'search'
   | 'dots'
   | 'expand'
-  | 'collapse';
+  | 'collapse'
+  | 'markdown';
 
 const paths: Record<IconName, ReactNode> = {
   menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
@@ -43,6 +44,7 @@ const paths: Record<IconName, ReactNode> = {
   dots: <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></>,
   expand: <><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M20 15v5h-5" /></>,
   collapse: <><path d="M9 3v6H3M15 3v6h6M9 21v-6H3M21 15v6h-6" /></>,
+  markdown: <><rect x="3.5" y="5" width="17" height="14" rx="2" /><path d="M6 15V9l3 3 3-3v6M16 15V9m0 0 2 2 2-2" /></>,
 };
 
 export function Icon({ name, size = 20, strokeWidth = 1.7, style }: { name: IconName; size?: number; strokeWidth?: number; style?: CSSProperties }) {

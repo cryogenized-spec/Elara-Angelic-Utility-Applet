@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GoogleDriveService } from './service';
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
 
-function makeOAuth(handler: (url: string, init?: RequestInit) => Response | Promise<Response>): GoogleOAuthAuthority {
+function makeOAuth(handler: (url: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>): GoogleOAuthAuthority {
   return {
     authorize: async (capability) => ({ capability, fetch: handler }),
     getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
@@ -14,7 +14,7 @@ describe('GoogleDriveService', () => {
   it('keeps read and write capabilities separate', async () => {
     const calls: string[] = [];
     const oauth = makeOAuth(async (url, init) => {
-      calls.push(`${init?.method ?? 'GET'}:${url}`);
+      calls.push(`${init?.method ?? 'GET'}:${String(url)}`);
       return new Response(JSON.stringify({ id: 'file-1', name: 'Plan', mimeType: 'text/plain' }), { status: 200 });
     });
     const service = new GoogleDriveService(oauth);
@@ -27,7 +27,8 @@ describe('GoogleDriveService', () => {
   it('uses Drive list fields and pagination safely', async () => {
     const calls: string[] = [];
     const oauth = makeOAuth(async (url) => {
-      calls.push(url);
+      const stringUrl = String(url);
+      calls.push(stringUrl);
       return new Response(JSON.stringify({
         files: [{ id: 'file-1', name: 'Plan', mimeType: 'text/plain', modifiedTime: '2026-09-04T00:00:00Z', parents: ['root'], capabilities: { canDownload: true } }],
         nextPageToken: 'next-2',
@@ -44,7 +45,7 @@ describe('GoogleDriveService', () => {
   it('fetches metadata before downloading and refuses non-downloadable files', async () => {
     const calls: string[] = [];
     const oauth = makeOAuth(async (url) => {
-      calls.push(url);
+      calls.push(String(url));
       return new Response(JSON.stringify({ id: 'file-1', name: 'Locked', mimeType: 'application/pdf', capabilities: { canDownload: false } }), { status: 200 });
     });
     await expect(new GoogleDriveService(oauth).downloadFile('file-1')).rejects.toThrow('cannot be downloaded');
@@ -54,8 +55,9 @@ describe('GoogleDriveService', () => {
   it('downloads bounded blob content through alt=media', async () => {
     const calls: string[] = [];
     const oauth = makeOAuth(async (url) => {
-      calls.push(url);
-      if (url.includes('?fields=')) return new Response(JSON.stringify({ id: 'file-1', name: 'Text', mimeType: 'text/plain', capabilities: { canDownload: true } }), { status: 200 });
+      const stringUrl = String(url);
+      calls.push(stringUrl);
+      if (stringUrl.includes('?fields=')) return new Response(JSON.stringify({ id: 'file-1', name: 'Text', mimeType: 'text/plain', capabilities: { canDownload: true } }), { status: 200 });
       return new Response(new Uint8Array([65, 66, 67]), { status: 200, headers: { 'content-type': 'text/plain', 'content-length': '3' } });
     });
     const content = await new GoogleDriveService(oauth).downloadFile('file-1', 10);
@@ -67,7 +69,8 @@ describe('GoogleDriveService', () => {
   it('exports Workspace content through files.export', async () => {
     const calls: string[] = [];
     const oauth = makeOAuth(async (url) => {
-      calls.push(url);
+      const stringUrl = String(url);
+      calls.push(stringUrl);
       return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'application/pdf' } });
     });
     const content = await new GoogleDriveService(oauth).exportFile('doc-1', 'application/pdf');
@@ -79,7 +82,7 @@ describe('GoogleDriveService', () => {
   it('keeps move operations on the Drive update endpoint', async () => {
     const calls: Array<{ url: string; method?: string }> = [];
     const oauth = makeOAuth(async (url, init) => {
-      calls.push({ url, method: init?.method });
+      calls.push({ url: String(url), method: init?.method });
       return new Response(JSON.stringify({ id: 'file-1', name: 'Plan', mimeType: 'text/plain', parents: ['folder-2'] }), { status: 200 });
     });
     const result = await new GoogleDriveService(oauth).moveFile('file-1', 'folder-2', 'folder-1');

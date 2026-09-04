@@ -95,8 +95,8 @@ function setCookie(name: string, value: string, attributes: string): string {
   return `${name}=${value}; ${attributes}`;
 }
 
-function randomBytes(size = 32): Uint8Array {
-  const bytes = new Uint8Array(size);
+function randomBytes(size = 32): Uint8Array<ArrayBuffer> {
+  const bytes = new Uint8Array(new ArrayBuffer(size));
   crypto.getRandomValues(bytes);
   return bytes;
 }
@@ -107,10 +107,10 @@ function base64UrlEncode(bytes: Uint8Array): string {
   return btoa(binary).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
 }
 
-function base64UrlDecode(value: string): Uint8Array {
+function base64UrlDecode(value: string): Uint8Array<ArrayBuffer> {
   const normalized = value.replaceAll('-', '+').replaceAll('_', '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
   const binary = atob(normalized);
-  const bytes = new Uint8Array(binary.length);
+  const bytes = new Uint8Array(new ArrayBuffer(binary.length));
   for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
   return bytes;
 }
@@ -127,10 +127,10 @@ async function sha256Base64Url(value: string): Promise<string> {
   return base64UrlEncode(new Uint8Array(digest));
 }
 
-function readEncryptionKey(value: string): Uint8Array {
+function readEncryptionKey(value: string): Uint8Array<ArrayBuffer> {
   const trimmed = value.trim();
   if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
-    const bytes = new Uint8Array(32);
+    const bytes = new Uint8Array(new ArrayBuffer(32));
     for (let index = 0; index < 32; index += 1) bytes[index] = Number.parseInt(trimmed.slice(index * 2, index * 2 + 2), 16);
     return bytes;
   }
@@ -345,10 +345,7 @@ async function handleStart(request: Request, env: GoogleOAuthEnv): Promise<Respo
   url.searchParams.set('response_type', 'code');
   url.searchParams.set('access_type', 'offline');
   url.searchParams.set('include_granted_scopes', 'true');
-  url.searchParams.set('scope', [
-    ...IDENTITY_SCOPES,
-    getGoogleScope(capability).scope,
-  ].join(' '));
+  url.searchParams.set('scope', [...IDENTITY_SCOPES, getGoogleScope(capability).scope].join(' '));
   url.searchParams.set('state', state);
   url.searchParams.set('code_challenge', challenge);
   url.searchParams.set('code_challenge_method', 'S256');

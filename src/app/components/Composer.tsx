@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
 import { Icon } from '../../ui/icons';
+import { MarkdownIcon } from '../../ui/MarkdownIcon';
 import type { ProviderStatus } from '../../domain/chat';
 import { MarkdownReference } from './MarkdownReference';
 import { VttRecorder, shouldDiscardVttCapture, type VttRecordingState } from '../../vtt/recording';
@@ -175,7 +176,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
         {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}
         <footer className="composer-expanded__footer">
           <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
-            <Icon name="markdown" size={20} />
+            <MarkdownIcon size={20} />
           </button>
           <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
             <Icon name="paperclip" size={20} />
@@ -197,7 +198,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
   return <>
     <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
       <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
-        <Icon name="markdown" size={20} />
+        <MarkdownIcon size={20} />
       </button>
       <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
         <Icon name="paperclip" size={20} />

@@ -54,7 +54,7 @@ export async function* streamGoogleToolLoop(
   signal?: AbortSignal,
 ): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
-  const tools = normalizeTools(request.tools as GoogleToolName[] | undefined, readOnly);
+  const tools = normalizeTools(options.tools ?? request.tools as GoogleToolName[] | undefined, readOnly);
   const executeOptions = executorOptions(options);
   let stream = geminiTurnPort.streamReply({ ...request, tools }, signal);
   let executedCalls = 0;

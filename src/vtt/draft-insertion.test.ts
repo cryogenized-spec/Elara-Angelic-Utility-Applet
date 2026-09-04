@@ -7,7 +7,7 @@ describe('VTT draft insertion', () => {
   });
 
   it('replaces a selected range', () => {
-    expect(insertTranscriptAtSelection('Hello bad world', { start: 6, end: 9 }, 'beautiful')).toEqual({ value: 'Hello beautiful world', cursor: 16 });
+    expect(insertTranscriptAtSelection('Hello bad world', { start: 6, end: 9 }, 'beautiful')).toEqual({ value: 'Hello beautiful world', cursor: 15 });
   });
 
   it('does not add a space before punctuation', () => {

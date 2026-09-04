@@ -1,6 +1,6 @@
 export interface GeminiTranscriptionClient {
   files: {
-    upload(params: { file: Blob; config: { mime_type: string } }): Promise<{ name?: string; uri?: string }>;
+    upload(params: { file: Blob; config: { mimeType: string } }): Promise<{ name?: string; uri?: string }>;
     delete(params: { name: string }): Promise<unknown>;
   };
   interactions: {
@@ -19,7 +19,7 @@ export async function transcribeAudio(client: GeminiTranscriptionClient, audio: 
   if (audio.byteLength === 0 || audio.byteLength > MAX_AUDIO_BYTES) throw new Error('Audio payload is empty or exceeds the VTT size limit.');
   const normalizedMimeType = mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
   if (!SUPPORTED_MIME_TYPES.has(normalizedMimeType)) throw new Error('Unsupported VTT audio format.');
-  const file = await client.files.upload({ file: new Blob([audio], { type: normalizedMimeType }), config: { mime_type: normalizedMimeType } });
+  const file = await client.files.upload({ file: new Blob([audio], { type: normalizedMimeType }), config: { mimeType: normalizedMimeType } });
   if (!file.uri || !file.name) throw new Error('Gemini did not return a usable transcription file.');
   try {
     const interaction = await client.interactions.create({

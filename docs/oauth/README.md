@@ -2,7 +2,7 @@
 
 > **Purpose:** This directory is the authoritative handoff for the Google OAuth, Workspace integrations, background execution, and related infrastructure work. A future implementation pass must read this file before changing OAuth, Google tools, or background execution.
 >
-> **Status:** Pass 2 is implemented. Pass 3 scope audit is implemented and recorded. The clean app still does not contain the protected OAuth Worker source, so end-to-end production authorization cannot yet be claimed.
+> **Status:** Pass 2 (Google connection settings UI), Pass 3 (scope audit), and Pass 4 (Drive/Docs/Sheets service adapters) are implemented. The clean app still does not contain the protected OAuth Worker source, so end-to-end production authorization cannot yet be claimed.
 
 ## 0. Non-negotiable architecture
 
@@ -26,6 +26,7 @@ The repository already contains these foundations:
 - `docs/GOOGLE_TOOL_BOUNDARY.md` — model-visible Google allow-list and execution boundary.
 - `src/google/tools/contracts.ts` and `src/google/tools/registry.ts` — existing explicit named Google tool contracts.
 - `docs/GOOGLE_CALENDAR_SERVICE.md`, `docs/GOOGLE_TASKS_SERVICE.md`, `docs/GOOGLE_DOCS_SERVICE.md`, `docs/GOOGLE_GMAIL_SERVICE.md` — existing service-boundary direction.
+- `docs/GOOGLE_DRIVE_SERVICE.md`, `docs/GOOGLE_SHEETS_SERVICE.md` — Pass 4 service boundaries.
 
 Do not replace these with a second architecture. Extend them.
 
@@ -70,28 +71,13 @@ Google's current documentation says refresh tokens allow offline access without 
 
 ### Pass 2 — Google connection settings UI
 
-Turn the Settings → Google area into a real authorization control surface.
-
-The UI should show:
-
-- Google account connection state.
-- Overall OAuth authority state.
-- Calendar capability state.
-- Tasks capability state.
-- Gmail capability state.
-- Drive capability state.
-- Docs capability state.
-- Sheets capability state.
-- Missing capability/scope state.
-- Reauthorize action.
-- Disconnect action.
-- Contextual Connect action per service.
+Implemented. Settings now has a dedicated Google section showing overall connection state and independent Calendar, Tasks, Gmail, Drive, Docs, and Sheets capability state. Gmail also exposes separate label-administration and send authorization actions.
 
 Do not let the UI contain scope strings or token logic. It calls application-facing OAuth commands and renders normalized state.
 
 ### Pass 3 — Finalize scope registry and least privilege
 
-Audit every existing and new scope against the exact operation.
+Implemented. The provider mappings are recorded in `docs/GOOGLE_SCOPE_REGISTRY.md` and tested in `src/google/oauth/scope-registry.test.ts`.
 
 Current audited direction:
 
@@ -104,40 +90,23 @@ Current audited direction:
 
 Sensitive/restricted scopes require verification/compliance review before production release.
 
-Pass 3 code hardening also validates application capability keys against the central schema before registry lookup and keeps provider scope strings outside model-facing tool contracts.
-
 ### Pass 4 — Drive, Docs, and Sheets service implementations
 
-Implement real Google API service adapters behind the existing service boundaries.
+Implemented as focused application-side adapters:
 
-Drive target operations should include small, auditable primitives such as:
+- `src/google/drive/service.ts` with listing/search, metadata get, authorized download, create, update, and move operations;
+- existing `src/google/docs/service.ts` for get/create/batchUpdate;
+- `src/google/sheets/service.ts` with spreadsheet metadata, targeted range reads, bounded writes, row appends, and explicit batch updates.
 
-- search/list files with explicit filters and pagination;
-- get file metadata/content where authorized;
-- create file;
-- update file;
-- move file;
-- user-selected file access via Google Picker where appropriate.
+Each service requests an application capability from the OAuth authority and never stores or handles raw OAuth credentials. Inputs are bounded, provider URL components are encoded, list payloads use explicit fields, and large Sheets writes are bounded for predictable execution.
 
-Docs target operations should include:
-
-- get document;
-- create document;
-- explicit batch updates.
-
-Sheets target operations should include:
-
-- read targeted ranges;
-- write targeted ranges;
-- append rows;
-- batch updates where necessary;
-- spreadsheet metadata access only when required.
+The Drive/Sheets service boundaries and test coverage are documented in `docs/GOOGLE_DRIVE_SERVICE.md` and `docs/GOOGLE_SHEETS_SERVICE.md`.
 
 Do not make Sheets discovery depend on a fictitious "list spreadsheets" endpoint. Use Drive/file-selection semantics when appropriate.
 
 ### Pass 5 — Expand the model-visible tool schema
 
-Extend the existing explicit Google allow-list with Drive and Sheets operations.
+Next. Extend the existing explicit Google allow-list with Drive and Sheets operations.
 
 Use small named tools, for example:
 
@@ -281,17 +250,9 @@ Do not claim production readiness until the required Google verification/complia
 
 ## 9. Current Google documentation anchors
 
-Use Google's live documentation at implementation time. As of Pass 3, the scope audit was checked against:
+Use Google's live documentation at implementation time. Pass 3 rechecked the scope choices against Google's current OAuth scope catalogue, Calendar authorization guide, Drive file/access guidance, Docs method authorization requirements, Sheets scope catalogue, Tasks scope reference, and Gmail scope catalogue.
 
-- Google OAuth 2.0 scope catalogue;
-- Google Calendar API authorization guide;
-- Google Drive API authorization/scope guidance;
-- Google Docs API `documents.get` and `documents.create` authorization requirements;
-- Google Sheets API scope guidance;
-- Google Tasks API authorization scopes;
-- Gmail API scope catalogue and method/service boundaries.
-
-The official documentation confirms that scope choice should be as narrow as practical, that `drive.file` is the per-file Drive scope, that Docs methods accept `drive.file`, and that Gmail exposes separate read, modify, label, and send scopes. citeturn905264view0turn968614search1turn285584search4turn285584search12turn285584search7turn285584search11turn229576search0
+The official documentation confirms that scope choice should be as narrow as practical, `drive.file` is the per-file Drive scope, Docs methods such as `documents.get` and `documents.create` accept `drive.file`, and Gmail exposes separate read, modify, label, and send scopes. citeturn905264view0turn968614search1turn285584search4turn285584search12turn285584search7turn285584search11turn229576search0
 
 Because Google's OAuth policies, scope classifications, and API requirements can change, the future implementer must re-check the live documentation immediately before implementing each pass.
 
@@ -319,4 +280,4 @@ OAuth is not complete until all of the following are true:
 
 Before making changes, read this README plus the existing Google OAuth/tool/service documents. Inspect the current `main` branch rather than trusting this note's file names or old commit hashes. Revalidate all Google and Cloudflare assumptions against current official documentation. Preserve the architectural boundaries. Do not resurrect legacy providers, `generateContent()`, client-side OAuth token storage, arbitrary Google HTTP tools, or browser-dependent background execution.
 
-**Next immediate implementation target:** Pass 4 — implement the Drive, Docs, and Sheets service adapters behind the existing OAuth/capability boundaries, after the protected OAuth Worker source is located or exposed.
+**Next immediate implementation target:** Pass 5 — expand the explicit model-visible Google tool schema with Drive and Sheets operations, then route those named tools through validation → capability lookup → OAuth authorization → risk/confirmation → focused service execution.

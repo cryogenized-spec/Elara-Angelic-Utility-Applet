@@ -23,8 +23,10 @@ async function installVttBrowserMocks(page: Page): Promise<void> {
       stop() {
         if (this.state === 'inactive') return;
         this.state = 'inactive';
-        this.ondataavailable?.({ data: new Blob([new Uint8Array(3_000)], { type: 'audio/webm;codecs=opus' }) });
-        this.onstop?.();
+        window.setTimeout(() => {
+          this.ondataavailable?.({ data: new Blob([new Uint8Array(3_000)], { type: 'audio/webm;codecs=opus' }) });
+          this.onstop?.();
+        }, 550);
       }
     }
 

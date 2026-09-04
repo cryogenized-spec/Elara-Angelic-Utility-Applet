@@ -83,9 +83,11 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
 
   const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {
+    if (descriptor.risk === 'read') return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
+    const confirmationRisk: Exclude<GoogleToolRisk, 'read'> = descriptor.risk;
     const confirmation: WriteConfirmationRequest = {
       tool: descriptor.name,
-      risk: descriptor.risk,
+      risk: confirmationRisk,
       resourceSummary: descriptor.description,
       requestedAt: (options.now?.() ?? new Date()).toISOString(),
     };

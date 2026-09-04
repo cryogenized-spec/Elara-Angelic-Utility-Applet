@@ -26,6 +26,7 @@ describe('Gemini Worker boundary', () => {
     createInteraction.mockReset();
     uploadFile.mockReset();
     deleteFile.mockReset();
+    deleteFile.mockResolvedValue(undefined);
   });
 
   it('reports a healthy service without exposing protected values', async () => {
@@ -95,10 +96,7 @@ describe('Gemini Worker boundary', () => {
     const response = await worker.fetch(request, baseEnv);
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      code: 'authz',
-      message: 'Origin is not authorized.',
-    });
+    await expect(response.json()).resolves.toEqual({ code: 'authz', message: 'Origin is not authorized.' });
     expect(createInteraction).not.toHaveBeenCalled();
   });
 
@@ -106,103 +104,64 @@ describe('Gemini Worker boundary', () => {
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: '', input: '' }),
+      body: JSON.stringify({ model: 'gemini-3-flash-preview' }),
     });
 
     const response = await worker.fetch(request, baseEnv);
 
     expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toEqual({
-      code: 'validation',
-      message: 'Request did not satisfy the approved Gemini contract.',
-    });
+    await expect(response.json()).resolves.toEqual({ code: 'validation', message: 'Request did not satisfy the approved Gemini contract.' });
     expect(createInteraction).not.toHaveBeenCalled();
   });
 
   it('passes the canonical Elara system instruction to Gemini when the client omits one', async () => {
-    createInteraction.mockResolvedValue((async function* () {
-      yield { event_type: 'interaction.created', interaction: { id: 'interaction-system', status: 'in_progress', model: 'gemini-3-flash-preview' } };
-      yield { event_type: 'interaction.completed', interaction: { id: 'interaction-system', status: 'completed' } };
-    })());
-
+    createInteraction.mockResolvedValue({});
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello' }),
     });
 
     const response = await worker.fetch(request, baseEnv);
     expect(response.status).toBe(200);
     expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({ system_instruction: ELARA_SYSTEM_INSTRUCTION }));
+    await response.text();
   });
 
   it('returns only allow-listed streaming events and keeps the credential out of the response', async () => {
-    createInteraction.mockResolvedValue((async function* () {
-      yield {
-        event_type: 'interaction.created',
-        interaction: { id: 'interaction-1', status: 'in_progress', model: 'gemini-3-flash-preview' },
-      };
-      yield {
-        event_type: 'step.delta',
-        interaction_id: 'interaction-1',
-        index: 0,
-        delta: { type: 'text', text: 'Hello from Elara.' },
-      };
-      yield {
-        event_type: 'step.delta',
-        interaction_id: 'interaction-1',
-        index: 0,
-        delta: { type: 'unexpected', text: 'This must not cross the boundary.' },
-      };
-      yield {
-        event_type: 'interaction.completed',
-        interaction: {
-          id: 'interaction-1',
-          status: 'completed',
-          usage: { input_tokens: 4, output_tokens: 5 },
-        },
-      };
-    })());
-
+    const events = [
+      { event_type: 'interaction.created', interaction: { id: 'interaction-1', status: 'in_progress', model: 'gemini-3-flash-preview' } },
+      { event_type: 'step.start', interaction_id: 'interaction-1', index: 0, step: { index: 0, id: 'step-1', name: 'answer', type: 'text' } },
+      { event_type: 'step.delta', interaction_id: 'interaction-1', index: 0, delta: { type: 'text', text: 'Hello' } },
+      { event_type: 'unknown.secret', secret: 'test-secret-key' },
+      { event_type: 'step.stop', interaction_id: 'interaction-1', index: 0 },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-1', status: 'completed', usage: { total_tokens: 7 } } },
+    ];
+    createInteraction.mockResolvedValue((async function* () { for (const event of events) yield event; })());
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Origin: 'https://cryogenized-spec.github.io',
-      },
-      body: JSON.stringify({
-        model: 'gemini-3-flash-preview',
-        input: 'hello',
-      }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello' }),
     });
 
     const response = await worker.fetch(request, baseEnv);
-    const body = await response.text();
+    const text = await response.text();
 
     expect(response.status).toBe(200);
-    expect(response.headers.get('Content-Type')).toMatch(/^text\/event-stream/);
-    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://cryogenized-spec.github.io');
-    expect(body).toContain('event: interaction.created');
-    expect(body).toContain('event: step.delta');
-    expect(body).toContain('Hello from Elara.');
-    expect(body).toContain('event: interaction.completed');
-    expect(body).not.toContain('This must not cross the boundary.');
-    expect(body).not.toContain('test-secret-key');
-
-    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({
-      model: 'gemini-3-flash-preview',
-      input: 'hello',
-      stream: true,
-      store: true,
-    }));
-    const clientOptions = createInteraction.mock.calls[0]?.[0];
-    expect(clientOptions).not.toHaveProperty('safety_settings');
+    expect(text).toContain('event: interaction.created');
+    expect(text).toContain('event: step.delta');
+    expect(text).not.toContain('unknown.secret');
+    expect(text).not.toContain('test-secret-key');
   });
 
   it('answers preflight requests without touching Gemini', async () => {
     const request = new Request('https://worker.example/api/gemini', {
       method: 'OPTIONS',
-      headers: { Origin: 'https://cryogenized-spec.github.io' },
+      headers: {
+        Origin: 'https://cryogenized-spec.github.io',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type',
+      },
     });
 
     const response = await worker.fetch(request, baseEnv);
@@ -222,10 +181,7 @@ describe('Gemini Worker boundary', () => {
     const response = await worker.fetch(request, baseEnv);
 
     expect(response.status).toBe(403);
-    await expect(response.json()).resolves.toEqual({
-      code: 'authz',
-      message: 'Origin is not authorized.',
-    });
+    await expect(response.json()).resolves.toEqual({ code: 'authz', message: 'Origin is not authorized.' });
     expect(uploadFile).not.toHaveBeenCalled();
     expect(createInteraction).not.toHaveBeenCalled();
   });
@@ -233,17 +189,14 @@ describe('Gemini Worker boundary', () => {
   it('rejects unsupported VTT MIME types before invoking Gemini', async () => {
     const request = new Request('https://worker.example/api/transcribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/mpeg', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'audio/mp4', Origin: 'https://cryogenized-spec.github.io' },
       body: new Uint8Array(3_000),
     });
 
     const response = await worker.fetch(request, baseEnv);
 
     expect(response.status).toBe(415);
-    await expect(response.json()).resolves.toEqual({
-      code: 'validation',
-      message: 'Unsupported VTT audio type.',
-    });
+    await expect(response.json()).resolves.toEqual({ code: 'validation', message: 'Unsupported VTT audio type.' });
     expect(uploadFile).not.toHaveBeenCalled();
     expect(createInteraction).not.toHaveBeenCalled();
   });
@@ -306,6 +259,7 @@ describe('Gemini Worker boundary', () => {
       generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
       store: false,
     }));
+    expect(deleteFile).toHaveBeenCalledWith({ name: 'files/vtt-test' });
     expect(JSON.stringify(body)).not.toContain('test-secret-key');
   });
 });

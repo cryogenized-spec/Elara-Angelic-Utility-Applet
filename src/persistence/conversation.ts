@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type { ChatMessage, ConversationState, ConversationThread } from '../domain/chat';
 import { DEFAULT_GEMINI_MODEL, getGeminiModel } from '../gemini/model-registry';
 import { defaultsForModel, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
+import type { StoredWorkspaceShortcut } from './workspace-shortcuts';
 
 const PRIMARY_ID = 'primary';
 const DEFAULT_TITLE = 'New conversation';
@@ -19,6 +20,7 @@ class ElaraDatabase extends Dexie {
   messages!: Table<ChatMessage, string>;
   threads!: Table<StoredThread, string>;
   settings!: Table<StoredGeminiSettings, string>;
+  workspaceShortcuts!: Table<StoredWorkspaceShortcut, string>;
 
   constructor() {
     super('elara-angelic-utility-applet');
@@ -35,6 +37,12 @@ class ElaraDatabase extends Dexie {
       messages: 'id, conversationId, createdAt, role',
       threads: 'id, updatedAt, archived',
       settings: 'id, updatedAt',
+    });
+    this.version(4).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
     });
   }
 }
@@ -143,4 +151,16 @@ export async function saveGeminiSettings(model: string, settings: GeminiSettings
   const next: StoredGeminiSettings = { id: GEMINI_SETTINGS_ID, model: normalizedModel, perModel: nextPerModel, updatedAt: Date.now() };
   await db.settings.put(next);
   return next;
+}
+
+export async function loadWorkspaceShortcuts(): Promise<StoredWorkspaceShortcut[]> {
+  return db.workspaceShortcuts.orderBy('order').toArray();
+}
+
+export async function saveWorkspaceShortcut(shortcut: StoredWorkspaceShortcut): Promise<void> {
+  await db.workspaceShortcuts.put({ ...shortcut, updatedAt: Date.now() });
+}
+
+export async function deleteWorkspaceShortcut(id: string): Promise<void> {
+  await db.workspaceShortcuts.delete(id);
 }

@@ -14,6 +14,10 @@ export const googleCapabilityKeySchema = z.enum([
   'gmail.read',
   'gmail.modify',
   'gmail.send',
+  'drive.files.read',
+  'drive.files.write',
+  'sheets.read',
+  'sheets.write',
 ]);
 
 export type GoogleCapabilityKey = z.infer<typeof googleCapabilityKeySchema>;
@@ -23,11 +27,26 @@ export interface AuthorizedGoogleRequest {
   readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
 
+export type GoogleOAuthState =
+  | 'disconnected'
+  | 'connected'
+  | 'needs-consent'
+  | 'token-recovery'
+  | 'reauthorization-required'
+  | 'partially-authorized'
+  | 'revoked';
+
+export interface GoogleOAuthStatus {
+  readonly state: GoogleOAuthState;
+  readonly grantedCapabilities: readonly GoogleCapabilityKey[];
+  readonly account?: {
+    readonly email: string;
+    readonly displayName?: string;
+  };
+}
+
 export interface GoogleOAuthAuthority {
   authorize(capability: GoogleCapabilityKey): Promise<AuthorizedGoogleRequest>;
-  getStatus(): Promise<{
-    state: 'disconnected' | 'connected' | 'needs-consent' | 'token-recovery' | 'reauthorization-required' | 'partially-authorized' | 'revoked';
-    grantedCapabilities: readonly GoogleCapabilityKey[];
-  }>;
+  getStatus(): Promise<GoogleOAuthStatus>;
   disconnect(): Promise<void>;
 }

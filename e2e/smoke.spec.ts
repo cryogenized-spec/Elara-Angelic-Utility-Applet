@@ -228,3 +228,28 @@ test('exposes Gemini model controls and the protected transport boundary', async
 test('keeps multiline drafts bounded without requiring a live model call', async ({ page }) => {
   await page.goto('');
   const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  await composer.fill('First line');
+  await composer.press('Shift+Enter');
+  await composer.type('Second line');
+  await expect(composer).toHaveValue('First line\nSecond line');
+  await composer.fill(Array.from({ length: 60 }, (_, index) => `line ${index}`).join('\n'));
+  await expect(composer).toHaveCSS('max-height', '132px');
+});
+
+test('opens Workspace quick-action surfaces without injecting a chat prompt', async ({ page }) => {
+  await page.goto('');
+  const conversation = page.getByRole('region', { name: 'Conversation' });
+  const before = await conversation.locator('.message').count();
+  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
+  const calendarSurface = page.getByRole('region', { name: 'Calendar action surface' });
+  await expect(calendarSurface).toBeVisible();
+  await expect(calendarSurface.getByText('Capability · calendar.events.read')).toBeVisible();
+  await expect(conversation.locator('.message')).toHaveCount(before);
+  await calendarSurface.getByRole('button', { name: 'Close Calendar action surface' }).click();
+  await page.getByRole('button', { name: 'Tasks', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Tasks action surface' })).toBeVisible();
+  await page.getByRole('button', { name: 'Gmail', exact: true }).click();
+  await expect(page.getByRole('region', { name: 'Gmail action surface' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Calendar', exact: true })).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByRole('button', { name: 'Gmail', exact: true })).toHaveAttribute('aria-pressed', 'true');
+});

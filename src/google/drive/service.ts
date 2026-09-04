@@ -2,6 +2,19 @@ import type { GoogleOAuthAuthority } from '../oauth/contracts';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
 
+interface DriveFileResponse {
+  id?: unknown;
+  name?: unknown;
+  mimeType?: unknown;
+  modifiedTime?: unknown;
+  webViewLink?: unknown;
+}
+
+interface DriveListResponse {
+  files?: unknown;
+  nextPageToken?: unknown;
+}
+
 export interface GoogleDriveFileSummary {
   id: string;
   name: string;
@@ -21,15 +34,26 @@ export interface GoogleDriveCreateInput {
   parents?: readonly string[];
 }
 
-function requireText(value: string, field: string): string {
+function requireText(value: string, field: string, maxLength = 500): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`Google Drive ${field} is required.`);
-  if (normalized.length > 500) throw new Error(`Google Drive ${field} is too long.`);
+  if (normalized.length > maxLength) throw new Error(`Google Drive ${field} is too long.`);
   return normalized;
 }
 
 function requireFileId(fileId: string): string {
   return requireText(fileId, 'file ID');
+}
+
+function asFileSummary(value: unknown): GoogleDriveFileSummary {
+  const file = value as DriveFileResponse;
+  return {
+    id: requireText(String(file.id ?? ''), 'file ID'),
+    name: String(file.name ?? ''),
+    mimeType: String(file.mimeType ?? 'application/octet-stream'),
+    ...(typeof file.modifiedTime === 'string' ? { modifiedTime: file.modifiedTime } : {}),
+    ...(typeof file.webViewLink === 'string' ? { webViewLink: file.webViewLink } : {}),
+  };
 }
 
 export class GoogleDriveService {
@@ -45,23 +69,25 @@ export class GoogleDriveService {
     if (options.pageToken?.trim()) params.set('pageToken', options.pageToken.trim());
 
     const response = await access.fetch(`${DRIVE_API}/files?${params.toString()}`);
-    return this.readList(response);
+    const payload = await this.readJson<DriveListResponse>(response);
+    const files = Array.isArray(payload.files) ? payload.files.map(asFileSummary) : [];
+    return { files, ...(typeof payload.nextPageToken === 'string' ? { nextPageToken: payload.nextPageToken } : {}) };
   }
 
-  async getFile(fileId: string, options: { includeContent?: boolean } = {}): Promise<GoogleDriveFileSummary & { content?: string }> {
+  async getFile(fileId: string): Promise<GoogleDriveFileSummary> {
     const access = await this.oauth.authorize('drive.files.read');
     const id = encodeURIComponent(requireFileId(fileId));
-    const fields = options.includeContent ? 'id,name,mimeType,modifiedTime,webViewLink,description' : 'id,name,mimeType,modifiedTime,webViewLink,description';
-    const response = await access.fetch(`${DRIVE_API}/files/${id}?fields=${encodeURIComponent(fields)}`);
-    const payload = await this.readJson(response);
-    return {
-      id: requireText(String(payload.id ?? ''), 'file ID'),
-      name: String(payload.name ?? ''),
-      mimeType: String(payload.mimeType ?? 'application/octet-stream'),
-      ...(typeof payload.modifiedTime === 'string' ? { modifiedTime: payload.modifiedTime } : {}),
-      ...(typeof payload.webViewLink === 'string' ? { webViewLink: payload.webViewLink } : {}),
-      ...(options.includeContent && typeof payload.description === 'string' ? { content: payload.description } : {}),
-    };
+    const fields = encodeURIComponent('id,name,mimeType,modifiedTime,webViewLink');
+    const response = await access.fetch(`${DRIVE_API}/files/${id}?fields=${fields}`);
+    return asFileSummary(await this.readJson<DriveFileResponse>(response));
+  }
+
+  async downloadFile(fileId: string): Promise<Blob> {
+    const access = await this.oauth.authorize('drive.files.read');
+    const id = encodeURIComponent(requireFileId(fileId));
+    const response = await access.fetch(`${DRIVE_API}/files/${id}?alt=media`);
+    if (!response.ok) throw new Error(`Google Drive download failed (${response.status}).`);
+    return response.blob();
   }
 
   async createFile(input: GoogleDriveCreateInput): Promise<GoogleDriveFileSummary> {
@@ -69,12 +95,13 @@ export class GoogleDriveService {
     const body: Record<string, unknown> = { name: requireText(input.name, 'file name') };
     if (input.mimeType?.trim()) body.mimeType = input.mimeType.trim();
     if (input.parents?.length) body.parents = input.parents.map((parent) => requireFileId(parent));
+
     const response = await access.fetch(`${DRIVE_API}/files?fields=id,name,mimeType,modifiedTime,webViewLink`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
-    return this.readFile(response);
+    return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
 
   async updateFile(fileId: string, patch: { name?: string; description?: string; starred?: boolean; trashed?: boolean }): Promise<GoogleDriveFileSummary> {
@@ -91,7 +118,7 @@ export class GoogleDriveService {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     });
-    return this.readFile(response);
+    return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
 
   async moveFile(fileId: string, parentId: string, previousParentId?: string): Promise<GoogleDriveFileSummary> {
@@ -103,34 +130,11 @@ export class GoogleDriveService {
     if (previousParentId?.trim()) params.set('removeParents', requireFileId(previousParentId));
 
     const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?${params.toString()}`, { method: 'PATCH' });
-    return this.readFile(response);
+    return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
 
-  private async readList(response: Response): Promise<GoogleDriveListResult> {
-    const payload = await this.readJson(response);
-    const files = Array.isArray(payload.files) ? payload.files.map((file) => ({
-      id: requireText(String(file.id ?? ''), 'file ID'),
-      name: String(file.name ?? ''),
-      mimeType: String(file.mimeType ?? 'application/octet-stream'),
-      ...(typeof file.modifiedTime === 'string' ? { modifiedTime: file.modifiedTime } : {}),
-      ...(typeof file.webViewLink === 'string' ? { webViewLink: file.webViewLink } : {}),
-    })) : [];
-    return { files, ...(typeof payload.nextPageToken === 'string' ? { nextPageToken: payload.nextPageToken } : {}) };
-  }
-
-  private async readFile(response: Response): Promise<GoogleDriveFileSummary> {
-    const payload = await this.readJson(response);
-    return {
-      id: requireText(String(payload.id ?? ''), 'file ID'),
-      name: String(payload.name ?? ''),
-      mimeType: String(payload.mimeType ?? 'application/octet-stream'),
-      ...(typeof payload.modifiedTime === 'string' ? { modifiedTime: payload.modifiedTime } : {}),
-      ...(typeof payload.webViewLink === 'string' ? { webViewLink: payload.webViewLink } : {}),
-    };
-  }
-
-  private async readJson(response: Response): Promise<Record<string, any>> {
+  private async readJson<T>(response: Response): Promise<T> {
     if (!response.ok) throw new Error(`Google Drive request failed (${response.status}).`);
-    return (await response.json()) as Record<string, any>;
+    return response.json() as Promise<T>;
   }
 }

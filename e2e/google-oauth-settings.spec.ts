@@ -26,7 +26,9 @@ test('Google settings render independent Workspace authorization states', async 
   await expect(page.getByText('Google Docs', { exact: true })).toBeVisible();
   await expect(page.getByText('Google Sheets', { exact: true })).toBeVisible();
   await expect(page.getByText('Read ready').first()).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Connect' })).toHaveCount(3);
+  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Gmail' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
+  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Docs' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
+  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Sheets' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Enable writes' })).toHaveCount(3);
 });
 

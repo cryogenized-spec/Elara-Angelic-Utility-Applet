@@ -10,7 +10,7 @@ export default defineConfig({
     },
     {
       name: 'android-portrait',
-      testMatch: /mobile-reliability\.spec\.ts/,
+      testMatch: /(?:mobile-reliability|vtt)\.spec\.ts/,
       use: {
         browserName: 'chromium',
         viewport: { width: 412, height: 915 },

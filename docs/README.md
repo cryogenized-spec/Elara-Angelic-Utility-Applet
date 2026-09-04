@@ -11,11 +11,13 @@ This directory is the authoritative documentation tree for Elara.
 - [`oauth/PASS_04_STATUS.md`](./oauth/PASS_04_STATUS.md) — Drive, Docs, and Sheets service implementation handoff.
 - [`oauth/PASS_05_STATUS.md`](./oauth/PASS_05_STATUS.md) — Drive and Sheets model-tool surface handoff.
 - [`oauth/PASS_06_STATUS.md`](./oauth/PASS_06_STATUS.md) — centralized Google tool execution, risk/confirmation, and safe diagnostics handoff.
+- [`oauth/PASS_07_STATUS.md`](./oauth/PASS_07_STATUS.md) — protected Cloudflare OAuth Worker implementation, session-backed Workspace proxy, and production provisioning handoff.
 - [`future-implementation/README.md`](./future-implementation/README.md) — future infrastructure notes for Worker health, Cron, background execution, push notifications, Telegram, and controlled internet access.
 
 ## Google Workspace architecture
 
 - [`GOOGLE_OAUTH_ARCHITECTURE.md`](./GOOGLE_OAUTH_ARCHITECTURE.md) — single server-side OAuth authority.
+- [`GOOGLE_OAUTH_WORKER_IMPLEMENTATION.md`](./GOOGLE_OAUTH_WORKER_IMPLEMENTATION.md) — protected Worker source, session storage, token encryption, proxy boundaries, and production configuration.
 - [`INCREMENTAL_AUTHORIZATION.md`](./INCREMENTAL_AUTHORIZATION.md) — demand-driven incremental consent.
 - [`GOOGLE_SCOPE_REGISTRY.md`](./GOOGLE_SCOPE_REGISTRY.md) — application capability and provider-scope registry.
 - [`GOOGLE_OAUTH_SETTINGS_UI.md`](./GOOGLE_OAUTH_SETTINGS_UI.md) — Google connection/settings UI contract.

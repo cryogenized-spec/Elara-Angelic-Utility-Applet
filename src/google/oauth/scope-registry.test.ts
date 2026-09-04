@@ -8,6 +8,7 @@ const REQUIRED_CAPABILITIES = [
   'tasks.write',
   'gmail.read',
   'gmail.modify',
+  'gmail.labels',
   'gmail.send',
   'drive.files.read',
   'drive.files.write',
@@ -24,6 +25,7 @@ const EXPECTED_SCOPES: Record<(typeof REQUIRED_CAPABILITIES)[number], string> = 
   'tasks.write': 'https://www.googleapis.com/auth/tasks',
   'gmail.read': 'https://www.googleapis.com/auth/gmail.readonly',
   'gmail.modify': 'https://www.googleapis.com/auth/gmail.modify',
+  'gmail.labels': 'https://www.googleapis.com/auth/gmail.labels',
   'gmail.send': 'https://www.googleapis.com/auth/gmail.send',
   'drive.files.read': 'https://www.googleapis.com/auth/drive.file',
   'drive.files.write': 'https://www.googleapis.com/auth/drive.file',
@@ -59,6 +61,8 @@ describe('Google OAuth scope registry', () => {
 
   it('keeps Gmail authorization granular', () => {
     expect(getGoogleScope('gmail.read').scope).not.toBe(getGoogleScope('gmail.modify').scope);
+    expect(getGoogleScope('gmail.modify').scope).not.toBe(getGoogleScope('gmail.labels').scope);
     expect(getGoogleScope('gmail.send').scope).not.toBe(getGoogleScope('gmail.modify').scope);
+    expect(getGoogleScope('gmail.send').scope).not.toBe(getGoogleScope('gmail.labels').scope);
   });
 });

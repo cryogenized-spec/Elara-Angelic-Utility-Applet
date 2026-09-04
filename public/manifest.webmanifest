@@ -10,7 +10,7 @@
   "background_color": "#0f0c1e",
   "theme_color": "#0f0c1e",
   "icons": [
-    { "src": "/Elara-Angelic-Utility-Applet/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-    { "src": "/Elara-Angelic-Utility-Applet/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+    { "src": "/Elara-Angelic-Utility-Applet/icons/%E2%80%8Bicon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/Elara-Angelic-Utility-Applet/icons/%E2%80%8Bicon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
   ]
 }

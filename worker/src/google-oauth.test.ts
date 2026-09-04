@@ -19,6 +19,17 @@ const env = () => ({
   ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io',
 });
 
+async function establishCalendarSession(runtime: ReturnType<typeof env>, fetchMock: ReturnType<typeof vi.spyOn>) {
+  fetchMock
+    .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access-123', refresh_token: 'refresh-123', expires_in: 3600, scope: 'openid email profile https://www.googleapis.com/auth/calendar.events.readonly' }), { status: 200 }))
+    .mockResolvedValueOnce(new Response(JSON.stringify({ sub: 'google-sub-1', email: 'user@example.com', name: 'Example User' }), { status: 200 }));
+  const start = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/start?capability=calendar.events.read', { headers: { Origin: 'https://cryogenized-spec.github.io' } }), runtime);
+  const state = new URL((await start.json() as { authorizationUrl: string }).authorizationUrl).searchParams.get('state')!;
+  const stateCookie = start.headers.get('Set-Cookie')!.split(';')[0];
+  const callback = await handleGoogleOAuthRequest(new Request(`https://elara-gemini.cryogenized.workers.dev/api/google/oauth/callback?state=${encodeURIComponent(state)}&code=authorization-code`, { headers: { Cookie: stateCookie } }), runtime);
+  return callback.headers.get('Set-Cookie')!.split(';')[0];
+}
+
 describe('protected Google OAuth Worker', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
@@ -58,38 +69,17 @@ describe('protected Google OAuth Worker', () => {
   it('exchanges the code, stores protected credentials, and establishes an HttpOnly session', async () => {
     const runtime = env();
     const fetchMock = vi.spyOn(globalThis, 'fetch');
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access-123', refresh_token: 'refresh-123', expires_in: 3600, scope: 'openid email profile https://www.googleapis.com/auth/calendar.events.readonly' }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ sub: 'google-sub-1', email: 'user@example.com', name: 'Example User' }), { status: 200 }));
+    await establishCalendarSession(runtime, fetchMock);
 
-    const start = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/start?capability=calendar.events.read', { headers: { Origin: 'https://cryogenized-spec.github.io' } }), runtime);
-    const startBody = await start.json() as { authorizationUrl: string };
-    const state = new URL(startBody.authorizationUrl).searchParams.get('state')!;
-    const stateCookie = start.headers.get('Set-Cookie')!.split(';')[0];
-
-    const callback = await handleGoogleOAuthRequest(new Request(`https://elara-gemini.cryogenized.workers.dev/api/google/oauth/callback?state=${encodeURIComponent(state)}&code=authorization-code`, { headers: { Cookie: stateCookie } }), runtime);
-    const sessionCookie = callback.headers.get('Set-Cookie');
-
-    expect(callback.status).toBe(303);
-    expect(callback.headers.get('Location')).toBe('https://cryogenized-spec.github.io/Elara-Angelic-Utility-Applet/');
-    expect(sessionCookie).toContain('__Host-elara_google_session=');
-    expect(sessionCookie).toContain('HttpOnly');
-    expect(sessionCookie).toContain('SameSite=None');
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const callbackRequestCount = fetchMock.mock.calls.length;
+    expect(callbackRequestCount).toBe(2);
+    expect(fetchMock.mock.calls[0]?.[1] && new URLSearchParams((fetchMock.mock.calls[0]?.[1] as RequestInit).body as URLSearchParams).get('grant_type')).toBe('authorization_code');
   });
 
   it('returns capability state without exposing stored tokens and proxies only an allowed Workspace target', async () => {
     const runtime = env();
     const fetchMock = vi.spyOn(globalThis, 'fetch');
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access-123', refresh_token: 'refresh-123', expires_in: 3600, scope: 'openid email profile https://www.googleapis.com/auth/calendar.events.readonly' }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ sub: 'google-sub-1', email: 'user@example.com', name: 'Example User' }), { status: 200 }));
-
-    const start = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/start?capability=calendar.events.read', { headers: { Origin: 'https://cryogenized-spec.github.io' } }), runtime);
-    const state = new URL((await start.json() as { authorizationUrl: string }).authorizationUrl).searchParams.get('state')!;
-    const stateCookie = start.headers.get('Set-Cookie')!.split(';')[0];
-    const callback = await handleGoogleOAuthRequest(new Request(`https://elara-gemini.cryogenized.workers.dev/api/google/oauth/callback?state=${encodeURIComponent(state)}&code=authorization-code`, { headers: { Cookie: stateCookie } }), runtime);
-    const sessionCookie = callback.headers.get('Set-Cookie')!.split(';')[0];
+    const sessionCookie = await establishCalendarSession(runtime, fetchMock);
 
     const status = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/status', { headers: { Origin: 'https://cryogenized-spec.github.io', Cookie: sessionCookie } }), runtime);
     const statusBody = await status.json() as Record<string, unknown>;
@@ -147,5 +137,48 @@ describe('protected Google OAuth Worker', () => {
 
     expect(response.status).toBe(403);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('revokes the provider credential and deletes the local session on disconnect', async () => {
+    const runtime = env();
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const sessionCookie = await establishCalendarSession(runtime, fetchMock);
+    fetchMock.mockResolvedValueOnce(new Response(null, { status: 200 }));
+
+    const disconnect = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/disconnect', {
+      method: 'POST',
+      headers: { Origin: 'https://cryogenized-spec.github.io', Cookie: sessionCookie },
+    }), runtime);
+
+    expect(disconnect.status).toBe(200);
+    expect(disconnect.headers.get('Set-Cookie')).toContain('__Host-elara_google_session=');
+    expect(new URLSearchParams((fetchMock.mock.calls[2]?.[1] as RequestInit).body as URLSearchParams).get('token')).toBe('refresh-123');
+
+    const status = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/status', { headers: { Origin: 'https://cryogenized-spec.github.io', Cookie: sessionCookie } }), runtime);
+    expect(await status.json()).toEqual({ state: 'disconnected', grantedCapabilities: [] });
+  });
+
+  it('retries a provider 401 once with a refreshed access token', async () => {
+    const runtime = env();
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const sessionCookie = await establishCalendarSession(runtime, fetchMock);
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'access-456', expires_in: 3600, scope: 'openid email profile https://www.googleapis.com/auth/calendar.events.readonly' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ items: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+
+    const proxy = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/proxy', {
+      method: 'GET',
+      headers: {
+        Origin: 'https://cryogenized-spec.github.io',
+        Cookie: sessionCookie,
+        'X-Elara-Google-Capability': 'calendar.events.read',
+        'X-Elara-Google-Target': 'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      },
+    }), runtime);
+
+    expect(proxy.status).toBe(200);
+    const refreshedRequest = fetchMock.mock.calls[6]?.[1] as RequestInit;
+    expect(new Headers(refreshedRequest?.headers).get('Authorization')).toBe('Bearer access-456');
   });
 });

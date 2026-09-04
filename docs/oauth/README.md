@@ -2,7 +2,7 @@
 
 > **Purpose:** This directory is the authoritative handoff for the Google OAuth, Workspace integrations, background execution, and related infrastructure work. A future implementation pass must read this file before changing OAuth, Google tools, or background execution.
 >
-> **Status:** Pass 2 (Google connection settings UI), Pass 3 (scope audit), Pass 4 (Drive/Docs/Sheets service adapters), Pass 5 (Drive/Sheets model-tool surface), and Pass 6 (centralized tool execution/risk/diagnostics gate) are implemented in the clean app repository. The protected Cloudflare OAuth Worker source is still not present here, so end-to-end production authorization cannot yet be claimed.
+> **Status:** Pass 2 (Google connection settings UI), Pass 3 (scope audit), Pass 4 (Drive/Docs/Sheets service adapters), Pass 5 (Drive/Sheets model-tool surface), Pass 6 (centralized tool execution/risk/diagnostics gate), and the protected OAuth Worker implementation are now present in the clean app repository. Production provisioning and live lifecycle verification remain outstanding; the source boundary itself is no longer missing.
 
 ## 0. Non-negotiable architecture
 
@@ -16,7 +16,7 @@ The character/master system prompt remains user-editable application configurati
 
 ## 1. Current repository starting point
 
-The repository already contains these foundations:
+The repository now contains these foundations:
 
 - `docs/GOOGLE_OAUTH_ARCHITECTURE.md` — single OAuth authority, server-side authorization-code boundary, offline refresh, secure redirects, revocation semantics.
 - `docs/INCREMENTAL_AUTHORIZATION.md` — demand-driven, contextual incremental consent rules.
@@ -25,8 +25,11 @@ The repository already contains these foundations:
 - `docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md` — structured failure semantics.
 - `docs/GOOGLE_TOOL_BOUNDARY.md` — model-visible Google allow-list and execution boundary.
 - `docs/GOOGLE_TOOL_EXECUTION.md` — centralized tool risk, confirmation, authorization, and diagnostics gate.
+- `docs/GOOGLE_OAUTH_WORKER_IMPLEMENTATION.md` — protected Worker source, session storage, token encryption, and capability-bound Workspace proxy.
+- `docs/oauth/PASS_07_STATUS.md` — implementation and production-provisioning handoff for the protected Worker boundary.
 - `src/google/tools/contracts.ts` and `src/google/tools/registry.ts` — explicit named Google tool contracts and descriptors.
 - `src/google/oauth/authority.ts` and `src/google/oauth/scope-registry.ts` — browser-side OAuth boundary and application scope registry.
+- `worker/src/google-oauth.ts` and `worker/src/index.ts` — server-side OAuth authority and route integration.
 - `docs/GOOGLE_CALENDAR_SERVICE.md`, `docs/GOOGLE_TASKS_SERVICE.md`, `docs/GOOGLE_DOCS_SERVICE.md`, `docs/GOOGLE_GMAIL_SERVICE.md`, `docs/GOOGLE_DRIVE_SERVICE.md`, `docs/GOOGLE_SHEETS_SERVICE.md` — focused Workspace service-boundary direction.
 
 Do not replace these with a second architecture. Extend them.
@@ -48,23 +51,28 @@ The intended end state is an agent that can perform useful task-management and p
 
 ### Pass 1 — Production OAuth authority
 
-Implement the real Cloudflare-side OAuth boundary.
+Implemented in source as `worker/src/google-oauth.ts`; production provisioning and live verification remain.
 
-Responsibilities:
+Responsibilities implemented:
 
-- Google OAuth client configuration references.
+- Google OAuth client configuration references via Worker secrets/vars.
 - Authorization-code flow.
-- Strong random `state` and callback validation.
-- PKCE where applicable/required by the selected agent/web flow.
-- Exact HTTPS redirect URI allow-listing.
-- Authorization-code exchange at the protected server boundary.
-- Secure persistent refresh-token storage.
-- Short-lived access-token minting/refresh.
+- Strong random `state` bound to a short-lived server-side record and HttpOnly state cookie.
+- PKCE S256.
+- Exact HTTPS callback URI configuration.
+- Authorization-code exchange at the protected Worker boundary.
+- Encrypted persistent refresh-token storage in dedicated KV.
+- Encrypted short-lived access-token caching and silent refresh.
 - Refresh-token replacement when Google returns a new refresh token.
 - Revocation/disconnect.
-- Granted-scope inventory.
-- Structured token-expired vs invalid-grant/revoked-consent classification.
-- Safe diagnostics with correlation IDs but no credentials or message payloads.
+- Granted-scope inventory mapped to application capabilities.
+- Revoked-grant classification.
+- Safe error handling without returning credentials or raw provider secrets.
+- Capability-bound Workspace proxy used by the existing focused service adapters.
+
+The browser still never receives a Google access or refresh token. It uses the HttpOnly Worker session cookie and normalized capability status.
+
+Google's current documentation describes the server-side authorization-code flow, `access_type=offline` for refresh credentials, and `state` validation as the appropriate pattern for server-side applications. citeturn736197search0turn736197search1turn736197search3
 
 Important: do not send the user through Google sign-in every time Elara opens. Persist the refresh credential and silently mint/refresh short-lived access tokens. Request offline access and incremental authorization. Only use explicit re-consent when the authorization state actually requires user interaction.
 
@@ -126,7 +134,7 @@ Dedicated Zod argument contracts prevent malformed/oversized Drive and Sheets ca
 
 Implemented at the application tool boundary.
 
-`src/google/tools/executor.ts` now provides a centralized gate that validates the tool call, resolves the registered descriptor, verifies current capability authorization state, applies the existing read/write/destructive/send confirmation policy, invokes a registered service handler, and returns a correlation ID with a normalized success/failure result.
+`src/google/tools/executor.ts` now provides a centralized gate that validates the tool call, resolves the registered descriptor, verifies current OAuth capability state, applies the existing read/write/destructive/send confirmation policy, invokes a registered service handler, and returns a correlation ID with a normalized success/failure result.
 
 `src/google/tools/diagnostics.ts` provides safe tool-level failure classes for validation, authorization, confirmation, network, rate-limit, provider, and unknown failures. Raw handler exceptions are deliberately not returned.
 
@@ -134,11 +142,9 @@ The executor also integrates the existing freshness-bound confirmation policy. A
 
 The execution boundary is documented in `docs/GOOGLE_TOOL_EXECUTION.md`.
 
-The protected Cloudflare OAuth Worker remains the production dependency for actual authorized Google requests; the clean app does not fabricate an alternative token path.
-
 ### Pass 7 — End-to-end verification and production hardening
 
-Do not declare OAuth complete after the callback returns successfully. Verify the complete lifecycle.
+Source implementation is now in place. The remaining work is verification and infrastructure rather than inventing another OAuth architecture.
 
 Required test matrix:
 
@@ -267,6 +273,6 @@ OAuth is not complete until all of the following are true:
 
 ## 11. Handoff rule for future Elara sessions
 
-Before making changes, read this README plus the existing Google OAuth/tool/service documents. Inspect the current `main` branch rather than trusting this note's file names or old commit hashes. Revalidate all Google and Cloudflare assumptions against current official documentation. Preserve the architectural boundaries. Do not resurrect legacy providers, `generateContent()`, client-side OAuth token storage, arbitrary Google HTTP tools, or browser-dependent background execution.
+Before making changes, read this README plus `docs/oauth/PASS_07_STATUS.md`, `docs/GOOGLE_OAUTH_WORKER_IMPLEMENTATION.md`, and the existing Google tool/service documents. Inspect the current `main` branch rather than trusting old commit hashes. Revalidate all Google and Cloudflare assumptions against current official documentation. Preserve the architectural boundaries. Do not resurrect legacy providers, `generateContent()`, client-side OAuth token storage, arbitrary Google HTTP tools, or browser-dependent background execution.
 
-**Next immediate implementation target:** Pass 7 — full end-to-end verification and production hardening. The first blocker remains access to the protected OAuth Worker source/configuration needed to exercise real authorization and refresh.
+**Next immediate implementation target:** production provisioning and full Pass 7 verification of the now-implemented OAuth Worker boundary. The source implementation is present; remaining blockers are KV namespace provisioning, Worker secrets/configuration, Google Cloud OAuth client registration/verification, deployment, and live end-to-end testing.

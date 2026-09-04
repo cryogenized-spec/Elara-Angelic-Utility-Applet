@@ -2,7 +2,7 @@
 
 > **Purpose:** This directory is the authoritative handoff for the Google OAuth, Workspace integrations, background execution, and related infrastructure work. A future implementation pass must read this file before changing OAuth, Google tools, or background execution.
 >
-> **Status:** Pass 2 (Google connection settings UI), Pass 3 (scope audit), and Pass 4 (Drive/Docs/Sheets service adapters) are implemented. The clean app still does not contain the protected OAuth Worker source, so end-to-end production authorization cannot yet be claimed.
+> **Status:** Pass 2 (Google connection settings UI), Pass 3 (scope audit), Pass 4 (Drive/Docs/Sheets service adapters), and Pass 5 (Drive/Sheets model-tool surface) are implemented. The clean app still does not contain the protected OAuth Worker source, so end-to-end production authorization cannot yet be claimed.
 
 ## 0. Non-negotiable architecture
 
@@ -90,6 +90,8 @@ Current audited direction:
 
 Sensitive/restricted scopes require verification/compliance review before production release.
 
+Pass 3 code hardening also validates application capability keys against the central schema before registry lookup and keeps provider scope strings outside model-facing tool contracts.
+
 ### Pass 4 — Drive, Docs, and Sheets service implementations
 
 Implemented as focused application-side adapters:
@@ -106,23 +108,23 @@ Do not make Sheets discovery depend on a fictitious "list spreadsheets" endpoint
 
 ### Pass 5 — Expand the model-visible tool schema
 
-Next. Extend the existing explicit Google allow-list with Drive and Sheets operations.
-
-Use small named tools, for example:
+Implemented for Drive and Sheets. The explicit tool allow-list now includes:
 
 - `drive.searchFiles`
 - `drive.getFile`
+- `drive.downloadFile`
 - `drive.createFile`
 - `drive.updateFile`
 - `drive.moveFile`
+- `sheets.getSpreadsheet`
 - `sheets.readRange`
 - `sheets.writeRange`
 - `sheets.appendRows`
 - `sheets.batchUpdate`
 
-Preserve the existing naming/risk/capability pattern.
+Dedicated bounded Zod argument contracts live in `src/google/tools/drive-sheets-schemas.ts`, with regression tests. No arbitrary `google.request` operation was added.
 
-Every tool call must follow:
+Every tool call is still intended to follow:
 
 `validated model call → application argument validation → capability lookup → OAuth authorization check → risk/confirmation check → service execution → normalized/auditable result`
 
@@ -130,7 +132,7 @@ No tool may invent endpoints, scopes, tokens, arbitrary URLs, or HTTP requests.
 
 ### Pass 6 — Confirmation, diagnostics, and failure handling
 
-Connect every mutation to the existing risk classification/confirmation architecture.
+Next. Connect every mutation to the existing risk classification/confirmation architecture and ensure the protected Worker can return structured authorization/provider failures to the application.
 
 Rules:
 
@@ -280,4 +282,4 @@ OAuth is not complete until all of the following are true:
 
 Before making changes, read this README plus the existing Google OAuth/tool/service documents. Inspect the current `main` branch rather than trusting this note's file names or old commit hashes. Revalidate all Google and Cloudflare assumptions against current official documentation. Preserve the architectural boundaries. Do not resurrect legacy providers, `generateContent()`, client-side OAuth token storage, arbitrary Google HTTP tools, or browser-dependent background execution.
 
-**Next immediate implementation target:** Pass 5 — expand the explicit model-visible Google tool schema with Drive and Sheets operations, then route those named tools through validation → capability lookup → OAuth authorization → risk/confirmation → focused service execution.
+**Next immediate implementation target:** Pass 6 — connect the complete Google tool surface to the existing risk/confirmation and diagnostics architecture, while continuing to resolve the protected OAuth Worker boundary.

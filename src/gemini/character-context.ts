@@ -1,22 +1,21 @@
 import type { CharacterProfile } from '../domain/character';
 import type { RoleplayPreferences } from '../domain/preferences';
+import { ELARA_SYSTEM_INSTRUCTION, LEGACY_CHARACTER_SYSTEM_INSTRUCTION } from '../character/system-instruction';
 
 export function buildCharacterInstruction(character: CharacterProfile, roleplay: RoleplayPreferences): string {
-  const base = character.systemInstruction.trim();
+  const configured = character.systemInstruction.trim();
+  const legacyPlaceholder = LEGACY_CHARACTER_SYSTEM_INSTRUCTION.trim();
+  const base = !configured || configured === legacyPlaceholder ? ELARA_SYSTEM_INSTRUCTION : configured;
   if (!roleplay.enabled) return base;
-  const environment = [
-    roleplay.environmentName.trim() && `Environment: ${roleplay.environmentName.trim()}`,
-    roleplay.environmentDescription.trim() && `Environment description: ${roleplay.environmentDescription.trim()}`,
-    roleplay.timeOfDay.trim() && `Time: ${roleplay.timeOfDay.trim()}`,
-    roleplay.weather.trim() && `Weather: ${roleplay.weather.trim()}`,
-    roleplay.atmosphere.trim() && `Atmosphere: ${roleplay.atmosphere.trim()}`,
-  ].filter(Boolean).join('\n');
-  return [
-    base,
-    '',
+  const lines = [
     'CREATIVE ROLEPLAY CONTEXT',
-    'This interaction is taking place within a fictional or creative roleplay frame chosen by the user. Continue the established fictional context naturally while remaining truthful about the application as an actual software system.',
-    'Presentation convention: use italics for physical action, scene narration, and non-dialogue roleplay description. Use ordinary text for spoken dialogue.',
-    environment ? `Current environment:\n${environment}` : '',
-  ].filter(Boolean).join('\n');
+    `Environment preset: ${roleplay.environmentPreset}`,
+    `Environment name: ${roleplay.environmentName || 'Unspecified'}`,
+    `Environment description: ${roleplay.environmentDescription || 'Unspecified'}`,
+    `Time of day: ${roleplay.timeOfDay || 'Unspecified'}`,
+    `Weather: ${roleplay.weather || 'Unspecified'}`,
+    `Atmosphere / mood: ${roleplay.atmosphere || 'Unspecified'}`,
+    'In roleplay scenes, use italics for physical action and keep spoken dialogue natural.',
+  ];
+  return `${base}\n\n${lines.join('\n')}`;
 }

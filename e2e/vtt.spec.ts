@@ -109,4 +109,24 @@ test.describe('VTT composer flow', () => {
     await expect(expanded).toHaveValue('expanded voice inserted draft');
     await expect(page.getByRole('textbox', { name: 'Message Elara' })).not.toBeVisible();
   });
+
+  test('cancels an in-flight transcription and leaves the draft unchanged', async ({ page }) => {
+    await page.unroute('**/api/transcribe');
+    await page.route('**/api/transcribe', async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    });
+
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await composer.fill('keep this draft');
+    await setSelection(page, 'Message Elara', 5, 5);
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await expect(page.getByRole('button', { name: 'Cancel voice transcription' })).toBeVisible();
+
+    await page.getByRole('button', { name: 'Cancel voice transcription' }).click();
+    await expect(composer).toHaveValue('keep this draft');
+    await expect(page.getByRole('status')).toContainText('Voice transcription cancelled.');
+    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
+  });
 });

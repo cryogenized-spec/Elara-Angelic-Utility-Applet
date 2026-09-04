@@ -1,12 +1,11 @@
-import { googleCapabilityKeySchema, type AuthorizedGoogleRequest, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus } from './contracts';
+import { googleCapabilityKeySchema, type AuthorizedGoogleRequest, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus as GoogleOAuthStatusContract } from './contracts';
 
 const DEFAULT_OAUTH_BASE_URL = 'https://elara-gemini.cryogenized.workers.dev';
-
 const OAUTH_BASE_URL = (import.meta.env.VITE_GOOGLE_OAUTH_BASE_URL as string | undefined)?.trim() || DEFAULT_OAUTH_BASE_URL;
 
 function assertSameOriginRedirect(url: URL): void {
   if (url.protocol !== 'https:') throw new Error('Google OAuth redirect must use HTTPS.');
-  if (url.origin !== OAUTH_BASE_URL) throw new Error('Unexpected Google OAuth redirect origin.');
+  if (url.origin !== new URL(OAUTH_BASE_URL).origin) throw new Error('Unexpected Google OAuth redirect origin.');
 }
 
 function capabilityParam(capability: GoogleCapabilityKey): string {
@@ -41,17 +40,11 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
   });
 }
 
-export interface GoogleOAuthStatus extends Omit<GoogleOAuthStatus, 'state'> {
-  state: GoogleOAuthStatus['state'];
-  grantedCapabilities: readonly GoogleCapabilityKey[];
-  account?: { email: string; displayName?: string };
-}
-
 export const googleOAuthAuthority: GoogleOAuthAuthority = {
   async authorize(capability) {
     googleCapabilityKeySchema.parse(capability);
     const status = await this.getStatus();
-    const available = status.grantedCapabilities.includes(capability) && status.state !== 'disconnected' && status.state !== 'needs-consent' && status.state !== 'revoked' && status.state !== 'reauthorization-required' && status.state !== 'token-recovery';
+    const available = status.grantedCapabilities.includes(capability) && !['disconnected', 'needs-consent', 'revoked', 'reauthorization-required', 'token-recovery'].includes(status.state);
     if (!available) {
       const response = await fetch(`${OAUTH_BASE_URL}/api/google/oauth/start?capability=${capabilityParam(capability)}`, {
         method: 'GET',
@@ -61,6 +54,7 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
       const payload = await readJson<{ authorizationUrl: string }>(response);
       const redirect = new URL(payload.authorizationUrl);
       if (redirect.protocol !== 'https:') throw new Error('Google authorization URL must be HTTPS.');
+      if (!['https:', 'http:'].includes(window.location.protocol) || redirect.hostname === window.location.hostname) throw new Error('Unexpected Google authorization redirect.');
       window.location.assign(redirect.toString());
       return { capability, fetch: async () => { throw new Error('OAuth redirect is pending; authorized Google requests cannot start in this page state.'); } } satisfies AuthorizedGoogleRequest;
     }
@@ -74,7 +68,7 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
       headers: { Accept: 'application/json', Origin: window.location.origin },
       cache: 'no-store',
     });
-    return readJson<GoogleOAuthStatus>(response);
+    return readJson<GoogleOAuthStatusContract>(response);
   },
 
   async disconnect() {

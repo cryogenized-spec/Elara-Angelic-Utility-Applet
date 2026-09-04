@@ -27,7 +27,7 @@ export function MarkdownReference({ open, onClose }: { open: boolean; onClose: (
   return <div className="markdown-reference__backdrop" role="presentation" onClick={onClose}>
     <section className="markdown-reference" role="dialog" aria-modal="true" aria-labelledby="markdown-reference-title" onClick={(event) => event.stopPropagation()}>
       <header><div><span className="panel-kicker">COMPOSER</span><h2 id="markdown-reference-title">Markdown</h2></div><button type="button" className="icon-button" aria-label="Close Markdown reference" onClick={onClose}>×</button></header>
-      <p>Restricted Markdown is supported. Raw HTML, scripts, embeds, arbitrary CSS, and browser-active markup are not rendered.</p>
+      <p><span>Raw HTML, scripts, embeds, arbitrary CSS</span>, and browser-active markup are not rendered. Restricted Markdown is supported.</p>
       <div className="markdown-reference__rows">{rows.map(([label, syntax]) => <div className="markdown-reference__row" key={label}><span>{label}</span><code>{syntax}</code></div>)}</div>
       <a className="markdown-reference__docs" href="https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/docs/MARKDOWN_FORMAT.md" target="_blank" rel="noreferrer noopener">Full Markdown format documentation ↗</a>
     </section>

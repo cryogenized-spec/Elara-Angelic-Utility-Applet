@@ -84,8 +84,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
             <Icon name="mic" size={20} />
           </button>
           <div className="composer-expanded__spacer" />
-          <button className="composer__icon composer__markdown" type="button" aria-label="VTT reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
-            <span aria-hidden="true">VTT</span>
+          <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
+            <span aria-hidden="true">M</span>
           </button>
           <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={status !== 'streaming' && !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
             <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
@@ -110,8 +110,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
       <button className="composer__icon" type="button" aria-label="Voice input" disabled={status === 'streaming'}>
         <Icon name="mic" size={20} />
       </button>
-      <button className="composer__icon composer__markdown" type="button" aria-label="VTT reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
-        <span aria-hidden="true">VTT</span>
+      <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
+        <span aria-hidden="true">M</span>
       </button>
       <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={status !== 'streaming' && !draft.trim()}>
         <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />

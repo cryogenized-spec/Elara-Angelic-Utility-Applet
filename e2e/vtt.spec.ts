@@ -82,6 +82,7 @@ test.describe('VTT composer flow', () => {
     await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
 
     await expect(composer).toHaveValue('hello voice inserted world');
+    await expect(composer).toBeFocused();
     await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled();
   });
@@ -109,7 +110,49 @@ test.describe('VTT composer flow', () => {
     await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
 
     await expect(expanded).toHaveValue('expanded voice inserted draft');
+    await expect(expanded).toBeFocused();
     await expect(page.getByRole('textbox', { name: 'Message Elara' })).not.toBeVisible();
+  });
+
+  test('auto-stops after sustained silence and returns to idle', async ({ page }) => {
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await composer.fill('keep ');
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await expect(page.getByRole('button', { name: 'Stop VTT voice input' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible({ timeout: 7_000 });
+    await expect(composer).toHaveValue('keep voice inserted');
+  });
+
+  test('reports transcription errors and recovers for the next attempt', async ({ page }) => {
+    await page.unroute('**/api/transcribe');
+    let attempts = 0;
+    await page.route('**/api/transcribe', async (route) => {
+      attempts += 1;
+      if (attempts === 1) {
+        await route.fulfill({
+          status: 502,
+          contentType: 'application/json',
+          body: JSON.stringify({ code: 'provider', message: 'Transcription unavailable.' }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ transcript: 'recovered text' }),
+      });
+    });
+
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await composer.fill('draft');
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await expect(page.getByRole('status')).toContainText('Transcription unavailable.');
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await expect(composer).toHaveValue('draftrecovered text');
   });
 
   test('cancels an in-flight transcription and leaves the draft unchanged', async ({ page }) => {

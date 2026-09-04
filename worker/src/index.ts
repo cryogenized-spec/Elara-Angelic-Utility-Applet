@@ -28,6 +28,9 @@ const requestSchema = z.object({
 type SafeEvent = Record<string, unknown>;
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
 
+const VTT_MAX_AUDIO_BYTES = 2 * 1024 * 1024;
+const VTT_ALLOWED_MIME_TYPES = new Set(['audio/webm', 'audio/webm;codecs=opus', 'audio/ogg', 'audio/ogg;codecs=opus']);
+
 function configuredOrigins(env: Env): string[] { return (env.ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean); }
 function allowedOrigin(request: Request, env: Env): string | null { const origin = request.headers.get('Origin'); if (!origin) return null; return configuredOrigins(env).includes(origin) ? origin : null; }
 function corsHeaders(request: Request, env: Env): Headers { const headers = new Headers({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Elara-Google-Capability, X-Elara-Google-Target', Vary: 'Origin' }); const origin = allowedOrigin(request, env); if (origin) { headers.set('Access-Control-Allow-Origin', origin); headers.set('Access-Control-Allow-Credentials', 'true'); } return headers; }
@@ -184,12 +187,50 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
   return new Response(body, { status: 200, headers });
 }
 
+async function handleTranscribe(request: Request, env: Env): Promise<Response> {
+  if (!env.GEMINI_API_KEY) return jsonResponse(request, env, { code: 'configuration', message: 'Gemini Worker credential is not configured.' }, 503);
+  const origin = request.headers.get('Origin');
+  if (origin && !allowedOrigin(request, env)) return jsonResponse(request, env, { code: 'authz', message: 'Origin is not authorized.' }, 403);
+  const contentType = (request.headers.get('Content-Type') ?? '').toLowerCase();
+  if (!VTT_ALLOWED_MIME_TYPES.has(contentType)) return jsonResponse(request, env, { code: 'validation', message: 'Unsupported VTT audio type.' }, 415);
+  const contentLength = Number(request.headers.get('Content-Length') ?? '0');
+  if (Number.isFinite(contentLength) && contentLength > VTT_MAX_AUDIO_BYTES) return jsonResponse(request, env, { code: 'validation', message: 'VTT audio capture is too large.' }, 413);
+  if (!request.body) return jsonResponse(request, env, { code: 'validation', message: 'VTT audio body is required.' }, 400);
+
+  const bytes = await request.arrayBuffer();
+  if (bytes.byteLength < 2048) return jsonResponse(request, env, { code: 'empty', message: 'No speech was detected.' }, 422);
+  if (bytes.byteLength > VTT_MAX_AUDIO_BYTES) return jsonResponse(request, env, { code: 'validation', message: 'VTT audio capture is too large.' }, 413);
+
+  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, apiVersion: 'v1' });
+  const audioFile = await client.files.upload({
+    file: new Blob([bytes], { type: contentType }),
+    config: { mimeType: contentType },
+  });
+  if (!audioFile.uri || !audioFile.mimeType) return jsonResponse(request, env, { code: 'provider', message: 'Gemini did not return a usable uploaded audio file.' }, 502);
+
+  const interaction = await client.interactions.create({
+    model: 'gemini-3.5-transcribe',
+    input: [{ type: 'audio', uri: audioFile.uri, mime_type: audioFile.mimeType }],
+    generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
+    store: false,
+  });
+  const transcript = typeof interaction.output_text === 'string' ? interaction.output_text.trim() : '';
+  if (!transcript) return jsonResponse(request, env, { code: 'empty', message: 'No speech was detected.' }, 422);
+  return jsonResponse(request, env, { transcript });
+}
+
 export default { async fetch(request: Request, env: Env): Promise<Response> {
   const googleOAuthResponse = await handleGoogleOAuthRequest(request, env);
   if (googleOAuthResponse) return googleOAuthResponse;
   const pathname = new URL(request.url).pathname;
   if (pathname === '/health') return healthResponse(request, env);
   if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-  if (request.method !== 'POST' || pathname !== '/api/gemini') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
-  try { return await handleGemini(request, env); } catch { return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502); }
+  if (request.method !== 'POST') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
+  try {
+    if (pathname === '/api/gemini') return await handleGemini(request, env);
+    if (pathname === '/api/transcribe') return await handleTranscribe(request, env);
+    return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
+  } catch {
+    return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502);
+  }
 } };

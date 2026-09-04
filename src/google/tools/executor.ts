@@ -4,6 +4,7 @@ import { evaluateWriteConfirmation, isConfirmationFresh, type WriteConfirmationR
 import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus } from '../oauth/contracts';
 import { classifyGoogleToolFailure, type GoogleToolFailure } from './diagnostics';
 import { validateDriveSheetsToolArguments, driveSheetsToolArgumentSchemas, type DriveSheetsToolName } from './drive-sheets-schemas';
+import { validateGoogleReadToolArguments, googleReadToolArgumentSchemas, type GoogleReadToolName } from './read-schemas';
 
 export interface GoogleToolExecutionContext {
   readonly tool: GoogleToolName;
@@ -42,6 +43,9 @@ function safeCapability(value: string): GoogleCapabilityKey {
 function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Record<string, unknown>> {
   if (Object.prototype.hasOwnProperty.call(driveSheetsToolArgumentSchemas, tool)) {
     return validateDriveSheetsToolArguments(tool as DriveSheetsToolName, value) as Readonly<Record<string, unknown>>;
+  }
+  if (Object.prototype.hasOwnProperty.call(googleReadToolArgumentSchemas, tool)) {
+    return validateGoogleReadToolArguments(tool as GoogleReadToolName, value) as Readonly<Record<string, unknown>>;
   }
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Tool arguments must be an object.');
   return Object.freeze({ ...(value as Record<string, unknown>) });

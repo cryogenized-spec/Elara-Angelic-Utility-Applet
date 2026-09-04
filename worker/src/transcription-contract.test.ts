@@ -37,7 +37,9 @@ describe('VTT transcription Worker contract', () => {
       body: new Uint8Array(3_000),
     });
 
-    await expect(worker.fetch(request, env)).resolves.toSatisfy(async (response: Response) => response.status === 200);
+    const response = await worker.fetch(request, env);
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ transcript: 'hello from voice' });
     await vi.waitFor(() => expect(deleteFile).toHaveBeenCalledWith({ name: 'files/vtt-test' }));
   });
 

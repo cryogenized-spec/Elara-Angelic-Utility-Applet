@@ -12,19 +12,26 @@ Drive and Sheets operations added during Pass 5 have dedicated bounded argument 
 
 ## Execution boundary
 
-1. Model emits a validated tool call by registered name.
-2. Application validates arguments at the trust boundary.
+Pass 6 now centralizes the application-side gate in `src/google/tools/executor.ts`:
+
+1. Model emits a registered tool call.
+2. Application validates the tool and arguments.
 3. The registry supplies the required application capability and mutation risk.
-4. OAuth authority authorizes the capability.
-5. The feature service executes the concrete Google API operation.
-6. The operation result becomes auditable application state for future orchestration/Kanban presentation.
+4. Current OAuth capability state is checked.
+5. Write/destructive/send risk is passed through the confirmation policy.
+6. A registered service handler performs the concrete Google operation.
+7. The executor returns a normalized result with a correlation ID or a structured failure state.
 
 Tool schemas contain no OAuth scope strings, access tokens, secrets, or endpoint URLs exposed to the model.
 
 ## Mutation policy
 
-Read operations can proceed when authorized. Write, destructive, and send operations are classified by risk and must pass the separate write-confirmation layer before execution when policy requires it.
+Read operations can proceed when authorized. Write, destructive, and send operations require explicit confirmation through the shared confirmation policy. Confirmation requests are time-bounded and contain only non-secret operation metadata.
+
+## Diagnostics
+
+Tool execution failures are normalized through `src/google/tools/diagnostics.ts`. Raw provider/handler exception details are not returned to the model or surfaced as diagnostic payloads. Correlation IDs allow higher layers to associate events without copying sensitive request data.
 
 ## Modularity
 
-Tool contracts, tool argument validation, tool registry, OAuth authority, Calendar/Tasks/Docs/Chat/Gmail/Drive/Sheets services, orchestration state, and UI remain separate modules. The tool registry is an adapter catalog, not a service manager and not a Kanban controller.
+Tool contracts, tool argument validation, tool registry, execution gate, OAuth authority, Calendar/Tasks/Docs/Chat/Gmail/Drive/Sheets services, orchestration state, and UI remain separate modules. The tool registry is an adapter catalog, not a service manager and not a Kanban controller.

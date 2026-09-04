@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ELARA_SYSTEM_INSTRUCTION } from '../../src/character/system-instruction';
 
-const { createInteraction } = vi.hoisted(() => ({
+const { createInteraction, uploadFile, deleteFile } = vi.hoisted(() => ({
   createInteraction: vi.fn(),
+  uploadFile: vi.fn(),
+  deleteFile: vi.fn(),
 }));
 
 vi.mock('@google/genai', () => ({
   GoogleGenAI: class {
     interactions = { create: createInteraction };
+    files = { upload: uploadFile, delete: deleteFile };
   },
 }));
 
@@ -21,6 +24,8 @@ describe('Gemini Worker boundary', () => {
 
   beforeEach(() => {
     createInteraction.mockReset();
+    uploadFile.mockReset();
+    deleteFile.mockReset();
   });
 
   it('reports a healthy service without exposing protected values', async () => {
@@ -205,5 +210,102 @@ describe('Gemini Worker boundary', () => {
     expect(response.status).toBe(204);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://cryogenized-spec.github.io');
     expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unauthorized origin at the VTT boundary', async () => {
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/webm', Origin: 'https://attacker.example' },
+      body: new Uint8Array(3_000),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      code: 'authz',
+      message: 'Origin is not authorized.',
+    });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported VTT MIME types before invoking Gemini', async () => {
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/mpeg', Origin: 'https://cryogenized-spec.github.io' },
+      body: new Uint8Array(3_000),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(415);
+    await expect(response.json()).resolves.toEqual({
+      code: 'validation',
+      message: 'Unsupported VTT audio type.',
+    });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized VTT captures using the request header before reading the body', async () => {
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'audio/webm',
+        'Content-Length': String((2 * 1024 * 1024) + 1),
+        Origin: 'https://cryogenized-spec.github.io',
+      },
+      body: new Uint8Array(10),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      code: 'validation',
+      message: 'VTT audio capture is too large.',
+    });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a tiny VTT capture without uploading audio to Gemini', async () => {
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/webm', Origin: 'https://cryogenized-spec.github.io' },
+      body: new Uint8Array(100),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ code: 'empty', message: 'No speech was detected.' });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('uses the transcription model and smart mode for accepted VTT audio', async () => {
+    uploadFile.mockResolvedValue({ name: 'files/vtt-test', uri: 'https://example.invalid/vtt-test', mimeType: 'audio/webm' });
+    createInteraction.mockResolvedValue({ output_text: 'hello from voice' });
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/webm', Origin: 'https://cryogenized-spec.github.io' },
+      body: new Uint8Array(3_000),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ transcript: 'hello from voice' });
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ config: { mimeType: 'audio/webm' } }));
+    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gemini-3.5-transcribe',
+      input: [{ type: 'audio', uri: 'https://example.invalid/vtt-test', mime_type: 'audio/webm' }],
+      generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
+      store: false,
+    }));
+    expect(JSON.stringify(body)).not.toContain('test-secret-key');
   });
 });

@@ -9,6 +9,7 @@ describe('buildCharacterInstruction', () => {
     const result = buildCharacterInstruction(DEFAULT_CHARACTER_PROFILE, DEFAULT_ROLEPLAY);
     expect(result).toBe(ELARA_SYSTEM_INSTRUCTION);
     expect(result).not.toContain('CREATIVE ROLEPLAY CONTEXT');
+    expect(result).not.toContain('ROLEPLAY MODE DIRECTIVE');
   });
 
   it('upgrades the legacy placeholder to the canonical instruction', () => {
@@ -21,7 +22,7 @@ describe('buildCharacterInstruction', () => {
     expect(buildCharacterInstruction(custom, DEFAULT_ROLEPLAY)).toBe(custom.systemInstruction);
   });
 
-  it('adds structured creative context without turning it into chat content', () => {
+  it('adds an explicit in-character roleplay directive when Roleplay Mode is enabled', () => {
     const result = buildCharacterInstruction(DEFAULT_CHARACTER_PROFILE, {
       ...DEFAULT_ROLEPLAY,
       enabled: true,
@@ -35,6 +36,10 @@ describe('buildCharacterInstruction', () => {
 
     expect(result).toContain(ELARA_SYSTEM_INSTRUCTION);
     expect(result).toContain('CREATIVE ROLEPLAY CONTEXT');
+    expect(result).toContain('ROLEPLAY MODE DIRECTIVE');
+    expect(result).toContain('required to participate in the fictional scene as an in-character participant');
+    expect(result).toContain('Treat the established fictional environment as the current scene context');
+    expect(result).toContain('Do not break the fictional frame to announce that Roleplay Mode is enabled.');
     expect(result).toContain('The Moonlit Room');
     expect(result).toContain('A quiet room with low light.');
     expect(result).toContain('late evening');

@@ -13,6 +13,7 @@ export const googleCapabilityKeySchema = z.enum([
   'chat.write',
   'gmail.read',
   'gmail.modify',
+  'gmail.labels',
   'gmail.send',
   'drive.files.read',
   'drive.files.write',

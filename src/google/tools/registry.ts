@@ -30,8 +30,8 @@ export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'gmail.untrashMessage', risk: 'write', capability: 'gmail.modify', description: 'Restore one message from trash.' },
   { name: 'gmail.trashThread', risk: 'destructive', capability: 'gmail.modify', description: 'Move one thread to trash.' },
   { name: 'gmail.untrashThread', risk: 'write', capability: 'gmail.modify', description: 'Restore one thread from trash.' },
-  { name: 'gmail.createLabel', risk: 'write', capability: 'gmail.modify', description: 'Create a Gmail user label.' },
-  { name: 'gmail.updateLabel', risk: 'write', capability: 'gmail.modify', description: 'Update a Gmail user label.' },
-  { name: 'gmail.deleteLabel', risk: 'destructive', capability: 'gmail.modify', description: 'Delete a Gmail user label.' },
+  { name: 'gmail.createLabel', risk: 'write', capability: 'gmail.labels', description: 'Create a Gmail user label.' },
+  { name: 'gmail.updateLabel', risk: 'write', capability: 'gmail.labels', description: 'Update a Gmail user label.' },
+  { name: 'gmail.deleteLabel', risk: 'destructive', capability: 'gmail.labels', description: 'Delete a Gmail user label.' },
   { name: 'gmail.sendMessage', risk: 'send', capability: 'gmail.send', description: 'Send an RFC 822 message on the authorized Gmail account.' },
 ];

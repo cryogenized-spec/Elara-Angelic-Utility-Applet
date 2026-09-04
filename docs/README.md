@@ -5,7 +5,10 @@ This directory is the authoritative documentation tree for Elara.
 ## Handoff and implementation notes
 
 - [`oauth/README.md`](./oauth/README.md) — Google OAuth + Workspace future-self handoff, eight-pass implementation plan, security boundaries, scope strategy, background execution, Cron, notifications, and completion checklist.
-- [`oauth/PASS_01_STATUS.md`](./oauth/PASS_01_STATUS.md) — current Pass 1 implementation state and the remaining protected Worker boundary.
+- [`oauth/PASS_01_STATUS.md`](./oauth/PASS_01_STATUS.md) — Pass 1 state and the remaining protected Worker boundary.
+- [`oauth/PASS_02_STATUS.md`](./oauth/PASS_02_STATUS.md) — Google Workspace settings UI implementation handoff.
+- [`oauth/PASS_03_STATUS.md`](./oauth/PASS_03_STATUS.md) — audited OAuth scope implementation handoff.
+- [`oauth/PASS_04_STATUS.md`](./oauth/PASS_04_STATUS.md) — Drive, Docs, and Sheets service implementation handoff.
 - [`future-implementation/README.md`](./future-implementation/README.md) — future infrastructure notes for Worker health, Cron, background execution, push notifications, Telegram, and controlled internet access.
 
 ## Google Workspace architecture
@@ -20,6 +23,8 @@ This directory is the authoritative documentation tree for Elara.
 - [`GOOGLE_TASKS_SERVICE.md`](./GOOGLE_TASKS_SERVICE.md) — Tasks service boundary.
 - [`GOOGLE_GMAIL_SERVICE.md`](./GOOGLE_GMAIL_SERVICE.md) — Gmail service boundary.
 - [`GOOGLE_DOCS_SERVICE.md`](./GOOGLE_DOCS_SERVICE.md) — Docs service boundary.
+- [`GOOGLE_DRIVE_SERVICE.md`](./GOOGLE_DRIVE_SERVICE.md) — Drive service boundary.
+- [`GOOGLE_SHEETS_SERVICE.md`](./GOOGLE_SHEETS_SERVICE.md) — Sheets service boundary.
 
 ## Rule for future sessions
 

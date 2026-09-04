@@ -9,12 +9,13 @@ type ServiceDefinition = {
   description: string;
   readCapability: GoogleCapabilityKey;
   writeCapability?: GoogleCapabilityKey;
+  extraCapabilities?: readonly { capability: GoogleCapabilityKey; label: string; readyLabel: string }[];
 };
 
 const SERVICES: readonly ServiceDefinition[] = [
   { id: 'calendar', name: 'Google Calendar', description: 'Events, scheduling, and calendar context.', readCapability: 'calendar.events.read', writeCapability: 'calendar.events.write' },
   { id: 'tasks', name: 'Google Tasks', description: 'Task lists, tasks, ordering, and completion.', readCapability: 'tasks.read', writeCapability: 'tasks.write' },
-  { id: 'gmail', name: 'Gmail', description: 'Mailbox reading, organization, and sending.', readCapability: 'gmail.read', writeCapability: 'gmail.modify' },
+  { id: 'gmail', name: 'Gmail', description: 'Mailbox reading, organization, labels, and sending.', readCapability: 'gmail.read', writeCapability: 'gmail.modify', extraCapabilities: [{ capability: 'gmail.labels', label: 'Enable labels', readyLabel: 'Labels ready' }, { capability: 'gmail.send', label: 'Enable sending', readyLabel: 'Sending ready' }] },
   { id: 'drive', name: 'Google Drive', description: 'Files the app creates or the user explicitly selects.', readCapability: 'drive.files.read', writeCapability: 'drive.files.write' },
   { id: 'docs', name: 'Google Docs', description: 'Documents created or selected for Elara to work with.', readCapability: 'docs.read', writeCapability: 'docs.write' },
   { id: 'sheets', name: 'Google Sheets', description: 'Selected spreadsheets, ranges, rows, and updates.', readCapability: 'sheets.read', writeCapability: 'sheets.write' },
@@ -123,14 +124,20 @@ export function GoogleOAuthSettings() {
               <div className="google-oauth-service__status">
                 <span className={`google-oauth-service__badge${readReady ? ' is-ready' : ''}`}>{readReady ? 'Read ready' : 'Not authorized'}</span>
                 {writeReady && <span className="google-oauth-service__badge is-ready">Writes ready</span>}
+                {service.extraCapabilities?.map((extra) => hasCapability(status.grantedCapabilities, extra.capability)
+                  ? <span className="google-oauth-service__badge is-ready" key={extra.capability}>{extra.readyLabel}</span>
+                  : null)}
               </div>
               {activeCapability ? (
                 <button className="google-oauth-settings__button" type="button" onClick={() => void connect(activeCapability)} disabled={loading || !!busyCapability}>
                   {busyCapability === activeCapability ? 'Opening Google…' : actionLabel}
                 </button>
               ) : (
-                <span className="google-oauth-service__authorized" aria-label={`${service.name} authorized`}>Ready</span>
+                <span className="google-oauth-service__authorized" aria-label={`${service.name} base access authorized`}>Ready</span>
               )}
+              {service.extraCapabilities?.map((extra) => !hasCapability(status.grantedCapabilities, extra.capability)
+                ? <button className="google-oauth-settings__button google-oauth-settings__button--secondary" key={extra.capability} type="button" onClick={() => void connect(extra.capability)} disabled={loading || !!busyCapability}>{busyCapability === extra.capability ? 'Opening Google…' : extra.label}</button>
+                : null)}
             </article>
           );
         })}

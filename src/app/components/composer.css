@@ -1,6 +1,6 @@
-.composer.composer { grid-template-columns: 40px minmax(0, 1fr) 40px 40px 42px; grid-template-rows: 42px; align-items: stretch; min-width: 0; }
+.composer.composer { grid-template-columns: 40px 40px minmax(0,1fr) 40px 42px; grid-template-rows: 42px; align-items: stretch; min-width: 0; }
 .composer textarea { display: block; max-height: 132px; min-height: 42px; overflow-y: hidden; }
-.composer__input-wrap { position: relative; min-width: 0; }
+.composer__input-wrap { position: relative; min-width: 0; width: 100%; }
 .composer__input-wrap textarea { padding-right: 42px; }
 .composer__expand { position: absolute; top: 50%; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; transform: translateY(-50%); border: 0; border-radius: 9px; background: transparent; color: rgba(255,255,255,.48); }
 .composer__expand:hover { color: var(--text); background: rgba(255,255,255,.07); }
@@ -8,7 +8,8 @@
 .composer__send.is-cancel { color: var(--text); background: rgba(240, 123, 220, .14); border-color: rgba(240, 123, 220, .3); }
 .composer__icon:disabled, .composer textarea:disabled { cursor: not-allowed; opacity: .55; }
 .composer__expand:disabled { cursor: not-allowed; opacity: .45; }
-.composer__markdown { font-size: 10px; font-weight: 700; letter-spacing: -.03em; }
+.composer__markdown { display: grid; place-items: center; font-size: 0; }
+.composer__markdown svg { display: block; width: 21px; height: 13px; }
 .composer__vtt-button { position: relative; overflow: hidden; }
 .composer__vtt-button.is-recording { color: var(--text); background: rgba(240, 123, 220, .12); border-color: rgba(240, 123, 220, .28); }
 .composer__vtt-meter { position: absolute; left: 50%; top: 50%; display: flex; align-items: center; gap: 2px; width: 18px; height: 18px; transform: translate(-50%, -50%); pointer-events: none; }
@@ -33,8 +34,7 @@
 .composer-expanded-open { overflow: hidden; }
 
 @media (max-width: 390px) {
-  .composer.composer { grid-template-columns: 38px minmax(0, 1fr) 38px 38px 42px; gap: 6px; }
+  .composer.composer { grid-template-columns: 38px 38px minmax(0,1fr) 38px 42px; gap: 6px; }
   .composer__icon, .composer__send { width: 38px; }
   .composer__send { width: 42px; }
-  .composer-expanded { padding-left: 14px; padding-right: 14px; }
 }

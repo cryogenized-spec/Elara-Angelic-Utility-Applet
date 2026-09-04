@@ -11,6 +11,32 @@ test('loads the Elara shell', async ({ page }) => {
   await expect(page.getByRole('img', { name: 'Elara portrait placeholder' })).toBeVisible();
 });
 
+test('composer keeps attachment left, VTT beside Send, and opens an expanded writing surface', async ({ page }) => {
+  await page.goto('');
+  const composer = page.locator('form.composer');
+  await expect(composer.getByRole('button', { name: 'Attach image or document' })).toBeVisible();
+  await expect(composer.getByRole('button', { name: 'Expand message editor' })).toBeVisible();
+  await expect(composer.getByRole('button', { name: 'Markdown reference' })).toBeVisible();
+  await expect(composer.getByRole('button', { name: 'Send message' })).toBeVisible();
+
+  const attachmentBox = await composer.getByRole('button', { name: 'Attach image or document' }).boundingBox();
+  const inputBox = await composer.getByPlaceholder('Message Elara…').boundingBox();
+  const markdownBox = await composer.getByRole('button', { name: 'Markdown reference' }).boundingBox();
+  const sendBox = await composer.getByRole('button', { name: 'Send message' }).boundingBox();
+  expect(attachmentBox && inputBox && markdownBox && sendBox).toBeTruthy();
+  expect(attachmentBox!.x).toBeLessThan(inputBox!.x);
+  expect(markdownBox!.x).toBeLessThan(sendBox!.x);
+
+  await composer.getByRole('button', { name: 'Expand message editor' }).click();
+  const expanded = page.getByRole('dialog', { name: 'Expanded message editor' });
+  await expect(expanded).toBeVisible();
+  await expect(expanded.getByRole('button', { name: 'Collapse message editor' })).toBeVisible();
+  await expanded.getByRole('textbox', { name: 'Expanded message' }).fill('A longer essay draft');
+  await expanded.getByRole('button', { name: 'Collapse message editor' }).click();
+  await expect(expanded).not.toBeVisible();
+  await expect(page.getByRole('textbox', { name: 'Message Elara' })).toHaveValue('A longer essay draft');
+});
+
 test('collapses the Elara character banner when the sidebar opens', async ({ page }) => {
   await page.goto('');
   const banner = page.getByRole('region', { name: 'Elara character banner' });

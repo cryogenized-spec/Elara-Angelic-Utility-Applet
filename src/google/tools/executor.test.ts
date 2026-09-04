@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { executeGoogleTool } from './executor';
-import type { GoogleOAuthAuthority } from '../oauth/contracts';
+import type { GoogleCapabilityKey, GoogleOAuthAuthority } from '../oauth/contracts';
 
-function oauthFor(...capabilities: string[]): GoogleOAuthAuthority {
+function oauthFor(...capabilities: GoogleCapabilityKey[]): GoogleOAuthAuthority {
   return {
     authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
-    getStatus: async () => ({ state: 'connected', grantedCapabilities: capabilities as never[] }),
+    getStatus: async () => ({ state: 'connected', grantedCapabilities: capabilities }),
     disconnect: async () => undefined,
   };
 }

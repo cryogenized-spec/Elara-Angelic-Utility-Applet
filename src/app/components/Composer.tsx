@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { Icon } from '../../ui/icons';
 import type { ProviderStatus } from '../../domain/chat';
 import { MarkdownReference } from './MarkdownReference';
-import { VttRecorder, shouldDiscardVttCapture, type VttCapture, type VttRecordingState } from '../../vtt/recording';
+import { VttRecorder, shouldDiscardVttCapture, type VttRecordingState } from '../../vtt/recording';
 import { insertTranscriptAtSelection } from '../../vtt/draft-insertion';
 import { transcribeVttCapture } from '../../vtt/transcription';
 import './composer.css';
@@ -119,7 +119,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
       setVttState('failed');
       window.setTimeout(() => setVttState('idle'), 1200);
     } finally {
-      if (transcriptionAbortRef.current === transcriptionAbortRef.current) transcriptionAbortRef.current = null;
+      transcriptionAbortRef.current = null;
       recorderRef.current = null;
       setVttLevel(0);
     }

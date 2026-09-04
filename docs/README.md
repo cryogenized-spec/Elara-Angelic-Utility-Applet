@@ -9,6 +9,7 @@ This directory is the authoritative documentation tree for Elara.
 - [`oauth/PASS_02_STATUS.md`](./oauth/PASS_02_STATUS.md) — Google Workspace settings UI implementation handoff.
 - [`oauth/PASS_03_STATUS.md`](./oauth/PASS_03_STATUS.md) — audited OAuth scope implementation handoff.
 - [`oauth/PASS_04_STATUS.md`](./oauth/PASS_04_STATUS.md) — Drive, Docs, and Sheets service implementation handoff.
+- [`oauth/PASS_05_STATUS.md`](./oauth/PASS_05_STATUS.md) — Drive and Sheets model-tool surface handoff.
 - [`future-implementation/README.md`](./future-implementation/README.md) — future infrastructure notes for Worker health, Cron, background execution, push notifications, Telegram, and controlled internet access.
 
 ## Google Workspace architecture

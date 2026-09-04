@@ -1,10 +1,10 @@
-const CACHE_NAME = 'elara-shell-v3';
+const CACHE_NAME = 'elara-shell-v4';
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
-  './icons/%E2%80%8Bicon-192.png',
-  './icons/%E2%80%8Bicon-512.png',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
   './icons/favicon.svg',
 ];
 

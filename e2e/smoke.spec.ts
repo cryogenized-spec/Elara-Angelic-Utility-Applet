@@ -134,14 +134,15 @@ test('roleplay stays opt-in and reveals environment controls only when enabled',
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Roleplay' }).click();
   const toggle = page.getByRole('switch');
+  const environment = page.locator('.roleplay-detail select');
   await expect(toggle).toHaveCount(1);
   if (await toggle.getAttribute('aria-checked') === 'true') await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
-  await expect(page.getByLabel('Environment')).not.toBeVisible();
+  await expect(environment).toHaveCount(0);
   await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
-  await expect(page.getByLabel('Environment')).toBeVisible();
-  await page.getByLabel('Environment').selectOption('poolside');
+  await expect(environment).toBeVisible();
+  await environment.selectOption('poolside');
   await page.getByLabel('Environment name').fill('Sunset villa');
   await page.getByLabel('Environment description').fill('Open terrace beside a quiet pool.');
   await page.getByLabel('Time of day').fill('Late afternoon');
@@ -151,13 +152,14 @@ test('roleplay stays opt-in and reveals environment controls only when enabled',
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Roleplay' }).click();
   const persistedToggle = page.getByRole('switch');
+  const persistedEnvironment = page.locator('.roleplay-detail select');
   await expect(persistedToggle).toHaveCount(1);
   await expect(persistedToggle).toHaveAttribute('aria-checked', 'true');
-  await expect(page.getByLabel('Environment')).toHaveValue('poolside');
+  await expect(persistedEnvironment).toHaveValue('poolside');
   await expect(page.getByLabel('Environment name')).toHaveValue('Sunset villa');
   await expect(page.getByLabel('Environment description')).toHaveValue('Open terrace beside a quiet pool.');
   await persistedToggle.click();
-  await expect(page.getByLabel('Environment')).not.toBeVisible();
+  await expect(persistedEnvironment).toHaveCount(0);
 });
 
 test('Markdown reference exposes exactly the supported composer syntax', async ({ page }) => {

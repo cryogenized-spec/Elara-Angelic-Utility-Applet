@@ -23,7 +23,7 @@ export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferenc
         type="button"
         className={`toggle-switch${value.enabled ? ' is-on' : ''}`}
         role="switch"
-        aria-label={value.enabled ? 'Roleplay mode enabled' : 'Roleplay mode disabled'}
+        aria-label={value.enabled ? 'Roleplay mode on' : 'Roleplay mode off'}
         aria-checked={value.enabled}
         onClick={() => onChange({ ...value, enabled: !value.enabled })}
       >

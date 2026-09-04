@@ -3,6 +3,9 @@ import type { KeyboardEvent } from 'react';
 import { Icon } from '../../ui/icons';
 import type { ProviderStatus } from '../../domain/chat';
 import { MarkdownReference } from './MarkdownReference';
+import { VttRecorder, shouldDiscardVttCapture, type VttCapture, type VttRecordingState } from '../../vtt/recording';
+import { insertTranscriptAtSelection } from '../../vtt/draft-insertion';
+import { transcribeVttCapture } from '../../vtt/transcription';
 import './composer.css';
 
 const MAX_HEIGHT = 132;
@@ -10,8 +13,13 @@ const MAX_HEIGHT = 132;
 export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { draft: string; status: ProviderStatus; onDraftChange: (value: string) => void; onSend: () => void; onCancel: () => void; }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const recorderRef = useRef<VttRecorder | null>(null);
+  const transcriptionAbortRef = useRef<AbortController | null>(null);
   const [markdownOpen, setMarkdownOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const [vttState, setVttState] = useState<VttRecordingState>('idle');
+  const [vttLevel, setVttLevel] = useState<0 | 1 | 2 | 3>(0);
+  const [vttMessage, setVttMessage] = useState<string | null>(null);
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -39,18 +47,98 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
     return () => window.removeEventListener('keydown', handleEscape);
   }, [expanded]);
 
+  useEffect(() => () => {
+    recorderRef.current?.cancel();
+    transcriptionAbortRef.current?.abort();
+  }, []);
+
+  const vttBusy = vttState === 'requesting' || vttState === 'recording' || vttState === 'processing';
+  const composerLocked = status === 'streaming' || vttBusy;
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-    if (status === 'streaming' || !draft.trim()) return;
+    if (status === 'streaming' || vttBusy || !draft.trim()) return;
     event.preventDefault();
     onSend();
   }
 
   function handleExpandedKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && status !== 'streaming' && draft.trim()) {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && status !== 'streaming' && !vttBusy && draft.trim()) {
       event.preventDefault();
       onSend();
     }
+  }
+
+  async function handleVtt(target: HTMLTextAreaElement | null): Promise<void> {
+    if (status === 'streaming') return;
+    if (vttState === 'recording') {
+      recorderRef.current?.stop();
+      return;
+    }
+    if (vttBusy || !target) return;
+
+    const selection = {
+      start: target.selectionStart ?? draft.length,
+      end: target.selectionEnd ?? draft.length,
+    };
+    setVttMessage(null);
+    setVttLevel(0);
+    const recorder = new VttRecorder({
+      selection,
+      onStateChange: setVttState,
+      onLevelChange: setVttLevel,
+    });
+    recorderRef.current = recorder;
+
+    try {
+      const capture = await recorder.start();
+      recorderRef.current = null;
+      setVttLevel(0);
+      if (shouldDiscardVttCapture(capture.blob.size, capture.durationMs)) {
+        setVttMessage('No speech detected.');
+        setVttState('idle');
+        return;
+      }
+      const controller = new AbortController();
+      transcriptionAbortRef.current = controller;
+      setVttState('processing');
+      const transcript = await transcribeVttCapture(capture, controller.signal);
+      const inserted = insertTranscriptAtSelection(draft, capture.selection, transcript);
+      onDraftChange(inserted.value);
+      setVttMessage(null);
+      requestAnimationFrame(() => {
+        const nextTarget = expanded ? expandedTextareaRef.current : textareaRef.current;
+        nextTarget?.focus();
+        nextTarget?.setSelectionRange(inserted.cursor, inserted.cursor);
+      });
+      setVttState('idle');
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') return;
+      const message = cause instanceof Error ? cause.message : 'Voice transcription failed.';
+      setVttMessage(message);
+      setVttState('failed');
+      window.setTimeout(() => setVttState('idle'), 1200);
+    } finally {
+      if (transcriptionAbortRef.current === transcriptionAbortRef.current) transcriptionAbortRef.current = null;
+      recorderRef.current = null;
+      setVttLevel(0);
+    }
+  }
+
+  function vttAriaLabel(): string {
+    if (vttState === 'recording') return 'Stop VTT voice input';
+    if (vttState === 'processing') return 'Transcribing voice input';
+    if (vttState === 'requesting') return 'Requesting microphone access';
+    return 'VTT voice input';
+  }
+
+  function VttMeter() {
+    if (!vttBusy) return null;
+    return <span className="composer__vtt-meter" aria-hidden="true" data-level={vttLevel}>
+      <span />
+      <span />
+      <span />
+    </span>;
   }
 
   if (expanded) {
@@ -61,7 +149,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
             <span className="composer-expanded__eyebrow">COMPOSE</span>
             <h2>Write to Elara</h2>
           </div>
-          <button className="composer-expanded__collapse composer__icon" type="button" aria-label="Collapse message editor" onClick={() => setExpanded(false)}>
+          <button className="composer-expanded__collapse composer__icon" type="button" aria-label="Collapse message editor" onClick={() => setExpanded(false)} disabled={vttBusy}>
             <Icon name="collapse" size={20} />
           </button>
         </header>
@@ -73,21 +161,23 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
           onChange={(event) => onDraftChange(event.target.value)}
           onKeyDown={handleExpandedKeyDown}
           placeholder="Write your message…"
-          disabled={status === 'streaming'}
+          disabled={composerLocked}
           autoFocus
         />
+        {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}
         <footer className="composer-expanded__footer">
-          <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
+          <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
             <Icon name="markdown" size={20} />
           </button>
-          <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={status === 'streaming'}>
+          <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
             <Icon name="paperclip" size={20} />
           </button>
           <div className="composer-expanded__spacer" />
-          <button className="composer__icon" type="button" aria-label="VTT voice input" disabled={status === 'streaming'}>
+          <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={status === 'streaming' || vttState === 'processing' || vttState === 'requesting'} onClick={() => void handleVtt(expandedTextareaRef.current)}>
+            <VttMeter />
             <Icon name="mic" size={20} />
           </button>
-          <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={status !== 'streaming' && !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
+          <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || (status !== 'streaming' && !draft.trim())} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
             <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
           </button>
         </footer>
@@ -98,25 +188,27 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
 
   return <>
     <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
-      <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
+      <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
         <Icon name="markdown" size={20} />
       </button>
-      <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={status === 'streaming'}>
+      <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
         <Icon name="paperclip" size={20} />
       </button>
       <div className="composer__input-wrap">
-        <textarea ref={textareaRef} aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={status === 'streaming'} enterKeyHint="send" />
-        <button className="composer__expand" type="button" aria-label="Expand message editor" onClick={() => setExpanded(true)} disabled={status === 'streaming'}>
+        <textarea ref={textareaRef} aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint="send" />
+        <button className="composer__expand" type="button" aria-label="Expand message editor" onClick={() => setExpanded(true)} disabled={composerLocked}>
           <Icon name="expand" size={15} />
         </button>
       </div>
-      <button className="composer__icon" type="button" aria-label="VTT voice input" disabled={status === 'streaming'}>
+      <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={status === 'streaming' || vttState === 'processing' || vttState === 'requesting'} onClick={() => void handleVtt(textareaRef.current)}>
+        <VttMeter />
         <Icon name="mic" size={20} />
       </button>
-      <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={status !== 'streaming' && !draft.trim()}>
+      <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || (status !== 'streaming' && !draft.trim())}>
         <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
       </button>
     </form>
+    {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}
     <MarkdownReference open={markdownOpen} onClose={() => setMarkdownOpen(false)} />
   </>;
 }

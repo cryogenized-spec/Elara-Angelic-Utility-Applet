@@ -1,4 +1,4 @@
-.composer { grid-template-columns: 40px minmax(0, 1fr) 40px 40px 42px; }
+.composer.composer { grid-template-columns: 40px minmax(0, 1fr) 40px 40px 42px; grid-template-rows: 42px; align-items: stretch; min-width: 0; }
 .composer textarea { display: block; max-height: 132px; min-height: 42px; overflow-y: hidden; }
 .composer__input-wrap { position: relative; min-width: 0; }
 .composer__input-wrap textarea { padding-right: 42px; }
@@ -23,7 +23,7 @@
 .composer-expanded-open { overflow: hidden; }
 
 @media (max-width: 390px) {
-  .composer { grid-template-columns: 38px minmax(0, 1fr) 38px 38px 42px; gap: 6px; }
+  .composer.composer { grid-template-columns: 38px minmax(0, 1fr) 38px 38px 42px; gap: 6px; }
   .composer__icon, .composer__send { width: 38px; }
   .composer__send { width: 42px; }
   .composer-expanded { padding-left: 14px; padding-right: 14px; }

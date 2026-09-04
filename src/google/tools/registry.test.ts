@@ -32,6 +32,7 @@ describe('Google tool registry', () => {
   });
 
   it('does not expose an arbitrary Google HTTP tool', () => {
-    expect(googleToolRegistry.some((tool) => tool.name === 'google.request')).toBe(false);
+    const registeredToolNames: readonly string[] = googleToolRegistry.map((tool) => tool.name);
+    expect(registeredToolNames.includes('google.request')).toBe(false);
   });
 });

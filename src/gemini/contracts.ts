@@ -7,7 +7,7 @@ export type GeminiStreamEvent =
   | { type: 'interaction-created'; interactionId: string; model: string }
   | { type: 'interaction-status'; interactionId: string; status: string }
   | { type: 'step-start'; index: number; stepType: string }
-  | { type: 'tool-call'; index: number; callId: string; name: string; arguments: Record<string, unknown> }
+  | { type: 'tool-call'; interactionId: string; index: number; callId: string; name: string; arguments: Record<string, unknown> }
   | { type: 'text-delta'; index: number; text: string }
   | { type: 'thought-summary-delta'; index: number; text: string }
   | { type: 'thought-signature'; index: number; signature: string }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateActio
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
 import type { CharacterProfile } from '../domain/character';
 import { DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
-import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, loadWorkspaceShortcuts, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
+import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
 import { ensureWorkspaceShortcuts, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
 import { loadChatAppearance, loadRoleplayPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
@@ -10,6 +10,7 @@ import { demoThreadTitlePort } from '../chat/thread-title-port';
 import { geminiTurnPort } from '../gemini/provider';
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent } from '../gemini/contracts';
+import type { GoogleToolName } from '../google/tools/contracts';
 import { buildCharacterInstruction } from '../gemini/character-context';
 import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import { getGeminiModel } from '../gemini/model-registry';
@@ -22,7 +23,7 @@ import { TopToolRail } from './components/TopToolRail';
 import { PortraitBanner } from './components/PortraitBanner';
 import { ConversationSurface } from './components/ConversationSurface';
 import { Composer } from './components/Composer';
-import { WorkspaceShortcutDefinition } from './quick-actions/shortcuts';
+import type { WorkspaceShortcutDefinition } from './quick-actions/shortcuts';
 import { DEFAULT_QUICK_ACTIONS } from './quick-actions/defaults';
 import '../ui/fonts.css';
 import './app.css';
@@ -98,7 +99,7 @@ export function App() {
       let titled = withUser;
       if (withUser.title === DEFAULT_TITLE) { try { const generatedTitle = await demoThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch {} }
       setConversation(titled); await refreshThreads();
-      await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: undefined, executionLabel: undefined });
+      await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig });
     } catch (cause) {
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed'); setError(cause instanceof Error ? cause.message : 'The response failed.');
@@ -116,24 +117,32 @@ export function App() {
     const systemInstruction = buildCharacterInstruction(character, roleplay);
     const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nDo not describe internal tool mechanics unless needed for the user-facing result. Use only the registered tools supplied for this shortcut. Do not perform write, destructive, or send actions.`;
     try {
-      await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools, executionLabel: shortcut.label });
-      if (!controller.signal.aborted) setStatus('idle');
+      await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
     } catch (cause) {
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed'); setError(cause instanceof Error ? cause.message : `The ${shortcut.label} shortcut failed.`);
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
-  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly import('../google/tools/contracts').GoogleToolName[]; executionLabel?: string }) {
+  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[] }) {
     const previousInteractionId = [...baseConversation.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
     const assistantMessage = makeMessage('assistant', '', conversationId); const liveText = { value: '' }; const startedAt = Date.now();
     const base = { ...baseConversation, messages: [...baseConversation.messages, assistantMessage], updatedAt: startedAt }; setConversation(base);
-    const stream = options.tools?.length ? streamGoogleToolLoop : geminiTurnPort.streamReply;
-    const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, ...(options.tools?.length ? { tools: options.tools } : {}) };
-    for await (const event of stream(request as never, controller.signal)) {
-      handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText });
-      if (event.type === 'interaction-created') liveText.value = '';
-      if (event.type === 'cancelled') return;
+
+    if (options.tools?.length) {
+      const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
+      for await (const event of streamGoogleToolLoop(request, { tools: options.tools, readOnly: true }, controller.signal)) {
+        handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText });
+        if (event.type === 'interaction-created') liveText.value = '';
+        if (event.type === 'cancelled') return;
+      }
+    } else {
+      const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction };
+      for await (const event of geminiTurnPort.streamReply(request, controller.signal)) {
+        handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText });
+        if (event.type === 'interaction-created') liveText.value = '';
+        if (event.type === 'cancelled') return;
+      }
     }
     if (!controller.signal.aborted) setStatus('idle');
   }

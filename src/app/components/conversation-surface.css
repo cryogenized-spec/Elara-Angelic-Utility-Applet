@@ -13,6 +13,15 @@
 .message-assistant + .message-assistant { margin-top: 10px; }
 .message-user + .message-user { margin-top: 10px; }
 
+.response-variants { display: flex; align-items: center; justify-content: flex-start; gap: 7px; margin: 0 0 3px; min-height: 28px; }
+.response-variants__button { display: grid; place-items: center; width: 27px; height: 27px; padding: 0; border: 1px solid rgba(255,255,255,.09); border-radius: 9px; background: rgba(255,255,255,.035); color: rgba(255,255,255,.7); font-size: 19px; line-height: 1; }
+.response-variants__button:hover:not(:disabled) { background: rgba(255,255,255,.08); border-color: rgba(110,168,255,.32); color: var(--text); }
+.response-variants__button:disabled { opacity: .24; cursor: default; }
+.response-variants__pagination { min-width: 34px; color: rgba(255,255,255,.42); font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; }
+.message-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; }
+.message-action { min-height: 28px; padding: 0 10px; border: 1px solid rgba(255,255,255,.09); border-radius: 9px; background: rgba(255,255,255,.035); color: rgba(255,255,255,.48); font-size: 10px; }
+.message-action:hover { color: var(--text); border-color: rgba(240,123,220,.3); background: rgba(240,123,220,.08); }
+
 .execution-summary { margin: 0 0 8px; border-left: 1px solid rgba(110,168,255,.32); background: linear-gradient(90deg, rgba(110,168,255,.06), transparent 65%); }
 .execution-summary__toggle { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: 8px; padding: 7px 8px 7px 10px; border: 0; background: transparent; color: rgba(255,255,255,.55); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; text-align: left; }
 .execution-summary__toggle:hover { background: rgba(255,255,255,.025); color: rgba(255,255,255,.78); }

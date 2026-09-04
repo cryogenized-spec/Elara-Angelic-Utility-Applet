@@ -1,0 +1,11 @@
+.workspace-shortcut-settings { margin-top: 16px; padding: 14px; border: 1px solid rgba(255,255,255,.09); border-radius: 15px; background: rgba(255,255,255,.035); }
+.workspace-shortcut-settings__header { display: flex; justify-content: space-between; gap: 12px; align-items: start; padding-bottom: 10px; }
+.workspace-shortcut-settings__header > div { display: grid; gap: 3px; }
+.workspace-shortcut-settings__header strong { font-size: 13px; }
+.workspace-shortcut-settings__header span { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.workspace-shortcut-settings__list { display: grid; gap: 5px; }
+.workspace-shortcut-settings__row { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 9px; border-radius: 11px; background: rgba(255,255,255,.025); }
+.workspace-shortcut-settings__row > span { display: grid; gap: 2px; min-width: 0; }
+.workspace-shortcut-settings__row b { font-size: 12px; font-weight: 600; }
+.workspace-shortcut-settings__row small { font-size: 10px; color: rgba(255,255,255,.42); }
+.workspace-shortcut-settings__row input { width: 18px; height: 18px; flex: 0 0 auto; accent-color: var(--blue); }

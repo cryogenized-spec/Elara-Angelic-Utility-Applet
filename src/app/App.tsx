@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
-import type { CharacterProfile } from '../domain/character';
+import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
 import { DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
 import { ensureWorkspaceShortcuts, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
@@ -59,7 +59,7 @@ export function App() {
   const [portraitBackground, setPortraitBackground] = useState<'midnight' | 'blue-hour' | 'violet' | 'rose'>('midnight');
   const [geminiModel, setGeminiModel] = useState(DEFAULT_GEMINI_MODEL);
   const [geminiPerModelSettings, setGeminiPerModelSettings] = useState<Record<string, GeminiSettings>>({ [DEFAULT_GEMINI_MODEL]: defaultsForModel(DEFAULT_GEMINI_MODEL) });
-  const [character, setCharacter] = useState<CharacterProfile>({ id: 'primary', name: 'Elara', systemInstruction: '', artworkMode: 'portrait', artwork: null, updatedAt: 0 });
+  const [character, setCharacter] = useState<CharacterProfile>(DEFAULT_CHARACTER_PROFILE);
   const [chatAppearance, setChatAppearance] = useState<ChatAppearancePreferences>(DEFAULT_CHAT_APPEARANCE);
   const [roleplay, setRoleplay] = useState<RoleplayPreferences>(DEFAULT_ROLEPLAY);
   const abortControllerRef = useRef<AbortController | null>(null);
@@ -100,10 +100,51 @@ export function App() {
       let titled = withUser;
       if (withUser.title === DEFAULT_TITLE) { try { const generatedTitle = await demoThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch {} }
       setConversation(titled); await refreshThreads();
-      await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig });
+      await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, responseGroupId: userMessage.id, responseVariant: 1 });
     } catch (cause) {
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed'); setError(cause instanceof Error ? cause.message : 'The response failed.');
+    } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
+  }
+
+  async function regenerate(messageId: string) {
+    if (status === 'streaming') return;
+    const targetIndex = conversation.messages.findIndex((message) => message.id === messageId);
+    const target = targetIndex >= 0 ? conversation.messages[targetIndex] : undefined;
+    if (!target || target.role !== 'assistant') return;
+
+    let groupId = target.responseGroupId;
+    let workingConversation = conversation;
+    if (!groupId) {
+      groupId = target.id;
+      const promoted: ConversationState = {
+        ...conversation,
+        updatedAt: Date.now(),
+        messages: conversation.messages.map((message) => message.id === target.id ? { ...message, responseGroupId: groupId, responseVariant: 1 } : message),
+      };
+      workingConversation = promoted;
+      setConversation(promoted);
+      try { await saveConversation(promoted); await refreshThreads(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not prepare that response for regeneration.'); return; }
+    }
+
+    const prompt = [...workingConversation.messages.slice(0, targetIndex)].reverse().find((message) => message.role === 'user');
+    if (!prompt) { setError('Could not find the original user prompt for this response.'); return; }
+    const promptIndex = workingConversation.messages.findIndex((message) => message.id === prompt.id);
+    const previousInteractionId = promptIndex >= 0
+      ? [...workingConversation.messages.slice(0, promptIndex)].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId
+      : undefined;
+    const nextVariant = workingConversation.messages.filter((message) => message.role === 'assistant' && (message.responseGroupId ?? message.id) === groupId).length + 1;
+    const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
+    const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
+    const systemInstruction = buildCharacterInstruction(character, roleplay);
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    setError(null); setStatus('streaming');
+    try {
+      await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, previousInteractionId, responseGroupId: groupId, responseVariant: nextVariant });
+    } catch (cause) {
+      if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
+      setStatus('failed'); setError(cause instanceof Error ? cause.message : 'The regenerated response failed.');
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
@@ -125,9 +166,10 @@ export function App() {
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
-  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[] }) {
-    const previousInteractionId = [...baseConversation.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
-    const assistantMessage = makeMessage('assistant', '', conversationId); const liveText = { value: '' }; const startedAt = Date.now();
+  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number }) {
+    const previousInteractionId = options.previousInteractionId ?? [...baseConversation.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
+    const assistantMessage = { ...makeMessage('assistant', '', conversationId), responseGroupId: options.responseGroupId, responseVariant: options.responseVariant } satisfies ChatMessage;
+    const liveText = { value: '' }; const startedAt = Date.now();
     const base = { ...baseConversation, messages: [...baseConversation.messages, assistantMessage], updatedAt: startedAt }; setConversation(base);
 
     if (options.tools?.length) {
@@ -169,7 +211,7 @@ export function App() {
     <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button><button className="glass-menu-button left-spine__settings" type="button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Icon name="settings" size={20} /></button></div>
     <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
     <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
-    <ConversationSurface messages={conversation.messages} fontSize={fontSize} />
+    <ConversationSurface messages={conversation.messages} fontSize={fontSize} onRegenerate={(messageId) => void regenerate(messageId)} />
     {error && <div className="error" role="alert">{error}</div>}
     <Composer draft={draft} status={status} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
     <Sidebar open={sidebarOpen} threads={threads} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => void switchThread(id)} onNewChat={() => void startNewChat()} onRename={(id, title) => void handleRename(id, title)} onArchive={(id) => void handleArchive(id)} onDelete={(id) => void handleDelete(id)} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />

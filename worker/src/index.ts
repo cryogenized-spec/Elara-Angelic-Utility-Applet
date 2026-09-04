@@ -1,8 +1,9 @@
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import { ELARA_SYSTEM_INSTRUCTION } from '../../src/gemini/creative-context';
+import { handleGoogleOAuthRequest, type GoogleOAuthEnv } from './google-oauth';
 
-export interface Env { GEMINI_API_KEY: string; ALLOWED_ORIGINS?: string; }
+export interface Env extends GoogleOAuthEnv { GEMINI_API_KEY: string; ALLOWED_ORIGINS?: string; }
 const requestSchema = z.object({
   model: z.string().min(1).max(128),
   input: z.string().min(1).max(200_000),
@@ -13,7 +14,7 @@ const requestSchema = z.object({
 type SafeEvent = Record<string, unknown>;
 function configuredOrigins(env: Env): string[] { return (env.ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean); }
 function allowedOrigin(request: Request, env: Env): string | null { const origin = request.headers.get('Origin'); if (!origin) return null; return configuredOrigins(env).includes(origin) ? origin : null; }
-function corsHeaders(request: Request, env: Env): Headers { const headers = new Headers({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', Vary: 'Origin' }); const origin = allowedOrigin(request, env); if (origin) headers.set('Access-Control-Allow-Origin', origin); return headers; }
+function corsHeaders(request: Request, env: Env): Headers { const headers = new Headers({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Elara-Google-Capability, X-Elara-Google-Target', Vary: 'Origin' }); const origin = allowedOrigin(request, env); if (origin) { headers.set('Access-Control-Allow-Origin', origin); headers.set('Access-Control-Allow-Credentials', 'true'); } return headers; }
 function jsonResponse(request: Request, env: Env, body: unknown, status = 200): Response { const headers = corsHeaders(request, env); headers.set('Content-Type', 'application/json; charset=utf-8'); return new Response(JSON.stringify(body), { status, headers }); }
 function healthResponse(request: Request, env: Env): Response { const hasCredential = Boolean(env.GEMINI_API_KEY); const hasOriginPolicy = configuredOrigins(env).length > 0; return jsonResponse(request, env, { service: 'elara-gemini', status: hasCredential && hasOriginPolicy ? 'healthy' : 'degraded', api: true, credentialConfigured: hasCredential, originPolicyConfigured: hasOriginPolicy }, 200); }
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
@@ -37,4 +38,13 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
   const body = new ReadableStream<Uint8Array>({ async start(controller) { try { for await (const rawEvent of stream) { const safe = toSafeEvent(rawEvent); if (safe) controller.enqueue(encoder.encode(sse(safe.name, safe.data))); if (safe?.name === 'interaction.completed' || safe?.name === 'error') break; } controller.close(); } catch { controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini streaming failed.' } }))); controller.close(); } } });
   const headers = corsHeaders(request, env); headers.set('Content-Type', 'text/event-stream; charset=utf-8'); headers.set('Cache-Control', 'no-cache, no-transform'); headers.set('Connection', 'keep-alive'); return new Response(body, { status: 200, headers });
 }
-export default { async fetch(request: Request, env: Env): Promise<Response> { const pathname = new URL(request.url).pathname; if (pathname === '/health') return healthResponse(request, env); if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) }); if (request.method !== 'POST' || pathname !== '/api/gemini') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404); try { return await handleGemini(request, env); } catch { return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502); } } };
+
+export default { async fetch(request: Request, env: Env): Promise<Response> {
+  const googleOAuthResponse = await handleGoogleOAuthRequest(request, env);
+  if (googleOAuthResponse) return googleOAuthResponse;
+  const pathname = new URL(request.url).pathname;
+  if (pathname === '/health') return healthResponse(request, env);
+  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+  if (request.method !== 'POST' || pathname !== '/api/gemini') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
+  try { return await handleGemini(request, env); } catch { return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502); }
+} };

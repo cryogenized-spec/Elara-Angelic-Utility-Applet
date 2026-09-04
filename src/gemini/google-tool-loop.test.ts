@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { streamReply, streamToolResult } = vi.hoisted(() => ({
   streamReply: vi.fn(),
@@ -22,6 +22,11 @@ const oauth = {
 };
 
 describe('streamGoogleToolLoop', () => {
+  beforeEach(() => {
+    streamReply.mockReset();
+    streamToolResult.mockReset();
+  });
+
   it('executes a registered read tool and resumes the interaction with its result', async () => {
     const handler = vi.fn(async ({ arguments: args }) => ({ events: [{ summary: 'Design review', ...args }] }));
     streamReply.mockReturnValueOnce(events(

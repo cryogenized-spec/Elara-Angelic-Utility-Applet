@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ELARA_SYSTEM_INSTRUCTION } from '../../src/character/system-instruction';
 
 const { createInteraction } = vi.hoisted(() => ({
   createInteraction: vi.fn(),
@@ -111,6 +112,23 @@ describe('Gemini Worker boundary', () => {
       message: 'Request did not satisfy the approved Gemini contract.',
     });
     expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('passes the canonical Elara system instruction to Gemini when the client omits one', async () => {
+    createInteraction.mockResolvedValue((async function* () {
+      yield { event_type: 'interaction.created', interaction: { id: 'interaction-system', status: 'in_progress', model: 'gemini-3-flash-preview' } };
+      yield { event_type: 'interaction.completed', interaction: { id: 'interaction-system', status: 'completed' } };
+    })());
+
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: 'https://cryogenized-spec.github.io' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    expect(response.status).toBe(200);
+    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({ system_instruction: ELARA_SYSTEM_INSTRUCTION }));
   });
 
   it('returns only allow-listed streaming events and keeps the credential out of the response', async () => {

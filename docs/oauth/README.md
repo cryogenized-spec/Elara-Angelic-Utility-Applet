@@ -2,7 +2,7 @@
 
 > **Purpose:** This directory is the authoritative handoff for the Google OAuth, Workspace integrations, background execution, and related infrastructure work. A future implementation pass must read this file before changing OAuth, Google tools, or background execution.
 >
-> **Status:** Pass 2 (Google connection settings UI), Pass 3 (scope audit), Pass 4 (Drive/Docs/Sheets service adapters), and Pass 5 (Drive/Sheets model-tool surface) are implemented. The clean app still does not contain the protected OAuth Worker source, so end-to-end production authorization cannot yet be claimed.
+> **Status:** Pass 2 (Google connection settings UI), Pass 3 (scope audit), Pass 4 (Drive/Docs/Sheets service adapters), Pass 5 (Drive/Sheets model-tool surface), and Pass 6 (centralized tool execution/risk/diagnostics gate) are implemented in the clean app repository. The protected Cloudflare OAuth Worker source is still not present here, so end-to-end production authorization cannot yet be claimed.
 
 ## 0. Non-negotiable architecture
 
@@ -24,9 +24,10 @@ The repository already contains these foundations:
 - `docs/GOOGLE_OAUTH_SETTINGS_UI.md` — intended user-facing Google authorization settings surface.
 - `docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md` — structured failure semantics.
 - `docs/GOOGLE_TOOL_BOUNDARY.md` — model-visible Google allow-list and execution boundary.
-- `src/google/tools/contracts.ts` and `src/google/tools/registry.ts` — existing explicit named Google tool contracts.
-- `docs/GOOGLE_CALENDAR_SERVICE.md`, `docs/GOOGLE_TASKS_SERVICE.md`, `docs/GOOGLE_DOCS_SERVICE.md`, `docs/GOOGLE_GMAIL_SERVICE.md` — existing service-boundary direction.
-- `docs/GOOGLE_DRIVE_SERVICE.md`, `docs/GOOGLE_SHEETS_SERVICE.md` — Pass 4 service boundaries.
+- `docs/GOOGLE_TOOL_EXECUTION.md` — centralized tool risk, confirmation, authorization, and diagnostics gate.
+- `src/google/tools/contracts.ts` and `src/google/tools/registry.ts` — explicit named Google tool contracts and descriptors.
+- `src/google/oauth/authority.ts` and `src/google/oauth/scope-registry.ts` — browser-side OAuth boundary and application scope registry.
+- `docs/GOOGLE_CALENDAR_SERVICE.md`, `docs/GOOGLE_TASKS_SERVICE.md`, `docs/GOOGLE_DOCS_SERVICE.md`, `docs/GOOGLE_GMAIL_SERVICE.md`, `docs/GOOGLE_DRIVE_SERVICE.md`, `docs/GOOGLE_SHEETS_SERVICE.md` — focused Workspace service-boundary direction.
 
 Do not replace these with a second architecture. Extend them.
 
@@ -65,13 +66,11 @@ Responsibilities:
 - Structured token-expired vs invalid-grant/revoked-consent classification.
 - Safe diagnostics with correlation IDs but no credentials or message payloads.
 
-Important: do not send the user through Google sign-in every time Elara opens. Persist the refresh credential securely and silently mint/refresh short-lived access tokens. Request `access_type=offline` and `include_granted_scopes=true`. Only use `prompt=consent` when an explicit re-consent/new-refresh-token condition requires it.
-
-Google's current documentation says refresh tokens allow offline access without repeatedly prompting the user and recommends incremental authorization for web/server applications. Re-check Google's live OAuth documentation immediately before implementation.
+Important: do not send the user through Google sign-in every time Elara opens. Persist the refresh credential and silently mint/refresh short-lived access tokens. Request offline access and incremental authorization. Only use explicit re-consent when the authorization state actually requires user interaction.
 
 ### Pass 2 — Google connection settings UI
 
-Implemented. Settings now has a dedicated Google section showing overall connection state and independent Calendar, Tasks, Gmail, Drive, Docs, and Sheets capability state. Gmail also exposes separate label-administration and send authorization actions.
+Implemented. Settings exposes overall Google connection state and independent Calendar, Tasks, Gmail, Drive, Docs, and Sheets capability state. Gmail label administration and sending remain separately authorized capabilities.
 
 Do not let the UI contain scope strings or token logic. It calls application-facing OAuth commands and renders normalized state.
 
@@ -86,29 +85,25 @@ Current audited direction:
 - Drive: `drive.file` where the feature operates on selected/app-created files; avoid broad Drive access unless proven necessary.
 - Docs: `drive.file` where sufficient; method-specific Docs scopes only when needed for broader document access.
 - Sheets: `drive.file` where a per-file workflow is sufficient; spreadsheet-specific scopes only when broader access is required.
-- Gmail: separate `gmail.readonly`, `gmail.modify`, `gmail.labels`, and `gmail.send` capabilities; do not request modification rights merely to send mail or administer labels.
+- Gmail: separate read, modify, label, and send capabilities; do not request modification rights merely to send mail.
 
 Sensitive/restricted scopes require verification/compliance review before production release.
-
-Pass 3 code hardening also validates application capability keys against the central schema before registry lookup and keeps provider scope strings outside model-facing tool contracts.
 
 ### Pass 4 — Drive, Docs, and Sheets service implementations
 
 Implemented as focused application-side adapters:
 
-- `src/google/drive/service.ts` with listing/search, metadata get, authorized download, create, update, and move operations;
-- existing `src/google/docs/service.ts` for get/create/batchUpdate;
-- `src/google/sheets/service.ts` with spreadsheet metadata, targeted range reads, bounded writes, row appends, and explicit batch updates.
+- Drive with listing/search, metadata retrieval, authorized blob download, export, create, metadata update, and folder move.
+- Docs with get/create/batchUpdate.
+- Sheets with spreadsheet metadata, targeted range reads, bounded value writes, row appends, and explicit spreadsheet batch updates.
 
-Each service requests an application capability from the OAuth authority and never stores or handles raw OAuth credentials. Inputs are bounded, provider URL components are encoded, list payloads use explicit fields, and large Sheets writes are bounded for predictable execution.
-
-The Drive/Sheets service boundaries and test coverage are documented in `docs/GOOGLE_DRIVE_SERVICE.md` and `docs/GOOGLE_SHEETS_SERVICE.md`.
-
-Do not make Sheets discovery depend on a fictitious "list spreadsheets" endpoint. Use Drive/file-selection semantics when appropriate.
+The service adapters request application capabilities from the single OAuth authority, encode provider path components, use field projection where appropriate, and bound high-risk/large payload operations.
 
 ### Pass 5 — Expand the model-visible tool schema
 
-Implemented for Drive and Sheets. The explicit tool allow-list now includes:
+Implemented for Drive and Sheets.
+
+Drive:
 
 - `drive.searchFiles`
 - `drive.getFile`
@@ -116,36 +111,30 @@ Implemented for Drive and Sheets. The explicit tool allow-list now includes:
 - `drive.createFile`
 - `drive.updateFile`
 - `drive.moveFile`
+
+Sheets:
+
 - `sheets.getSpreadsheet`
 - `sheets.readRange`
 - `sheets.writeRange`
 - `sheets.appendRows`
 - `sheets.batchUpdate`
 
-Dedicated bounded Zod argument contracts live in `src/google/tools/drive-sheets-schemas.ts`, with regression tests. No arbitrary `google.request` operation was added.
-
-Every tool call is still intended to follow:
-
-`validated model call → application argument validation → capability lookup → OAuth authorization check → risk/confirmation check → service execution → normalized/auditable result`
-
-No tool may invent endpoints, scopes, tokens, arbitrary URLs, or HTTP requests.
+Dedicated Zod argument contracts prevent malformed/oversized Drive and Sheets calls before provider execution. No arbitrary HTTP or universal Google request tool exists.
 
 ### Pass 6 — Confirmation, diagnostics, and failure handling
 
-Next. Connect every mutation to the existing risk classification/confirmation architecture and ensure the protected Worker can return structured authorization/provider failures to the application.
+Implemented at the application tool boundary.
 
-Rules:
+`src/google/tools/executor.ts` now provides a centralized gate that validates the tool call, resolves the registered descriptor, verifies current capability authorization state, applies the existing read/write/destructive/send confirmation policy, invokes a registered service handler, and returns a correlation ID with a normalized success/failure result.
 
-- reads: execute when authorized;
-- writes: use write confirmation policy as required;
-- destructive operations: stronger explicit confirmation;
-- send operations: explicit send risk;
-- authorization denial: disable only affected capability;
-- invalid/revoked refresh token: structured remediation state;
-- network/provider outage: distinguish temporary failure from authorization failure;
-- retry only where the operation is safe and the existing retry policy permits it.
+`src/google/tools/diagnostics.ts` provides safe tool-level failure classes for validation, authorization, confirmation, network, rate-limit, provider, and unknown failures. Raw handler exceptions are deliberately not returned.
 
-Diagnostics must never expose OAuth tokens, client secrets, authorization headers, raw message payloads, or private file contents.
+The executor also integrates the existing freshness-bound confirmation policy. A write/destructive/send operation cannot run without explicit approval.
+
+The execution boundary is documented in `docs/GOOGLE_TOOL_EXECUTION.md`.
+
+The protected Cloudflare OAuth Worker remains the production dependency for actual authorized Google requests; the clean app does not fabricate an alternative token path.
 
 ### Pass 7 — End-to-end verification and production hardening
 
@@ -250,13 +239,11 @@ Keep the application home page, privacy policy, terms where applicable, verified
 
 Do not claim production readiness until the required Google verification/compliance work has been completed or the use case clearly qualifies for an applicable exception.
 
-## 9. Current Google documentation anchors
+## 9. Documentation anchors
 
-Use Google's live documentation at implementation time. Pass 3 rechecked the scope choices against Google's current OAuth scope catalogue, Calendar authorization guide, Drive file/access guidance, Docs method authorization requirements, Sheets scope catalogue, Tasks scope reference, and Gmail scope catalogue.
+Use Google's and Cloudflare's live documentation at implementation time. The relevant current references cover OAuth web-server authorization/offline refresh/incremental authorization, OAuth policies, the Google scope catalogue, Calendar authorization, Drive file access/download/export, Docs methods, Sheets values and batch updates, Tasks, Gmail, Cloudflare Cron Triggers, durable scheduled execution, and Web Push.
 
-The official documentation confirms that scope choice should be as narrow as practical, `drive.file` is the per-file Drive scope, Docs methods such as `documents.get` and `documents.create` accept `drive.file`, and Gmail exposes separate read, modify, label, and send scopes. citeturn905264view0turn968614search1turn285584search4turn285584search12turn285584search7turn285584search11turn229576search0
-
-Because Google's OAuth policies, scope classifications, and API requirements can change, the future implementer must re-check the live documentation immediately before implementing each pass.
+Because these APIs, scope classifications, verification requirements, and runtime capabilities can change, the future implementer must re-check the live official documentation immediately before each pass.
 
 ## 10. Completion checklist
 
@@ -282,4 +269,4 @@ OAuth is not complete until all of the following are true:
 
 Before making changes, read this README plus the existing Google OAuth/tool/service documents. Inspect the current `main` branch rather than trusting this note's file names or old commit hashes. Revalidate all Google and Cloudflare assumptions against current official documentation. Preserve the architectural boundaries. Do not resurrect legacy providers, `generateContent()`, client-side OAuth token storage, arbitrary Google HTTP tools, or browser-dependent background execution.
 
-**Next immediate implementation target:** Pass 6 — connect the complete Google tool surface to the existing risk/confirmation and diagnostics architecture, while continuing to resolve the protected OAuth Worker boundary.
+**Next immediate implementation target:** Pass 7 — full end-to-end verification and production hardening. The first blocker remains access to the protected OAuth Worker source/configuration needed to exercise real authorization and refresh.

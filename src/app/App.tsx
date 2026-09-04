@@ -208,7 +208,7 @@ export function App() {
 
   return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
     <div className="app-shell__background" aria-hidden="true" />
-    <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button><button className="glass-menu-button left-spine__settings" type="button" aria-label="Open settings" onClick={() => setSettingsOpen(true)}><Icon name="settings" size={20} /></button></div>
+    <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button></div>
     <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
     <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
     <ConversationSurface messages={conversation.messages} fontSize={fontSize} onRegenerate={(messageId) => void regenerate(messageId)} />

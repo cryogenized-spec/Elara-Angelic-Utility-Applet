@@ -77,15 +77,15 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
           autoFocus
         />
         <footer className="composer-expanded__footer">
+          <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
+            <Icon name="markdown" size={20} />
+          </button>
           <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={status === 'streaming'}>
             <Icon name="paperclip" size={20} />
           </button>
-          <button className="composer__icon" type="button" aria-label="Voice input" disabled={status === 'streaming'}>
-            <Icon name="mic" size={20} />
-          </button>
           <div className="composer-expanded__spacer" />
-          <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
-            <span aria-hidden="true">M</span>
+          <button className="composer__icon" type="button" aria-label="VTT voice input" disabled={status === 'streaming'}>
+            <Icon name="mic" size={20} />
           </button>
           <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={status !== 'streaming' && !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
             <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
@@ -98,6 +98,9 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
 
   return <>
     <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
+      <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
+        <Icon name="markdown" size={20} />
+      </button>
       <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={status === 'streaming'}>
         <Icon name="paperclip" size={20} />
       </button>
@@ -107,11 +110,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
           <Icon name="expand" size={15} />
         </button>
       </div>
-      <button className="composer__icon" type="button" aria-label="Voice input" disabled={status === 'streaming'}>
+      <button className="composer__icon" type="button" aria-label="VTT voice input" disabled={status === 'streaming'}>
         <Icon name="mic" size={20} />
-      </button>
-      <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={status === 'streaming'} onClick={() => setMarkdownOpen((open) => !open)}>
-        <span aria-hidden="true">M</span>
       </button>
       <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={status !== 'streaming' && !draft.trim()}>
         <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />

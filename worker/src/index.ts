@@ -113,9 +113,12 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
     async start(controller) {
       const pendingFunctions = new Map<number, PendingFunctionCall>();
       let waitingForToolResult = false;
+      let currentInteractionId: string | undefined = parsed.data.previousInteractionId;
       try {
         for await (const rawEvent of stream) {
           const raw = asRecord(rawEvent);
+          const eventInteractionId = interactionId(raw);
+          if (eventInteractionId) currentInteractionId = eventInteractionId;
           const eventType = stringValue(raw, 'event_type') ?? stringValue(raw, 'type') ?? '';
           const step = asRecord(raw.step);
           const stepIndex = indexOf(raw);
@@ -149,7 +152,8 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
                 const args = JSON.parse(pending.arguments) as unknown;
                 if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.');
                 const toolName = googleToolNameSchema.parse(pending.name);
-                controller.enqueue(encoder.encode(sse('tool-call', { event_type: 'tool-call', interaction_id: interactionId(raw), index: stepIndex, call_id: pending.callId, name: toolName, arguments: args }))); 
+                if (!currentInteractionId) throw new Error('Function call has no interaction identity.');
+                controller.enqueue(encoder.encode(sse('tool-call', { event_type: 'tool-call', interaction_id: currentInteractionId, index: stepIndex, call_id: pending.callId, name: toolName, arguments: args })));
                 waitingForToolResult = true;
               } catch {
                 controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini produced invalid registered function arguments.' } })));

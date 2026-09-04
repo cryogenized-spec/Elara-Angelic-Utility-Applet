@@ -25,6 +25,7 @@ describe('VTT transcription Worker contract', () => {
     createInteraction.mockReset();
     uploadFile.mockReset();
     deleteFile.mockReset();
+    deleteFile.mockResolvedValue(undefined);
   });
 
   it('deletes a temporary Gemini File after successful transcription', async () => {
@@ -40,7 +41,7 @@ describe('VTT transcription Worker contract', () => {
     const response = await worker.fetch(request, env);
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ transcript: 'hello from voice' });
-    await vi.waitFor(() => expect(deleteFile).toHaveBeenCalledWith({ name: 'files/vtt-test' }));
+    expect(deleteFile).toHaveBeenCalledWith({ name: 'files/vtt-test' });
   });
 
   it('deletes a temporary Gemini File when transcription fails', async () => {
@@ -54,13 +55,15 @@ describe('VTT transcription Worker contract', () => {
     });
 
     const response = await worker.fetch(request, env);
+    const body = await response.json();
+
     expect(response.status).toBe(502);
-    await expect(response.json()).resolves.toEqual({
+    expect(body).toEqual({
       code: 'provider',
       message: 'The Gemini Worker could not complete the request.',
     });
-    expect(JSON.stringify(await response.clone().text())).not.toContain('test-secret-key');
-    await vi.waitFor(() => expect(deleteFile).toHaveBeenCalledWith({ name: 'files/vtt-failure' }));
+    expect(JSON.stringify(body)).not.toContain('test-secret-key');
+    expect(deleteFile).toHaveBeenCalledWith({ name: 'files/vtt-failure' });
   });
 
   it('rejects a VTT body that exceeds the hard byte limit after reading it', async () => {

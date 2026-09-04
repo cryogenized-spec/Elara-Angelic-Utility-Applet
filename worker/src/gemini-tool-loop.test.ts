@@ -41,7 +41,7 @@ describe('Gemini registered tool loop', () => {
     const events = await parseSse(response);
     const call = events.find((item) => item.event === 'tool-call');
     expect(response.status).toBe(200);
-    expect(call?.data).toEqual(expect.objectContaining({ call_id: 'call-1', name: 'calendar.listEvents', arguments: { timeMin: '2026-09-04T00:00:00Z', timeMax: '2026-09-04T23:59:59Z' } }));
+    expect(call?.data).toEqual(expect.objectContaining({ interaction_id: 'interaction-1', call_id: 'call-1', name: 'calendar.listEvents', arguments: { timeMin: '2026-09-04T00:00:00Z', timeMax: '2026-09-04T23:59:59Z' } }));
     expect(events.some((item) => item.event === 'interaction.requires_action')).toBe(true);
     expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({ tools: [expect.objectContaining({ type: 'function', name: 'calendar.listEvents' })] }));
   });

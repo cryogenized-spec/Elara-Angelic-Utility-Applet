@@ -1,0 +1,1 @@
+PWA icon source: the uploaded Elara 1×1 app icon is stored in the icon blobs; normalized manifest paths are created from that asset.

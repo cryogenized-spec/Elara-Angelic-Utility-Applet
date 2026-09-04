@@ -2,7 +2,7 @@
 
 > **Purpose:** This directory is the authoritative handoff for the Google OAuth, Workspace integrations, background execution, and related infrastructure work. A future implementation pass must read this file before changing OAuth, Google tools, or background execution.
 >
-> **Status at handoff:** Visual layer and canonical Gemini Worker path are operational. Google Workspace architecture, capability registry, tool boundary, and OAuth design notes already exist, but the production OAuth authority and end-to-end Workspace API execution still need to be completed.
+> **Status:** Pass 2 is implemented. Pass 3 scope audit is implemented and recorded. The clean app still does not contain the protected OAuth Worker source, so end-to-end production authorization cannot yet be claimed.
 
 ## 0. Non-negotiable architecture
 
@@ -66,11 +66,11 @@ Responsibilities:
 
 Important: do not send the user through Google sign-in every time Elara opens. Persist the refresh credential securely and silently mint/refresh short-lived access tokens. Request `access_type=offline` and `include_granted_scopes=true`. Only use `prompt=consent` when an explicit re-consent/new-refresh-token condition requires it.
 
-Google's current documentation says refresh tokens allow offline access without repeatedly prompting the user and recommends incremental authorization for web/server applications. See the current Google OAuth web-server and policy docs before implementation.
+Google's current documentation says refresh tokens allow offline access without repeatedly prompting the user and recommends incremental authorization for web/server applications. Re-check Google's live OAuth documentation immediately before implementation.
 
 ### Pass 2 — Google connection settings UI
 
-Turn the Settings → Gemini/Google area into a real authorization control surface.
+Turn the Settings → Google area into a real authorization control surface.
 
 The UI should show:
 
@@ -93,16 +93,18 @@ Do not let the UI contain scope strings or token logic. It calls application-fac
 
 Audit every existing and new scope against the exact operation.
 
-Preferred direction:
+Current audited direction:
 
-- Calendar: use event-specific/read-only scopes when sufficient; escalate to event write only when required.
+- Calendar: event-specific read/write scopes where sufficient; calendar-list/settings scopes only for those functions.
 - Tasks: `tasks.readonly` for reads and `tasks` for management.
-- Drive: prefer `drive.file` when the feature can operate on user-selected/app-created files; use broader Drive scopes only when demonstrably necessary.
-- Docs: prefer `drive.file` when that meets the feature requirement; otherwise use the narrowest Docs scope required.
-- Sheets: prefer `drive.file` where the app is working with selected/created spreadsheets; use spreadsheet scopes only when required for broader spreadsheet access.
-- Gmail: separate read, modify, labels, and send capabilities; do not request `gmail.modify` merely to send mail.
+- Drive: `drive.file` where the feature operates on selected/app-created files; avoid broad Drive access unless proven necessary.
+- Docs: `drive.file` where sufficient; method-specific Docs scopes only when needed for broader document access.
+- Sheets: `drive.file` where a per-file workflow is sufficient; spreadsheet-specific scopes only when broader access is required.
+- Gmail: separate `gmail.readonly`, `gmail.modify`, `gmail.labels`, and `gmail.send` capabilities; do not request modification rights merely to send mail or administer labels.
 
-Treat sensitive/restricted scopes as an architectural decision requiring verification/compliance review. Do not casually add broad scopes for convenience.
+Sensitive/restricted scopes require verification/compliance review before production release.
+
+Pass 3 code hardening also validates application capability keys against the central schema before registry lookup and keeps provider scope strings outside model-facing tool contracts.
 
 ### Pass 4 — Drive, Docs, and Sheets service implementations
 
@@ -212,8 +214,6 @@ Target architecture:
 
 `Cron/scheduled job → durable background execution → OAuth authority refresh → Google API operation → persist normalized result/state → push notification → app resumes/display`
 
-Cloudflare Workers currently support Cron Triggers through `scheduled()` and Cloudflare Agents provide durable scheduled tasks plus Web Push notification patterns. Use the current Cloudflare documentation at implementation time rather than relying on older Worker examples.
-
 The browser must not be the thing that performs the background work. A closed/killed tab must not prevent an already-authorized scheduled job from running.
 
 ## 4. Health/status light design
@@ -263,7 +263,7 @@ The eventual background layer should support:
 - Web Push when the app is closed;
 - later optional Telegram integration if desired.
 
-WhatsApp integration is explicitly out of scope for this phase.
+WhatsApp integration is explicitly out of the current scope.
 
 ## 7. Future internet access
 
@@ -281,22 +281,19 @@ Do not claim production readiness until the required Google verification/complia
 
 ## 9. Current Google documentation anchors
 
-Use Google's live documentation at implementation time. As of this handoff, these are the key authorities that were checked:
+Use Google's live documentation at implementation time. As of Pass 3, the scope audit was checked against:
 
-- OAuth web-server authorization / offline refresh / incremental authorization: Google OAuth 2.0 web-server documentation.
-- OAuth policies / secure redirect URIs / incremental-consent behaviour / revocation handling: Google OAuth 2.0 policies.
-- Google OAuth scope catalog: Google OAuth 2.0 scopes reference.
-- Calendar scopes: Google Calendar API authorization guide.
-- Drive scopes and file-scoped access: Google Drive API authorization guidance.
-- Google Picker: Google Drive Picker web integration guide.
-- Docs authorization and `documents.get`: Google Docs API reference.
-- Sheets authorization: Google Sheets API scopes/reference.
-- Tasks scopes: Google Tasks API authorization reference.
-- Gmail scopes: Google Gmail API authorization reference.
-- Cloudflare Cron Triggers and `scheduled()`: current Cloudflare Workers documentation.
-- Cloudflare durable scheduled execution and Web Push: current Cloudflare Agents documentation.
+- Google OAuth 2.0 scope catalogue;
+- Google Calendar API authorization guide;
+- Google Drive API authorization/scope guidance;
+- Google Docs API `documents.get` and `documents.create` authorization requirements;
+- Google Sheets API scope guidance;
+- Google Tasks API authorization scopes;
+- Gmail API scope catalogue and method/service boundaries.
 
-Because Google's OAuth policies, scope classifications, and Cloudflare runtime capabilities can change, the future implementer must re-check the live documentation immediately before implementing each pass.
+The official documentation confirms that scope choice should be as narrow as practical, that `drive.file` is the per-file Drive scope, that Docs methods accept `drive.file`, and that Gmail exposes separate read, modify, label, and send scopes. citeturn905264view0turn968614search1turn285584search4turn285584search12turn285584search7turn285584search11turn229576search0
+
+Because Google's OAuth policies, scope classifications, and API requirements can change, the future implementer must re-check the live documentation immediately before implementing each pass.
 
 ## 10. Completion checklist
 
@@ -322,4 +319,4 @@ OAuth is not complete until all of the following are true:
 
 Before making changes, read this README plus the existing Google OAuth/tool/service documents. Inspect the current `main` branch rather than trusting this note's file names or old commit hashes. Revalidate all Google and Cloudflare assumptions against current official documentation. Preserve the architectural boundaries. Do not resurrect legacy providers, `generateContent()`, client-side OAuth token storage, arbitrary Google HTTP tools, or browser-dependent background execution.
 
-**Next immediate implementation target:** Pass 1 — production OAuth authority.
+**Next immediate implementation target:** Pass 4 — implement the Drive, Docs, and Sheets service adapters behind the existing OAuth/capability boundaries, after the protected OAuth Worker source is located or exposed.

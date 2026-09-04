@@ -11,7 +11,7 @@ vi.mock('./provider', () => ({
 
 import { streamGoogleToolLoop } from './google-tool-loop';
 
-async function* events(...items: Array<Awaited<ReturnType<typeof Promise.resolve>>>) {
+async function* events(...items: unknown[]) {
   for (const item of items) yield item as never;
 }
 
@@ -52,10 +52,16 @@ describe('streamGoogleToolLoop', () => {
   });
 
   it('never permits a write tool through the default read-only loop', async () => {
-    await expect(streamGoogleToolLoop(
-      { model: 'gemini-3.8-flash', input: 'Change something.', tools: ['tasks.createTask'] },
-      { executor: { oauth, handlers: {} } },
-    )).rejects.toThrow('not permitted in read-only mode');
+    const consume = async () => {
+      for await (const _event of streamGoogleToolLoop(
+        { model: 'gemini-3.8-flash', input: 'Change something.', tools: ['tasks.createTask'] },
+        { executor: { oauth, handlers: {} } },
+      )) {
+        // The generator should reject before contacting Gemini.
+      }
+    };
+
+    await expect(consume()).rejects.toThrow('not permitted in read-only mode');
     expect(streamReply).not.toHaveBeenCalled();
   });
 });

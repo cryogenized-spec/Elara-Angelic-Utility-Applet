@@ -195,7 +195,7 @@ function appOrigin(env: GoogleOAuthEnv): string {
 }
 
 function corsHeaders(request: Request, env: GoogleOAuthEnv): Headers {
-  const headers = new Headers({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Elara-Google-Capability', Vary: 'Origin' });
+  const headers = new Headers({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Elara-Google-Capability, X-Elara-Google-Target', Vary: 'Origin' });
   const origin = request.headers.get('Origin');
   if (origin && configuredOrigins(env).includes(origin)) headers.set('Access-Control-Allow-Origin', origin);
   headers.set('Access-Control-Allow-Credentials', 'true');
@@ -233,7 +233,7 @@ function grantedCapabilities(record: UserRecord): GoogleCapabilityKey[] {
   return capabilities.filter((capability) => capabilityGranted(record, capability));
 }
 
-function stateFromRecord(record: UserRecord): 'connected' | 'needs-consent' | 'revoked' | 'partially-authorized' {
+function stateFromRecord(record: UserRecord): 'connected' | 'needs-consent' | 'revoked' | 'partially-authorized' | 'token-recovery' {
   if (record.status === 'revoked') return 'revoked';
   const count = grantedCapabilities(record).length;
   if (!record.encryptedRefreshToken) return count > 0 ? 'token-recovery' : 'needs-consent';
@@ -362,7 +362,7 @@ async function handleStart(request: Request, env: GoogleOAuthEnv): Promise<Respo
 
 async function handleCallback(request: Request, env: GoogleOAuthEnv): Promise<Response> {
   const configError = missingConfig(env);
-  if (configError) return new Response(configError, { status: 503 });
+  if (configError) return new Response(configError, { status: 503, headers: { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' } });
   const url = new URL(request.url);
   const state = url.searchParams.get('state');
   const code = url.searchParams.get('code');
@@ -458,12 +458,10 @@ async function proxy(request: Request, env: GoogleOAuthEnv): Promise<Response> {
   const capabilityResult = googleCapabilityKeySchema.safeParse(request.headers.get('X-Elara-Google-Capability'));
   if (!capabilityResult.success) return json(request, env, { code: 'validation', message: 'Google capability header is invalid.' }, 400);
   const capability = capabilityResult.data;
-  const target = new URL(request.url); // replaced below
   const targetHeader = request.headers.get('X-Elara-Google-Target');
   if (!targetHeader) return json(request, env, { code: 'validation', message: 'Google target is required.' }, 400);
   let googleTarget: URL;
   try { googleTarget = new URL(targetHeader); } catch { return json(request, env, { code: 'validation', message: 'Google target is invalid.' }, 400); }
-  void target;
   if (!allowedGoogleTarget(capability, googleTarget)) return json(request, env, { code: 'authz', message: 'Google target is not allowed for this capability.' }, 403);
   const session = await resolveSession(env, request);
   if (!session || session.user.status === 'revoked' || !capabilityGranted(session.user, capability)) return json(request, env, { code: 'authorization', message: 'Google capability is not authorized.' }, 401);

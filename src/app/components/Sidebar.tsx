@@ -114,7 +114,7 @@ export function Sidebar({ open, threads, activeId, onClose, onSelect, onNewChat,
         </div>
 
         <div className="sidebar__footer">
-          <button className="sidebar-action" type="button" onClick={onSettings}>
+          <button className="sidebar-action" type="button" aria-label="Open settings" onClick={onSettings}>
             <Icon name="settings" size={19} /><span>Settings</span>
           </button>
         </div>

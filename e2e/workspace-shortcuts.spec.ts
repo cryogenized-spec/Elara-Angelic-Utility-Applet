@@ -26,6 +26,32 @@ test('executes a shortcut as an internal task rather than an injected user promp
   await expect(page.getByRole('alert')).toContainText('[GEMINI_UNKNOWN]');
 });
 
+async function readStoredShortcutEnabled(page: import('@playwright/test').Page, id: string): Promise<boolean | undefined> {
+  return page.evaluate(async (shortcutId) => await new Promise<boolean | undefined>((resolve, reject) => {
+    const request = indexedDB.open('elara-angelic-utility-applet');
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains('workspaceShortcuts')) {
+        db.close();
+        resolve(undefined);
+        return;
+      }
+      const transaction = db.transaction('workspaceShortcuts', 'readonly');
+      const getRequest = transaction.objectStore('workspaceShortcuts').get(shortcutId);
+      getRequest.onerror = () => {
+        db.close();
+        reject(getRequest.error);
+      };
+      getRequest.onsuccess = () => {
+        const value = getRequest.result as { enabled?: boolean } | undefined;
+        db.close();
+        resolve(value?.enabled);
+      };
+    };
+  }), id);
+}
+
 test('persists Workspace shortcut enablement in Google settings', async ({ page }) => {
   await page.goto('');
   await page.getByRole('button', { name: 'Open settings' }).click();
@@ -33,6 +59,8 @@ test('persists Workspace shortcut enablement in Google settings', async ({ page 
   const toggle = page.getByRole('checkbox', { name: 'Current schedule enabled' });
   await expect(toggle).toBeChecked();
   await toggle.uncheck();
+  await expect(toggle).not.toBeChecked();
+  await expect.poll(() => readStoredShortcutEnabled(page, 'calendar-current')).toBe(false);
   await page.reload();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Google' }).click();

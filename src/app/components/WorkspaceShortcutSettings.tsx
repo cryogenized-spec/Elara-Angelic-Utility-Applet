@@ -17,13 +17,14 @@ export function WorkspaceShortcutSettings() {
     return () => { cancelled = true; };
   }, []);
 
-  async function toggle(shortcut: StoredWorkspaceShortcut) {
-    const next = { ...shortcut, enabled: !shortcut.enabled };
+  async function toggle(shortcut: StoredWorkspaceShortcut, enabled: boolean) {
+    const previous = shortcut;
+    const next = { ...shortcut, enabled, updatedAt: Date.now() };
     setShortcuts((current) => current.map((item) => item.id === next.id ? next : item));
     try {
       await workspaceShortcutStore.save(next);
     } catch {
-      setShortcuts((current) => current.map((item) => item.id === shortcut.id ? shortcut : item));
+      setShortcuts((current) => current.map((item) => item.id === previous.id ? previous : item));
     }
   }
 
@@ -37,7 +38,7 @@ export function WorkspaceShortcutSettings() {
         {shortcuts.map((shortcut) => (
           <label className="workspace-shortcut-settings__row" key={shortcut.id}>
             <span><b>{shortcut.label}</b><small>{serviceNames[shortcut.service]} · {shortcut.source === 'built-in' ? 'Built-in recipe' : 'Generated recipe'}</small></span>
-            <input type="checkbox" checked={shortcut.enabled} onChange={() => void toggle(shortcut)} aria-label={`${shortcut.label} enabled`} />
+            <input type="checkbox" checked={shortcut.enabled} onChange={(event) => void toggle(shortcut, event.currentTarget.checked)} aria-label={`${shortcut.label} enabled`} />
           </label>
         ))}
       </div>

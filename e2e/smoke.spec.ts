@@ -15,7 +15,6 @@ test('collapses the Elara character banner when the sidebar opens', async ({ pag
   await page.goto('');
   const banner = page.getByRole('region', { name: 'Elara character banner' });
   const sidebar = page.getByRole('complementary', { name: 'Chat threads' });
-
   await expect(banner).toHaveClass(/elara-banner/);
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await expect(banner).toHaveClass(/is-collapsed/);
@@ -28,7 +27,6 @@ test('shows typography controls and applies the 10–20px text size range', asyn
   await page.goto('');
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Typography' }).click();
-
   await expect(page.getByText('The quick brown fox jumps over the lazy dog.').first()).toBeVisible();
   const slider = page.getByRole('slider', { name: 'Text size' });
   await expect(slider).toHaveValue('15');
@@ -43,7 +41,6 @@ test('controls character presentation scale and banner background from Appearanc
   const banner = page.getByRole('region', { name: 'Elara character banner' });
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Appearance' }).click();
-
   const scale = page.getByRole('slider', { name: 'Character presentation scale' });
   await expect(scale).toHaveValue('2');
   await scale.fill('3');
@@ -58,13 +55,11 @@ test('character identity and master prompt persist independently of tool setting
   await page.goto('');
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Character' }).click();
-
   await page.getByLabel('AI character name').fill('Elara Prime');
   await page.getByLabel('Master system prompt').fill('Be concise, perceptive, and warmly creative.');
   await page.reload();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Character' }).click();
-
   await expect(page.getByLabel('AI character name')).toHaveValue('Elara Prime');
   await expect(page.getByLabel('Master system prompt')).toHaveValue('Be concise, perceptive, and warmly creative.');
   await expect(page.getByText(/Tool schemas, exposed capabilities, tool-use rules, authorization, confirmation, provider transport, and security/)).toBeVisible();
@@ -74,14 +69,12 @@ test('switches between one active portrait or landscape artwork mode and persist
   await page.goto('');
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Character' }).click();
-
   const portrait = page.getByRole('radio', { name: /Portrait · 4:5/ });
   const landscape = page.getByRole('radio', { name: /Landscape · 16:6/ });
   await expect(portrait).toHaveAttribute('aria-checked', 'true');
   await expect(landscape).toHaveAttribute('aria-checked', 'false');
   await page.locator('input[type="file"]').setInputFiles(pngFile('elara.png'));
   await expect(page.getByRole('img', { name: 'Current character artwork' })).toBeVisible();
-
   await landscape.click();
   await expect(landscape).toHaveAttribute('aria-checked', 'true');
   await expect(portrait).toHaveAttribute('aria-checked', 'false');
@@ -101,7 +94,6 @@ test('chat background, speaker colours, and user surface style persist', async (
   await page.goto('');
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Appearance' }).click();
-
   const chatBackground = page.getByRole('radiogroup', { name: 'Chat background mode' });
   await chatBackground.getByRole('radio', { name: 'Gradient' }).click();
   await page.getByRole('button', { name: 'Violet', exact: true }).click();
@@ -114,7 +106,6 @@ test('chat background, speaker colours, and user surface style persist', async (
   await page.getByLabel('User text colour hex').blur();
   await page.getByRole('radiogroup', { name: 'User message surface style' }).getByRole('radio', { name: 'Gradient' }).click();
   await page.getByLabel('Surface opacity').fill('0.66');
-
   await page.reload();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Appearance' }).click();
@@ -142,12 +133,11 @@ test('roleplay stays opt-in and reveals environment controls only when enabled',
   await page.goto('');
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Roleplay' }).click();
-
-  const toggle = page.getByRole('switch', { name: 'Roleplay mode off' });
+  const toggle = page.getByRole('switch', { name: 'Roleplay mode disabled' });
   await expect(toggle).toHaveAttribute('aria-checked', 'false');
   await expect(page.getByLabel('Environment')).not.toBeVisible();
   await toggle.click();
-  await expect(page.getByRole('switch', { name: 'Roleplay mode on' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('switch', { name: 'Roleplay mode enabled' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByLabel('Environment')).toBeVisible();
   await page.getByLabel('Environment').selectOption('poolside');
   await page.getByLabel('Environment name').fill('Sunset villa');
@@ -155,15 +145,14 @@ test('roleplay stays opt-in and reveals environment controls only when enabled',
   await page.getByLabel('Time of day').fill('Late afternoon');
   await page.getByLabel('Weather').fill('Warm and clear');
   await page.getByLabel('Atmosphere / mood').fill('Quiet and cinematic');
-
   await page.reload();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Roleplay' }).click();
-  await expect(page.getByRole('switch', { name: 'Roleplay mode on' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('switch', { name: 'Roleplay mode enabled' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByLabel('Environment')).toHaveValue('poolside');
   await expect(page.getByLabel('Environment name')).toHaveValue('Sunset villa');
   await expect(page.getByLabel('Environment description')).toHaveValue('Open terrace beside a quiet pool.');
-  await page.getByRole('switch', { name: 'Roleplay mode on' }).click();
+  await page.getByRole('switch', { name: 'Roleplay mode enabled' }).click();
   await expect(page.getByLabel('Environment')).not.toBeVisible();
 });
 
@@ -172,9 +161,9 @@ test('Markdown reference exposes exactly the supported composer syntax', async (
   await page.getByRole('button', { name: 'Markdown reference' }).click();
   const dialog = page.getByRole('dialog', { name: 'Markdown' });
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText('Italic')).toBeVisible();
-  await expect(dialog.getByText('Bold italic')).toBeVisible();
-  await expect(dialog.getByText('Roleplay action')).toBeVisible();
+  await expect(dialog.getByText('Italic', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Bold italic', { exact: true })).toBeVisible();
+  await expect(dialog.getByText('Roleplay action', { exact: true })).toBeVisible();
   await expect(dialog.getByText(/Raw HTML, scripts, embeds, arbitrary CSS/)).toBeVisible();
   await expect(dialog.getByRole('link', { name: /Full Markdown format documentation/ })).toHaveAttribute('href', /MARKDOWN_FORMAT\.md$/);
   await dialog.getByRole('button', { name: 'Close Markdown reference' }).click();
@@ -194,12 +183,10 @@ test('normalizes a simulated Worker network failure without fabricating a respon
 test('exposes Gemini model controls and the protected transport boundary', async ({ page }) => {
   await page.goto('');
   await page.getByRole('button', { name: 'Open settings' }).click();
-
   await page.getByRole('button', { name: 'Gemini' }).click();
   await expect(page.getByLabel('Model')).toBeVisible();
   await expect(page.getByText(/Temperature, top-p and top-k are intentionally not offered/)).toBeVisible();
   await expect(page.getByText(/Settings save automatically/)).toBeVisible();
-
   await page.getByRole('button', { name: 'Chat', exact: true }).click();
   await expect(page.getByText(/Protected Worker boundary/)).toBeVisible();
 });
@@ -207,12 +194,10 @@ test('exposes Gemini model controls and the protected transport boundary', async
 test('keeps multiline drafts bounded without requiring a live model call', async ({ page }) => {
   await page.goto('');
   const composer = page.getByRole('textbox', { name: 'Message Elara' });
-
   await composer.fill('First line');
   await composer.press('Shift+Enter');
   await composer.type('Second line');
   await expect(composer).toHaveValue('First line\nSecond line');
-
   await composer.fill(Array.from({ length: 60 }, (_, index) => `line ${index}`).join('\n'));
   await expect(composer).toHaveCSS('max-height', '132px');
 });
@@ -221,14 +206,12 @@ test('opens Workspace quick-action surfaces without injecting a chat prompt', as
   await page.goto('');
   const conversation = page.getByRole('region', { name: 'Conversation' });
   const before = await conversation.locator('.message').count();
-
   await page.getByRole('button', { name: 'Calendar', exact: true }).click();
   const calendarSurface = page.getByRole('region', { name: 'Calendar action surface' });
   await expect(calendarSurface).toBeVisible();
   await expect(calendarSurface.getByText('Capability · calendar.events.read')).toBeVisible();
   await expect(conversation.locator('.message')).toHaveCount(before);
   await calendarSurface.getByRole('button', { name: 'Close Calendar action surface' }).click();
-
   await page.getByRole('button', { name: 'Tasks', exact: true }).click();
   await expect(page.getByRole('region', { name: 'Tasks action surface' })).toBeVisible();
   await page.getByRole('button', { name: 'Gmail', exact: true }).click();

@@ -10,6 +10,7 @@ This directory is the authoritative documentation tree for Elara.
 - [`oauth/PASS_03_STATUS.md`](./oauth/PASS_03_STATUS.md) — audited OAuth scope implementation handoff.
 - [`oauth/PASS_04_STATUS.md`](./oauth/PASS_04_STATUS.md) — Drive, Docs, and Sheets service implementation handoff.
 - [`oauth/PASS_05_STATUS.md`](./oauth/PASS_05_STATUS.md) — Drive and Sheets model-tool surface handoff.
+- [`oauth/PASS_06_STATUS.md`](./oauth/PASS_06_STATUS.md) — centralized Google tool execution, risk/confirmation, and safe diagnostics handoff.
 - [`future-implementation/README.md`](./future-implementation/README.md) — future infrastructure notes for Worker health, Cron, background execution, push notifications, Telegram, and controlled internet access.
 
 ## Google Workspace architecture
@@ -20,6 +21,7 @@ This directory is the authoritative documentation tree for Elara.
 - [`GOOGLE_OAUTH_SETTINGS_UI.md`](./GOOGLE_OAUTH_SETTINGS_UI.md) — Google connection/settings UI contract.
 - [`GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md`](./GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md) — structured authorization failure handling.
 - [`GOOGLE_TOOL_BOUNDARY.md`](./GOOGLE_TOOL_BOUNDARY.md) — explicit model-visible Google tool allow-list.
+- [`GOOGLE_TOOL_EXECUTION.md`](./GOOGLE_TOOL_EXECUTION.md) — centralized tool risk, confirmation, authorization, and diagnostics gate.
 - [`GOOGLE_CALENDAR_SERVICE.md`](./GOOGLE_CALENDAR_SERVICE.md) — Calendar service boundary.
 - [`GOOGLE_TASKS_SERVICE.md`](./GOOGLE_TASKS_SERVICE.md) — Tasks service boundary.
 - [`GOOGLE_GMAIL_SERVICE.md`](./GOOGLE_GMAIL_SERVICE.md) — Gmail service boundary.

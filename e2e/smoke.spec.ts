@@ -16,16 +16,18 @@ test('composer keeps attachment left, VTT beside Send, and opens an expanded wri
   const composer = page.locator('form.composer');
   await expect(composer.getByRole('button', { name: 'Attach image or document' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Expand message editor' })).toBeVisible();
-  await expect(composer.getByRole('button', { name: 'Markdown reference' })).toBeVisible();
+  await expect(composer.getByRole('button', { name: 'VTT reference' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Send message' })).toBeVisible();
 
   const attachmentBox = await composer.getByRole('button', { name: 'Attach image or document' }).boundingBox();
   const inputBox = await composer.getByPlaceholder('Message Elara…').boundingBox();
-  const markdownBox = await composer.getByRole('button', { name: 'Markdown reference' }).boundingBox();
+  const vttBox = await composer.getByRole('button', { name: 'VTT reference' }).boundingBox();
   const sendBox = await composer.getByRole('button', { name: 'Send message' }).boundingBox();
-  expect(attachmentBox && inputBox && markdownBox && sendBox).toBeTruthy();
+  expect(attachmentBox && inputBox && vttBox && sendBox).toBeTruthy();
   expect(attachmentBox!.x).toBeLessThan(inputBox!.x);
-  expect(markdownBox!.x).toBeLessThan(sendBox!.x);
+  expect(vttBox!.x).toBeLessThan(sendBox!.x);
+  expect(Math.abs(vttBox!.y - sendBox!.y)).toBeLessThan(2);
+  expect(Math.abs(attachmentBox!.y - sendBox!.y)).toBeLessThan(2);
 
   await composer.getByRole('button', { name: 'Expand message editor' }).click();
   const expanded = page.getByRole('dialog', { name: 'Expanded message editor' });
@@ -190,7 +192,7 @@ test('roleplay stays opt-in and reveals environment controls only when enabled',
 
 test('Markdown reference exposes exactly the supported composer syntax', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Markdown reference' }).click();
+  await page.getByRole('button', { name: 'VTT reference' }).click();
   const dialog = page.getByRole('dialog', { name: 'Markdown' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('Italic', { exact: true })).toBeVisible();

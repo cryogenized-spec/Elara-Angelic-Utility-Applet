@@ -4,9 +4,11 @@ Prompt 46 defines the model-visible Google tool surface as an explicit allow-lis
 
 ## Granularity
 
-Calendar, Tasks, Docs, Chat, and Gmail are intentionally exposed as separate operations. Examples include Calendar event patch versus move, Tasks update versus move, Docs batch updates, and Gmail message label modification versus thread modification. This preserves enough resolution for the future orchestration/Kanban layer to represent exactly what Elara intends to do.
+Calendar, Tasks, Docs, Chat, Gmail, Drive, and Sheets are intentionally exposed as separate operations. Examples include Calendar event patch versus move, Tasks update versus move, Docs batch updates, Gmail message label modification versus thread modification, Drive metadata/file movement, and Sheets range updates versus batch updates. This preserves enough resolution for the future orchestration/Kanban layer to represent exactly what Elara intends to do.
 
-The current registry contains 39 named operations across Calendar, Tasks, Docs, Chat, and Gmail. New operations should be added as small descriptors and matching validated service calls, not by creating a universal `google.request` tool.
+The current registry contains named operations across Calendar, Tasks, Docs, Chat, Gmail, Drive, and Sheets. New operations should be added as small descriptors and matching validated service calls, not by creating a universal `google.request` tool.
+
+Drive and Sheets operations added during Pass 5 have dedicated bounded argument schemas in `src/google/tools/drive-sheets-schemas.ts`. These schemas are application-owned validation contracts; they do not expose provider OAuth scopes or credentials.
 
 ## Execution boundary
 
@@ -25,4 +27,4 @@ Read operations can proceed when authorized. Write, destructive, and send operat
 
 ## Modularity
 
-Tool contracts, tool registry, OAuth authority, Calendar/Tasks/Docs/Chat/Gmail services, orchestration state, and UI remain separate modules. The tool registry is an adapter catalog, not a service manager and not a Kanban controller.
+Tool contracts, tool argument validation, tool registry, OAuth authority, Calendar/Tasks/Docs/Chat/Gmail/Drive/Sheets services, orchestration state, and UI remain separate modules. The tool registry is an adapter catalog, not a service manager and not a Kanban controller.

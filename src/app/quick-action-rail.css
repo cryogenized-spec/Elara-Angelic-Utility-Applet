@@ -1,4 +1,5 @@
 .tool-rail__track { padding-right: 8px; }
+.tool-pill__wrap { position: relative; display: inline-flex; }
 .tool-pill { min-width: 92px; min-height: 40px; justify-content: center; transition: transform .16s ease, border-color .16s ease, background .16s ease, color .16s ease, box-shadow .16s ease; }
 .tool-pill:hover { box-shadow: 0 7px 20px rgba(0,0,0,.16); }
 .tool-pill:active { transform: translateY(1px) scale(.98); }

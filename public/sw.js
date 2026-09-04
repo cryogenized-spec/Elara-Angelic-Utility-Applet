@@ -1,4 +1,4 @@
-const CACHE_NAME = 'elara-shell-v6';
+const CACHE_NAME = 'elara-shell-v7';
 const SHELL = [
   './',
   './index.html',

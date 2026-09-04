@@ -19,12 +19,12 @@ test('Google settings render independent Workspace authorization states', async 
 
   await expect(page.getByRole('heading', { name: 'Google' })).toBeVisible();
   await expect(page.getByText('Partially authorized · test@example.com')).toBeVisible();
-  await expect(page.getByText('Google Calendar')).toBeVisible();
-  await expect(page.getByText('Google Tasks')).toBeVisible();
-  await expect(page.getByText('Gmail')).toBeVisible();
-  await expect(page.getByText('Google Drive')).toBeVisible();
-  await expect(page.getByText('Google Docs')).toBeVisible();
-  await expect(page.getByText('Google Sheets')).toBeVisible();
+  await expect(page.getByText('Google Calendar', { exact: true })).toBeVisible();
+  await expect(page.getByText('Google Tasks', { exact: true })).toBeVisible();
+  await expect(page.getByText('Gmail', { exact: true })).toBeVisible();
+  await expect(page.getByText('Google Drive', { exact: true })).toBeVisible();
+  await expect(page.getByText('Google Docs', { exact: true })).toBeVisible();
+  await expect(page.getByText('Google Sheets', { exact: true })).toBeVisible();
   await expect(page.getByText('Read ready').first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Connect' })).toHaveCount(3);
   await expect(page.getByRole('button', { name: 'Enable writes' })).toHaveCount(3);

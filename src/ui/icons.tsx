@@ -42,7 +42,7 @@ const paths: Record<IconName, ReactNode> = {
   search: <><circle cx="10.5" cy="10.5" r="6.5" /><path d="m16 16 4.5 4.5" /></>,
   dots: <><circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" /></>,
   expand: <><path d="M9 4H4v5M15 4h5v5M9 20H4v-5M20 15v5h-5" /></>,
-  collapse: <><path d="m9 9-5-5M15 9l5-5M9 15l-5 5M15 15l5 5" /></>,
+  collapse: <><path d="M9 3v6H3M15 3v6h6M9 21v-6H3M21 15v6h-6" /></>,
 };
 
 export function Icon({ name, size = 20, strokeWidth = 1.7, style }: { name: IconName; size?: number; strokeWidth?: number; style?: CSSProperties }) {

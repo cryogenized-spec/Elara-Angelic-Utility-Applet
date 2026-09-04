@@ -18,7 +18,7 @@ test('Google settings render independent Workspace authorization states', async 
   await page.getByRole('button', { name: 'Google' }).click();
 
   await expect(page.getByRole('heading', { name: 'Google' })).toBeVisible();
-  await expect(page.getByText('Connected · test@example.com')).toBeVisible();
+  await expect(page.getByText('Partially authorized · test@example.com')).toBeVisible();
   await expect(page.getByText('Google Calendar')).toBeVisible();
   await expect(page.getByText('Google Tasks')).toBeVisible();
   await expect(page.getByText('Gmail')).toBeVisible();

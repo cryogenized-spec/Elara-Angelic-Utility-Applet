@@ -202,21 +202,26 @@ async function handleTranscribe(request: Request, env: Env): Promise<Response> {
   if (bytes.byteLength > VTT_MAX_AUDIO_BYTES) return jsonResponse(request, env, { code: 'validation', message: 'VTT audio capture is too large.' }, 413);
 
   const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, apiVersion: 'v1' });
-  const audioFile = await client.files.upload({
-    file: new Blob([bytes], { type: contentType }),
-    config: { mimeType: contentType },
-  });
-  if (!audioFile.uri || !audioFile.mimeType) return jsonResponse(request, env, { code: 'provider', message: 'Gemini did not return a usable uploaded audio file.' }, 502);
+  let audioFile: { name?: string; uri?: string; mimeType?: string } | undefined;
+  try {
+    audioFile = await client.files.upload({
+      file: new Blob([bytes], { type: contentType }),
+      config: { mimeType: contentType },
+    });
+    if (!audioFile.uri || !audioFile.mimeType) return jsonResponse(request, env, { code: 'provider', message: 'Gemini did not return a usable uploaded audio file.' }, 502);
 
-  const interaction = await client.interactions.create({
-    model: 'gemini-3.5-transcribe',
-    input: [{ type: 'audio', uri: audioFile.uri, mime_type: audioFile.mimeType }],
-    generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
-    store: false,
-  });
-  const transcript = typeof interaction.output_text === 'string' ? interaction.output_text.trim() : '';
-  if (!transcript) return jsonResponse(request, env, { code: 'empty', message: 'No speech was detected.' }, 422);
-  return jsonResponse(request, env, { transcript });
+    const interaction = await client.interactions.create({
+      model: 'gemini-3.5-transcribe',
+      input: [{ type: 'audio', uri: audioFile.uri, mime_type: audioFile.mimeType }],
+      generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
+      store: false,
+    });
+    const transcript = typeof interaction.output_text === 'string' ? interaction.output_text.trim() : '';
+    if (!transcript) return jsonResponse(request, env, { code: 'empty', message: 'No speech was detected.' }, 422);
+    return jsonResponse(request, env, { transcript });
+  } finally {
+    if (audioFile?.name) await client.files.delete({ name: audioFile.name }).catch(() => undefined);
+  }
 }
 
 export default { async fetch(request: Request, env: Env): Promise<Response> {

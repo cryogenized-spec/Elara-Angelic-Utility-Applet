@@ -25,6 +25,8 @@ test('regeneration creates navigable response variants for the same prompt', asy
   await expect(page.getByText('First generated answer.')).toBeVisible();
 
   expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('SYSTEM INSTRUCTION INTEGRITY'));
+  expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('Default to being in character as Elara.'));
+  expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('Narrate physical action and scene narration in *italics*.'));
   expect(requests[0]?.input).toBe('Give me two concise ideas.');
 
   await page.getByRole('button', { name: 'Regenerate response' }).click();

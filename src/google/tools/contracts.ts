@@ -6,6 +6,8 @@ export const googleToolNameSchema = z.enum([
   'docs.getDocument', 'docs.createDocument', 'docs.batchUpdate',
   'chat.listMessages', 'chat.getMessage', 'chat.createMessage', 'chat.updateMessage', 'chat.deleteMessage',
   'gmail.listMessages', 'gmail.getMessage', 'gmail.listThreads', 'gmail.getThread', 'gmail.listLabels', 'gmail.getLabel', 'gmail.modifyMessage', 'gmail.modifyThread', 'gmail.trashMessage', 'gmail.untrashMessage', 'gmail.trashThread', 'gmail.untrashThread', 'gmail.createLabel', 'gmail.updateLabel', 'gmail.deleteLabel', 'gmail.sendMessage',
+  'drive.searchFiles', 'drive.getFile', 'drive.downloadFile', 'drive.createFile', 'drive.updateFile', 'drive.moveFile',
+  'sheets.getSpreadsheet', 'sheets.readRange', 'sheets.writeRange', 'sheets.appendRows', 'sheets.batchUpdate',
 ]);
 
 export type GoogleToolName = z.infer<typeof googleToolNameSchema>;

@@ -114,4 +114,38 @@ describe('protected Google OAuth Worker', () => {
     const providerOptions = fetchMock.mock.calls[2]?.[1] as RequestInit;
     expect(new Headers(providerOptions?.headers).get('Authorization')).toBe('Bearer access-123');
   });
+
+  it('advertises the proxy target header during credentialed browser preflight', async () => {
+    const runtime = env();
+    const response = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/proxy', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://cryogenized-spec.github.io',
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Headers': 'content-type, x-elara-google-capability, x-elara-google-target',
+      },
+    }), runtime);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://cryogenized-spec.github.io');
+    expect(response.headers.get('Access-Control-Allow-Credentials')).toBe('true');
+    expect(response.headers.get('Access-Control-Allow-Headers')).toContain('X-Elara-Google-Target');
+  });
+
+  it('rejects a Google target outside the capability allow-list before contacting the provider', async () => {
+    const runtime = env();
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    const response = await handleGoogleOAuthRequest(new Request('https://elara-gemini.cryogenized.workers.dev/api/google/oauth/proxy', {
+      method: 'GET',
+      headers: {
+        Origin: 'https://cryogenized-spec.github.io',
+        Cookie: '__Host-elara_google_session=missing',
+        'X-Elara-Google-Capability': 'calendar.events.read',
+        'X-Elara-Google-Target': 'https://example.com/steal',
+      },
+    }), runtime);
+
+    expect(response.status).toBe(403);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

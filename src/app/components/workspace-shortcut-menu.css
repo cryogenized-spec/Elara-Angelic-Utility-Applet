@@ -1,0 +1,56 @@
+.workspace-shortcut-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 45;
+  width: min(292px, calc(100vw - 32px));
+  max-height: min(58vh, 420px);
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 16px;
+  background: rgba(13,13,23,.96);
+  box-shadow: 0 18px 48px rgba(0,0,0,.38), inset 0 1px 0 rgba(255,255,255,.035);
+  backdrop-filter: blur(18px);
+}
+.workspace-shortcut-menu__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 7px 8px;
+  color: rgba(255,255,255,.56);
+  font-size: 10px;
+  letter-spacing: .12em;
+}
+.workspace-shortcut-menu__header button {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  color: rgba(255,255,255,.7);
+  background: rgba(255,255,255,.045);
+}
+.workspace-shortcut-menu__items { display: grid; gap: 4px; }
+.workspace-shortcut-menu__item {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid transparent;
+  border-radius: 11px;
+  text-align: left;
+  color: rgba(255,255,255,.9);
+  background: transparent;
+}
+.workspace-shortcut-menu__item:hover,
+.workspace-shortcut-menu__item:focus-visible { background: rgba(255,255,255,.055); border-color: rgba(255,255,255,.08); outline: none; }
+.workspace-shortcut-menu__item span { font-size: 14px; line-height: 1.2; }
+.workspace-shortcut-menu__item small { font-size: 11px; line-height: 1.35; color: rgba(255,255,255,.48); }
+@media (max-width: 560px) {
+  .workspace-shortcut-menu { top: calc(100% + 6px); width: min(300px, calc(100vw - 24px)); max-height: 62vh; }
+}

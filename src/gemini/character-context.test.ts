@@ -2,12 +2,23 @@ import { describe, expect, it } from 'vitest';
 import { buildCharacterInstruction } from './character-context';
 import { DEFAULT_CHARACTER_PROFILE } from '../domain/character';
 import { DEFAULT_ROLEPLAY } from '../domain/preferences';
+import { ELARA_SYSTEM_INSTRUCTION, LEGACY_CHARACTER_SYSTEM_INSTRUCTION } from '../character/system-instruction';
 
 describe('buildCharacterInstruction', () => {
-  it('returns only the character master instruction when roleplay is disabled', () => {
+  it('uses the canonical Elara system instruction by default', () => {
     const result = buildCharacterInstruction(DEFAULT_CHARACTER_PROFILE, DEFAULT_ROLEPLAY);
-    expect(result).toBe(DEFAULT_CHARACTER_PROFILE.systemInstruction.trim());
+    expect(result).toBe(ELARA_SYSTEM_INSTRUCTION);
     expect(result).not.toContain('CREATIVE ROLEPLAY CONTEXT');
+  });
+
+  it('upgrades the legacy placeholder to the canonical instruction', () => {
+    const legacy = { ...DEFAULT_CHARACTER_PROFILE, systemInstruction: LEGACY_CHARACTER_SYSTEM_INSTRUCTION };
+    expect(buildCharacterInstruction(legacy, DEFAULT_ROLEPLAY)).toBe(ELARA_SYSTEM_INSTRUCTION);
+  });
+
+  it('preserves an explicitly customized character instruction', () => {
+    const custom = { ...DEFAULT_CHARACTER_PROFILE, systemInstruction: 'Always answer like a concise museum guide.' };
+    expect(buildCharacterInstruction(custom, DEFAULT_ROLEPLAY)).toBe(custom.systemInstruction);
   });
 
   it('adds structured creative context without turning it into chat content', () => {
@@ -22,7 +33,7 @@ describe('buildCharacterInstruction', () => {
       atmosphere: 'intimate and calm',
     });
 
-    expect(result).toContain(DEFAULT_CHARACTER_PROFILE.systemInstruction.trim());
+    expect(result).toContain(ELARA_SYSTEM_INSTRUCTION);
     expect(result).toContain('CREATIVE ROLEPLAY CONTEXT');
     expect(result).toContain('The Moonlit Room');
     expect(result).toContain('A quiet room with low light.');

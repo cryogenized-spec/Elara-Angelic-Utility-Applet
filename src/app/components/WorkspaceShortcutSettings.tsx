@@ -19,8 +19,12 @@ export function WorkspaceShortcutSettings() {
 
   async function toggle(shortcut: StoredWorkspaceShortcut) {
     const next = { ...shortcut, enabled: !shortcut.enabled };
-    await workspaceShortcutStore.save(next);
     setShortcuts((current) => current.map((item) => item.id === next.id ? next : item));
+    try {
+      await workspaceShortcutStore.save(next);
+    } catch {
+      setShortcuts((current) => current.map((item) => item.id === shortcut.id ? shortcut : item));
+    }
   }
 
   return (

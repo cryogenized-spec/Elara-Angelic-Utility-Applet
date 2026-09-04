@@ -31,6 +31,8 @@ export interface ChatMessage {
   text: string;
   createdAt: number;
   conversationId?: string;
+  responseGroupId?: string;
+  responseVariant?: number;
   executionSummary?: ExecutionSummary;
   providerTurn?: ProviderTurnMetadata;
 }

@@ -173,7 +173,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
             <Icon name="paperclip" size={20} />
           </button>
           <div className="composer-expanded__spacer" />
-          <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={status === 'streaming' || vttState === 'processing' || vttState === 'requesting'} onClick={() => void handleVtt(expandedTextareaRef.current)}>
+          <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={composerLocked} onClick={() => void handleVtt(expandedTextareaRef.current)}>
             <VttMeter />
             <Icon name="mic" size={20} />
           </button>
@@ -200,7 +200,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
           <Icon name="expand" size={15} />
         </button>
       </div>
-      <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={status === 'streaming' || vttState === 'processing' || vttState === 'requesting'} onClick={() => void handleVtt(textareaRef.current)}>
+      <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={composerLocked} onClick={() => void handleVtt(textareaRef.current)}>
         <VttMeter />
         <Icon name="mic" size={20} />
       </button>

@@ -1,12 +1,14 @@
+import type { IconName } from '../ui/icons';
 import type { QuickActionId } from '../app/quick-actions/contracts';
-import { DEFAULT_WORKSPACE_SHORTCUTS, type WorkspaceShortcutDefinition, type WorkspaceShortcutId } from '../app/quick-actions/shortcuts';
+import { DEFAULT_WORKSPACE_SHORTCUTS, type WorkspaceShortcutDefinition } from '../app/quick-actions/shortcuts';
 import type { GoogleToolName } from '../google/tools/contracts';
+import { deleteWorkspaceShortcut, loadWorkspaceShortcuts, saveWorkspaceShortcut } from './conversation';
 
 export interface StoredWorkspaceShortcut {
   id: string;
   service: QuickActionId;
   label: string;
-  icon: WorkspaceShortcutDefinition['service'];
+  icon: IconName;
   intent: string;
   source: 'built-in' | 'generated';
   requiredCapabilities: string[];
@@ -20,11 +22,12 @@ export interface StoredWorkspaceShortcut {
 
 export function storedShortcutFromDefinition(definition: WorkspaceShortcutDefinition, order: number): StoredWorkspaceShortcut {
   const now = Date.now();
+  const icon: IconName = definition.service === 'calendar' ? 'calendar' : definition.service === 'tasks' ? 'tasks' : 'mail';
   return {
     id: definition.id,
     service: definition.service,
     label: definition.label,
-    icon: definition.service,
+    icon,
     intent: definition.intent,
     source: 'built-in',
     requiredCapabilities: [...definition.requiredCapabilities],
@@ -36,32 +39,28 @@ export function storedShortcutFromDefinition(definition: WorkspaceShortcutDefini
   };
 }
 
-export interface WorkspaceShortcutStore {
-  list(): Promise<StoredWorkspaceShortcut[]>;
-  save(shortcut: StoredWorkspaceShortcut): Promise<void>;
-  delete(id: string): Promise<void>;
-}
-
-export class InMemoryWorkspaceShortcutStore implements WorkspaceShortcutStore {
-  private readonly records = new Map<string, StoredWorkspaceShortcut>();
-
-  constructor(seed: readonly StoredWorkspaceShortcut[] = defaultStoredWorkspaceShortcuts()) {
-    seed.forEach((record) => this.records.set(record.id, record));
-  }
-
-  async list() { return [...this.records.values()].sort((a, b) => a.order - b.order); }
-  async save(shortcut: StoredWorkspaceShortcut) { this.records.set(shortcut.id, shortcut); }
-  async delete(id: string) { this.records.delete(id); }
-}
-
 export function defaultStoredWorkspaceShortcuts(): StoredWorkspaceShortcut[] {
   return DEFAULT_WORKSPACE_SHORTCUTS.map((shortcut, index) => storedShortcutFromDefinition(shortcut, index));
 }
 
+export async function ensureWorkspaceShortcuts(): Promise<StoredWorkspaceShortcut[]> {
+  const current = await loadWorkspaceShortcuts();
+  if (current.length > 0) return current;
+  const defaults = defaultStoredWorkspaceShortcuts();
+  for (const shortcut of defaults) await saveWorkspaceShortcut(shortcut);
+  return defaults;
+}
+
+export const workspaceShortcutStore = {
+  list: ensureWorkspaceShortcuts,
+  save: saveWorkspaceShortcut,
+  delete: deleteWorkspaceShortcut,
+};
+
 export function workspaceShortcutDefinition(record: StoredWorkspaceShortcut): WorkspaceShortcutDefinition {
-  const base = DEFAULT_WORKSPACE_SHORTCUTS.find((shortcut) => shortcut.id === record.id as WorkspaceShortcutId);
+  const base = DEFAULT_WORKSPACE_SHORTCUTS.find((shortcut) => shortcut.id === record.id);
   return {
-    id: record.id as WorkspaceShortcutId,
+    id: record.id as WorkspaceShortcutDefinition['id'],
     service: record.service,
     label: record.label,
     description: base?.description ?? record.label,

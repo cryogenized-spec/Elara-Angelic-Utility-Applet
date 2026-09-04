@@ -66,7 +66,12 @@ describe('Gemini registered tool loop', () => {
     expect(response.status).toBe(200);
     expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({
       previous_interaction_id: 'interaction-1',
-      input: [{ type: 'function_result', name: 'calendar.listEvents', call_id: 'call-1' }],
+      input: [{
+        type: 'function_result',
+        name: 'calendar.listEvents',
+        call_id: 'call-1',
+        result: [{ type: 'text', text: JSON.stringify({ events: [] }) }],
+      }],
     }));
   });
 

@@ -1,6 +1,10 @@
+import { useState } from 'react';
 import { Icon } from '../../ui/icons';
 import { DEFAULT_QUICK_ACTIONS } from '../quick-actions/defaults';
+import { shortcutsForService, type WorkspaceShortcutDefinition } from '../quick-actions/shortcuts';
 import type { QuickActionId } from '../quick-actions/contracts';
+import { WorkspaceShortcutMenu } from './WorkspaceShortcutMenu';
+import './workspace-shortcut-menu.css';
 
 export type QuickTool = typeof DEFAULT_QUICK_ACTIONS[number];
 
@@ -10,24 +14,38 @@ export function TopToolRail({
   activeId = null,
 }: {
   tools?: readonly QuickTool[];
-  onAction: (id: QuickActionId) => void;
+  onAction: (shortcut: WorkspaceShortcutDefinition) => void;
   activeId?: QuickActionId | null;
 }) {
+  const [openId, setOpenId] = useState<QuickActionId | null>(null);
+
+  function toggle(tool: QuickTool) {
+    setOpenId((current) => current === tool.id ? null : tool.id);
+  }
+
+  function select(shortcut: WorkspaceShortcutDefinition) {
+    setOpenId(null);
+    onAction(shortcut);
+  }
+
   return (
     <nav className="tool-rail" aria-label="Quick actions">
       <div className="tool-rail__track">
         {tools.map((tool) => (
-          <button
-            className={`tool-pill${activeId === tool.id ? ' is-active' : ''}`}
-            type="button"
-            key={tool.id}
-            aria-pressed={activeId === tool.id}
-            title={tool.description}
-            onClick={() => onAction(tool.id)}
-          >
-            <Icon name={tool.icon} size={17} />
-            <span>{tool.label}</span>
-          </button>
+          <div className="tool-pill__wrap" key={tool.id}>
+            <button
+              className={`tool-pill${activeId === tool.id ? ' is-active' : ''}`}
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={openId === tool.id}
+              title={tool.description}
+              onClick={() => toggle(tool)}
+            >
+              <Icon name={tool.icon} size={17} />
+              <span>{tool.label}</span>
+            </button>
+            {openId === tool.id && <WorkspaceShortcutMenu service={tool.id} shortcuts={shortcutsForService(tool.id)} onSelect={select} onClose={() => setOpenId(null)} />}
+          </div>
         ))}
       </div>
     </nav>

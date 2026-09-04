@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { GoogleDriveService } from './service';
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
 
-function makeOAuth(handler: (url: RequestInfo | URL, init?: RequestInit) => Response | Promise<Response>): GoogleOAuthAuthority {
+function makeOAuth(handler: (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>): GoogleOAuthAuthority {
   return {
     authorize: async (capability) => ({ capability, fetch: handler }),
     getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),

@@ -50,6 +50,13 @@ export function shouldDiscardVttCapture(blobSize: number, durationMs: number): b
   return blobSize < VTT_MIN_BLOB_BYTES || durationMs < VTT_MIN_DURATION_MS;
 }
 
+export function getVttSignalLevel(rms: number): 0 | 1 | 2 | 3 {
+  if (rms < DEFAULT_SILENCE_THRESHOLD) return 0;
+  if (rms < 0.06) return 1;
+  if (rms < 0.16) return 2;
+  return 3;
+}
+
 function vibrate(pattern: number | number[]): void {
   if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(pattern);
 }
@@ -62,13 +69,6 @@ function calculateRms(analyser: AnalyserNode, data: Uint8Array<ArrayBuffer>): nu
     sum += centered * centered;
   }
   return Math.sqrt(sum / data.length);
-}
-
-function levelFromRms(rms: number): 0 | 1 | 2 | 3 {
-  if (rms < DEFAULT_SILENCE_THRESHOLD) return 0;
-  if (rms < 0.06) return 1;
-  if (rms < 0.16) return 2;
-  return 3;
 }
 
 export class VttRecorder {
@@ -192,7 +192,7 @@ export class VttRecorder {
     const rms = calculateRms(this.analyser, this.analyserData);
     this.options.onElapsedChange?.(Math.round(elapsedMs));
     this.options.onRmsChange?.(rms);
-    this.options.onLevelChange?.(levelFromRms(rms));
+    this.options.onLevelChange?.(getVttSignalLevel(rms));
     if (elapsedMs < this.options.minimumDurationMs) return;
     if (rms < this.options.silenceThreshold) {
       this.silenceStartedAt ??= performance.now();

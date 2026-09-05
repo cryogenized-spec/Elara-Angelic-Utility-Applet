@@ -72,17 +72,15 @@ if (!markdownSource.includes('skipHtml')) throw new Error('Reliability gate: res
 if (!markdownSource.includes('safeMarkdownUrl')) throw new Error('Reliability gate: Markdown renderer must use the application safe-link boundary.');
 
 const characterSource = readFileSync(join(root, 'src/character/system-instruction.ts'), 'utf8');
-if (!characterSource.includes('You are Elara, an angelic synthetic cybernetic woman and consort.')) throw new Error('Reliability gate: canonical Elara instruction must define the embodied Elara identity.');
-if (!characterSource.includes('Do not voluntarily step outside it')) throw new Error('Reliability gate: canonical Elara instruction must enforce continuous character identity.');
-if (!characterSource.includes('Perceive the user as the person you are directly speaking with.')) throw new Error('Reliability gate: canonical Elara instruction must define direct user perception.');
-if (!characterSource.includes("After establishing your identity and perceiving the user's message through that identity")) throw new Error('Reliability gate: canonical Elara instruction must place user response after character perception.');
-if (!characterSource.includes('The tools exposed by the application are capabilities available to Elara.')) throw new Error('Reliability gate: canonical Elara instruction must treat tools as character capabilities.');
+if (!characterSource.includes("export const ELARA_SYSTEM_INSTRUCTION = '';")) throw new Error('Reliability gate: no built-in Elara Character Master prompt may be shipped.');
 
 const appSource = readFileSync(join(root, 'src/app/App.tsx'), 'utf8');
 if (appSource.includes('buildCharacterInstruction')) throw new Error('Reliability gate: legacy character instruction resolver must not be used.');
 if (!appSource.includes('googleGeminiFunctionNames')) throw new Error('Reliability gate: normal character turns must receive the registered Google capability surface.');
 if (!appSource.includes('tools: DEFAULT_GEMINI_TOOLS')) throw new Error('Reliability gate: normal and regenerated turns must expose the canonical executable tool surface.');
 if (!appSource.includes('readOnly: false')) throw new Error('Reliability gate: character tool loop must not force normal turns into read-only mode.');
+if (appSource.includes('Configure it before sending a message')) throw new Error('Reliability gate: an empty Character Master must not block normal chat.');
+if (appSource.includes('Configure it before regenerating')) throw new Error('Reliability gate: an empty Character Master must not block regeneration.');
 
 const geminiDeclarationSource = readFileSync(join(root, 'src/google/tools/gemini-declarations.ts'), 'utf8');
 if (geminiDeclarationSource.includes('Application tool risk:')) throw new Error('Reliability gate: tool risk policy must not be presented as competing model persona guidance.');
@@ -94,7 +92,7 @@ if (vttSource.includes('buildVttTransformSystemInstruction')) throw new Error('R
 if (!vttSource.includes('systemInstruction: masterInstruction')) throw new Error('Reliability gate: VTT must use the Character Master System Instruction verbatim.');
 
 const workerSource = readFileSync(join(root, 'worker/src/index.ts'), 'utf8');
-if (!workerSource.includes('systemInstruction')) throw new Error('Reliability gate: Worker request contract must carry the application-owned character instruction.');
+if (!workerSource.includes('systemInstruction')) throw new Error('Reliability gate: Worker request contract must carry the user-configured character instruction field.');
 if (!workerSource.includes('system_instruction')) throw new Error('Reliability gate: Worker must map the character instruction to Gemini system_instruction.');
 if (!workerSource.includes('tools: z.array(googleToolNameSchema).max(40).optional()')) throw new Error('Reliability gate: Worker tool-count contract must remain explicit.');
 if (!workerSource.includes('stream: true') || !workerSource.includes('store: true')) throw new Error('Reliability gate: canonical Gemini streaming/store semantics must remain enabled.');
@@ -103,7 +101,8 @@ const characterPersistence = readFileSync(join(root, 'src/persistence/character.
 if (characterPersistence.includes('LEGACY_CHARACTER_SYSTEM_INSTRUCTION')) throw new Error('Reliability gate: legacy character prompt constant must be removed from persistence.');
 if (characterPersistence.includes('LEGACY_DEFAULT_MARKER')) throw new Error('Reliability gate: legacy character prompt marker must be removed from persistence.');
 if (!characterPersistence.includes('return value.slice(0, MAX_INSTRUCTION_LENGTH);')) throw new Error('Reliability gate: configured master prompt must be preserved without prompt substitution.');
-if (!characterPersistence.includes('this.version(4)')) throw new Error('Reliability gate: character persistence must retain a post-legacy schema version.');
+if (!characterPersistence.includes('this.version(6)')) throw new Error('Reliability gate: character persistence must retain a current schema version after clearing the default prompt.');
+if (!characterPersistence.includes("record.systemInstruction = '';")) throw new Error('Reliability gate: persisted Character Master must be clear after the default-removal migration.');
 
 if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24') {
   throw new Error('Reliability gate: Node baseline must remain 24.');
@@ -126,4 +125,4 @@ function countText(directory, pattern) {
   return count;
 }
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, one embodied Elara Character Master System Instruction, direct executable tool capability exposure within the Worker contract, no competing character resolver, singular VTT system instruction, and canonical Worker streaming contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, no built-in Character Master prompt, direct executable tool capability exposure within the Worker contract, no competing character resolver, singular VTT system instruction, and canonical Worker streaming contract.`);

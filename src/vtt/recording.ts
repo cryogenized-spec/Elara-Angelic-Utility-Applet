@@ -39,7 +39,7 @@ const SUPPORTED_MIME_TYPES = [
   'audio/ogg',
 ] as const;
 
-export function getSupportedVttMimeType(mediaRecorder: Pick<typeof MediaRecorder, 'isTypeSupported'> = MediaRecorder): string {
+export function getSupportedVttMimeType(mediaRecorder: Pick<typeof MediaRecorder, 'isTypeSupported'> = globalThis.MediaRecorder): string {
   for (const mimeType of SUPPORTED_MIME_TYPES) {
     if (mediaRecorder.isTypeSupported(mimeType)) return mimeType;
   }
@@ -107,11 +107,11 @@ export class VttRecorder {
   async start(): Promise<VttCapture> {
     if (this.recorder && this.recorder.state !== 'inactive') throw new Error('VTT recording is already active.');
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone capture is not supported by this browser.');
-    if (typeof MediaRecorder === 'undefined') throw new Error('This browser does not support microphone recording.');
+    if (typeof globalThis.MediaRecorder === 'undefined') throw new Error('This browser does not support microphone recording.');
 
     this.setState('requesting');
     try {
-      const mimeType = getSupportedVttMimeType(MediaRecorder);
+      const mimeType = getSupportedVttMimeType(globalThis.MediaRecorder);
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.startedAt = performance.now();
       this.silenceStartedAt = null;
@@ -120,7 +120,7 @@ export class VttRecorder {
       this.options.onLevelChange?.(0);
       this.setupMeter(this.stream);
       const chunks: BlobPart[] = [];
-      this.recorder = new MediaRecorder(this.stream, { mimeType, audioBitsPerSecond: VTT_AUDIO_BITRATE });
+      this.recorder = new globalThis.MediaRecorder(this.stream, { mimeType, audioBitsPerSecond: VTT_AUDIO_BITRATE });
       this.recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
       this.recorder.onerror = () => this.fail(new Error('The browser could not record microphone audio.'));
       this.recorder.onstop = () => {
@@ -141,14 +141,16 @@ export class VttRecorder {
         this.resolveCapture = null;
         this.rejectCapture = null;
       };
+
+      const capturePromise = new Promise<VttCapture>((resolve, reject) => {
+        this.resolveCapture = resolve;
+        this.rejectCapture = reject;
+      });
       this.recorder.start(250);
       vibrate(20);
       this.setState('recording');
       this.maxDurationTimer = window.setTimeout(() => this.stop(), this.options.maximumDurationMs);
-      return await new Promise<VttCapture>((resolve, reject) => {
-        this.resolveCapture = resolve;
-        this.rejectCapture = reject;
-      });
+      return await capturePromise;
     } catch (cause) {
       this.cleanup(true);
       this.setState('failed');

@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+async function openSettings(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+}
+
 test('Google settings render independent Workspace authorization states', async ({ page }) => {
   await page.route('**/api/google/oauth/status', async (route) => {
     await route.fulfill({
@@ -14,7 +19,7 @@ test('Google settings render independent Workspace authorization states', async 
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Google' }).click();
 
   await expect(page.getByRole('heading', { name: 'Google' })).toBeVisible();
@@ -49,7 +54,7 @@ test('Google settings can disconnect and refresh normalized status', async ({ pa
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Google' }).click();
   await expect(page.getByText('Connected · test@example.com')).toBeVisible();
 

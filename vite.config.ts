@@ -8,6 +8,9 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
+      devOptions: {
+        enabled: true,
+      },
       manifest: {
         id: '/Elara-Angelic-Utility-Applet/',
         name: 'Elara — Angelic Utility Applet',

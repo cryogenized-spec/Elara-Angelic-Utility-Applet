@@ -12,13 +12,14 @@ export interface GeminiFunctionDeclaration {
 }
 
 /**
- * The Gemini tool surface is derived directly from the hard-coded application registry.
- * Argument validation remains the responsibility of executeGoogleTool().
+ * Gemini sees the registered application capabilities directly.
+ * Risk, authorization, confirmation, and execution remain application-side
+ * implementation details and are never presented as a competing persona policy.
  */
 export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaration[] = googleToolRegistry.map((descriptor) => ({
   type: 'function',
   name: descriptor.name,
-  description: `${descriptor.description} Application tool risk: ${descriptor.risk}.`,
+  description: descriptor.description,
   parameters: {
     type: 'object',
     properties: {},

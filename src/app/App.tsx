@@ -11,6 +11,7 @@ import { geminiTurnPort } from '../gemini/provider';
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent } from '../gemini/contracts';
 import type { GoogleToolName } from '../google/tools/contracts';
+import { googleGeminiFunctionNames } from '../google/tools/gemini-declarations';
 import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import { getGeminiModel } from '../gemini/model-registry';
 import { Icon } from '../ui/icons';
@@ -32,6 +33,7 @@ import './components/composer-layout.css';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 const DEFAULT_TITLE = 'New conversation';
+const DEFAULT_GEMINI_TOOLS = googleGeminiFunctionNames() as readonly GoogleToolName[];
 const makeMessage = (role: ChatMessage['role'], text: string, conversationId: string): ChatMessage => ({ id: `${role}-${crypto.randomUUID()}`, role, text, conversationId, createdAt: Date.now() });
 
 function backgroundValue(preferences: ChatAppearancePreferences): string {
@@ -44,8 +46,7 @@ function backgroundValue(preferences: ChatAppearancePreferences): string {
 }
 
 function masterCharacterInstruction(character: CharacterProfile): string {
-  const instruction = character.systemInstruction.trim();
-  return instruction || DEFAULT_CHARACTER_PROFILE.systemInstruction;
+  return character.systemInstruction.trim();
 }
 
 export function App() {
@@ -118,11 +119,12 @@ export function App() {
   async function send() {
     const text = draft.trim();
     if (!text || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
+    const systemInstruction = masterCharacterInstruction(character);
+    if (!systemInstruction) { setError('Character Master System Instruction is empty. Configure it before sending a message.'); return; }
     setDraft(''); setError(null); setStatus('streaming');
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = masterCharacterInstruction(character);
     try {
       const userMessage = makeMessage('user', text, conversationId); const withUser = await appendMessage(userMessage, conversationId); if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       let titled = withUser;
@@ -130,7 +132,7 @@ export function App() {
       if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       setConversation((current) => activeConversationIdRef.current === conversationId ? titled : current); await refreshThreads();
       if (activeConversationIdRef.current !== conversationId) return;
-      await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, responseGroupId: userMessage.id, responseVariant: 1 });
+      await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, responseGroupId: userMessage.id, responseVariant: 1 });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
@@ -168,11 +170,12 @@ export function App() {
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     const systemInstruction = masterCharacterInstruction(character);
+    if (!systemInstruction) { setError('Character Master System Instruction is empty. Configure it before regenerating.'); return; }
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setError(null); setStatus('streaming');
     try {
-      await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, previousInteractionId, responseGroupId: groupId, responseVariant: nextVariant });
+      await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, previousInteractionId, responseGroupId: groupId, responseVariant: nextVariant });
     } catch (cause) {
       if (activeConversationIdRef.current !== workingConversation.id) return;
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
@@ -189,7 +192,8 @@ export function App() {
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     const systemInstruction = masterCharacterInstruction(character);
-    const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut. Do not perform write, destructive, or send actions.`;
+    if (!systemInstruction) { setStatus('idle'); setError('Character Master System Instruction is empty. Configure it before using a Workspace capability.'); return; }
+    const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut.`;
     try {
       await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
     } catch (cause) {

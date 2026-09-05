@@ -6,6 +6,7 @@ vi.mock('@google/genai', () => ({ GoogleGenAI: class { interactions = { create: 
 import worker from './index';
 
 const env = { GEMINI_API_KEY: 'test-key', ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io' };
+const systemInstruction = 'You are Elara, an angelic synthetic cybernetic woman and consort.';
 
 async function* eventStream(...items: unknown[]) { for (const item of items) yield item; }
 
@@ -35,7 +36,7 @@ describe('Gemini registered tool loop', () => {
     const response = await worker.fetch(new Request('https://worker.example/api/gemini', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Origin: 'https://cryogenized-spec.github.io' },
-      body: JSON.stringify({ model: 'gemini-3.8-flash', input: 'Show my calendar today.', tools: ['calendar.listEvents'] }),
+      body: JSON.stringify({ model: 'gemini-3.8-flash', input: 'Show my calendar today.', systemInstruction, tools: ['calendar.listEvents'] }),
     }), env);
 
     const events = await parseSse(response);
@@ -43,7 +44,10 @@ describe('Gemini registered tool loop', () => {
     expect(response.status).toBe(200);
     expect(call?.data).toEqual(expect.objectContaining({ interaction_id: 'interaction-1', call_id: 'call-1', name: 'calendar.listEvents', arguments: { timeMin: '2026-09-04T00:00:00Z', timeMax: '2026-09-04T23:59:59Z' } }));
     expect(events.some((item) => item.event === 'interaction.requires_action')).toBe(true);
-    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({ tools: [expect.objectContaining({ type: 'function', name: 'calendar.listEvents' })] }));
+    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({
+      system_instruction: systemInstruction,
+      tools: [expect.objectContaining({ type: 'function', name: 'calendar.listEvents' })],
+    }));
   });
 
   it('continues an interaction from a registered tool result', async () => {
@@ -58,6 +62,7 @@ describe('Gemini registered tool loop', () => {
       body: JSON.stringify({
         model: 'gemini-3.8-flash',
         previousInteractionId: 'interaction-1',
+        systemInstruction,
         tools: ['calendar.listEvents'],
         toolResult: { callId: 'call-1', name: 'calendar.listEvents', result: { events: [] } },
       }),
@@ -66,6 +71,7 @@ describe('Gemini registered tool loop', () => {
     expect(response.status).toBe(200);
     expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({
       previous_interaction_id: 'interaction-1',
+      system_instruction: systemInstruction,
       input: [{
         type: 'function_result',
         name: 'calendar.listEvents',

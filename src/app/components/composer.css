@@ -10,15 +10,23 @@
 .composer__expand:disabled { cursor: not-allowed; opacity: .45; }
 .composer__markdown { display: grid; place-items: center; font-size: 0; }
 .composer__markdown svg { display: block; width: 21px; height: 13px; }
-.composer__vtt-button { position: relative; overflow: hidden; }
-.composer__vtt-button.is-recording { color: var(--text); background: rgba(240, 123, 220, .12); border-color: rgba(240, 123, 220, .28); }
+.composer__vtt-button { position: relative; overflow: visible; isolation: isolate; }
+.composer__vtt-button.is-recording,
+.composer__vtt-button[aria-label="Recording voice input"] { color: var(--text); background: rgba(240, 123, 220, .12); border-color: rgba(240, 123, 220, .34); box-shadow: 0 0 0 1px rgba(240,123,220,.05), 0 0 22px rgba(240,123,220,.16); }
+.composer__vtt-button[aria-label="Recording voice input"]::after { content: ''; position: absolute; inset: -4px; z-index: -1; border: 1px solid rgba(240,123,220,.32); border-radius: inherit; animation: composer-vtt-button-pulse 1.55s ease-out infinite; }
+.composer__vtt-button[aria-label="Requesting microphone access"] { color: rgba(255,255,255,.7); }
+.composer__vtt-button[aria-label="Raw voice input"],
+.composer__vtt-button[aria-label="Polish voice input"],
+.composer__vtt-button[aria-label="Roleplay voice input"] { border-color: rgba(110,168,255,.2); }
 .composer__vtt-button .icon { opacity: 1; }
 .composer__vtt-status { width: min(100% - 24px, 720px); margin: 6px auto 0; color: var(--muted); font-size: 12px; text-align: center; }
-.composer__vtt-mode { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; padding: 0 5px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.035); color: var(--muted); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.composer__vtt-mode { position: relative; display: inline-flex; align-items: center; justify-content: center; min-width: 0; height: 34px; padding: 0 25px 0 10px; border: 1px solid rgba(255,255,255,.08); border-radius: 12px; background: linear-gradient(145deg, rgba(255,255,255,.05), rgba(255,255,255,.018)); box-shadow: inset 0 1px 0 rgba(255,255,255,.04), 0 5px 16px rgba(0,0,0,.14); color: rgba(255,255,255,.66); font-size: 9px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.composer__vtt-mode::after { content: ''; position: absolute; right: 9px; top: 50%; width: 5px; height: 5px; border-right: 1.5px solid rgba(255,255,255,.52); border-bottom: 1.5px solid rgba(255,255,255,.52); transform: translateY(-65%) rotate(45deg); pointer-events: none; }
 .composer__vtt-mode span { display: none; }
-.composer__vtt-mode select { max-width: 78px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 10px; font-weight: 700; }
+.composer__vtt-mode select { max-width: 92px; min-width: 54px; height: 100%; padding: 0; appearance: none; -webkit-appearance: none; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 9px; font-weight: 800; letter-spacing: .04em; text-align: center; text-transform: uppercase; cursor: pointer; }
 .composer__vtt-mode select option { background: #14121b; color: #fff; }
-.composer__vtt-mode:focus-within { outline: 2px solid var(--blue); outline-offset: 1px; }
+.composer__vtt-mode:focus-within { border-color: rgba(110,168,255,.4); box-shadow: 0 0 0 2px rgba(110,168,255,.1), inset 0 1px 0 rgba(255,255,255,.04); }
+.composer__vtt-mode:has(select:disabled) { opacity: .56; }
 
 .composer__vtt-banner {
   display: grid;
@@ -49,12 +57,23 @@
 .composer__vtt-signal { position: relative; min-width: 0; height: 34px; overflow: hidden; border-radius: 10px; background: linear-gradient(90deg, rgba(255,255,255,.025), rgba(255,255,255,.045), rgba(255,255,255,.025)); }
 .composer__vtt-signal::before { content: ''; position: absolute; inset: 50% 0 auto; height: 1px; background: rgba(255,255,255,.07); }
 .composer__vtt-signal canvas { display: block; width: 100%; height: 100%; }
+.composer__vtt-loader { display: flex; align-items: center; justify-content: center; gap: 10px; min-width: 0; height: 34px; padding: 0 8px; border-radius: 10px; background: linear-gradient(90deg, rgba(255,255,255,.02), rgba(240,123,220,.055), rgba(110,168,255,.035), rgba(255,255,255,.02)); }
+.composer__vtt-loader-orbit { position: relative; display: inline-grid; place-items: center; width: 24px; height: 24px; flex: none; }
+.composer__vtt-loader-orbit::before { content: ''; position: absolute; inset: 1px; border: 1px solid rgba(255,255,255,.1); border-radius: 50%; }
+.composer__vtt-loader-orbit::after { content: ''; position: absolute; inset: 4px; border: 1px solid transparent; border-top-color: rgba(240,123,220,.85); border-right-color: rgba(110,168,255,.65); border-radius: 50%; animation: composer-vtt-spin .85s linear infinite; }
+.composer__vtt-loader-orbit span { position: absolute; width: 3px; height: 3px; border-radius: 50%; background: rgba(255,255,255,.85); box-shadow: 0 0 8px rgba(240,123,220,.55); animation: composer-vtt-orbit 1.25s ease-in-out infinite; }
+.composer__vtt-loader-orbit span:nth-child(2) { animation-delay: .2s; opacity: .7; }
+.composer__vtt-loader-orbit span:nth-child(3) { animation-delay: .4s; opacity: .45; }
+.composer__vtt-loader-text { min-width: 0; overflow: hidden; color: rgba(255,255,255,.62); font-size: 9px; font-weight: 700; letter-spacing: .11em; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .composer__vtt-stop { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 74px; height: 36px; padding: 0 11px; border: 1px solid rgba(255,255,255,.12); border-radius: 11px; background: rgba(255,255,255,.055); color: var(--text); font: inherit; font-size: 11px; font-weight: 700; }
 .composer__vtt-stop:hover:not(:disabled) { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.2); }
 .composer__vtt-stop:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .composer__vtt-stop:disabled { cursor: progress; opacity: .72; }
 @keyframes composer-vtt-pulse { 0% { box-shadow: 0 0 0 0 rgba(255,255,255,.34); opacity: 1; } 70% { box-shadow: 0 0 0 7px rgba(255,255,255,0); opacity: .72; } 100% { box-shadow: 0 0 0 0 rgba(255,255,255,0); opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .composer__vtt-live-dot { animation: none; } }
+@keyframes composer-vtt-button-pulse { 0% { transform: scale(.96); opacity: .85; } 70% { transform: scale(1.08); opacity: 0; } 100% { transform: scale(1.08); opacity: 0; } }
+@keyframes composer-vtt-spin { to { transform: rotate(360deg); } }
+@keyframes composer-vtt-orbit { 0%, 100% { transform: translate(0, -7px) scale(.8); opacity: .3; } 50% { transform: translate(7px, 0) scale(1); opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .composer__vtt-live-dot, .composer__vtt-button[aria-label="Recording voice input"]::after, .composer__vtt-loader-orbit::after, .composer__vtt-loader-orbit span { animation: none; } }
 
 .composer-expanded { position: fixed; inset: 0; z-index: 1000; display: flex; flex-direction: column; width: 100%; height: 100dvh; min-height: 100dvh; padding: max(18px, env(safe-area-inset-top)) 18px max(14px, env(safe-area-inset-bottom)); background: radial-gradient(circle at 50% -10%, rgba(110,168,255,.12), transparent 42%), rgba(5,5,7,.98); }
 .composer-expanded__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 18px; border-bottom: 1px solid var(--line); }

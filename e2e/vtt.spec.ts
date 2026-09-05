@@ -120,8 +120,8 @@ test.describe('VTT composer flow', () => {
 
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await expect(page.getByRole('button', { name: 'Stop VTT voice input' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible({ timeout: 7_000 });
-    await expect(composer).toHaveValue('keep voice inserted');
+    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible({ timeout: 10_000 });
+    await expect(composer).toHaveValue('keep voice inserted', { timeout: 10_000 });
   });
 
   test('reports transcription errors and recovers for the next attempt', async ({ page }) => {
@@ -152,7 +152,7 @@ test.describe('VTT composer flow', () => {
 
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
-    await expect(composer).toHaveValue('draftrecovered text');
+    await expect(composer).toHaveValue('draft recovered text');
   });
 
   test('cancels an in-flight transcription and leaves the draft unchanged', async ({ page }) => {

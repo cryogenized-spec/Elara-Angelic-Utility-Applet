@@ -23,42 +23,54 @@ export async function transcribeVttCapture(capture: VttCapture, signal?: AbortSi
   const apiKey = await getGeminiApiKey();
   if (!apiKey) throw new VttTranscriptionError('configuration', 'Gemini API key is not configured in the app Lockbox.');
 
-  const controller = new AbortController();
   let timedOut = false;
-  const timeoutId = globalThis.setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, VTT_TRANSCRIPTION_TIMEOUT_MS);
-  const abortFromCaller = () => controller.abort(signal?.reason);
-
-  if (signal?.aborted) abortFromCaller();
-  else signal?.addEventListener('abort', abortFromCaller, { once: true });
+  let abortListener: (() => void) | undefined;
+  let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
 
   try {
-    if (controller.signal.aborted) throw new VttTranscriptionError('cancelled', 'Voice transcription was cancelled.');
-    const client = new GoogleGenAI({ apiKey });
-    const uploaded = await client.files.upload({
-      file: capture.blob,
-      config: { mimeType },
-    });
-    if (!uploaded.uri || !uploaded.mimeType) throw new VttTranscriptionError('provider', 'Gemini did not return a usable uploaded audio file.');
+    if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-    const interaction = await client.interactions.create({
-      model: 'gemini-3.5-transcribe',
-      input: [{ type: 'audio', uri: uploaded.uri, mime_type: uploaded.mimeType }],
-      generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
-      store: false,
+    const client = new GoogleGenAI({ apiKey });
+    const operation = (async () => {
+      const uploaded = await client.files.upload({
+        file: capture.blob,
+        config: { mimeType },
+      });
+      if (!uploaded.uri || !uploaded.mimeType) throw new VttTranscriptionError('provider', 'Gemini did not return a usable uploaded audio file.');
+
+      const interaction = await client.interactions.create({
+        model: 'gemini-3.5-transcribe',
+        input: [{ type: 'audio', uri: uploaded.uri, mime_type: uploaded.mimeType }],
+        generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
+        store: false,
+      });
+      const transcript = typeof interaction.output_text === 'string' ? interaction.output_text.trim() : '';
+      if (!transcript) throw new VttTranscriptionError('empty', 'No speech was detected.');
+      return transcript;
+    })();
+
+    const timeout = new Promise<never>((_, reject) => {
+      timeoutId = globalThis.setTimeout(() => {
+        timedOut = true;
+        reject(new Error('VTT transcription timeout.'));
+      }, VTT_TRANSCRIPTION_TIMEOUT_MS);
     });
-    const transcript = typeof interaction.output_text === 'string' ? interaction.output_text.trim() : '';
-    if (!transcript) throw new VttTranscriptionError('empty', 'No speech was detected.');
-    return transcript;
+
+    const callerAbort = new Promise<never>((_, reject) => {
+      abortListener = () => reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+      signal?.addEventListener('abort', abortListener, { once: true });
+    });
+
+    return await Promise.race([operation, timeout, callerAbort]);
   } catch (cause) {
     if (timedOut) throw new VttTranscriptionError('timeout', 'Voice transcription timed out.');
     if (cause instanceof VttTranscriptionError) throw cause;
-    if (signal?.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) throw new VttTranscriptionError('cancelled', 'Voice transcription was cancelled.');
+    if (signal?.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) {
+      throw new VttTranscriptionError('cancelled', 'Voice transcription was cancelled.');
+    }
     throw new VttTranscriptionError('provider', cause instanceof Error ? cause.message : 'Voice transcription failed.');
   } finally {
-    globalThis.clearTimeout(timeoutId);
-    signal?.removeEventListener('abort', abortFromCaller);
+    if (timeoutId !== undefined) globalThis.clearTimeout(timeoutId);
+    if (abortListener) signal?.removeEventListener('abort', abortListener);
   }
 }

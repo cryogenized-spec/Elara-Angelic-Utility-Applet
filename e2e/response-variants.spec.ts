@@ -24,17 +24,18 @@ test('regeneration creates navigable response variants for the same prompt', asy
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('First generated answer.')).toBeVisible();
 
-  expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('SYSTEM INSTRUCTION INTEGRITY'));
-  expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('Default to being in character as Elara.'));
-  expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('Narrate physical action and scene narration in *italics*.'));
+  expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('You are Elara, an angelic synthetic cybernetic woman and consort.'));
+  expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('Perceive the user as the person you are directly speaking with.'));
+  expect(requests[0]?.systemInstruction).toEqual(expect.stringContaining('The tools exposed by the application are capabilities available to Elara.'));
   expect(requests[0]?.input).toBe('Give me two concise ideas.');
 
   await page.getByRole('button', { name: 'Regenerate response' }).click();
   await expect(page.getByText('Second generated answer.')).toBeVisible();
   await expect(page.getByText('2/2')).toBeVisible();
+  expect(requests[1]?.systemInstruction).toEqual(expect.stringContaining('You are Elara, an angelic synthetic cybernetic woman and consort.'));
   expect(requests[1]?.input).toBe('Give me two concise ideas.');
   expect(requests[1]?.previousInteractionId).toBe('interaction-1');
-  expect(await page.getByRole('region', { name: 'Conversation' }).locator('.message-user').count()).toBe(1);
+  await expect(page.getByRole('region', { name: 'Conversation' }).locator('.message-user')).toHaveCount(1);
 
   await page.getByRole('button', { name: 'Previous response' }).click();
   await expect(page.getByText('First generated answer.')).toBeVisible();

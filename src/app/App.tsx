@@ -94,18 +94,18 @@ export function App() {
     try {
       const nextConversation = await loadConversation(id);
       if (activeConversationIdRef.current !== id) return;
-      setConversation(nextConversation); window.localStorage.setItem(ACTIVE_THREAD_KEY, id); await refreshThreads();
+      setConversation((current) => activeConversationIdRef.current === id ? nextConversation : current); window.localStorage.setItem(ACTIVE_THREAD_KEY, id); await refreshThreads();
     } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not open that conversation.'); }
   }
   async function startNewChat() {
     cancel();
     activeConversationIdRef.current = '';
     setError(null); setDraft('');
-    setConversation({ id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] });
+    setConversation((current) => activeConversationIdRef.current === '' ? { id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] } : current);
     try {
       const nextConversation = await createThread();
       activeConversationIdRef.current = nextConversation.id;
-      setConversation(nextConversation); window.localStorage.setItem(ACTIVE_THREAD_KEY, nextConversation.id); await refreshThreads(); setSidebarOpen(false);
+      setConversation((current) => activeConversationIdRef.current === nextConversation.id ? nextConversation : current); window.localStorage.setItem(ACTIVE_THREAD_KEY, nextConversation.id); await refreshThreads(); setSidebarOpen(false);
     } catch (cause) { if (!activeConversationIdRef.current) setError(cause instanceof Error ? cause.message : 'Could not create a new conversation.'); }
   }
 
@@ -122,7 +122,7 @@ export function App() {
       let titled = withUser;
       if (withUser.title === DEFAULT_TITLE) { try { const generatedTitle = await demoThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch {} }
       if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
-      setConversation(titled); await refreshThreads();
+      setConversation((current) => activeConversationIdRef.current === conversationId ? titled : current); await refreshThreads();
       if (activeConversationIdRef.current !== conversationId) return;
       await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, responseGroupId: userMessage.id, responseVariant: 1 });
     } catch (cause) {
@@ -202,7 +202,7 @@ Do not describe internal tool mechanics unless needed for the user-facing result
     const liveText = { value: '' }; const startedAt = Date.now();
     const base = { ...baseConversation, messages: [...baseConversation.messages, assistantMessage], updatedAt: startedAt };
     if (activeConversationIdRef.current !== conversationId) return;
-    setConversation(base);
+    setConversation((current) => activeConversationIdRef.current === conversationId ? base : current);
     const isCurrentConversation = () => activeConversationIdRef.current === conversationId;
 
     if (options.tools?.length) {

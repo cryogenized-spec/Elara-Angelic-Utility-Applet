@@ -13,7 +13,7 @@ async function unlockTestGemini(page: import('@playwright/test').Page): Promise<
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
   await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
-  await page.getByLabel('Lockbox password').fill('e2e-test-password');
+  await page.getByRole('textbox', { name: 'Lockbox password', exact: true }).fill('e2e-test-password');
   await page.getByLabel('Confirm Lockbox password').fill('e2e-test-password');
   await page.getByRole('button', { name: 'Create Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();

@@ -2,75 +2,54 @@
 
 ## Gemini API Lockbox v2 — local session security and unlock modes
 
-### Goal
-Upgrade the existing local Gemini API Lockbox so users can choose one of three security modes:
+Three user-selectable modes: PIN (default, 6–8 digits), Passkey (optional biometric/platform-authenticator upgrade with PIN fallback), and Off (optional opt-out, while retaining encrypted-at-rest storage and never persisting plaintext key). The provider-facing getGeminiApiKey() contract remains unchanged.
 
-1. PIN — default: 6–8 digit local unlock PIN.
-2. Passkey — optional upgrade from PIN to platform authentication (biometric/device credential where supported).
-3. Off — optional opt-out: authenticated users can disable the lock gate without persisting the plaintext API key.
+### Phase 1 — Security/session
+- Version Lockbox metadata with mode and auth metadata.
+- Retain AES-GCM-256 + PBKDF2-SHA-256 at 310,000 iterations.
+- Decrypted API key remains module memory only.
+- Add local activity timestamp and idle timeout; no network checks.
+- Cold start/reload with enabled security and no in-memory key becomes locked.
+- Idle timeout wipes in-memory key.
 
-The Gemini provider contract remains unchanged: it consumes the decrypted key only through the existing local getGeminiApiKey() path.
+### Phase 2 — PIN default
+- 6–8 digit numeric PIN setup/unlock.
+- Numeric validation, local failed-attempt backoff, and mobile input with type=password, inputmode=numeric, pattern, and persistent-PIN-appropriate autocomplete.
+- Focus PIN field when locked so Android/Chromium can present the numeric keyboard.
+- Wrong PIN clears input and reports failure.
+- Forgotten PIN has no recovery shortcut: destructive reset wipes the encrypted Gemini API key and returns to unconfigured.
 
-## Phase 1 — Security/session model
-- Version Lockbox metadata with selected security mode and authentication metadata.
-- Keep API key encrypted at rest in IndexedDB using existing AES-GCM-256 + PBKDF2-SHA-256 with 310,000 iterations.
-- Keep decrypted key only in JavaScript module memory; never persist plaintext in browser storage.
-- Add local activity timestamp for idle-session decisions; no Google/Gemini network call is involved in stale-session detection.
-- Missing in-memory key after cold start/reload is locked when security is enabled.
-- Idle timeout wipes the in-memory key and locks.
+### Phase 3 — Passkey
+- After successful PIN authentication, offer Upgrade to Passkey.
+- Register platform WebAuthn with user verification requested.
+- Use WebAuthn for authentication/key-unwrapping support only; never expose Gemini API key to the credential service.
+- Passkey is primary when configured; PIN remains fallback.
+- Capability-detect and gracefully fall back when unsupported.
 
-## Phase 2 — PIN mode (default)
-- Replace password-first setup/unlock with a 6–8 digit numeric PIN.
-- Validate numeric length 6–8.
-- Retain 310,000 PBKDF2 iterations.
-- Add local failed-attempt backoff.
-- Use type=password, inputmode=numeric, numeric pattern, and persistent-PIN-appropriate autocomplete.
-- Focus the PIN field whenever the locked surface mounts to request Android/Chromium numeric keyboard.
-- Incorrect PIN clears input, records failure, applies backoff, and shows an error.
-- Forgotten PIN uses destructive reset: wipe encrypted Gemini key and return to unconfigured state.
+### Phase 4 — Off
+- Add Off mode.
+- Require current authentication before disabling security.
+- Off must not cause plaintext API-key persistence.
+- Allow security to be re-enabled after authentication.
 
-## Phase 3 — Passkey mode
-- After successful PIN authentication, expose Upgrade to Passkey.
-- Register platform WebAuthn credential with user verification requested.
-- Use WebAuthn only for local authentication/key-unwrapping support; never expose the Gemini API key to the credential service.
-- Store only minimum credential metadata.
-- Passkey is the primary unlock path when configured; 6–8 digit PIN remains a deliberate fallback.
-- Gate passkey behavior on actual browser/device capability.
+### Phase 5 — UI/UX
+- Clearly show mode and configured/locked/unlocked state.
+- PIN: compact numeric unlock surface.
+- Passkey: biometric/passkey first with PIN fallback.
+- Off: no lock gate; expose Turn Security On.
+- Provide Upgrade to Passkey, Switch to PIN, Change PIN, Turn Security Off/On, and Clear Lockbox as applicable.
 
-## Phase 4 — Off mode
-- Add Off as the third selectable mode.
-- Require successful authentication before disabling security.
-- Do not persist plaintext API key merely to make Off survive reloads; preserve encrypted-at-rest boundary.
-- Allow security to be re-enabled from Settings after authentication.
-
-## Phase 5 — Lockbox UI/UX
-- Make the three modes explicit.
-- First-run starts in PIN mode.
-- Show configured/unconfigured, locked/unlocked, and active mode.
-- PIN mode: compact numeric unlock surface with immediate focus request.
-- Passkey mode: biometric/passkey action first with PIN fallback.
-- Off mode: no unlock gate; expose Turn Security On.
-- Add Upgrade to Passkey, Switch to PIN, Change PIN, Turn Security Off/On, and Clear Lockbox as appropriate.
-- Require authentication for security changes and make destructive clearing explicit.
-
-## Phase 6 — Lifecycle/provider integration
-- Keep getGeminiApiKey() as provider interface, returning only in-memory key or empty while locked.
-- Add client-side controller for visibilitychange, focus, and meaningful activity.
+### Phase 6 — Integration
+- Add client-side lifecycle controller for visibilitychange, focus, and meaningful activity.
 - Throttle activity timestamp writes.
-- Locking immediately wipes memory and updates UI without network traffic.
-- Ensure reset/unmount paths do not retain decrypted key.
-- Do not change Gemini request payloads/provider generation behavior.
+- Lock immediately wipes memory and updates UI without network traffic.
+- Keep provider/generation behavior unchanged.
 
-## Phase 7 — Tests and hardening
-- Unit-test PIN validation, crypto, mode transitions, timeout, activity timestamps, backoff, reset/wipe, and provider-while-locked behavior.
-- Assert API key never appears in plaintext in IndexedDB/localStorage/sessionStorage.
-- Add browser tests for numeric input, focus, lock rendering, and passkey capability handling.
-- Add WebAuthn mocks for registration, authentication, unsupported capability, and PIN fallback.
-- Test all major transitions: first-run → PIN → unlock → stale → PIN; PIN → passkey → stale → passkey; passkey → PIN; PIN → Off; Off → security enabled; forgotten PIN → wipe.
-- Run lint, typecheck, unit, build, Playwright, and E2E CI before merge.
+### Phase 7 — Tests
+- Unit-test crypto, PIN validation, mode transitions, stale timeout, activity, backoff, reset/wipe, and locked-provider behavior.
+- Assert plaintext key never appears in IndexedDB/localStorage/sessionStorage.
+- Browser-test lock UI, numeric input/focus, and WebAuthn capability/fallback.
+- Run lint, typecheck, unit, build, Playwright, and E2E before merge.
 
-## Non-goals
-- No network-based stale-session checks.
-- No plaintext API-key persistence.
-- No Cloudflare Worker credential transport.
-- No conversation/folder context changes.
+### Non-goals
+No network-based stale checks, no plaintext API-key storage, no Worker credential transport, and no conversation/folder context changes.

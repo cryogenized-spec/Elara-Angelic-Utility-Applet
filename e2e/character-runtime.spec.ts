@@ -5,16 +5,23 @@ async function openSettings(page: import('@playwright/test').Page): Promise<void
   await page.getByRole('button', { name: 'Open settings' }).click();
 }
 
+async function unlockTestGemini(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(async () => {
+    const lockbox = await import('/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts');
+    await lockbox.saveGeminiApiKey('e2e-test-api-key', 'e2e-test-password');
+  });
+}
+
 test('transmits the saved master persona protocol as the active runtime instruction', async ({ page }) => {
   const requests: Array<Record<string, unknown>> = [];
-  await page.route('**/api/gemini', async (route) => {
+  await page.route('**/v1beta/interactions*', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     requests.push(payload);
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
       body: [
-        `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: 'persona-runtime-test', status: 'in_progress', model: 'gemini-3.7-flash' } })}\n\n`,
+        `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: 'persona-runtime-test', status: 'in_progress', model: 'gemini-3.8-flash' } })}\n\n`,
         `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: 'persona-runtime-test', index: 0, delta: { type: 'text', text: 'Runtime persona received.' } })}\n\n`,
         `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: 'persona-runtime-test', status: 'completed' } })}\n\n`,
       ].join(''),
@@ -22,6 +29,7 @@ test('transmits the saved master persona protocol as the active runtime instruct
   });
 
   await page.goto('');
+  await unlockTestGemini(page);
   await openSettings(page);
   await page.getByRole('button', { name: 'Character' }).click();
 
@@ -39,6 +47,6 @@ test('transmits the saved master persona protocol as the active runtime instruct
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('Runtime persona received.')).toBeVisible();
 
-  const instruction = requests[0]?.systemInstruction;
+  const instruction = requests[0]?.system_instruction;
   expect(instruction).toBe(persona);
 });

@@ -71,10 +71,10 @@ if (!markdownSource.includes('skipHtml')) throw new Error('Reliability gate: res
 if (!markdownSource.includes('safeMarkdownUrl')) throw new Error('Reliability gate: Markdown renderer must use the application safe-link boundary.');
 
 const characterContext = readFileSync(join(root, 'src/gemini/character-context.ts'), 'utf8');
-if (!characterContext.includes('CREATIVE ROLEPLAY CONTEXT')) throw new Error('Reliability gate: roleplay context boundary is missing.');
-if (!characterContext.includes('ROLEPLAY MODE DIRECTIVE')) throw new Error('Reliability gate: explicit Roleplay Mode directive is missing.');
-if (!characterContext.includes('required to participate in the fictional scene as an in-character participant')) throw new Error('Reliability gate: Roleplay Mode must explicitly require in-character participation.');
-if (!characterContext.includes('Do not break the fictional frame to announce that Roleplay Mode is enabled.')) throw new Error('Reliability gate: Roleplay Mode must preserve the fictional frame.');
+if (!characterContext.includes('character.systemInstruction.trim()')) throw new Error('Reliability gate: character-context must build the provider instruction from the configured master system prompt.');
+if (!characterContext.includes('CREATIVE ROLEPLAY SCENE CONTEXT')) throw new Error('Reliability gate: roleplay scene context boundary is missing.');
+if (characterContext.includes('CHARACTER EXECUTION DIRECTIVE')) throw new Error('Reliability gate: character execution policy must live in the configured master prompt, not in a competing hard-coded directive.');
+if (!characterContext.includes('if (!roleplay.enabled) return resolvedBase;')) throw new Error('Reliability gate: roleplay scene settings must not be required for the configured master prompt to remain active.');
 if (/safety\s+(?:can|may)\s+be\s+(?:disabled|overridden)/i.test(characterContext)) {
   throw new Error('Reliability gate: roleplay context must not claim provider safety can be disabled or overridden.');
 }
@@ -115,4 +115,4 @@ function countText(directory, pattern) {
   return count;
 }
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, persistent default Elara roleplay behavior, explicit Roleplay Mode context directive, portrait-or-landscape artwork contract, and canonical Worker streaming contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, configured master prompt remains canonical character behavior, optional roleplay scene context, portrait-or-landscape artwork contract, and canonical Worker streaming contract.`);

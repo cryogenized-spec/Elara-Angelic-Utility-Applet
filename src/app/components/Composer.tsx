@@ -234,7 +234,13 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }
 
   function beginVttPress(): void {
-    if (status === 'streaming' || vttBusy || (!textareaRef.current && !expandedTextareaRef.current)) return;
+    if (status === 'streaming' || (!textareaRef.current && !expandedTextareaRef.current)) return;
+    if (vttState === 'recording' || vttState === 'processing' || vttState === 'requesting') {
+      vttPressActiveRef.current = true;
+      vttLongPressTriggeredRef.current = false;
+      return;
+    }
+    if (vttBusy) return;
     if (vttPressTimerRef.current) window.clearTimeout(vttPressTimerRef.current);
     vttPressActiveRef.current = true;
     vttLongPressTriggeredRef.current = false;
@@ -314,7 +320,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           aria-expanded={vttModeOpen}
           aria-haspopup="menu"
           data-vtt-mode={vttTransformMode}
-          disabled={composerLocked}
+          disabled={status === 'streaming'}
           onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); beginVttPress(); }}
           onPointerUp={() => endVttPress(getTarget())}
           onPointerCancel={cancelVttPress}

@@ -22,9 +22,12 @@ test('starting a new thread isolates it from a still-running previous response',
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'New chat' }).click();
 
-  await expect(page.getByRole('region', { name: 'Conversation' }).locator('.message')).toHaveCount(0);
+  const conversation = page.getByRole('region', { name: 'Conversation' });
+  await expect(conversation).not.toContainText('This belongs only to the old thread.');
+  await expect(conversation).not.toContainText('Old thread response.');
+  await expect(conversation.locator('.message').filter({ hasText: 'This belongs only to the old thread.' })).toHaveCount(0);
+  await expect(conversation.locator('.message').filter({ hasText: 'Old thread response.' })).toHaveCount(0);
   await new Promise((resolve) => setTimeout(resolve, 1800));
-  await expect(page.getByRole('region', { name: 'Conversation' }).locator('.message')).toHaveCount(0);
-  await expect(page.getByRole('region', { name: 'Conversation' })).not.toContainText('This belongs only to the old thread.');
-  await expect(page.getByRole('region', { name: 'Conversation' })).not.toContainText('Old thread response.');
+  await expect(conversation).not.toContainText('This belongs only to the old thread.');
+  await expect(conversation).not.toContainText('Old thread response.');
 });

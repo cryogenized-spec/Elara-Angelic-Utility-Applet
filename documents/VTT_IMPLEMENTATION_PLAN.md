@@ -54,9 +54,10 @@ When tapped:
 7. Show an unmistakable active-listening state and a Stop button.
 8. On Stop, finalize the Blob, release microphone/audio resources, and send only the captured audio to the Worker.
 9. Transcribe through `gemini-3.5-transcribe` in Smart mode.
-10. Insert only the returned text at the original selection/caret, replacing a captured selection where applicable.
-11. Place the caret immediately after the inserted transcript.
-12. Return to the normal composer state without sending the message.
+10. Optionally transform the faithful transcript into a clearer `Polish` message or concise `Roleplay` action/narration before insertion.
+11. Insert only the returned/transformed text at the original selection/caret, replacing a captured selection where applicable.
+12. Place the caret immediately after the inserted text.
+13. Return to the normal composer state without sending the message.
 
 The same behavior must work in the compact composer and expanded editor.
 
@@ -200,6 +201,23 @@ Verify:
 
 A real Android physical-device test remains the final production-readiness check because microphone permissions, PWA lifecycle, MediaRecorder implementation, vibration support, audio routing, and browser MIME support are device-dependent.
 
+### Pass 7 — Intentful VTT draft transformation
+
+Add optional post-transcription transformation while preserving the faithful transcription as the fallback source.
+
+Deliver:
+
+- `Raw` mode: insert the transcript unchanged apart from safe trimming;
+- `Polish` mode: rewrite into a clear, straightforward message while preserving meaning, facts, names, sequence, intent, and useful specificity;
+- `Roleplay` mode: convert the transcript into concise third-person present-tense action/narration using asterisks, without inventing actions, dialogue, motivations, settings, or other details;
+- transformation routed through the existing canonical Gemini provider boundary;
+- configured Character Master System Prompt remains authoritative and is combined with the VTT task instruction rather than replaced by it;
+- transformation failure falls back to the faithful raw transcript instead of losing user input;
+- compact and expanded composer parity;
+- no automatic send.
+
+Verification includes unit coverage for all modes and Playwright coverage proving that the transformation request reaches `/api/gemini`, carries the configured Character Master Prompt, inserts the transformed result, and falls back safely on provider failure.
+
 ## Current repository observations entering Pass 1
 
 The repository already contains a substantial VTT foundation in `src/vtt/recording.ts`, including MediaRecorder capture, an `AnalyserNode`, RMS calculation, silence detection, maximum duration, and stream cleanup. The current weakness is that the implementation exposes only a three-level UI meter and is tightly coupled to the existing button presentation.
@@ -218,7 +236,9 @@ VTT is complete only when:
 - the recording banner visibly and correctly reflects live local microphone activity;
 - Stop reliably finalizes and submits the audio;
 - Gemini returns usable transcription through the protected Worker;
-- the transcript is inserted exactly at the intended location;
+- optional Raw / Polish / Roleplay transformation behaves deterministically and preserves the faithful transcript as a fallback;
+- the configured Character Master System Prompt remains authoritative during VTT transformation;
+- the transcript/transformed text is inserted exactly at the intended location;
 - repeated dictation works without overwriting or losing the draft;
 - no microphone/audio resources remain live after completion or failure;
 - no raw audio or credentials are persisted or leaked;

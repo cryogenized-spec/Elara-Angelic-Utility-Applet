@@ -2,31 +2,36 @@
 .app-shell form.composer {
   position: relative;
   flex: 0 0 auto;
-  grid-template-columns: 40px 40px minmax(0, 1fr) 42px 42px;
+  grid-template-columns: 38px 38px minmax(0, 1fr) 40px 42px;
   grid-template-rows: 42px;
   align-items: stretch;
-  gap: 10px;
+  gap: 12px;
   grid-auto-flow: column;
 }
 
 .app-shell form.composer > .composer__vtt-control {
   min-width: 0;
+  width: 40px;
+  justify-self: center;
 }
 
 @media (max-width: 560px) {
   .app-shell form.composer {
-    grid-template-columns: 40px 40px minmax(0, 1fr) 42px 42px;
-    gap: 9px;
+    grid-template-columns: 38px 38px minmax(0, 1fr) 40px 42px;
+    gap: 11px;
   }
 }
 
 @media (max-width: 390px) {
   .app-shell form.composer {
-    grid-template-columns: 38px 38px minmax(0, 1fr) 40px 42px;
-    gap: 7px;
+    grid-template-columns: 36px 36px minmax(0, 1fr) 38px 42px;
+    gap: 8px;
   }
 
-  .app-shell form.composer > .composer__icon,
+  .app-shell form.composer > .composer__icon {
+    width: 36px;
+  }
+
   .app-shell form.composer > .composer__vtt-control > .composer__icon {
     width: 38px;
   }

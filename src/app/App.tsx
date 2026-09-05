@@ -69,13 +69,14 @@ export function App() {
 
   useEffect(() => {
     let cancelled = false;
+    const initialActiveConversationId = activeConversationIdRef.current;
     void (async () => {
       try {
         const [loadedThreads, savedGeminiSettings, loadedCharacter, loadedAppearance, loadedRoleplay, loadedShortcuts] = await Promise.all([loadThreads(), loadGeminiSettings(), loadCharacterProfile(), loadChatAppearance(), loadRoleplayPreferences(), ensureWorkspaceShortcuts()]);
         const storedActive = window.localStorage.getItem(ACTIVE_THREAD_KEY);
         const activeId = storedActive && loadedThreads.some((thread) => thread.id === storedActive) ? storedActive : (loadedThreads[0]?.id ?? 'primary');
         const loadedConversation = await loadConversation(activeId);
-        if (cancelled) return;
+        if (cancelled || activeConversationIdRef.current !== initialActiveConversationId) return;
         activeConversationIdRef.current = activeId;
         setThreads(loadedThreads); setConversation(loadedConversation); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel); setCharacter(loadedCharacter); setChatAppearance(loadedAppearance); setRoleplay(loadedRoleplay); setWorkspaceShortcuts(loadedShortcuts);
         window.localStorage.setItem(ACTIVE_THREAD_KEY, activeId);
@@ -182,7 +183,9 @@ export function App() {
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     const systemInstruction = buildCharacterInstruction(character, roleplay);
-    const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nDo not describe internal tool mechanics unless needed for the user-facing result. Use only the registered tools supplied for this shortcut. Do not perform write, destructive, or send actions.`;
+    const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\
+User intent: ${shortcut.intent}\
+Do not describe internal tool mechanics unless needed for the user-facing result. Use only the registered tools supplied for this shortcut. Do not perform write, destructive, or send actions.`;
     try {
       await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
     } catch (cause) {

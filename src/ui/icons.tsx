@@ -15,12 +15,14 @@ import {
   Palette,
   Paperclip,
   Plus,
+  RefreshCw,
   Search,
   Send,
   Settings,
   ShieldCheck,
   Sparkles,
   Square,
+  Trash2,
   Type,
   X,
 } from 'lucide-react';
@@ -47,7 +49,9 @@ export type IconName =
   | 'expand'
   | 'collapse'
   | 'markdown'
-  | 'stop';
+  | 'stop'
+  | 'refresh'
+  | 'trash';
 
 const icons: Record<IconName, LucideIcon> = {
   menu: Menu,
@@ -72,6 +76,8 @@ const icons: Record<IconName, LucideIcon> = {
   collapse: Minimize2,
   markdown: FileCode2,
   stop: Square,
+  refresh: RefreshCw,
+  trash: Trash2,
 };
 
 export function Icon({

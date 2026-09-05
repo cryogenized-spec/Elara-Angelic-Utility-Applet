@@ -16,6 +16,8 @@ export interface VttRecorderOptions {
   selection: VttSelectionRange;
   onStateChange?: (state: VttRecordingState) => void;
   onLevelChange?: (level: 0 | 1 | 2 | 3) => void;
+  onRmsChange?: (rms: number) => void;
+  onElapsedChange?: (elapsedMs: number) => void;
   silenceThreshold?: number;
   silenceDurationMs?: number;
   minimumDurationMs?: number;
@@ -52,7 +54,7 @@ function vibrate(pattern: number | number[]): void {
   if (typeof navigator !== 'undefined' && 'vibrate' in navigator) navigator.vibrate(pattern);
 }
 
-function rmsLevel(analyser: AnalyserNode, data: Uint8Array<ArrayBuffer>): number {
+function calculateRms(analyser: AnalyserNode, data: Uint8Array<ArrayBuffer>): number {
   analyser.getByteTimeDomainData(data);
   let sum = 0;
   for (const sample of data) {
@@ -81,7 +83,7 @@ export class VttRecorder {
   private startedAt = 0;
   private resolveCapture: ((capture: VttCapture) => void) | null = null;
   private rejectCapture: ((error: Error) => void) | null = null;
-  private readonly options: Required<Pick<VttRecorderOptions, 'selection' | 'silenceThreshold' | 'silenceDurationMs' | 'minimumDurationMs' | 'maximumDurationMs'>> & Pick<VttRecorderOptions, 'onStateChange' | 'onLevelChange'>;
+  private readonly options: Required<Pick<VttRecorderOptions, 'selection' | 'silenceThreshold' | 'silenceDurationMs' | 'minimumDurationMs' | 'maximumDurationMs'>> & Pick<VttRecorderOptions, 'onStateChange' | 'onLevelChange' | 'onRmsChange' | 'onElapsedChange'>;
 
   constructor(options: VttRecorderOptions) {
     this.options = {
@@ -92,6 +94,8 @@ export class VttRecorder {
       maximumDurationMs: options.maximumDurationMs ?? VTT_MAX_DURATION_MS,
       onStateChange: options.onStateChange,
       onLevelChange: options.onLevelChange,
+      onRmsChange: options.onRmsChange,
+      onElapsedChange: options.onElapsedChange,
     };
   }
 
@@ -103,13 +107,17 @@ export class VttRecorder {
   async start(): Promise<VttCapture> {
     if (this.recorder && this.recorder.state !== 'inactive') throw new Error('VTT recording is already active.');
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('Microphone capture is not supported by this browser.');
+    if (typeof MediaRecorder === 'undefined') throw new Error('This browser does not support microphone recording.');
 
     this.setState('requesting');
     try {
-      const mimeType = getSupportedVttMimeType();
+      const mimeType = getSupportedVttMimeType(MediaRecorder);
       this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.startedAt = performance.now();
       this.silenceStartedAt = null;
+      this.options.onElapsedChange?.(0);
+      this.options.onRmsChange?.(0);
+      this.options.onLevelChange?.(0);
       this.setupMeter(this.stream);
       const chunks: BlobPart[] = [];
       this.recorder = new MediaRecorder(this.stream, { mimeType, audioBitsPerSecond: VTT_AUDIO_BITRATE });
@@ -137,8 +145,6 @@ export class VttRecorder {
       vibrate(20);
       this.setState('recording');
       this.maxDurationTimer = window.setTimeout(() => this.stop(), this.options.maximumDurationMs);
-      this.resolveCapture = null;
-      this.rejectCapture = null;
       return await new Promise<VttCapture>((resolve, reject) => {
         this.resolveCapture = resolve;
         this.rejectCapture = reject;
@@ -182,9 +188,11 @@ export class VttRecorder {
 
   private sampleMeter(): void {
     if (!this.analyser || !this.analyserData || !this.startedAt) return;
-    const rms = rmsLevel(this.analyser, this.analyserData);
+    const elapsedMs = Math.max(0, performance.now() - this.startedAt);
+    const rms = calculateRms(this.analyser, this.analyserData);
+    this.options.onElapsedChange?.(Math.round(elapsedMs));
+    this.options.onRmsChange?.(rms);
     this.options.onLevelChange?.(levelFromRms(rms));
-    const elapsedMs = performance.now() - this.startedAt;
     if (elapsedMs < this.options.minimumDurationMs) return;
     if (rms < this.options.silenceThreshold) {
       this.silenceStartedAt ??= performance.now();
@@ -202,9 +210,14 @@ export class VttRecorder {
     this.recorder = null;
     this.analyser = null;
     this.analyserData = null;
+    this.silenceStartedAt = null;
+    this.startedAt = 0;
     const context = this.audioContext;
     this.audioContext = null;
     if (context) void context.close().catch(() => undefined);
+    this.options.onRmsChange?.(0);
+    this.options.onLevelChange?.(0);
+    this.options.onElapsedChange?.(0);
     if (rejectPending) this.rejectCapture?.(new Error('VTT recording was cancelled.'));
   }
 

@@ -62,7 +62,15 @@ async function* streamWorkerRequest(payload: Record<string, unknown>, signal?: A
   } catch (cause) { const error = normalizeGeminiError(cause, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }); if (error.cancelled || signal?.aborted) { yield { type: 'cancelled', interactionId }; return; } yield { type: 'failed', error }; }
 }
 
-function commonPayload(request: { model: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }) { return { model: request.model || DEFAULT_GEMINI_MODEL, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools }; }
+function commonPayload(request: { model: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }) {
+  const systemInstruction = request.systemInstruction;
+  return {
+    model: request.model || DEFAULT_GEMINI_MODEL,
+    generationConfig: request.generationConfig,
+    ...(systemInstruction && systemInstruction.trim() ? { systemInstruction } : {}),
+    tools: request.tools,
+  };
+}
 
 export const geminiTurnPort: GeminiTurnPort = {
   streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {

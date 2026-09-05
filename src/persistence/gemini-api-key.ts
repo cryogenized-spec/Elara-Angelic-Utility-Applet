@@ -46,6 +46,12 @@ function fromBase64(value: string): Uint8Array {
   return bytes;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
 function textEncoder(): TextEncoder {
   return new TextEncoder();
 }
@@ -58,13 +64,13 @@ async function deriveEncryptionKey(passphrase: string, salt: Uint8Array, iterati
   if (!passphrase) throw new Error('A Lockbox password is required.');
   const material = await crypto.subtle.importKey(
     'raw',
-    textEncoder().encode(passphrase),
+    toArrayBuffer(textEncoder().encode(passphrase)),
     'PBKDF2',
     false,
     ['deriveKey'],
   );
   return crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt: toArrayBuffer(salt), iterations, hash: 'SHA-256' },
     material,
     { name: 'AES-GCM', length: KEY_LENGTH },
     false,
@@ -77,7 +83,7 @@ async function encryptApiKey(apiKey: string, passphrase: string): Promise<Encryp
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const key = await deriveEncryptionKey(passphrase, salt, PBKDF2_ITERATIONS);
   const plaintext = textEncoder().encode(apiKey);
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, toArrayBuffer(plaintext));
   return {
     id: RECORD_ID,
     version: 1,
@@ -95,7 +101,7 @@ async function decryptApiKey(record: EncryptedGeminiApiKey, passphrase: string):
     const iv = fromBase64(record.iv);
     const ciphertext = fromBase64(record.ciphertext);
     const key = await deriveEncryptionKey(passphrase, salt, record.iterations);
-    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, ciphertext);
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, toArrayBuffer(ciphertext));
     return textDecoder().decode(plaintext);
   } catch {
     throw new Error('Invalid Lockbox password.');

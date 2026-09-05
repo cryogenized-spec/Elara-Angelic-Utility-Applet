@@ -27,23 +27,52 @@ test('loads the Elara shell', async ({ page }) => {
   await expect(page.locator('.elara-banner__portrait')).toBeVisible();
 });
 
-test('composer keeps attachment, Markdown, and Send controls aligned', async ({ page }) => {
+test('composer keeps attachment, Markdown, microphone, and Send controls aligned', async ({ page }) => {
   await page.goto('');
   const composer = page.locator('form.composer');
   await expect(composer.getByRole('button', { name: 'Attach image or document' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Expand message editor' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Markdown reference' })).toBeVisible();
+  await expect(composer.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Send message' })).toBeVisible();
 
   const attachmentBox = await composer.getByRole('button', { name: 'Attach image or document' }).boundingBox();
   const inputBox = await composer.getByPlaceholder('Message Elara…').boundingBox();
   const markdownBox = await composer.getByRole('button', { name: 'Markdown reference' }).boundingBox();
+  const micBox = await composer.getByRole('button', { name: 'VTT voice input' }).boundingBox();
   const sendBox = await composer.getByRole('button', { name: 'Send message' }).boundingBox();
-  expect(attachmentBox && inputBox && markdownBox && sendBox).toBeTruthy();
+  expect(attachmentBox && inputBox && markdownBox && micBox && sendBox).toBeTruthy();
   expect(attachmentBox!.x).toBeLessThan(inputBox!.x);
-  expect(markdownBox!.x).toBeLessThan(sendBox!.x);
+  expect(inputBox!.width).toBeGreaterThan(120);
+  expect(markdownBox!.x).toBeLessThan(inputBox!.x);
+  expect(inputBox!.x + inputBox!.width).toBeLessThan(micBox!.x);
+  expect(micBox!.x).toBeLessThan(sendBox!.x);
   expect(Math.abs(markdownBox!.y - sendBox!.y)).toBeLessThan(2);
   expect(Math.abs(attachmentBox!.y - sendBox!.y)).toBeLessThan(2);
+  expect(Math.abs(micBox!.y - sendBox!.y)).toBeLessThan(2);
+});
+
+test('composer occupies its own layout space instead of overlapping the conversation', async ({ page }) => {
+  await page.goto('');
+  const shell = page.locator('.app-shell');
+  const conversation = page.getByRole('region', { name: 'Conversation' });
+  const composer = page.locator('form.composer');
+  const shellBox = await shell.boundingBox();
+  const conversationBox = await conversation.boundingBox();
+  const composerBox = await composer.boundingBox();
+  expect(shellBox && conversationBox && composerBox).toBeTruthy();
+  expect(conversationBox!.bottom).toBeLessThanOrEqual(composerBox!.y + 1);
+  expect(composerBox!.bottom).toBeLessThanOrEqual(shellBox!.bottom + 1);
+
+  await page.evaluate(() => document.documentElement.style.setProperty('--elara-visual-viewport-height', '520px'));
+  await page.waitForTimeout(50);
+  const compactShell = await shell.boundingBox();
+  const compactConversation = await conversation.boundingBox();
+  const compactComposer = await composer.boundingBox();
+  expect(compactShell && compactConversation && compactComposer).toBeTruthy();
+  expect(compactShell!.height).toBeLessThanOrEqual(521);
+  expect(compactConversation!.bottom).toBeLessThanOrEqual(compactComposer!.y + 1);
+  expect(compactComposer!.bottom).toBeLessThanOrEqual(compactShell!.bottom + 1);
 });
 
 test('collapses the character banner when the sidebar opens', async ({ page }) => {
@@ -116,7 +145,7 @@ test('keeps roleplay opt-in and persists its environment settings', async ({ pag
   await expect(page.getByLabel('Environment name')).toHaveValue('Sunset villa');
 });
 
-test('exposes the local API Lockbox rather than the retired Worker boundary', async ({ page }) => {
+test('exposes the local API Lockbox rather than the retired Worker boundary', async ({ page }) =>
   await page.goto('');
   await openSettings(page);
   await page.getByRole('button', { name: 'Lockbox' }).click();

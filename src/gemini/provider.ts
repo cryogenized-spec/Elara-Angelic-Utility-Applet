@@ -4,9 +4,20 @@ import { normalizeGeminiError } from './errors';
 import { getGeminiApiKey } from '../persistence/gemini-api-key';
 import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
 
-function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
-function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
-function readNumber(record: Record<string, unknown>, key: string): number | undefined { const value = record[key]; return typeof value === 'number' && Number.isFinite(value) ? value : undefined; }
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
+}
+
+function readString(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function readNumber(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
 function readUsage(raw: unknown): GeminiUsage | undefined {
   const usage = asRecord(raw);
   const inputTokens = readNumber(usage, 'input_tokens') ?? readNumber(usage, 'prompt_tokens') ?? readNumber(usage, 'prompt_token_count') ?? readNumber(usage, 'total_input_tokens');
@@ -17,20 +28,64 @@ function readUsage(raw: unknown): GeminiUsage | undefined {
   if ([inputTokens, outputTokens, cachedTokens, thoughtsTokens, totalTokens].every((value) => value === undefined)) return undefined;
   return { inputTokens, outputTokens, cachedTokens, thoughtsTokens, totalTokens };
 }
-function interactionIdFrom(event: Record<string, unknown>): string | undefined { return readString(event, 'interaction_id') ?? readString(event, 'interactionId') ?? readString(asRecord(event.interaction), 'id'); }
-function stepIndex(event: Record<string, unknown>): number { return readNumber(event, 'index') ?? readNumber(asRecord(event.step), 'index') ?? 0; }
-function stepType(event: Record<string, unknown>): string { return readString(asRecord(event.step), 'type') ?? readString(event, 'step_type') ?? 'other'; }
+
+function interactionIdFrom(event: Record<string, unknown>): string | undefined {
+  return readString(event, 'interaction_id') ?? readString(event, 'interactionId') ?? readString(asRecord(event.interaction), 'id');
+}
+
+function stepIndex(event: Record<string, unknown>): number {
+  return readNumber(event, 'index') ?? readNumber(asRecord(event.step), 'index') ?? 0;
+}
+
+function stepType(event: Record<string, unknown>): string {
+  return readString(asRecord(event.step), 'type') ?? readString(event, 'step_type') ?? 'other';
+}
 
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
 
-function buildInteractionPayload(request: { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }) {
+type InteractionRequest = {
+  model: string;
+  input: unknown;
+  previousInteractionId?: string;
+  generationConfig?: unknown;
+  systemInstruction?: string;
+  tools?: readonly string[];
+};
+
+export function toGeminiGenerationConfig(value: unknown): Record<string, unknown> | undefined {
+  const source = asRecord(value);
+  const generationConfig: Record<string, unknown> = {};
+
+  const thinkingLevel = typeof source.thinkingLevel === 'string' ? source.thinkingLevel : typeof source.thinking_level === 'string' ? source.thinking_level : undefined;
+  if (thinkingLevel) generationConfig.thinking_level = thinkingLevel;
+
+  const thinkingSummaries = typeof source.thinkingSummaries === 'string' ? source.thinkingSummaries : typeof source.thinking_summaries === 'string' ? source.thinking_summaries : undefined;
+  if (thinkingSummaries === 'auto' || thinkingSummaries === 'none') generationConfig.thinking_summaries = thinkingSummaries;
+
+  const maxOutputTokens = readNumber(source, 'maxOutputTokens') ?? readNumber(source, 'max_output_tokens');
+  if (Number.isInteger(maxOutputTokens) && maxOutputTokens > 0) generationConfig.max_output_tokens = maxOutputTokens;
+
+  const seed = readNumber(source, 'seed');
+  if (Number.isInteger(seed) && seed >= 0) generationConfig.seed = seed;
+
+  const stopSequences = Array.isArray(source.stopSequences) ? source.stopSequences : Array.isArray(source.stop_sequences) ? source.stop_sequences : undefined;
+  if (stopSequences) {
+    const normalized = stopSequences.filter((item): item is string => typeof item === 'string' && item.length > 0);
+    if (normalized.length > 0) generationConfig.stop_sequences = normalized.slice(0, 5);
+  }
+
+  return Object.keys(generationConfig).length > 0 ? generationConfig : undefined;
+}
+
+function buildInteractionPayload(request: InteractionRequest) {
   const requestedTools = request.tools ?? [];
   const declarations = googleGeminiFunctionDeclarations.filter((tool) => requestedTools.includes(tool.name));
+  const generationConfig = toGeminiGenerationConfig(request.generationConfig);
   const payload: Record<string, unknown> = {
     model: request.model || DEFAULT_GEMINI_MODEL,
     input: request.input,
     previous_interaction_id: request.previousInteractionId,
-    generation_config: request.generationConfig,
+    generation_config: generationConfig,
     tools: declarations.length ? declarations : undefined,
     stream: true,
     store: true,
@@ -40,7 +95,7 @@ function buildInteractionPayload(request: { model: string; input: unknown; previ
   return payload;
 }
 
-async function* streamDirectRequest(request: { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
+async function* streamDirectRequest(request: InteractionRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const startedAt = performance.now();
   const requestId = crypto.randomUUID();
   let interactionId: string | undefined;

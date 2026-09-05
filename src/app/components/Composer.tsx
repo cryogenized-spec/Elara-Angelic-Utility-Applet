@@ -3,6 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { Icon } from '../../ui/icons';
 import type { ProviderStatus } from '../../domain/chat';
 import { MarkdownReference } from './MarkdownReference';
+import { RecordingBanner } from './RecordingBanner';
 import { VttRecorder, shouldDiscardVttCapture, type VttRecordingState } from '../../vtt/recording';
 import { insertTranscriptAtSelection } from '../../vtt/draft-insertion';
 import { transcribeVttCapture } from '../../vtt/transcription';
@@ -10,15 +11,25 @@ import './composer.css';
 
 const MAX_HEIGHT = 132;
 
-export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { draft: string; status: ProviderStatus; onDraftChange: (value: string) => void; onSend: () => void; onCancel: () => void; }) {
+type ComposerProps = {
+  draft: string;
+  status: ProviderStatus;
+  onDraftChange: (value: string) => void;
+  onSend: () => void;
+  onCancel: () => void;
+};
+
+export function Composer({ draft, status, onDraftChange, onSend, onCancel }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<VttRecorder | null>(null);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
+  const vttTargetRef = useRef<HTMLTextAreaElement | null>(null);
   const [markdownOpen, setMarkdownOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [vttState, setVttState] = useState<VttRecordingState>('idle');
-  const [vttLevel, setVttLevel] = useState<0 | 1 | 2 | 3>(0);
+  const [vttRms, setVttRms] = useState(0);
+  const [vttElapsed, setVttElapsed] = useState(0);
   const [vttMessage, setVttMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -41,11 +52,11 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
   useEffect(() => {
     if (!expanded) return;
     function handleEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === 'Escape') setExpanded(false);
+      if (event.key === 'Escape' && vttState !== 'recording' && vttState !== 'processing' && vttState !== 'requesting') setExpanded(false);
     }
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [expanded]);
+  }, [expanded, vttState]);
 
   useEffect(() => () => {
     recorderRef.current?.cancel();
@@ -80,7 +91,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
       transcriptionAbortRef.current = null;
       setVttMessage('Voice transcription cancelled.');
       setVttState('idle');
-      setVttLevel(0);
+      setVttRms(0);
+      setVttElapsed(0);
       return;
     }
     if (vttBusy || !target) return;
@@ -89,19 +101,21 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
       start: target.selectionStart ?? draft.length,
       end: target.selectionEnd ?? draft.length,
     };
+    vttTargetRef.current = target;
     setVttMessage(null);
-    setVttLevel(0);
+    setVttRms(0);
+    setVttElapsed(0);
     const recorder = new VttRecorder({
       selection,
       onStateChange: setVttState,
-      onLevelChange: setVttLevel,
+      onRmsChange: setVttRms,
+      onElapsedChange: setVttElapsed,
     });
     recorderRef.current = recorder;
 
     try {
       const capture = await recorder.start();
       recorderRef.current = null;
-      setVttLevel(0);
       if (shouldDiscardVttCapture(capture.blob.size, capture.durationMs)) {
         setVttMessage('No speech detected.');
         setVttState('idle');
@@ -115,7 +129,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
       onDraftChange(inserted.value);
       setVttMessage(null);
       requestAnimationFrame(() => {
-        const nextTarget = expanded ? expandedTextareaRef.current : textareaRef.current;
+        const nextTarget = vttTargetRef.current ?? (expanded ? expandedTextareaRef.current : textareaRef.current);
         nextTarget?.focus();
         nextTarget?.setSelectionRange(inserted.cursor, inserted.cursor);
       });
@@ -129,25 +143,34 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
     } finally {
       transcriptionAbortRef.current = null;
       recorderRef.current = null;
-      setVttLevel(0);
+      vttTargetRef.current = null;
+      setVttRms(0);
+      if (vttState !== 'processing') setVttElapsed(0);
     }
   }
 
-  function vttAriaLabel(): string {
-    if (vttState === 'recording') return 'Stop VTT voice input';
-    if (vttState === 'processing') return 'Cancel voice transcription';
+  function bannerStop(): void {
+    if (vttState === 'recording') recorderRef.current?.stop();
+    else if (vttState === 'processing') {
+      transcriptionAbortRef.current?.abort();
+      transcriptionAbortRef.current = null;
+      setVttMessage('Voice transcription cancelled.');
+      setVttState('idle');
+      setVttRms(0);
+      setVttElapsed(0);
+    }
+  }
+
+  function micAriaLabel(): string {
+    if (vttState === 'recording') return 'Recording voice input';
+    if (vttState === 'processing') return 'Transcribing voice input';
     if (vttState === 'requesting') return 'Requesting microphone access';
     return 'VTT voice input';
   }
 
-  function VttMeter() {
-    if (!vttBusy) return null;
-    return <span className="composer__vtt-meter" aria-hidden="true" data-level={vttLevel}>
-      <span />
-      <span />
-      <span />
-    </span>;
-  }
+  const banner = vttBusy ? (
+    <RecordingBanner state={vttState} rms={vttRms} elapsedMs={vttElapsed} onStop={bannerStop} />
+  ) : null;
 
   if (expanded) {
     return <>
@@ -161,6 +184,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
             <Icon name="collapse" size={20} />
           </button>
         </header>
+        {banner}
         <textarea
           ref={expandedTextareaRef}
           className="composer-expanded__textarea"
@@ -181,8 +205,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
             <Icon name="paperclip" size={19} />
           </button>
           <div className="composer-expanded__spacer" />
-          <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={status === 'streaming' || vttState === 'requesting'} onClick={() => void handleVtt(expandedTextareaRef.current)}>
-            <VttMeter />
+          <button className="composer__icon composer__vtt-button" type="button" aria-label={micAriaLabel()} aria-pressed={false} disabled={composerLocked} onClick={() => void handleVtt(expandedTextareaRef.current)}>
             <Icon name="mic" size={20} />
           </button>
           <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
@@ -195,6 +218,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
   }
 
   return <>
+    {banner}
     <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
       <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
         <Icon name="markdown" size={20} />
@@ -208,8 +232,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
           <Icon name="expand" size={15} />
         </button>
       </div>
-      <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={status === 'streaming' || vttState === 'requesting'} onClick={() => void handleVtt(textareaRef.current)}>
-        <VttMeter />
+      <button className="composer__icon composer__vtt-button" type="button" aria-label={micAriaLabel()} aria-pressed={false} disabled={composerLocked} onClick={() => void handleVtt(textareaRef.current)}>
         <Icon name="mic" size={20} />
       </button>
       <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()}>

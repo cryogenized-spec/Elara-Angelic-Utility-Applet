@@ -18,10 +18,6 @@ jobs:
   build:
     name: Build Pages artifact
     runs-on: ubuntu-latest
-    env:
-      VITE_GEMINI_WORKER_URL: ${{ vars.GEMINI_WORKER_URL || 'https://elara-gemini.cryogenized.workers.dev' }}
-      GEMINI_WORKER_URL: ${{ vars.GEMINI_WORKER_URL || 'https://elara-gemini.cryogenized.workers.dev' }}
-      GEMINI_ALLOWED_ORIGIN: https://cryogenized-spec.github.io
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -33,23 +29,8 @@ jobs:
           check-latest: true
           package-manager-cache: false
 
-      - name: Verify public Gemini Worker configuration
-        run: |
-          set -euo pipefail
-          case "$VITE_GEMINI_WORKER_URL" in
-            https://*) ;;
-            *)
-              echo "GEMINI_WORKER_URL must be an HTTPS URL."
-              exit 1
-              ;;
-          esac
-          echo "Using configured Gemini Worker endpoint: $VITE_GEMINI_WORKER_URL"
-
       - name: Install dependencies
         run: npm install --no-audit --no-fund
-
-      - name: Verify Gemini Worker production boundary
-        run: npm run verify:worker
 
       - name: Build
         run: npm run build

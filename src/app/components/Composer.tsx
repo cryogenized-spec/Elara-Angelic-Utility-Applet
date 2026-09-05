@@ -73,11 +73,16 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
     return () => window.removeEventListener('keydown', handleEscape);
   }, [expanded, vttState]);
 
-  useEffect(() => () => {
-    mountedRef.current = false;
-    vttSessionIdRef.current += 1;
-    recorderRef.current?.cancel();
-    transcriptionAbortRef.current?.abort();
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      vttSessionIdRef.current += 1;
+      recorderRef.current?.cancel();
+      transcriptionAbortRef.current?.abort();
+      recorderRef.current = null;
+      transcriptionAbortRef.current = null;
+    };
   }, []);
 
   const vttBusy = vttState === 'requesting' || vttState === 'recording' || vttState === 'processing';

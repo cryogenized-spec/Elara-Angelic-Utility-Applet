@@ -13,7 +13,7 @@ The Gemini provider contract remains unchanged: it consumes the decrypted key on
 
 ## Phase 1 — Security/session model
 
-- Version the Lockbox metadata to include the selected security mode and any required authentication metadata.
+- Version the Lockbox metadata to include selected security mode and any required authentication metadata.
 - Keep the Gemini API key encrypted at rest in IndexedDB using the existing AES-GCM-256 + PBKDF2-SHA-256 construction and current 310,000 iterations.
 - Keep decrypted key material exclusively in JavaScript module memory. Never persist the plaintext key in `localStorage`, `sessionStorage`, or IndexedDB.
 - Add a local activity timestamp for idle-session decisions; no Google/Gemini network call is involved in stale-session detection.

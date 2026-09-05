@@ -7,6 +7,7 @@ import { RecordingBanner } from './RecordingBanner';
 import { VttRecorder, shouldDiscardVttCapture, type VttRecordingState } from '../../vtt/recording';
 import { insertTranscriptAtSelection } from '../../vtt/draft-insertion';
 import { transcribeVttCapture } from '../../vtt/transcription';
+import { transformVttTranscript, type VttTransformMode } from '../../vtt/transformation';
 import './composer.css';
 
 const MAX_HEIGHT = 132;
@@ -14,12 +15,13 @@ const MAX_HEIGHT = 132;
 type ComposerProps = {
   draft: string;
   status: ProviderStatus;
+  geminiModel: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
   onCancel: () => void;
 };
 
-export function Composer({ draft, status, onDraftChange, onSend, onCancel }: ComposerProps) {
+export function Composer({ draft, status, geminiModel, onDraftChange, onSend, onCancel }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<VttRecorder | null>(null);
@@ -34,6 +36,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
   const [vttRms, setVttRms] = useState(0);
   const [vttElapsed, setVttElapsed] = useState(0);
   const [vttMessage, setVttMessage] = useState<string | null>(null);
+  const [vttTransformMode, setVttTransformMode] = useState<VttTransformMode>('raw');
 
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -102,6 +105,12 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
     }
   }
 
+  function transformModeLabel(): string {
+    if (vttTransformMode === 'polish') return 'Polish';
+    if (vttTransformMode === 'roleplay') return 'Roleplay';
+    return 'Raw';
+  }
+
   async function handleVtt(target: HTMLTextAreaElement | null): Promise<void> {
     if (status === 'streaming') return;
     if (vttState === 'recording') {
@@ -112,7 +121,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
       vttSessionIdRef.current += 1;
       transcriptionAbortRef.current?.abort();
       transcriptionAbortRef.current = null;
-      setVttMessage('Voice transcription cancelled.');
+      setVttMessage('Voice processing cancelled.');
       setVttState('idle');
       setVttRms(0);
       setVttElapsed(0);
@@ -154,19 +163,33 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
       setVttState('processing');
       const transcript = await transcribeVttCapture(capture, controller.signal);
       if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;
-      const inserted = insertTranscriptAtSelection(draft, capture.selection, transcript);
+
+      let message = transcript;
+      if (vttTransformMode !== 'raw') {
+        setVttMessage(vttTransformMode === 'polish' ? 'Polishing transcript…' : 'Converting to roleplay…');
+        try {
+          message = await transformVttTranscript(transcript, vttTransformMode, { model: geminiModel, signal: controller.signal });
+        } catch (cause) {
+          if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+          message = transcript;
+          setVttMessage('Transformation failed; inserted the raw transcript.');
+        }
+      }
+
+      if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;
+      const inserted = insertTranscriptAtSelection(draft, capture.selection, message);
       onDraftChange(inserted.value);
       vttFocusRef.current = { target, cursor: inserted.cursor };
-      setVttMessage(null);
+      if (vttTransformMode === 'raw' || !vttMessage) setVttMessage(null);
       setVttState('idle');
     } catch (cause) {
       if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;
       if (cause instanceof DOMException && cause.name === 'AbortError') {
-        setVttMessage('Voice transcription cancelled.');
+        setVttMessage('Voice processing cancelled.');
         setVttState('idle');
         return;
       }
-      const message = cause instanceof Error ? cause.message : 'Voice transcription failed.';
+      const message = cause instanceof Error ? cause.message : 'Voice processing failed.';
       setVttMessage(message);
       setVttState('failed');
       window.setTimeout(() => {
@@ -188,7 +211,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
       vttSessionIdRef.current += 1;
       transcriptionAbortRef.current?.abort();
       transcriptionAbortRef.current = null;
-      setVttMessage('Voice transcription cancelled.');
+      setVttMessage('Voice processing cancelled.');
       setVttState('idle');
       setVttRms(0);
       setVttElapsed(0);
@@ -197,7 +220,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
 
   function micAriaLabel(): string {
     if (vttState === 'recording') return 'Recording voice input';
-    if (vttState === 'processing') return 'Transcribing voice input';
+    if (vttState === 'processing') return `${transformModeLabel()} voice input`;
     if (vttState === 'requesting') return 'Requesting microphone access';
     return 'VTT voice input';
   }
@@ -205,6 +228,17 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
   const banner = vttBusy ? (
     <RecordingBanner state={vttState} rms={vttRms} elapsedMs={vttElapsed} onStop={bannerStop} />
   ) : null;
+
+  const transformControl = (
+    <label className="composer__vtt-mode">
+      <span>Voice</span>
+      <select aria-label="Voice transcript mode" value={vttTransformMode} disabled={composerLocked} onChange={(event) => setVttTransformMode(event.target.value as VttTransformMode)}>
+        <option value="raw">Raw</option>
+        <option value="polish">Polish</option>
+        <option value="roleplay">Roleplay</option>
+      </select>
+    </label>
+  );
 
   if (expanded) {
     return <>
@@ -238,6 +272,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
           <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
             <Icon name="paperclip" size={19} />
           </button>
+          {transformControl}
           <div className="composer-expanded__spacer" />
           <button className="composer__icon composer__vtt-button" type="button" aria-label={micAriaLabel()} aria-pressed={false} disabled={composerLocked} onClick={() => void handleVtt(expandedTextareaRef.current)}>
             <Icon name="mic" size={20} />
@@ -266,6 +301,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
           <Icon name="expand" size={15} />
         </button>
       </div>
+      {transformControl}
       <button className="composer__icon composer__vtt-button" type="button" aria-label={micAriaLabel()} aria-pressed={false} disabled={composerLocked} onClick={() => void handleVtt(textareaRef.current)}>
         <Icon name="mic" size={20} />
       </button>

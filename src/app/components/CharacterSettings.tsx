@@ -54,6 +54,9 @@ export function CharacterSettings({ profile, onChange }: { profile: CharacterPro
   }
 
   const availability = profile.artwork ? focusAvailability(profile.artwork, profile.artworkMode) : { horizontal: true, vertical: true };
+  const previewObjectPosition = profile.artwork
+    ? `${availability.horizontal ? profile.artwork.focalX : 50}% ${availability.vertical ? profile.artwork.focalY : 50}%`
+    : undefined;
 
   return <div className="character-settings">
     <div className="setting-card character-card">
@@ -73,7 +76,7 @@ export function CharacterSettings({ profile, onChange }: { profile: CharacterPro
         {(['portrait', 'landscape'] as CharacterArtworkMode[]).map((mode) => <button key={mode} type="button" role="radio" aria-checked={profile.artworkMode === mode} className={profile.artworkMode === mode ? 'is-active' : ''} onClick={() => setMode(mode)}>{mode === 'portrait' ? 'Portrait · 4:5' : 'Landscape · 16:6'}</button>)}
       </div>
       <div className={`artwork-preview artwork-preview--${profile.artworkMode}`}>
-        {profile.artwork ? <img src={profile.artwork.dataUrl} alt="Current character artwork" style={{ objectPosition: `${profile.artwork.focalX}% ${profile.artwork.focalY}%` }} /> : <div className="artwork-empty"><span>No artwork selected</span><small>{profile.artworkMode === 'portrait' ? 'Best for compact character/avatar presentation.' : 'Best for the full-width upper banner.'}</small></div>}
+        {profile.artwork ? <img src={profile.artwork.dataUrl} alt="Current character artwork" style={{ objectPosition: previewObjectPosition }} /> : <div className="artwork-empty"><span>No artwork selected</span><small>{profile.artworkMode === 'portrait' ? 'Best for compact character/avatar presentation.' : 'Best for the full-width upper banner.'}</small></div>}
       </div>
       <div className="artwork-actions">
         <button type="button" onClick={() => inputRef.current?.click()}>{profile.artwork ? 'Replace image' : 'Upload image'}</button>

@@ -1,250 +1,234 @@
 # Elara VTT — Voice-to-Text Implementation Plan
 
-## Status
+## Objective
 
-Implementation started on 2026-09-04.
+Make Elara's voice-to-text feature reliable and production-ready while preserving the repository's single-provider architecture and the existing protected Gemini Worker boundary.
 
-VTT means **Voice-to-Text**. It is a composer capability that records a short microphone utterance, sends only that audio to the controlled Worker transcription boundary, receives a Gemini transcription, and inserts the result into the existing draft. VTT never sends the resulting text automatically.
+The user experience is deliberately **record → stop → transcribe → insert**. The microphone signal visualization is local and immediate; Gemini is responsible for transcription, not the animation.
 
-## Current Gemini/API choice
+## Architecture decisions
 
-The implementation uses Google's current **Gemini Interactions API** through the existing `@google/genai` dependency. The repository is currently pinned to `@google/genai` **2.21.0**, which is the npm `latest` release checked on 2026-09-04. The canonical Worker already selects API version **`v1`** for `GoogleGenAI`; VTT will follow that same API-version policy rather than introducing another SDK or API family.
+### Keep
 
-The transcription model is **`gemini-3.5-transcribe`** for recorded/turn-based transcription. Google documents a separate **`gemini-3.5-transcribe-live`** Live API model for low-latency streaming transcription; that is intentionally a later VTT mode because it requires a different raw-PCM/WebSocket audio pipeline. The first implementation therefore remains a short recording → transcription → draft insertion flow.
+- Browser microphone capture through `MediaRecorder`.
+- Local Web Audio `AnalyserNode` RMS measurement.
+- The existing VTT capability boundary in `src/vtt`.
+- The existing Cloudflare Worker as the only place that holds the Gemini API key.
+- Gemini `gemini-3.5-transcribe` for recorded/turn-based transcription.
+- Gemini Smart transcription mode for natural punctuation, capitalization, disfluency cleanup, and useful formatting.
+- Selection-aware insertion into the active composer.
+- No automatic chat submission after transcription.
+- No audio persistence in Dexie, IndexedDB, localStorage, or application analytics.
 
-For small voice clips, the Gemini API supports inline audio input under the documented request-size limit. This makes a short VTT clip a reasonable fit for the controlled Worker boundary. The Files API remains the expansion path for larger recordings and is not needed for the initial dictation path.
+### Change / correct
 
-## Architecture rule
+- Replace the current three-bar meter that overlays the microphone icon with a dedicated recording banner above the text editor.
+- Use a real animated waveform/oscilloscope-style visualization driven by local RMS/time-domain audio data.
+- Show a clear elapsed recording timer in the banner.
+- Give the recording state an unambiguous Stop control; the idle microphone remains the start control.
+- Make repeated dictation deterministic: after insertion, the caret lands immediately after the inserted transcript so the next recording inserts there.
+- Harden browser MIME negotiation and normalize the MIME passed to Gemini instead of blindly forwarding codec parameters that the provider may not require.
+- Prefer inline audio in the Worker for short dictation clips, using the Interactions API audio `data` + `mime_type` contract. Use the Files API only if real-world clip sizes require it; this must not create a second provider abstraction.
+- Keep recording infrastructure separate from React UI state. Do not introduce a competing React recording subsystem merely as a convenience hook.
 
-VTT remains a separate capability boundary while preserving Elara's one-provider architecture:
+### Do not adopt
 
-```text
-Android/PWA Composer
-    ↓
-VTT recorder + local metering/VAD
-    ↓
-validated /api/transcribe request
-    ↓
-Cloudflare Worker
-    ↓
-@google/genai / Gemini Interactions API
-    ↓
-gemini-3.5-transcribe
-    ↓
-validated transcript response
-    ↓
-composer draft insertion at captured selection
-```
+- Browser `SpeechRecognition` as the transcription engine.
+- Gemini Live transcription/WebSocket/PCM architecture for this feature revision. Live transcription is a separate, low-latency product path and would unnecessarily replace the simple recorded-utterance contract.
+- A second Gemini SDK/provider path.
+- Raw audio logging or persistence.
+- A UI-level fake meter disconnected from the real microphone signal.
 
-The browser never receives the Gemini API key. The normal chat endpoint `/api/gemini` remains unchanged. VTT is transcription, not a second conversational execution path.
+## User experience
 
-## Product behavior
+When idle, the composer shows its normal microphone button.
 
-When the user taps the microphone:
+When tapped:
 
-1. Request microphone permission if needed.
-2. Capture the active text control's `selectionStart` and `selectionEnd` before recording begins.
-3. Start the microphone recorder at a voice-appropriate target bitrate of **32 kbps**.
-4. Show an active recording state and a compact three-bar microphone signal meter.
-5. Provide tactile start feedback using `navigator.vibrate(20)` where the browser/device supports vibration.
-6. Monitor RMS microphone level locally.
-7. Auto-stop after approximately **4 seconds of sustained silence**, subject to a minimum recording guard.
-8. Stop/cancel cleanly and release microphone/audio resources.
-9. On stop, use `navigator.vibrate([15, 30, 15])` where supported.
-10. Reject obviously empty captures before any network/API call (`<2 KB` or `<500 ms`).
-11. Send the accepted recording to the Worker transcription endpoint.
-12. Validate the Worker response and extract only the returned transcript.
-13. Insert that transcript at the original selection/cursor location, replacing a captured selection when present.
-14. Do not send the chat message automatically.
+1. Capture the active editor's selection/caret immediately.
+2. Request microphone permission when necessary.
+3. Start MediaRecorder using a browser-supported voice recording format and a voice-appropriate bitrate target.
+4. Insert a dedicated recording banner directly above the text editor.
+5. Show an elapsed timer such as `00:14`.
+6. Draw a continuously updating local RMS/time-domain waveform from left to right across the banner.
+7. Show an unmistakable active-listening state and a Stop button.
+8. On Stop, finalize the Blob, release microphone/audio resources, and send only the captured audio to the Worker.
+9. Transcribe through `gemini-3.5-transcribe` in Smart mode.
+10. Insert only the returned text at the original selection/caret, replacing a captured selection where applicable.
+11. Place the caret immediately after the inserted transcript.
+12. Return to the normal composer state without sending the message.
 
-## Pass structure
+The same behavior must work in the compact composer and expanded editor.
 
-### Pass 1 — Microphone capture boundary
+## Implementation passes
 
-Implement and test the browser-side VTT recording foundation:
+### Pass 1 — Recording engine and signal foundation
 
-- supported `MediaRecorder` MIME-type selection;
-- 32 kbps `audioBitsPerSecond` target;
-- explicit VTT recording state machine;
-- microphone permission/error handling;
-- clean stream/track teardown;
-- recording start/stop/cancel lifecycle;
-- captured selection range;
-- haptic feedback;
-- `AnalyserNode` RMS metering;
-- three-bar signal level contract;
-- four-second silence auto-stop;
-- minimum-duration/empty-capture guardrails;
-- maximum recording duration;
-- pure draft insertion helper with exact cursor/selection semantics.
+Rework the existing `src/vtt/recording.ts` without creating a parallel microphone implementation.
 
-Pass 1 must not call Gemini and must not persist audio. It proves that capture is bounded and deterministic before an API is involved.
+Deliver:
 
-### Pass 2 — Worker transcription boundary
+- capability-driven MediaRecorder MIME selection;
+- clear recorder lifecycle and state transitions;
+- explicit microphone permission/error handling;
+- clean stream/track teardown on stop, cancel, failure, and unmount;
+- recording duration accounting;
+- maximum recording guard;
+- minimum-duration / tiny-capture guard;
+- sustained-silence auto-stop safeguard;
+- RMS/time-domain signal sampling with a UI-friendly signal data contract rather than only a three-level meter;
+- correct audio context/analyser lifecycle;
+- cancellation that cannot leave pending promises or live tracks behind;
+- haptic feedback where the platform supports it.
 
-Add `POST /api/transcribe` to the Cloudflare Worker with:
+Tests:
 
-- strict origin validation matching the existing Worker policy;
-- explicit request-size ceiling for VTT clips;
-- MIME validation against supported audio types;
-- safe request parsing;
-- no arbitrary upstream target/URL support;
-- Gemini credential use only inside the Worker;
-- Interactions API request using `gemini-3.5-transcribe`;
-- `generation_config.transcription_config.mode` set to `smart` for ordinary dictation;
-- normalized JSON response containing transcript and safe metadata only;
-- no message text or raw audio in diagnostics beyond what is necessary for operation;
-- clean provider/network error normalization;
-- explicit timeout/abort behavior.
+- MIME capability selection;
+- permission denial;
+- unsupported microphone APIs;
+- start/stop/cancel;
+- short/empty capture rejection;
+- maximum duration;
+- sustained silence;
+- analyser cleanup;
+- stream track cleanup;
+- state transitions.
 
-For the initial clip size, the implementation may use inline audio data in the Interactions request. This avoids adding a second provider abstraction solely for Files API uploads. The Worker must nevertheless enforce a much smaller VTT-specific body limit than Gemini's general multimodal ceiling. If that limit proves insufficient for real-world dictation, a follow-up pass can move the upload leg to the Files API without changing the browser-facing contract.
+Pass 1 must not require a Gemini call.
 
-### Pass 3 — Gemini transcription adapter
+### Pass 2 — Recording banner and waveform UI
 
-Wire the Worker transcription boundary to the current `@google/genai` SDK:
+Replace the current microphone-button meter with a dedicated `RecordingBanner`-style UI component integrated into the existing composer architecture.
 
-```ts
-const ai = new GoogleGenAI({
-  apiKey: env.GEMINI_API_KEY,
-  apiVersion: 'v1',
-});
+Deliver:
 
-const interaction = await ai.interactions.create({
-  model: 'gemini-3.5-transcribe',
-  input: [{
-    type: 'audio',
-    data: base64Audio,
-    mime_type: mimeType,
-  }],
-  generation_config: {
-    transcription_config: {
-      mode: 'smart',
-    },
-  },
-});
-```
+- banner positioned immediately above the text editor;
+- responsive mobile-first layout;
+- elapsed timer;
+- animated canvas waveform using `requestAnimationFrame` and the real local microphone signal;
+- restrained Elara pearlescent/iridescent treatment with glass/translucent surfaces;
+- clear active-listening indicator;
+- large, reliable Stop touch target;
+- reduced-motion behavior;
+- no waveform overlay on the microphone icon;
+- correct layout in both normal and expanded composers;
+- accessible status and Stop control labels.
 
-The exact request/response shape will be verified against the installed SDK typings and the current Google documentation before the implementation is considered complete.
+The waveform must be local signal visualization only. It must not imply that Gemini is receiving or decoding audio in real time.
 
-### Pass 4 — Composer integration
+### Pass 3 — Gemini transcription boundary and adapter
 
-Turn the existing microphone icon into the real VTT control.
+Correct the existing Worker transcription path against the current official Gemini Interactions API contract.
 
-Required UX:
+Deliver:
 
-- same VTT control in the normal composer and expanded editor;
-- idle / requesting / recording / processing / success / error presentation;
-- signal meter while recording;
-- explicit stop interaction;
-- disabled composer controls while transcription is processing where necessary;
-- no automatic message submission;
-- no accidental loss of a draft while VTT is active;
-- cursor/selection insertion into the exact composer that was active when VTT started.
+- validated `/api/transcribe` request boundary;
+- strict origin policy consistent with the existing Worker;
+- explicit VTT request-size ceiling;
+- supported audio MIME validation;
+- inline audio submission for ordinary short clips;
+- `gemini-3.5-transcribe` model;
+- Smart transcription mode;
+- concise transcription instruction requiring only the direct transcript, with no meta-commentary;
+- normalized JSON response containing only safe transcript data;
+- provider/network error normalization;
+- no secret/audio leakage in diagnostics;
+- explicit cleanup for any temporary provider resource if Files API is ever required.
 
-When the expanded editor is active, insertion must target the expanded textarea rather than the compact textarea.
+The browser must never receive the Gemini API key.
 
-### Pass 5 — Reliability, diagnostics, and security
+### Pass 4 — Cursor-aware composer integration
 
-Add unit tests and Worker contract tests for:
+Connect the recorder, banner, Worker adapter, and existing draft insertion helper.
 
-- MIME allow-listing;
-- oversized request rejection;
-- malformed payload rejection;
-- tiny/short capture rejection;
-- transcript response validation;
-- provider error mapping;
-- origin/CORS behavior;
-- no secret leakage;
-- audio resource teardown;
-- cancellation during recording and during transcription;
-- selection-aware insertion with empty, collapsed, and selected ranges;
-- whitespace padding without damaging intentional newlines.
+Deliver:
 
-The VTT path must never log raw microphone data, credentials, OAuth tokens, or arbitrary provider payloads.
+- capture selection before permission/recording starts;
+- insertion at the original selection/caret;
+- replacement of selected text;
+- whitespace handling without concatenating words or destroying intentional newlines;
+- caret placement immediately after inserted transcript;
+- second/third consecutive dictation inserted at the new caret;
+- compact and expanded editor parity;
+- no automatic send;
+- no accidental draft loss while recording or processing.
 
-### Pass 6 — Android/PWA E2E validation
+### Pass 5 — Reliability, security and edge cases
 
-Extend Playwright coverage for Android portrait and desktop Chromium:
+Exercise all failure paths and harden recovery:
 
-- microphone permission mocked/controlled;
-- start/stop flow;
-- signal meter state;
-- auto-stop after sustained silence;
-- no-speech guard;
-- cursor insertion;
-- selection replacement;
-- expanded-editor insertion;
+- microphone denied/unavailable;
+- unsupported MediaRecorder format;
+- no speech / near-empty capture;
+- silence auto-stop;
+- maximum duration;
+- manual stop;
+- cancellation while recording;
+- cancellation while transcribing;
+- provider failure;
+- network failure;
+- timeout;
+- empty transcript;
+- component unmount during recording/transcription;
+- repeated recording sessions;
+- expanded-editor state changes;
+- no credential/raw-audio logging;
+- correct CORS and request validation.
+
+### Pass 6 — E2E and Android/PWA validation
+
+Extend Playwright coverage for desktop Chromium and Android portrait geometry.
+
+Verify:
+
+- microphone permission flow;
+- banner appearance/disappearance;
+- timer updates;
+- waveform activity;
+- Stop action;
+- successful transcript insertion;
+- cursor placement;
+- selected-text replacement;
+- repeated dictation;
+- expanded editor;
+- auto-stop;
 - cancellation;
 - error recovery;
-- accessibility labels and keyboard focus;
-- reduced-motion behavior.
+- accessibility labels;
+- reduced-motion behavior;
+- PWA/service-worker environment compatibility.
 
-A real Android physical-device validation remains required before calling VTT production-ready because microphone permissions, PWA lifecycle, vibration support, MediaRecorder MIME support, and audio device routing are all browser/device dependent.
+A real Android physical-device test remains the final production-readiness check because microphone permissions, PWA lifecycle, MediaRecorder implementation, vibration support, audio routing, and browser MIME support are device-dependent.
 
-## Audio policy
+## Current repository observations entering Pass 1
 
-The first implementation targets **32 kbps** recording with a browser-supported Opus/WebM format where available. MediaRecorder configuration remains capability-driven: the browser's `MediaRecorder.isTypeSupported()` result is authoritative.
+The repository already contains a substantial VTT foundation in `src/vtt/recording.ts`, including MediaRecorder capture, an `AnalyserNode`, RMS calculation, silence detection, maximum duration, and stream cleanup. The current weakness is that the implementation exposes only a three-level UI meter and is tightly coupled to the existing button presentation.
 
-The product does not transcode audio in the browser merely to satisfy a preferred format. The selected recording MIME type is sent to the Worker and validated before the Gemini request.
+The current Composer places that meter absolutely inside the microphone button, which is the UI behavior this plan replaces.
 
-## Cursor-aware insertion policy
+The current Worker exposes `/api/transcribe` and already protects the Gemini key behind the Worker boundary. Its transcription implementation currently uses a temporary Gemini File upload before creating a `gemini-3.5-transcribe` interaction. Pass 3 will verify and correct this against the current official SDK/API contract rather than preserving that path by default.
 
-The selection range is captured before microphone recording starts because focus can move while permission prompts, recording, and network processing occur.
+The existing draft insertion helper already captures a selection range and returns the resulting cursor index. It will be retained and hardened rather than replaced by a second insertion mechanism.
 
-Insertion behavior:
+## Completion criteria
 
-```text
-prefix + separator + transcript + separator + suffix
-```
+VTT is complete only when:
 
-The helper must avoid doubled whitespace at natural boundaries while still preventing accidental word concatenation. A selected range is replaced. A collapsed selection inserts at the cursor. The final draft remains a normal user-editable string.
+- microphone capture works on the target Android/PWA environment;
+- the recording banner visibly and correctly reflects live local microphone activity;
+- Stop reliably finalizes and submits the audio;
+- Gemini returns usable transcription through the protected Worker;
+- the transcript is inserted exactly at the intended location;
+- repeated dictation works without overwriting or losing the draft;
+- no microphone/audio resources remain live after completion or failure;
+- no raw audio or credentials are persisted or leaked;
+- all unit, Worker contract, E2E, build, lint, typecheck, and repository reliability gates pass.
 
-## Silence/VAD policy
-
-RMS is calculated from an `AnalyserNode` locally. The VAD layer is an interaction safeguard, not a claim of speech recognition accuracy.
-
-The recorder must:
-
-- tolerate brief pauses;
-- avoid stopping immediately after start;
-- accumulate sustained-silence duration;
-- stop after approximately four seconds below threshold;
-- stop at the hard maximum duration even if audio is continuously active.
-
-The exact RMS threshold will be empirically tuned during Android testing rather than baked into the UI layer.
-
-## State model
-
-The VTT state machine is:
-
-`idle → requesting → recording → processing → idle`
-
-with explicit terminal/recoverable conditions:
-
-`permission-denied`, `unsupported`, `cancelled`, `empty`, and `failed`.
-
-No state should leave the microphone stream live after completion, failure, cancellation, or unmount.
-
-## Transcript semantics
-
-Gemini Smart transcription is the initial mode because ordinary dictation benefits from removal of disfluencies, punctuation, casing, and structure. Google documents Smart mode as incompatible with word timestamps and speaker diarization; neither feature is required by VTT-1.
-
-Automatic language detection is the default. Explicit language codes and custom vocabulary are deferred until there is a concrete product requirement.
-
-## Privacy
-
-Recorded audio exists only for the duration required to obtain its transcript. VTT does not persist recordings to Dexie, localStorage, IndexedDB, or application analytics. Gemini-side temporary storage follows Google's documented API behavior when the Files API is used in a later expansion; the initial inline-audio path avoids storing a Gemini File resource for ordinary short dictation.
-
-## Current official references checked 2026-09-04
+## Official references
 
 - Gemini audio transcription: https://ai.google.dev/gemini-api/docs/transcribe
-- Gemini file input methods: https://ai.google.dev/gemini-api/docs/file-input-methods
-- Gemini Files API: https://ai.google.dev/gemini-api/docs/files
+- Gemini Interactions API: https://ai.google.dev/api/interactions-api-v1
+- Gemini audio/file input: https://ai.google.dev/gemini-api/docs/file-input-methods
 - Gemini Live transcription: https://ai.google.dev/gemini-api/docs/live-api/live-transcribe
 - Gemini API versioning: https://ai.google.dev/gemini-api/docs/api-versions
-- Interactions API overview: https://ai.google.dev/gemini-api/docs/interactions-overview
-- `@google/genai` npm release state: https://www.npmjs.com/package/@google/genai
-
-## Implementation invariant
-
-The VTT feature is complete only when the microphone is a real composer capability, transcription uses the current Gemini API through the existing protected Worker boundary, the transcript is inserted exactly where the user left the cursor/selection, no automatic send occurs, no audio is persisted, and all repository reliability gates remain green.
+- `@google/genai`: https://www.npmjs.com/package/@google/genai

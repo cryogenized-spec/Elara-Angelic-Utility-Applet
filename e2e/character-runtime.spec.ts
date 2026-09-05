@@ -40,9 +40,5 @@ test('transmits the saved master persona protocol as the active runtime instruct
   await expect(page.getByText('Runtime persona received.')).toBeVisible();
 
   const instruction = requests[0]?.systemInstruction;
-  expect(typeof instruction).toBe('string');
-  expect(instruction).toEqual(expect.stringContaining('PERSONA PROTOCOL: ELARA'));
-  expect(instruction).toEqual(expect.stringContaining('Default to being in character.'));
-  expect(instruction).toEqual(expect.stringContaining('CHARACTER EXECUTION DIRECTIVE'));
-  expect(instruction).toEqual(expect.stringContaining('active runtime behavior'));
+  expect(instruction).toBe(persona);
 });

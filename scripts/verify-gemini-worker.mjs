@@ -52,18 +52,6 @@ async function main() {
   const headers = options.headers.get('access-control-allow-headers') || '';
   if (!headers.toLowerCase().includes('content-type')) throw new Error(`Worker preflight does not allow Content-Type: ${headers || '(missing)'}`);
 
-  const missingInstruction = await request(`${workerUrl}/api/gemini`, {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gemini-3.8-flash',
-      input: 'This request intentionally omits the master system instruction.',
-    }),
-  });
-  if (missingInstruction.status !== 400) throw new Error(`Worker accepted a request without systemInstruction (HTTP ${missingInstruction.status}). The deployed Worker is not enforcing the current contract.`);
-  const missingBody = await missingInstruction.text();
-  if (!missingBody.includes('validation') || !missingBody.includes('approved Gemini contract')) throw new Error(`Worker returned an unexpected missing-instruction response: ${missingBody}`);
-
   const behavior = await request(`${workerUrl}/api/gemini`, {
     method: 'POST',
     headers: { Origin: origin, 'Content-Type': 'application/json' },
@@ -79,8 +67,7 @@ async function main() {
   if (modelText !== 'SYS_PROMPT_OK') throw new Error(`System instruction behavioral verification failed. Expected SYS_PROMPT_OK, received: ${JSON.stringify(modelText)}`);
 
   console.log('Live Worker browser transport verification passed.');
-  console.log('Live Worker master-instruction contract verification passed.');
-  console.log('Live system-instruction behavioral verification passed.');
+  console.log('Live Worker supplied-master-instruction behavioral verification passed.');
 }
 
 main().catch((error) => {

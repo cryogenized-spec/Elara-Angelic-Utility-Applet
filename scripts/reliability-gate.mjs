@@ -80,12 +80,13 @@ if (!characterSource.includes('The tools exposed by the application are capabili
 const appSource = readFileSync(join(root, 'src/app/App.tsx'), 'utf8');
 if (appSource.includes('buildCharacterInstruction')) throw new Error('Reliability gate: legacy character instruction resolver must not be used.');
 if (!appSource.includes('googleGeminiFunctionNames')) throw new Error('Reliability gate: normal character turns must receive the registered Google capability surface.');
-if (!appSource.includes('tools: DEFAULT_GEMINI_TOOLS')) throw new Error('Reliability gate: normal and regenerated turns must expose the canonical tool surface.');
+if (!appSource.includes('tools: DEFAULT_GEMINI_TOOLS')) throw new Error('Reliability gate: normal and regenerated turns must expose the canonical executable tool surface.');
 if (!appSource.includes('readOnly: false')) throw new Error('Reliability gate: character tool loop must not force normal turns into read-only mode.');
 
 const geminiDeclarationSource = readFileSync(join(root, 'src/google/tools/gemini-declarations.ts'), 'utf8');
 if (geminiDeclarationSource.includes('Application tool risk:')) throw new Error('Reliability gate: tool risk policy must not be presented as competing model persona guidance.');
 if (!geminiDeclarationSource.includes('description: descriptor.description')) throw new Error('Reliability gate: Gemini tool descriptions must come directly from the registered capability descriptions.');
+if (!geminiDeclarationSource.includes("filter((descriptor) => descriptor.risk === 'read')")) throw new Error('Reliability gate: default conversational tool surface must only expose currently executable read capabilities.');
 
 const vttSource = readFileSync(join(root, 'src/vtt/transformation.ts'), 'utf8');
 if (vttSource.includes('buildVttTransformSystemInstruction')) throw new Error('Reliability gate: VTT must not construct a second competing system instruction.');
@@ -94,6 +95,7 @@ if (!vttSource.includes('systemInstruction: masterInstruction')) throw new Error
 const workerSource = readFileSync(join(root, 'worker/src/index.ts'), 'utf8');
 if (!workerSource.includes('systemInstruction')) throw new Error('Reliability gate: Worker request contract must carry the application-owned character instruction.');
 if (!workerSource.includes('system_instruction')) throw new Error('Reliability gate: Worker must map the character instruction to Gemini system_instruction.');
+if (!workerSource.includes('tools: z.array(googleToolNameSchema).max(40).optional()')) throw new Error('Reliability gate: Worker tool-count contract must remain explicit.');
 if (!workerSource.includes('stream: true') || !workerSource.includes('store: true')) throw new Error('Reliability gate: canonical Gemini streaming/store semantics must remain enabled.');
 
 const characterPersistence = readFileSync(join(root, 'src/persistence/character.ts'), 'utf8');
@@ -123,4 +125,4 @@ function countText(directory, pattern) {
   return count;
 }
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, one embodied Elara Character Master System Instruction, direct tool capability exposure, no competing character resolver, singular VTT system instruction, and canonical Worker streaming contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, one embodied Elara Character Master System Instruction, direct executable tool capability exposure within the Worker contract, no competing character resolver, singular VTT system instruction, and canonical Worker streaming contract.`);

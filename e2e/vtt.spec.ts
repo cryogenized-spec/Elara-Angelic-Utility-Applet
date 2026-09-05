@@ -59,6 +59,11 @@ async function setSelection(page: Page, name: string, start: number, end: number
   }, { start, end });
 }
 
+async function stopRecording(page: Page): Promise<void> {
+  await expect(page.getByRole('button', { name: 'Stop VTT voice input' })).toBeVisible();
+  await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+}
+
 test.describe('VTT composer flow', () => {
   test.beforeEach(async ({ page }) => {
     await installVttBrowserMocks(page);
@@ -78,8 +83,8 @@ test.describe('VTT composer flow', () => {
     await setSelection(page, 'Message Elara', 5, 5);
 
     await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await expect(page.getByRole('button', { name: 'Stop VTT voice input' })).toBeVisible();
-    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await expect(page.getByRole('region', { name: 'Voice recording' })).toBeVisible();
+    await stopRecording(page);
 
     await expect(composer).toHaveValue('hello voice inserted world');
     await expect(composer).toBeFocused();
@@ -93,7 +98,7 @@ test.describe('VTT composer flow', () => {
     await setSelection(page, 'Message Elara', 6, 11);
 
     await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await stopRecording(page);
 
     await expect(composer).toHaveValue('hello voice inserted world');
   });
@@ -107,7 +112,7 @@ test.describe('VTT composer flow', () => {
     await setSelection(page, 'Expanded message', 8, 8);
 
     await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await stopRecording(page);
 
     await expect(expanded).toHaveValue('expanded voice inserted draft');
     await expect(expanded).toBeFocused();
@@ -147,11 +152,11 @@ test.describe('VTT composer flow', () => {
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('draft');
     await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await stopRecording(page);
     await expect(page.getByRole('status')).toContainText('Transcription unavailable.');
 
     await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await stopRecording(page);
     await expect(composer).toHaveValue('draft recovered text');
   });
 
@@ -166,7 +171,7 @@ test.describe('VTT composer flow', () => {
     await setSelection(page, 'Message Elara', 5, 5);
 
     await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
+    await stopRecording(page);
     await expect(page.getByRole('button', { name: 'Cancel voice transcription' })).toBeVisible();
 
     await page.getByRole('button', { name: 'Cancel voice transcription' }).click();

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { clearGeminiApiKey, getGeminiApiKey, getGeminiLockboxStatus, lockGeminiApiKey, saveGeminiApiKey, unlockGeminiApiKey } from '../../persistence/gemini-api-key';
 import './worker-health.css';
 
@@ -16,11 +16,11 @@ export function GeminiApiLockbox() {
     void getGeminiLockboxStatus().then(setStatus).catch(() => setStatus('empty'));
   }, []);
 
-  function read(ref: React.RefObject<HTMLInputElement | null>): string {
+  function read(ref: RefObject<HTMLInputElement | null>): string {
     return ref.current?.value.trim() ?? '';
   }
 
-  function clearInputs(...refs: Array<React.RefObject<HTMLInputElement | null>>): void {
+  function clearInputs(...refs: Array<RefObject<HTMLInputElement | null>>): void {
     for (const ref of refs) {
       if (ref.current) ref.current.value = '';
     }

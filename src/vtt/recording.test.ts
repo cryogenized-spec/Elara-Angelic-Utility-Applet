@@ -6,6 +6,7 @@ import {
   VTT_MIN_DURATION_MS,
   VTT_SILENCE_DURATION_MS,
   getSupportedVttMimeType,
+  getVttSignalLevel,
   shouldDiscardVttCapture,
 } from './recording';
 
@@ -28,6 +29,16 @@ describe('VTT recording contract', () => {
     expect(shouldDiscardVttCapture(2_047, 1_000)).toBe(true);
     expect(shouldDiscardVttCapture(5_000, 499)).toBe(true);
     expect(shouldDiscardVttCapture(5_000, 500)).toBe(false);
+  });
+
+  it('maps RMS signal into deterministic visual levels', () => {
+    expect(getVttSignalLevel(0)).toBe(0);
+    expect(getVttSignalLevel(0.0179)).toBe(0);
+    expect(getVttSignalLevel(0.018)).toBe(1);
+    expect(getVttSignalLevel(0.0599)).toBe(1);
+    expect(getVttSignalLevel(0.06)).toBe(2);
+    expect(getVttSignalLevel(0.1599)).toBe(2);
+    expect(getVttSignalLevel(0.16)).toBe(3);
   });
 
   it('fails format selection when no supported recorder MIME type exists', () => {

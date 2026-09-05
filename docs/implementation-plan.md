@@ -72,7 +72,7 @@ The Gemini provider contract remains unchanged: it consumes the decrypted key on
 ## Phase 7 — Tests and hardening
 
 - Unit-test PIN validation, encryption/decryption, mode transitions, timeout behavior, timestamp logic, failed-attempt backoff, reset/wipe behavior, and provider behavior while locked.
-- Assert that the API key never appears in plaintext in IndexedDB, localStorage, or sessionStorage.
+- Assert that the API key never appears in plaintext in IndexedDB/localStorage/sessionStorage.
 - Add browser tests for the locked PIN surface, numeric input configuration, focus request, and passkey capability handling.
 - Add WebAuthn mocks for registration, authentication, unsupported-capability fallback, and PIN fallback.
 - Test the complete state transitions: first-run → PIN → unlocked → stale → PIN unlock; PIN → passkey → stale → passkey unlock; passkey → PIN fallback; PIN → Off; Off → security enabled; forgotten PIN → full key wipe.

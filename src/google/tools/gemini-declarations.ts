@@ -27,6 +27,14 @@ export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaratio
   },
 }));
 
+/**
+ * The ordinary conversational surface contains only capabilities that have
+ * concrete execution handlers today. Additional registered write/destructive
+ * tools remain available to explicitly wired application workflows until their
+ * handlers are complete.
+ */
 export function googleGeminiFunctionNames(): readonly string[] {
-  return googleGeminiFunctionDeclarations.map((tool) => tool.name);
+  return googleToolRegistry
+    .filter((descriptor) => descriptor.risk === 'read')
+    .map((tool) => tool.name);
 }

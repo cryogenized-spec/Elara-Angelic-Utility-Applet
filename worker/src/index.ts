@@ -1,6 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
-import { ELARA_SYSTEM_INSTRUCTION } from '../../src/gemini/creative-context';
 import { googleToolNameSchema } from '../../src/google/tools/contracts';
 import { googleGeminiFunctionDeclarations } from '../../src/google/tools/gemini-declarations';
 import { handleGoogleOAuthRequest, type GoogleOAuthEnv } from './google-oauth';
@@ -19,7 +18,7 @@ const requestSchema = z.object({
   model: z.string().min(1).max(128),
   input: z.string().min(1).max(200_000).optional(),
   previousInteractionId: z.string().min(1).max(256).optional(),
-  systemInstruction: z.string().min(1).max(50_000).optional(),
+  systemInstruction: z.string().min(1).max(50_000),
   tools: z.array(googleToolNameSchema).max(40).optional(),
   toolResult: toolResultSchema.optional(),
   generationConfig: z.object({ thinkingLevel: z.string().optional(), thinkingSummaries: z.enum(['auto', 'none']).optional(), maxOutputTokens: z.number().int().min(1).optional(), seed: z.number().int().min(0).optional(), stopSequences: z.array(z.string().min(1).max(128)).max(5).optional() }).optional(),
@@ -105,7 +104,7 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
   const tools = selectedTools(requestedTools);
   if (requestedTools?.length && (!tools || tools.length !== new Set(requestedTools).size)) return jsonResponse(request, env, { code: 'validation', message: 'Request referenced an unregistered Gemini tool.' }, 400);
   const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, apiVersion: 'v1' });
-  const systemInstruction = parsed.data.systemInstruction?.trim() || ELARA_SYSTEM_INSTRUCTION;
+  const systemInstruction = parsed.data.systemInstruction.trim();
   const input = parsed.data.toolResult
     ? [{ type: 'function_result' as const, name: parsed.data.toolResult.name, call_id: parsed.data.toolResult.callId, result: [{ type: 'text' as const, text: JSON.stringify(parsed.data.toolResult.result) }] }]
     : parsed.data.input!;

@@ -21,6 +21,8 @@ const oauth = {
   disconnect: async () => undefined,
 };
 
+const systemInstruction = 'You are Elara, an angelic synthetic cybernetic woman and consort.';
+
 describe('streamGoogleToolLoop', () => {
   beforeEach(() => {
     streamReply.mockReset();
@@ -40,7 +42,7 @@ describe('streamGoogleToolLoop', () => {
 
     const collected: Array<unknown> = [];
     for await (const event of streamGoogleToolLoop(
-      { model: 'gemini-3.8-flash', input: 'Show my calendar.' },
+      { model: 'gemini-3.8-flash', input: 'Show my calendar.', systemInstruction },
       { tools: ['calendar.listEvents'], executor: { oauth, handlers: { 'calendar.listEvents': handler } } },
     )) collected.push(event);
 
@@ -48,6 +50,7 @@ describe('streamGoogleToolLoop', () => {
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gemini-3.8-flash',
       previousInteractionId: 'interaction-1',
+      systemInstruction,
       result: expect.objectContaining({ callId: 'call-1', name: 'calendar.listEvents', result: { events: [{ summary: 'Design review', calendarId: 'primary' }] } }),
       tools: ['calendar.listEvents'],
     }), undefined);
@@ -59,7 +62,7 @@ describe('streamGoogleToolLoop', () => {
   it('never permits a write tool through the default read-only loop', async () => {
     const consume = async () => {
       for await (const _event of streamGoogleToolLoop(
-        { model: 'gemini-3.8-flash', input: 'Change something.', tools: ['tasks.createTask'] },
+        { model: 'gemini-3.8-flash', input: 'Change something.', systemInstruction, tools: ['tasks.createTask'] },
         { executor: { oauth, handlers: {} } },
       )) {
         // The generator should reject before contacting Gemini.

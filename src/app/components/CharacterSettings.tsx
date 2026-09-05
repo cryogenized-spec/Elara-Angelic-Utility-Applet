@@ -28,6 +28,7 @@ async function readImage(file: File): Promise<CharacterProfile['artwork']> {
 }
 
 function focusAvailability(artwork: NonNullable<CharacterProfile['artwork']>, mode: CharacterArtworkMode) {
+  if (!artwork.width || !artwork.height) return { horizontal: true, vertical: true };
   const imageRatio = artwork.width / artwork.height;
   const containerRatio = CONTAINER_RATIOS[mode];
   const tolerance = 0.005;

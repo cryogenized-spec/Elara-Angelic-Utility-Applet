@@ -69,9 +69,10 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
         const groupId = responseGroupFor(message);
         const selectedIndex = Math.min(Math.max(selectedVariants[groupId] ?? variants.length - 1, 0), variants.length - 1);
         const selected = variants[selectedIndex];
+        const thoughtSummary = selected.providerTurn?.usage?.thoughtSummary;
         return <article className="message message-assistant assistant-glow" key={groupId}>
           <header className="message-meta"><span>ELARA</span><time dateTime={new Date(selected.createdAt).toISOString()}>{new Date(selected.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
-          {selected.executionSummary && <ExecutionSummary summary={selected.executionSummary} />}
+          {selected.executionSummary && <ExecutionSummary summary={selected.executionSummary} thoughtSummary={thoughtSummary} />}
           {variants.length > 0 && <div className="response-variants" aria-label="Generated response variants">
             <button type="button" className="response-variants__button" aria-label="Previous response" disabled={selectedIndex === 0} onClick={() => setSelectedVariants((current) => ({ ...current, [groupId]: Math.max(0, selectedIndex - 1) }))}>‹</button>
             <span className="response-variants__pagination" aria-live="polite">{selectedIndex + 1}/{variants.length}</span>

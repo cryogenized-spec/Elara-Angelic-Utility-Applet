@@ -119,6 +119,38 @@ test.describe('VTT composer flow', () => {
     await expect(page.getByRole('textbox', { name: 'Message Elara' })).not.toBeVisible();
   });
 
+  test('supports second and third dictation at the caret left by the prior insertion', async ({ page }) => {
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await composer.fill('start');
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await stopRecording(page);
+    await expect(composer).toHaveValue('start voice inserted');
+    await expect(composer).toBeFocused();
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await stopRecording(page);
+    await expect(composer).toHaveValue('start voice inserted voice inserted');
+    await expect(composer).toBeFocused();
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await stopRecording(page);
+    await expect(composer).toHaveValue('start voice inserted voice inserted voice inserted');
+    await expect(composer).toBeFocused();
+  });
+
+  test('preserves an intentional newline adjacent to the insertion point', async ({ page }) => {
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await composer.fill('Hello\nworld');
+    await setSelection(page, 'Message Elara', 5, 5);
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await stopRecording(page);
+
+    await expect(composer).toHaveValue('Hello voice inserted\nworld');
+    await expect(composer).toBeFocused();
+  });
+
   test('auto-stops after sustained silence and returns to idle', async ({ page }) => {
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('keep ');

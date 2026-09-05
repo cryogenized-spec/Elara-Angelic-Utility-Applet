@@ -3,8 +3,8 @@ import { transcribeVttCapture, VttTranscriptionError } from './transcription';
 import type { VttCapture } from './recording';
 
 const capture: VttCapture = {
-  blob: new Blob(['audio'], { type: 'audio/webm' }),
-  mimeType: 'audio/webm',
+  blob: new Blob(['audio'], { type: 'audio/webm;codecs=opus' }),
+  mimeType: 'audio/webm;codecs=opus',
   durationMs: 800,
   selection: { start: 2, end: 2 },
 };
@@ -12,7 +12,7 @@ const capture: VttCapture = {
 afterEach(() => vi.restoreAllMocks());
 
 describe('VTT transcription client', () => {
-  it('posts the capture to the Worker transcription boundary', async () => {
+  it('posts the capture to the Worker transcription boundary with a canonical MIME type', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ transcript: 'hello there' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
     await expect(transcribeVttCapture(capture)).resolves.toBe('hello there');
     expect(fetchMock).toHaveBeenCalledWith(

@@ -85,6 +85,10 @@ jobs:
 
           echo 'Live Worker browser transport verification passed.'
 
+      - name: Verify live Gemini system instruction behavior
+        shell: bash
+        run: npm run verify:worker
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 

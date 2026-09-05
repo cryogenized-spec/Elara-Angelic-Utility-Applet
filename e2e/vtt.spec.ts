@@ -44,10 +44,16 @@ async function installVttBrowserMocks(page: Page, interactionMode: 'default' | '
     Object.defineProperty(navigator, 'vibrate', { configurable: true, value: () => true });
   });
 
-  await page.evaluate(async () => {
-    const lockbox = await import('/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts');
-    await lockbox.saveGeminiApiKey('e2e-test-api-key', 'e2e-test-password');
-  });
+  await page.goto('');
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Lockbox' }).click();
+  await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
+  await page.getByLabel('Lockbox password').fill('e2e-test-password');
+  await page.getByLabel('Confirm Lockbox password').fill('e2e-test-password');
+  await page.getByRole('button', { name: 'Create Lockbox' }).click();
+  await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
 
   await page.route('**/upload/v1beta/files*', async (route) => {
     await route.fulfill({
@@ -88,7 +94,6 @@ async function stopRecording(page: Page): Promise<void> {
 test.describe('VTT composer flow', () => {
   test('records, transcribes, and inserts at the captured cursor without sending', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.goto('');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('hello world');
     await setSelection(page, 'Message Elara', 5, 5);
@@ -100,7 +105,6 @@ test.describe('VTT composer flow', () => {
 
   test('replaces the captured selection', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.goto('');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('hello cruel world');
     await setSelection(page, 'Message Elara', 6, 11);
@@ -111,7 +115,6 @@ test.describe('VTT composer flow', () => {
 
   test('uses the expanded editor as the insertion target', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.goto('');
     await page.getByRole('textbox', { name: 'Message Elara' }).fill('expanded draft');
     await page.getByRole('button', { name: 'Expand message editor' }).click();
     const expanded = page.getByRole('textbox', { name: 'Expanded message' });
@@ -125,7 +128,6 @@ test.describe('VTT composer flow', () => {
 
   test('supports repeated dictation at the caret left by the prior insertion', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.goto('');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('start');
     for (const expected of ['start voice inserted', 'start voice inserted voice inserted', 'start voice inserted voice inserted voice inserted']) {
@@ -138,7 +140,6 @@ test.describe('VTT composer flow', () => {
 
   test('polishes a transcript through the direct Gemini boundary before insertion', async ({ page }) => {
     await installVttBrowserMocks(page, 'transform');
-    await page.goto('');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('polish');
     await composer.fill('draft: ');
@@ -149,7 +150,6 @@ test.describe('VTT composer flow', () => {
 
   test('falls back to the raw transcript when transformation fails', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.goto('');
     await page.route('**/v1beta/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       if (Array.isArray(body.input)) {
@@ -169,7 +169,6 @@ test.describe('VTT composer flow', () => {
 
   test('reports microphone denial without changing the draft', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.goto('');
     await page.evaluate(() => Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => { throw new DOMException('Permission denied', 'NotAllowedError'); } } }));
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('permission draft');
@@ -180,7 +179,6 @@ test.describe('VTT composer flow', () => {
 
   test('reports an empty transcript without altering the draft', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.goto('');
     await page.unroute('**/v1beta/interactions*');
     await page.route('**/v1beta/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
@@ -200,7 +198,6 @@ test.describe('VTT composer flow', () => {
 
   test('cancels an in-flight transcription and leaves the draft unchanged', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.goto('');
     await page.unroute('**/v1beta/interactions*');
     await page.route('**/v1beta/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;

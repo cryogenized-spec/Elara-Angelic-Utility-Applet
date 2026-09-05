@@ -12,14 +12,12 @@ async function unlockTestGemini(page: import('@playwright/test').Page): Promise<
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
-  const lockbox = page.getByRole('heading', { name: 'Gemini API' }).locator('..').locator('..');
   await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
   await page.getByLabel('Lockbox password').fill('e2e-test-password');
   await page.getByLabel('Confirm Lockbox password').fill('e2e-test-password');
   await page.getByRole('button', { name: 'Create Lockbox' }).click();
-  await expect(lockbox.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
-  await page.goBack().catch(() => {});
-  if (await page.getByRole('textbox', { name: 'Message Elara' }).count() === 0) await page.reload();
+  await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 
 test('regeneration creates navigable response variants for the same prompt', async ({ page }) => {

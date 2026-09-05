@@ -33,7 +33,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   const vttFocusRef = useRef<{ target: HTMLTextAreaElement; cursor: number } | null>(null);
   const vttSessionIdRef = useRef(0);
   const mountedRef = useRef(true);
-  const vttPressTimerRef = useRef<ReturnType<typeof window.setTimeout> | null>(null);
+  const vttPressTimerRef = useRef<number | null>(null);
   const vttLongPressTriggeredRef = useRef(false);
   const vttPressActiveRef = useRef(false);
   const vttModeControlRef = useRef<HTMLDivElement>(null);
@@ -105,7 +105,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     return () => {
       mountedRef.current = false;
       vttSessionIdRef.current += 1;
-      if (vttPressTimerRef.current) window.clearTimeout(vttPressTimerRef.current);
+      if (vttPressTimerRef.current !== null) window.clearTimeout(vttPressTimerRef.current);
       recorderRef.current?.cancel();
       transcriptionAbortRef.current?.abort();
       recorderRef.current = null;
@@ -241,7 +241,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
       return;
     }
     if (vttBusy) return;
-    if (vttPressTimerRef.current) window.clearTimeout(vttPressTimerRef.current);
+    if (vttPressTimerRef.current !== null) window.clearTimeout(vttPressTimerRef.current);
     vttPressActiveRef.current = true;
     vttLongPressTriggeredRef.current = false;
     vttPressTimerRef.current = window.setTimeout(() => {
@@ -254,7 +254,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   function endVttPress(target: HTMLTextAreaElement | null): void {
     if (!vttPressActiveRef.current) return;
     vttPressActiveRef.current = false;
-    if (vttPressTimerRef.current) {
+    if (vttPressTimerRef.current !== null) {
       window.clearTimeout(vttPressTimerRef.current);
       vttPressTimerRef.current = null;
     }
@@ -264,7 +264,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
 
   function cancelVttPress(): void {
     vttPressActiveRef.current = false;
-    if (vttPressTimerRef.current) {
+    if (vttPressTimerRef.current !== null) {
       window.clearTimeout(vttPressTimerRef.current);
       vttPressTimerRef.current = null;
     }
@@ -278,10 +278,44 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     beginVttPress();
   }
 
-  function handleVttKeyUp(event: KeyboardEvent<HTMLButtonElement>, target: HTMLTextAreaElement | null): void {
+  function handleVttKeyUp(event: KeyboardEvent<HTMLButtonElement>): void {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    endVttPress(target);
+    endVttPress(expanded ? expandedTextareaRef.current : textareaRef.current);
+  }
+
+  function selectVttMode(mode: VttTransformMode): void {
+    setVttTransformMode(mode);
+    setVttModeOpen(false);
+  }
+
+  const banner = vttBusy ? <RecordingBanner state={vttState} rms={vttRms} elapsedMs={vttElapsed} onStop={bannerStop} /> : null;
+
+  function vttControl(target: HTMLTextAreaElement | null) {
+    return <div className="composer__vtt-control" ref={vttModeControlRef}>
+      <button
+        className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`}
+        type="button"
+        aria-label={micAriaLabel()}
+        aria-pressed={vttState === 'recording'}
+        disabled={composerLocked}
+        onPointerDown={(event) => { if (event.pointerType === 'mouse' && event.button !== 0) return; beginVttPress(); }}
+        onPointerUp={() => endVttPress(target)}
+        onPointerCancel={cancelVttPress}
+        onKeyDown={handleVttKeyDown}
+        onKeyUp={handleVttKeyUp}
+      >
+        <Icon name={vttState === 'processing' ? 'loader' : 'mic'} size={20} />
+        <span className="composer__vtt-mode-glyph" aria-hidden="true">{vttTransformMode === 'raw' ? 'R' : vttTransformMode === 'polish' ? 'P' : 'RP'}</span>
+      </button>
+      {vttModeOpen && (
+        <div className="composer__vtt-menu" role="menu" aria-label="Voice transcript mode">
+          <button type="button" role="menuitem" className={vttTransformMode === 'raw' ? 'is-active' : ''} aria-label="Raw" onClick={() => selectVttMode('raw')}><span>Raw</span><small>Faithful transcript</small></button>
+          <button type="button" role="menuitem" className={vttTransformMode === 'polish' ? 'is-active' : ''} aria-label="Polish" onClick={() => selectVttMode('polish')}><span>Polish</span><small>Clean natural prose</small></button>
+          <button type="button" role="menuitem" className={vttTransformMode === 'roleplay' ? 'is-active' : ''} aria-label="Roleplay" onClick={() => selectVttMode('roleplay')}><span>Roleplay</span><small>Convert to scene prose</small></button>
+        </div>
+      )}
+    </div>;
   }
 
   function bannerStop(): void {
@@ -303,57 +337,6 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     if (vttState === 'requesting') return 'Requesting microphone access';
     return 'VTT voice input';
   }
-
-  function selectVttTransformMode(mode: VttTransformMode): void {
-    setVttTransformMode(mode);
-    setVttModeOpen(false);
-  }
-
-  function vttControl(getTarget: () => HTMLTextAreaElement | null) {
-    return (
-      <div className="composer__vtt-control" ref={vttModeControlRef}>
-        <button
-          className="composer__icon composer__vtt-button"
-          type="button"
-          aria-label={micAriaLabel()}
-          aria-pressed={vttState === 'recording'}
-          aria-expanded={vttModeOpen}
-          aria-haspopup="menu"
-          data-vtt-mode={vttTransformMode}
-          disabled={status === 'streaming'}
-          onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); beginVttPress(); }}
-          onPointerUp={() => endVttPress(getTarget())}
-          onPointerCancel={cancelVttPress}
-          onKeyDown={handleVttKeyDown}
-          onKeyUp={(event) => handleVttKeyUp(event, getTarget())}
-        >
-          <Icon name="mic" size={20} />
-        </button>
-        {vttModeOpen && (
-          <div className="composer__vtt-menu" role="menu" aria-label="Voice transcript mode">
-            <div className="composer__vtt-menu-title">Voice mode</div>
-            {(['raw', 'polish', 'roleplay'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                role="menuitemradio"
-                aria-checked={vttTransformMode === mode}
-                className={vttTransformMode === mode ? 'is-active' : undefined}
-                onClick={() => selectVttTransformMode(mode)}
-              >
-                <span>{mode === 'raw' ? 'Raw' : mode === 'polish' ? 'Polish' : 'Roleplay'}</span>
-                {vttTransformMode === mode && <span className="composer__vtt-menu-check" aria-hidden="true">✓</span>}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  const banner = vttBusy ? (
-    <RecordingBanner state={vttState} rms={vttRms} elapsedMs={vttElapsed} onStop={bannerStop} />
-  ) : null;
 
   if (expanded) {
     return <>
@@ -388,7 +371,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
             <Icon name="paperclip" size={19} />
           </button>
           <div className="composer-expanded__spacer" />
-          {vttControl(() => expandedTextareaRef.current)}
+          {vttControl(expandedTextareaRef.current)}
           <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
             <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
           </button>
@@ -413,7 +396,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           <Icon name="expand" size={15} />
         </button>
       </div>
-      {vttControl(() => textareaRef.current)}
+      {vttControl(textareaRef.current)}
       <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()}>
         <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
       </button>

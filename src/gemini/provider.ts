@@ -87,9 +87,9 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         const type = stepType(raw);
         yield { type: 'step-start', index, stepType: type };
         if (type === 'thought') {
-          const summaryParts = Array.isArray(step.summary) ? step.summary : [];
-          for (const summary of summaryParts) {
-            const text = readString(asRecord(summary), 'text');
+          const summaryBlocks = Array.isArray(step.summary) ? step.summary : [];
+          for (const summaryBlock of summaryBlocks) {
+            const text = readString(asRecord(summaryBlock), 'text');
             if (text) {
               appendThoughtSummary(thoughtSummaryParts, index, text);
               yield { type: 'thought-summary-delta', index, text };
@@ -105,7 +105,8 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         const delta = asRecord(raw.delta);
         const index = stepIndex(raw);
         const deltaType = readString(delta, 'type');
-        const deltaText = readString(delta, 'text');
+        const content = asRecord(delta.content);
+        const deltaText = readString(delta, 'text') ?? readString(content, 'text');
         if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
         else if (deltaType === 'thought_summary') { if (deltaText) { appendThoughtSummary(thoughtSummaryParts, index, deltaText); yield { type: 'thought-summary-delta', index, text: deltaText }; } }
         else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; }

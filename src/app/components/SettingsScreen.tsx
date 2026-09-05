@@ -61,7 +61,7 @@ export function SettingsScreen({ font, onFontChange, fontSize, onFontSizeChange,
   function applyCustomFont() { setCustomError(null); const parsed = css2UrlSchema.safeParse(customUrl.trim()); if (!parsed.success) { setCustomError('Paste a valid Google Fonts CSS2 URL.'); return; } const family = googleFontFamilyFromCss2Url(parsed.data); if (!family) { setCustomError('That link does not contain a readable Google font family.'); return; } loadCustomGoogleFont(parsed.data); onFontChange({ kind: 'custom', family, stylesheetUrl: parsed.data }); }
   function updateSetting(patch: Partial<GeminiSettings>) { onGeminiSettingsChange({ ...geminiSettings, ...patch }); }
   return <main className="settings-screen" style={{ fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
-    <header className="settings-header"><button className="icon-button" type="button" aria-label="Back to chat" onClick={onBack}><Icon name="chevron" /></button><div><div className="eyebrow">ELARA</div><h1>Settings</h1></div></header>
+    <header className="settings-header"><button className="icon-button" type="button" aria-label="Back to chat" onClick={onBack}><Icon name="chevron" /></button><div><div className="eyebrow">{character.name}</div><h1>Settings</h1></div></header>
     <div className="settings-layout">
       <nav className="settings-nav" aria-label="Settings sections">{settingsSections.map((item) => <button className={`settings-nav__item${section === item.id ? ' is-active' : ''}`} key={item.id} type="button" onClick={() => setSection(item.id)}><Icon name={item.icon} size={18} /><span>{item.label}</span></button>)}</nav>
       <section className="settings-panel" aria-live="polite">

@@ -1,4 +1,4 @@
-.composer.composer { grid-template-columns: 40px 40px minmax(0,1fr) 42px 42px; grid-template-rows: 42px; align-items: stretch; gap: 10px; min-width: 0; }
+.composer.composer { grid-template-columns: 38px 38px minmax(0,1fr) 40px 42px; grid-template-rows: 42px; align-items: stretch; gap: 12px; min-width: 0; }
 .composer textarea { display: block; max-height: 132px; min-height: 42px; overflow-y: hidden; }
 .composer__input-wrap { position: relative; min-width: 0; width: 100%; }
 .composer__input-wrap textarea { padding-right: 42px; }
@@ -11,8 +11,8 @@
 .composer__markdown { display: grid; place-items: center; font-size: 0; }
 .composer__markdown svg { display: block; width: 21px; height: 13px; }
 
-.composer__vtt-control { position: relative; display: grid; min-width: 0; }
-.composer__vtt-button { position: relative; overflow: visible; isolation: isolate; width: 42px; }
+.composer__vtt-control { position: relative; display: grid; min-width: 0; width: 40px; justify-self: center; }
+.composer__vtt-button { position: relative; overflow: visible; isolation: isolate; width: 40px; }
 .composer__vtt-button.is-recording,
 .composer__vtt-button[aria-label="Recording voice input"] { color: var(--text); background: rgba(240, 123, 220, .12); border-color: rgba(240, 123, 220, .34); box-shadow: 0 0 0 1px rgba(240,123,220,.05), 0 0 22px rgba(240,123,220,.16); }
 .composer__vtt-button[aria-label="Recording voice input"]::after { content: ''; position: absolute; inset: -4px; z-index: -1; border: 1px solid rgba(240,123,220,.32); border-radius: inherit; animation: composer-vtt-button-pulse 1.55s ease-out infinite; }
@@ -21,6 +21,7 @@
 .composer__vtt-button[data-vtt-mode="roleplay"] { border-color: rgba(240,123,220,.22); }
 .composer__vtt-button[data-vtt-mode="raw"] { border-color: rgba(110,168,255,.14); }
 .composer__vtt-button .icon { opacity: 1; }
+.composer__vtt-mode-glyph { position: absolute; right: 3px; bottom: 3px; display: grid; min-width: 12px; height: 12px; padding: 0 2px; place-items: center; border: 1px solid rgba(255,255,255,.2); border-radius: 5px; background: rgba(10,10,16,.86); color: rgba(255,255,255,.68); font-size: 6px; font-weight: 900; line-height: 1; letter-spacing: -.03em; pointer-events: none; }
 .composer__vtt-status { width: min(100% - 24px, 720px); margin: 6px auto 0; color: var(--muted); font-size: 12px; text-align: center; }
 
 .composer__vtt-menu { position: absolute; right: 0; bottom: calc(100% + 10px); z-index: 30; display: grid; gap: 4px; min-width: 158px; padding: 7px; border: 1px solid rgba(255,255,255,.12); border-radius: 15px; background: rgba(17,16,24,.97); box-shadow: 0 18px 42px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05); backdrop-filter: blur(18px) saturate(135%); -webkit-backdrop-filter: blur(18px) saturate(135%); }
@@ -85,13 +86,13 @@
 .composer-expanded__textarea { flex: 1 1 auto; width: 100%; min-height: 0; margin: 18px 0; resize: none; border: 0; border-radius: 0; padding: 4px 2px; background: transparent; color: var(--text); font-size: clamp(18px, 4.8vw, 23px); line-height: 1.65; outline: none; }
 .composer-expanded__textarea::placeholder { color: rgba(255,255,255,.28); }
 .composer-expanded__textarea:focus { outline: none; }
-.composer-expanded__footer { display: flex; align-items: center; gap: 8px; padding-top: 10px; border-top: 1px solid var(--line); }
+.composer-expanded__footer { display: flex; align-items: center; gap: 14px; padding-top: 10px; border-top: 1px solid var(--line); }
 .composer-expanded__spacer { flex: 1 1 auto; }
 .composer-expanded-open { overflow: hidden; }
 
 @media (max-width: 560px) {
-  .composer.composer { grid-template-columns: 40px 40px minmax(0,1fr) 42px 42px; gap: 9px; }
-  .composer__vtt-button { width: 42px; }
+  .composer.composer { grid-template-columns: 38px 38px minmax(0,1fr) 40px 42px; gap: 11px; }
+  .composer__vtt-button { width: 40px; }
   .composer__vtt-menu { min-width: 150px; }
   .composer__vtt-banner { grid-template-columns: auto minmax(0,1fr) auto; gap: 7px; width: min(100% - 10px, 760px); }
   .composer__vtt-stop { min-width: 42px; width: 42px; padding: 0; }
@@ -99,8 +100,8 @@
 }
 
 @media (max-width: 390px) {
-  .composer.composer { grid-template-columns: 38px 38px minmax(0,1fr) 40px 42px; gap: 7px; }
-  .composer__icon, .composer__send { width: 38px; }
-  .composer__vtt-button { width: 40px; }
+  .composer.composer { grid-template-columns: 36px 36px minmax(0,1fr) 38px 42px; gap: 8px; }
+  .composer__icon { width: 36px; }
+  .composer__vtt-button { width: 38px; }
   .composer__send { width: 42px; }
 }

@@ -9,10 +9,14 @@ async function openSettings(page: import('@playwright/test').Page): Promise<void
 }
 
 async function unlockTestGemini(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(async () => {
-    const lockbox = await import('/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts');
-    await lockbox.saveGeminiApiKey('e2e-test-api-key', 'e2e-test-password');
-  });
+  await openSettings(page);
+  await page.getByRole('button', { name: 'Lockbox' }).click();
+  await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
+  await page.getByLabel('Lockbox password').fill('e2e-test-password');
+  await page.getByLabel('Confirm Lockbox password').fill('e2e-test-password');
+  await page.getByRole('button', { name: 'Create Lockbox' }).click();
+  await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 
 test('loads the Elara shell', async ({ page }) => {

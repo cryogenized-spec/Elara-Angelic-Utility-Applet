@@ -30,6 +30,9 @@
 }
 
 .settings-nav__item > svg {
+  width: 20px;
+  height: 20px;
   flex: 0 0 20px;
   display: block;
+  margin: 0;
 }

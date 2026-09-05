@@ -1,4 +1,19 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { getGeminiApiKey, uploadFile, createInteraction } = vi.hoisted(() => ({
+  getGeminiApiKey: vi.fn(),
+  uploadFile: vi.fn(),
+  createInteraction: vi.fn(),
+}));
+
+vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey }));
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: class {
+    files = { upload: uploadFile };
+    interactions = { create: createInteraction };
+  },
+}));
+
 import { transcribeVttCapture, VttTranscriptionError, VTT_TRANSCRIPTION_TIMEOUT_MS } from './transcription';
 import type { VttCapture } from './recording';
 
@@ -9,48 +24,70 @@ const capture: VttCapture = {
   selection: { start: 2, end: 2 },
 };
 
+beforeEach(() => {
+  getGeminiApiKey.mockResolvedValue('test-gemini-key');
+  uploadFile.mockResolvedValue({ uri: 'files/audio-1', mimeType: 'audio/webm' });
+  createInteraction.mockResolvedValue({ output_text: 'hello there' });
+});
+
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  getGeminiApiKey.mockReset();
+  uploadFile.mockReset();
+  createInteraction.mockReset();
 });
 
 describe('VTT transcription client', () => {
-  it('posts the capture to the Worker transcription boundary with a canonical MIME type', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ transcript: 'hello there' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  it('uploads the capture to Gemini with a canonical MIME type', async () => {
     await expect(transcribeVttCapture(capture)).resolves.toBe('hello there');
-    expect(fetchMock).toHaveBeenCalledWith(
-      'https://elara-gemini.cryogenized.workers.dev/api/transcribe',
-      expect.objectContaining({ method: 'POST', headers: { 'Content-Type': 'audio/webm' }, body: capture.blob }),
-    );
+    expect(uploadFile).toHaveBeenCalledWith({
+      file: capture.blob,
+      config: { mimeType: 'audio/webm' },
+    });
+    expect(createInteraction).toHaveBeenCalledWith({
+      model: 'gemini-3.5-transcribe',
+      input: [{ type: 'audio', uri: 'files/audio-1', mime_type: 'audio/webm' }],
+      generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
+      store: false,
+    });
   });
 
-  it('returns a typed provider error from an unsuccessful Worker response', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ code: 'provider', message: 'Transcription unavailable.' }), { status: 502, headers: { 'Content-Type': 'application/json' } }));
+  it('returns a typed provider error from an unsuccessful Gemini request', async () => {
+    uploadFile.mockRejectedValue(new Error('Transcription unavailable.'));
     await expect(transcribeVttCapture(capture)).rejects.toEqual(new VttTranscriptionError('provider', 'Transcription unavailable.'));
   });
 
   it('rejects an empty transcript response', async () => {
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(JSON.stringify({ transcript: '   ' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    createInteraction.mockResolvedValue({ output_text: '   ' });
     await expect(transcribeVttCapture(capture)).rejects.toEqual(new VttTranscriptionError('empty', 'No speech was detected.'));
   });
 
-  it('preserves caller cancellation as AbortError instead of converting it to a timeout', async () => {
+  it('preserves caller cancellation as a typed cancellation error', async () => {
     const controller = new AbortController();
     controller.abort();
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('Aborted', 'AbortError'));
 
-    await expect(transcribeVttCapture(capture, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(transcribeVttCapture(capture, controller.signal)).rejects.toEqual(
+      new VttTranscriptionError('cancelled', 'Voice transcription was cancelled.'),
+    );
+    expect(uploadFile).not.toHaveBeenCalled();
   });
 
-  it('returns a typed timeout when the Worker does not respond in time', async () => {
+  it('returns a typed timeout when Gemini does not respond in time', async () => {
     vi.useFakeTimers();
-    vi.spyOn(globalThis, 'fetch').mockImplementation((_input, init) => new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
-    }));
+    uploadFile.mockImplementation(() => new Promise(() => {}));
 
     const request = transcribeVttCapture(capture);
     const assertion = expect(request).rejects.toEqual(new VttTranscriptionError('timeout', 'Voice transcription timed out.'));
     await vi.advanceTimersByTimeAsync(VTT_TRANSCRIPTION_TIMEOUT_MS);
     await assertion;
+  });
+
+  it('reports configuration failure when the Lockbox is unavailable', async () => {
+    getGeminiApiKey.mockResolvedValue('');
+    await expect(transcribeVttCapture(capture)).rejects.toEqual(
+      new VttTranscriptionError('configuration', 'Gemini API key is not configured in the app Lockbox.'),
+    );
+    expect(uploadFile).not.toHaveBeenCalled();
   });
 });

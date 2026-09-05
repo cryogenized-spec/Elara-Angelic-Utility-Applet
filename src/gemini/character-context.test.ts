@@ -11,6 +11,9 @@ describe('buildCharacterInstruction', () => {
     expect(result).toContain('CHARACTER EXECUTION DIRECTIVE');
     expect(result).toContain('supplied master character protocol is active runtime behavior');
     expect(result).toContain('Default to responding as the configured character in character.');
+    expect(result).toContain('IN-CHARACTER OUTPUT CONTRACT');
+    expect(result).toContain('Every normal conversational response must be authored from the character’s established perspective and voice.');
+    expect(result).toContain('Do not produce generic virtual-assistant greetings');
     expect(result).not.toContain('CREATIVE ROLEPLAY CONTEXT');
     expect(result).not.toContain('ROLEPLAY MODE DIRECTIVE');
   });
@@ -30,6 +33,7 @@ describe('buildCharacterInstruction', () => {
     expect(result).toContain(custom.systemInstruction);
     expect(result).toContain('CHARACTER EXECUTION DIRECTIVE');
     expect(result).toContain('active runtime behavior');
+    expect(result).toContain('IN-CHARACTER OUTPUT CONTRACT');
     expect(result).not.toContain(ELARA_SYSTEM_INSTRUCTION);
   });
 
@@ -47,6 +51,7 @@ describe('buildCharacterInstruction', () => {
 
     expect(result).toContain(ELARA_SYSTEM_INSTRUCTION);
     expect(result).toContain('CHARACTER EXECUTION DIRECTIVE');
+    expect(result).toContain('IN-CHARACTER OUTPUT CONTRACT');
     expect(result).toContain('CREATIVE ROLEPLAY CONTEXT');
     expect(result).toContain('ROLEPLAY MODE DIRECTIVE');
     expect(result).toContain('in-character participant');

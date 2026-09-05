@@ -6,7 +6,7 @@ vi.mock('../gemini/provider', () => ({
   geminiTurnPort: { streamReply },
 }));
 
-import { buildVttTransformInput, buildVttTransformSystemInstruction, transformVttTranscript, VTT_TRANSFORM_SYSTEM_INSTRUCTION } from './transformation';
+import { transformVttTranscript } from './transformation';
 
 afterEach(() => {
   streamReply.mockReset();
@@ -18,36 +18,29 @@ describe('VTT transformation', () => {
     expect(streamReply).not.toHaveBeenCalled();
   });
 
-  it('builds explicit mode input', () => {
-    expect(buildVttTransformInput('walk up to her', 'roleplay')).toBe('Mode: ROLEPLAY\n\nTranscript:\nwalk up to her');
-  });
-
-  it('combines the saved Character master prompt with the VTT task instruction', () => {
-    const characterPrompt = 'PERSONA PROTOCOL: ELARA\nRoleplay as Elara.';
-    const combined = buildVttTransformSystemInstruction(characterPrompt);
-    expect(combined).toContain(characterPrompt);
-    expect(combined).toContain('VTT TRANSFORMATION TASK');
-    expect(combined).toContain(VTT_TRANSFORM_SYSTEM_INSTRUCTION);
-  });
-
-  it('sends polish mode through the canonical Gemini turn port and accumulates deltas', async () => {
+  it('sends the exact Character Master System Instruction and keeps transformation instructions in user input', async () => {
     streamReply.mockReturnValue((async function* () {
-      yield { type: 'text-delta', index: 0, text: 'A clear ' };
-      yield { type: 'text-delta', index: 0, text: 'message.' };
+      yield { type: 'text-delta', index: 0, text: 'A clear message.' };
       yield { type: 'completed', interactionId: 'int-1', status: 'completed', durationMs: 1 };
     })());
 
-    const persona = 'PERSONA PROTOCOL: ELARA\nBe in character.';
-    await expect(transformVttTranscript('  um I mean this message, basically  ', 'polish', { model: 'gemini-test', systemInstruction: persona })).resolves.toBe('A clear message.');
+    const masterPrompt = 'PERSONA PROTOCOL: ELARA\nBe in character and perceive the user as yourself.';
+    await expect(transformVttTranscript('  um I mean this message, basically  ', 'polish', { model: 'gemini-test', systemInstruction: masterPrompt })).resolves.toBe('A clear message.');
     expect(streamReply).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gemini-test',
-      input: 'Mode: POLISH\n\nTranscript:\num I mean this message, basically',
-      systemInstruction: expect.stringContaining(persona),
+      input: expect.stringContaining('VOICE INPUT TRANSFORMATION TASK'),
+      systemInstruction: masterPrompt,
       generationConfig: { maxOutputTokens: 500 },
     }), undefined);
+    expect(streamReply.mock.calls[0][0].input).toContain('um I mean this message, basically');
   });
 
-  it('supports roleplay transformation with the same protected provider port', async () => {
+  it('does not allow a VTT call to run without the Character Master System Instruction', async () => {
+    await expect(transformVttTranscript('hello', 'polish')).rejects.toThrow('Character Master System Instruction is required');
+    expect(streamReply).not.toHaveBeenCalled();
+  });
+
+  it('supports roleplay transformation through the same protected provider port', async () => {
     streamReply.mockReturnValue((async function* () {
       yield { type: 'text-delta', index: 0, text: '*walks up to you and smiles*' };
       yield { type: 'completed', interactionId: 'int-2', status: 'completed', durationMs: 1 };
@@ -62,7 +55,7 @@ describe('VTT transformation', () => {
       yield { type: 'failed', error: { message: 'provider unavailable' } };
     })());
 
-    await expect(transformVttTranscript('hello', 'polish')).rejects.toThrow('provider unavailable');
+    await expect(transformVttTranscript('hello', 'polish', { systemInstruction: 'PERSONA PROTOCOL: ELARA' })).rejects.toThrow('provider unavailable');
   });
 
   it('rejects empty transformed output', async () => {
@@ -70,6 +63,6 @@ describe('VTT transformation', () => {
       yield { type: 'completed', interactionId: 'int-3', status: 'completed', durationMs: 1 };
     })());
 
-    await expect(transformVttTranscript('hello', 'roleplay')).rejects.toThrow('returned no text');
+    await expect(transformVttTranscript('hello', 'roleplay', { systemInstruction: 'PERSONA PROTOCOL: ELARA' })).rejects.toThrow('returned no text');
   });
 });

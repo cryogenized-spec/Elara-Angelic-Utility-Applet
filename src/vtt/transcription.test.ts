@@ -34,14 +34,12 @@ describe('VTT transcription client', () => {
     await expect(transcribeVttCapture(capture)).rejects.toEqual(new VttTranscriptionError('empty', 'No speech was detected.'));
   });
 
-  it('aborts on the caller signal without converting cancellation into a timeout', async () => {
-    const deferred = new Promise<Response>(() => undefined);
-    vi.spyOn(globalThis, 'fetch').mockReturnValue(deferred);
+  it('preserves caller cancellation as AbortError instead of converting it to a timeout', async () => {
     const controller = new AbortController();
-    const request = transcribeVttCapture(capture, controller.signal);
-
     controller.abort();
-    await expect(request).rejects.toMatchObject({ name: 'AbortError' });
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(new DOMException('Aborted', 'AbortError'));
+
+    await expect(transcribeVttCapture(capture, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
   });
 
   it('returns a typed timeout when the Worker does not respond in time', async () => {

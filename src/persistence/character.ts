@@ -1,14 +1,11 @@
 import Dexie, { type Table } from 'dexie';
 import { DEFAULT_CHARACTER_PROFILE, type CharacterArtworkReference, type CharacterProfile } from '../domain/character';
-import { LEGACY_CHARACTER_SYSTEM_INSTRUCTION } from '../character/system-instruction';
 
 const MAX_NAME_LENGTH = 80;
 const MAX_INSTRUCTION_LENGTH = 50_000;
 const MAX_ARTWORK_DATA_URL_LENGTH = 8_000_000;
 const SAFE_ARTWORK_DATA_URL = /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i;
 const SAFE_ARTWORK_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const LEGACY_DEFAULT_MARKER = 'You are Elara, an angelic synthetic companion designed to be a warm, perceptive, creative conversational presence.\n\nIDENTITY\n';
-const LEGACY_ROLEPLAY_MARKER = '\nROLEPLAY\nYou may participate fully in fictional settings and character-driven scenes.';
 
 class CharacterDatabase extends Dexie {
   profiles!: Table<CharacterProfile, string>;
@@ -30,6 +27,13 @@ class CharacterDatabase extends Dexie {
         };
       });
     });
+    this.version(4).stores({ profiles: 'id, updatedAt' }).upgrade((tx) => {
+      return tx.table('profiles').toCollection().modify((record: CharacterProfile) => {
+        if (typeof record.systemInstruction !== 'string') {
+          record.systemInstruction = DEFAULT_CHARACTER_PROFILE.systemInstruction;
+        }
+      });
+    });
   }
 }
 
@@ -38,11 +42,7 @@ const PRIMARY_ID = 'primary';
 
 function normalizeSystemInstruction(value: unknown): string {
   if (typeof value !== 'string') return DEFAULT_CHARACTER_PROFILE.systemInstruction;
-  const normalized = value.slice(0, MAX_INSTRUCTION_LENGTH);
-  const trimmed = normalized.trim();
-  if (!trimmed || trimmed === LEGACY_CHARACTER_SYSTEM_INSTRUCTION.trim()) return DEFAULT_CHARACTER_PROFILE.systemInstruction;
-  if (trimmed.startsWith(LEGACY_DEFAULT_MARKER) && trimmed.includes(LEGACY_ROLEPLAY_MARKER)) return DEFAULT_CHARACTER_PROFILE.systemInstruction;
-  return normalized;
+  return value.slice(0, MAX_INSTRUCTION_LENGTH);
 }
 
 export function normalizeCharacterProfile(input: Partial<CharacterProfile> | null | undefined): CharacterProfile {
@@ -91,7 +91,7 @@ export async function loadCharacterProfile(): Promise<CharacterProfile> {
   const existing = await db.profiles.get(PRIMARY_ID);
   if (existing) {
     const normalized = normalizeCharacterProfile(existing);
-    if (normalized.systemInstruction !== existing.systemInstruction || normalized.name !== existing.name || normalized.artworkMode !== existing.artworkMode) await db.profiles.put(normalized);
+    if (JSON.stringify(normalized) !== JSON.stringify(existing)) await db.profiles.put(normalized);
     return normalized;
   }
   const initial = normalizeCharacterProfile({ ...DEFAULT_CHARACTER_PROFILE, updatedAt: Date.now() });

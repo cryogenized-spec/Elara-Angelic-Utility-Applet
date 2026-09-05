@@ -6,7 +6,6 @@ const MAX_INSTRUCTION_LENGTH = 50_000;
 const MAX_ARTWORK_DATA_URL_LENGTH = 8_000_000;
 const SAFE_ARTWORK_DATA_URL = /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i;
 const SAFE_ARTWORK_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const OBSOLETE_DEFAULT_INSTRUCTION = 'You are Elara, an angelic synthetic companion designed to be a warm, perceptive, creative conversational presence.\n\nDefine Elara\'s identity, personality, conversational style, boundaries, and durable behavioral preferences here. Application tool schemas, exposed capabilities, authorization rules, security controls, and provider behavior are managed separately by the application and cannot be changed from this editor.';
 
 class CharacterDatabase extends Dexie {
   profiles!: Table<CharacterProfile, string>;
@@ -30,13 +29,17 @@ class CharacterDatabase extends Dexie {
     });
     this.version(4).stores({ profiles: 'id, updatedAt' }).upgrade((tx) => {
       return tx.table('profiles').toCollection().modify((record: CharacterProfile) => {
-        if (record.systemInstruction === OBSOLETE_DEFAULT_INSTRUCTION) record.systemInstruction = DEFAULT_CHARACTER_PROFILE.systemInstruction;
-        if (typeof record.systemInstruction !== 'string') record.systemInstruction = DEFAULT_CHARACTER_PROFILE.systemInstruction;
+        if (typeof record.systemInstruction !== 'string') record.systemInstruction = '';
       });
     });
     this.version(5).stores({ profiles: 'id, updatedAt' }).upgrade((tx) => {
       return tx.table('profiles').toCollection().modify((record: CharacterProfile) => {
-        if (record.systemInstruction === OBSOLETE_DEFAULT_INSTRUCTION) record.systemInstruction = DEFAULT_CHARACTER_PROFILE.systemInstruction;
+        if (typeof record.systemInstruction !== 'string') record.systemInstruction = '';
+      });
+    });
+    this.version(6).stores({ profiles: 'id, updatedAt' }).upgrade((tx) => {
+      return tx.table('profiles').toCollection().modify((record: CharacterProfile) => {
+        record.systemInstruction = '';
       });
     });
   }
@@ -46,7 +49,7 @@ const db = new CharacterDatabase();
 const PRIMARY_ID = 'primary';
 
 function normalizeSystemInstruction(value: unknown): string {
-  if (typeof value !== 'string') return DEFAULT_CHARACTER_PROFILE.systemInstruction;
+  if (typeof value !== 'string') return '';
   return value.slice(0, MAX_INSTRUCTION_LENGTH);
 }
 
@@ -96,9 +99,6 @@ export async function loadCharacterProfile(): Promise<CharacterProfile> {
   const existing = await db.profiles.get(PRIMARY_ID);
   if (existing) {
     const normalized = normalizeCharacterProfile(existing);
-    if (existing.systemInstruction === OBSOLETE_DEFAULT_INSTRUCTION && normalized.systemInstruction !== DEFAULT_CHARACTER_PROFILE.systemInstruction) {
-      normalized.systemInstruction = DEFAULT_CHARACTER_PROFILE.systemInstruction;
-    }
     if (JSON.stringify(normalized) !== JSON.stringify(existing)) await db.profiles.put(normalized);
     return normalized;
   }

@@ -110,6 +110,9 @@ function removeLegacyPlaintextKey(): void {
   }
 }
 
+// Remove the temporary plaintext storage key immediately on load. It is never read or migrated.
+removeLegacyPlaintextKey();
+
 export type GeminiLockboxStatus = 'empty' | 'locked' | 'unlocked';
 
 export async function getGeminiLockboxStatus(): Promise<GeminiLockboxStatus> {

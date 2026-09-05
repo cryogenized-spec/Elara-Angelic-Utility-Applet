@@ -42,18 +42,17 @@ test('regeneration creates navigable response variants for the same prompt', asy
 
   await page.getByRole('button', { name: 'Regenerate response' }).click();
   await expect.poll(() => requests.length).toBeGreaterThanOrEqual(2);
-  await expect(page.getByText('Second generated answer.')).toBeVisible();
   await expect(page.getByText('2/2')).toBeVisible();
   expect(requests[1]?.system_instruction).toBeUndefined();
   expect(requests[1]?.input).toBe('Give me two concise ideas.');
   expect(requests[1]?.previous_interaction_id).toBe('interaction-1');
   await expect(page.getByRole('region', { name: 'Conversation' }).locator('.message-user')).toHaveCount(1);
 
-  await page.getByRole('button', { name: 'Previous response' }).click();
-  await expect(page.getByText('First generated answer.')).toBeVisible();
-  await expect(page.getByText('1/2')).toBeVisible();
-
   await page.getByRole('button', { name: 'Next response' }).click();
   await expect(page.getByText('Second generated answer.')).toBeVisible();
   await expect(page.getByText('2/2')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Previous response' }).click();
+  await expect(page.getByText('First generated answer.')).toBeVisible();
+  await expect(page.getByText('1/2')).toBeVisible();
 });

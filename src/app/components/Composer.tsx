@@ -234,7 +234,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }
 
   function beginVttPress(): void {
-    if (status === 'streaming' || vttBusy || !textareaRef.current && !expandedTextareaRef.current) return;
+    if (status === 'streaming' || vttBusy || (!textareaRef.current && !expandedTextareaRef.current)) return;
     if (vttPressTimerRef.current) window.clearTimeout(vttPressTimerRef.current);
     vttPressActiveRef.current = true;
     vttLongPressTriggeredRef.current = false;
@@ -265,12 +265,11 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     vttLongPressTriggeredRef.current = false;
   }
 
-  function handleVttKeyDown(event: KeyboardEvent<HTMLButtonElement>, target: HTMLTextAreaElement | null): void {
+  function handleVttKeyDown(event: KeyboardEvent<HTMLButtonElement>): void {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     if (event.repeat) return;
     event.preventDefault();
     beginVttPress();
-    (event.currentTarget as HTMLButtonElement).dataset.vttKeyTarget = target ? 'ready' : 'none';
   }
 
   function handleVttKeyUp(event: KeyboardEvent<HTMLButtonElement>, target: HTMLTextAreaElement | null): void {
@@ -304,7 +303,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     setVttModeOpen(false);
   }
 
-  function vttControl(target: HTMLTextAreaElement | null) {
+  function vttControl(getTarget: () => HTMLTextAreaElement | null) {
     return (
       <div className="composer__vtt-control" ref={vttModeControlRef}>
         <button
@@ -317,10 +316,10 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           data-vtt-mode={vttTransformMode}
           disabled={composerLocked}
           onPointerDown={(event) => { event.currentTarget.setPointerCapture?.(event.pointerId); beginVttPress(); }}
-          onPointerUp={() => endVttPress(target)}
+          onPointerUp={() => endVttPress(getTarget())}
           onPointerCancel={cancelVttPress}
-          onKeyDown={(event) => handleVttKeyDown(event, target)}
-          onKeyUp={(event) => handleVttKeyUp(event, target)}
+          onKeyDown={handleVttKeyDown}
+          onKeyUp={(event) => handleVttKeyUp(event, getTarget())}
         >
           <Icon name="mic" size={20} />
         </button>
@@ -383,7 +382,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
             <Icon name="paperclip" size={19} />
           </button>
           <div className="composer-expanded__spacer" />
-          {vttControl(expandedTextareaRef.current)}
+          {vttControl(() => expandedTextareaRef.current)}
           <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
             <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
           </button>
@@ -408,7 +407,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           <Icon name="expand" size={15} />
         </button>
       </div>
-      {vttControl(textareaRef.current)}
+      {vttControl(() => textareaRef.current)}
       <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()}>
         <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
       </button>

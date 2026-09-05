@@ -28,6 +28,7 @@ const requiredFiles = [
   'src/character/system-instruction.ts',
   'src/persistence/character.ts',
   'src/persistence/character.test.ts',
+  'src/persistence/gemini-api-key.ts',
   'src/persistence/preferences.ts',
   'src/google/tools/gemini-declarations.test.ts',
 ];
@@ -62,10 +63,11 @@ while (stack.length) {
   }
 }
 
-const geminiImportCount = countText(join(root, 'worker/src'), /from ['"]@google\/genai['"]/g);
-if (geminiImportCount !== 1) {
-  throw new Error(`Reliability gate: expected exactly one @google/genai worker import, found ${geminiImportCount}.`);
-}
+const providerSource = readFileSync(join(root, 'src/gemini/provider.ts'), 'utf8');
+if (!providerSource.includes("from '@google/genai'")) throw new Error('Reliability gate: Gemini must execute directly from the application provider.');
+if (providerSource.includes('GEMINI_WORKER_URL') || providerSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: Gemini provider must not use the Cloudflare Worker.');
+if (!providerSource.includes("getGeminiApiKey")) throw new Error('Reliability gate: Gemini provider must obtain its credential through the local app Lockbox.');
+if (!providerSource.includes("if (systemInstruction) payload.system_instruction = systemInstruction;")) throw new Error('Reliability gate: empty Character Master must omit system_instruction entirely.');
 
 const markdownSource = readFileSync(join(root, 'src/app/components/MarkdownText.tsx'), 'utf8');
 if (!markdownSource.includes('skipHtml')) throw new Error('Reliability gate: restricted Markdown renderer must explicitly skip raw HTML.');
@@ -91,11 +93,12 @@ const vttSource = readFileSync(join(root, 'src/vtt/transformation.ts'), 'utf8');
 if (vttSource.includes('buildVttTransformSystemInstruction')) throw new Error('Reliability gate: VTT must not construct a second competing system instruction.');
 if (!vttSource.includes('systemInstruction: masterInstruction')) throw new Error('Reliability gate: VTT must use the Character Master System Instruction verbatim.');
 
-const workerSource = readFileSync(join(root, 'worker/src/index.ts'), 'utf8');
-if (!workerSource.includes('systemInstruction')) throw new Error('Reliability gate: Worker request contract must carry the user-configured character instruction field.');
-if (!workerSource.includes('system_instruction')) throw new Error('Reliability gate: Worker must map the character instruction to Gemini system_instruction.');
-if (!workerSource.includes('tools: z.array(googleToolNameSchema).max(40).optional()')) throw new Error('Reliability gate: Worker tool-count contract must remain explicit.');
-if (!workerSource.includes('stream: true') || !workerSource.includes('store: true')) throw new Error('Reliability gate: canonical Gemini streaming/store semantics must remain enabled.');
+const transcriptionSource = readFileSync(join(root, 'src/vtt/transcription.ts'), 'utf8');
+if (transcriptionSource.includes('GEMINI_WORKER_URL') || transcriptionSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: VTT transcription must not use the Cloudflare Worker.');
+if (!transcriptionSource.includes("from '@google/genai'")) throw new Error('Reliability gate: VTT transcription must use the direct Gemini SDK.');
+
+const lockboxSource = readFileSync(join(root, 'src/persistence/gemini-api-key.ts'), 'utf8');
+if (!lockboxSource.includes("elara.gemini.api-key")) throw new Error('Reliability gate: Gemini API credential must have a local Lockbox storage boundary.');
 
 const characterPersistence = readFileSync(join(root, 'src/persistence/character.ts'), 'utf8');
 if (characterPersistence.includes('LEGACY_CHARACTER_SYSTEM_INSTRUCTION')) throw new Error('Reliability gate: legacy character prompt constant must be removed from persistence.');
@@ -125,4 +128,4 @@ function countText(directory, pattern) {
   return count;
 }
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, one @google/genai worker import, restricted Markdown safety boundary, no built-in Character Master prompt, direct executable tool capability exposure within the Worker contract, no competing character resolver, singular VTT system instruction, and canonical Worker streaming contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the local API Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, direct executable tool capability exposure, no competing character resolver, singular VTT system instruction, and canonical persistence contract.`);

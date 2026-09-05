@@ -17,9 +17,9 @@ The Gemini provider contract remains unchanged: it consumes the decrypted key on
 - Keep the Gemini API key encrypted at rest in IndexedDB using the existing AES-GCM-256 + PBKDF2-SHA-256 construction and current 310,000 iterations.
 - Keep decrypted key material exclusively in JavaScript module memory. Never persist the plaintext key in localStorage, sessionStorage, or IndexedDB.
 - Add a local activity timestamp for idle-session decisions; no Google/Gemini network call is involved in stale-session detection.
-- Treat a missing in-memory key after reload/cold start as locked when security is enabled.
+- Treat a missing in-memory key after cold start/reload as locked when security is enabled.
 - On idle timeout, wipe the in-memory key and transition to locked state.
-- Treat local activity metadata as convenience state, not as a security boundary.
+- Treat local activity metadata as convenience state, not as the security boundary.
 
 ## Phase 2 — PIN mode (default)
 

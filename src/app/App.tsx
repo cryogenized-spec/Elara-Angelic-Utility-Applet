@@ -11,7 +11,6 @@ import { geminiTurnPort } from '../gemini/provider';
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent } from '../gemini/contracts';
 import type { GoogleToolName } from '../google/tools/contracts';
-import { buildCharacterInstruction } from '../gemini/character-context';
 import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import { getGeminiModel } from '../gemini/model-registry';
 import { Icon } from '../ui/icons';
@@ -42,6 +41,11 @@ function backgroundValue(preferences: ChatAppearancePreferences): string {
     return 'linear-gradient(135deg,#070914,#14172a)';
   }
   return preferences.chatBackgroundMode === 'image' ? `url(${preferences.chatBackgroundValue})` : preferences.chatBackgroundValue;
+}
+
+function masterCharacterInstruction(character: CharacterProfile): string {
+  const instruction = character.systemInstruction.trim();
+  return instruction || DEFAULT_CHARACTER_PROFILE.systemInstruction;
 }
 
 export function App() {
@@ -118,7 +122,7 @@ export function App() {
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = buildCharacterInstruction(character, roleplay);
+    const systemInstruction = masterCharacterInstruction(character);
     try {
       const userMessage = makeMessage('user', text, conversationId); const withUser = await appendMessage(userMessage, conversationId); if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       let titled = withUser;
@@ -163,7 +167,7 @@ export function App() {
     const nextVariant = workingConversation.messages.filter((message) => message.role === 'assistant' && (message.responseGroupId ?? message.id) === groupId).length + 1;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = buildCharacterInstruction(character, roleplay);
+    const systemInstruction = masterCharacterInstruction(character);
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setError(null); setStatus('streaming');
@@ -184,10 +188,8 @@ export function App() {
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = buildCharacterInstruction(character, roleplay);
-    const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\
-User intent: ${shortcut.intent}\
-Do not describe internal tool mechanics unless needed for the user-facing result. Use only the registered tools supplied for this shortcut. Do not perform write, destructive, or send actions.`;
+    const systemInstruction = masterCharacterInstruction(character);
+    const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut. Do not perform write, destructive, or send actions.`;
     try {
       await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
     } catch (cause) {
@@ -209,7 +211,7 @@ Do not describe internal tool mechanics unless needed for the user-facing result
 
     if (options.tools?.length) {
       const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
-      for await (const event of streamGoogleToolLoop(request, { tools: options.tools, readOnly: true }, controller.signal)) {
+      for await (const event of streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)) {
         handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText, isCurrentConversation });
         if (event.type === 'interaction-created') liveText.value = '';
         if (event.type === 'cancelled') return;
@@ -226,9 +228,9 @@ Do not describe internal tool mechanics unless needed for the user-facing result
   }
 
   function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); }
-  async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that conversation.'); } }
-  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that conversation.'); } }
-  async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not delete this conversation.'); } }
+  async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
+  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
+  async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } }
   async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) { const record = workspaceShortcuts.find((item) => item.id === shortcut.id); if (!record) { setError('That Workspace shortcut is not available.'); return; } await runWorkspaceShortcut(record); }
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }
@@ -249,7 +251,7 @@ Do not describe internal tool mechanics unless needed for the user-facing result
     <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
     <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={fontSize} onRegenerate={(messageId) => void regenerate(messageId)} />
     {error && <div className="error" role="alert">{error}</div>}
-    <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={buildCharacterInstruction(character, roleplay)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
+    <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={masterCharacterInstruction(character)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
     <Sidebar open={sidebarOpen} threads={threads} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => void switchThread(id)} onNewChat={() => void startNewChat()} onRename={(id, title) => void handleRename(id, title)} onArchive={(id) => void handleArchive(id)} onDelete={(id) => void handleDelete(id)} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
   </main>;
 }
@@ -267,7 +269,7 @@ function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
   else if (event.type === 'completed') {
     const completedAt = Date.now();
     const live = context.liveText.value;
-    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Applied the configured Character master system prompt.', 'Accepted the request through the canonical Gemini provider boundary.', 'Executed any requested Workspace operations through the registered Google tool executor.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) };
+    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Applied the configured Character Master System Instruction.', 'Accepted the request through the canonical Gemini provider boundary.', 'Executed any requested Google capability through the registered tool executor.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) };
     void context.save(completed).then(context.refreshThreads).then(() => { if (isCurrentConversation()) setConversation((current) => current.id === completed.id ? completed : current); }).catch((cause) => { if (isCurrentConversation()) context.setError(cause instanceof Error ? cause.message : 'Could not save the assistant response.'); });
   }
   else if (event.type === 'failed') { if (isCurrentConversation()) { context.setStatus('failed'); context.setError(`${event.error.message} [${event.error.code}]`); } }

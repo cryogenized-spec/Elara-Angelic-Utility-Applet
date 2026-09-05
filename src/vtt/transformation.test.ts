@@ -6,7 +6,7 @@ vi.mock('../gemini/provider', () => ({
   geminiTurnPort: { streamReply },
 }));
 
-import { buildVttTransformInput, transformVttTranscript, VTT_TRANSFORM_SYSTEM_INSTRUCTION } from './transformation';
+import { buildVttTransformInput, buildVttTransformSystemInstruction, transformVttTranscript, VTT_TRANSFORM_SYSTEM_INSTRUCTION } from './transformation';
 
 afterEach(() => {
   streamReply.mockReset();
@@ -22,6 +22,14 @@ describe('VTT transformation', () => {
     expect(buildVttTransformInput('walk up to her', 'roleplay')).toBe('Mode: ROLEPLAY\n\nTranscript:\nwalk up to her');
   });
 
+  it('combines the saved Character master prompt with the VTT task instruction', () => {
+    const characterPrompt = 'PERSONA PROTOCOL: ELARA\nRoleplay as Elara.';
+    const combined = buildVttTransformSystemInstruction(characterPrompt);
+    expect(combined).toContain(characterPrompt);
+    expect(combined).toContain('VTT TRANSFORMATION TASK');
+    expect(combined).toContain(VTT_TRANSFORM_SYSTEM_INSTRUCTION);
+  });
+
   it('sends polish mode through the canonical Gemini turn port and accumulates deltas', async () => {
     streamReply.mockReturnValue((async function* () {
       yield { type: 'text-delta', index: 0, text: 'A clear ' };
@@ -29,11 +37,12 @@ describe('VTT transformation', () => {
       yield { type: 'completed', interactionId: 'int-1', status: 'completed', durationMs: 1 };
     })());
 
-    await expect(transformVttTranscript('  um I mean this message, basically  ', 'polish', { model: 'gemini-test' })).resolves.toBe('A clear message.');
+    const persona = 'PERSONA PROTOCOL: ELARA\nBe in character.';
+    await expect(transformVttTranscript('  um I mean this message, basically  ', 'polish', { model: 'gemini-test', systemInstruction: persona })).resolves.toBe('A clear message.');
     expect(streamReply).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gemini-test',
       input: 'Mode: POLISH\n\nTranscript:\num I mean this message, basically',
-      systemInstruction: VTT_TRANSFORM_SYSTEM_INSTRUCTION,
+      systemInstruction: expect.stringContaining(persona),
       generationConfig: { maxOutputTokens: 500 },
     }), undefined);
   });
@@ -44,7 +53,7 @@ describe('VTT transformation', () => {
       yield { type: 'completed', interactionId: 'int-2', status: 'completed', durationMs: 1 };
     })());
 
-    await expect(transformVttTranscript('I walk up to you and smile', 'roleplay')).resolves.toBe('*walks up to you and smiles*');
+    await expect(transformVttTranscript('I walk up to you and smile', 'roleplay', { systemInstruction: 'PERSONA PROTOCOL: ELARA' })).resolves.toBe('*walks up to you and smiles*');
     expect(streamReply).toHaveBeenCalledTimes(1);
   });
 

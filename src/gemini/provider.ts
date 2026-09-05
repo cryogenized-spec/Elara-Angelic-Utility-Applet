@@ -20,6 +20,11 @@ function readUsage(raw: unknown): GeminiUsage | undefined {
 function interactionIdFrom(event: Record<string, unknown>): string | undefined { return readString(event, 'interaction_id') ?? readString(event, 'interactionId') ?? readString(asRecord(event.interaction), 'id'); }
 function stepIndex(event: Record<string, unknown>): number { return readNumber(event, 'index') ?? readNumber(asRecord(event.step), 'index') ?? 0; }
 function stepType(event: Record<string, unknown>): string { return readString(asRecord(event.step), 'type') ?? readString(event, 'step_type') ?? 'other'; }
+function appendThoughtSummary(parts: Map<number, string>, index: number, text: string): void { parts.set(index, `${parts.get(index) ?? ''}${text}`); }
+function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
+  const summary = [...parts.entries()].sort(([left], [right]) => left - right).map(([, text]) => text.trim()).filter(Boolean).join('\n\n').trim();
+  return summary || undefined;
+}
 
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
 type InteractionRequest = { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] };
@@ -60,6 +65,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   let sawTerminalEvent = false;
   let sawRequiresAction = false;
   const pendingFunctions = new Map<number, PendingFunctionCall>();
+  const thoughtSummaryParts = new Map<number, string>();
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
   try {
     const apiKey = await getGeminiApiKey();
@@ -75,10 +81,50 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
       if (eventInteractionId) interactionId = eventInteractionId;
       if (eventType === 'interaction.created') { const interaction = asRecord(raw.interaction); const id = readString(interaction, 'id') ?? interactionId ?? 'unknown'; interactionId = id; const model = readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL); yield { type: 'interaction-created', interactionId: id, model }; continue; }
       if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') { const status = readString(raw, 'status') ?? readString(asRecord(raw.interaction), 'status') ?? eventType.replace('interaction.', ''); if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
-      if (eventType === 'step.start') { const index = stepIndex(raw); const step = asRecord(raw.step); const type = stepType(raw); yield { type: 'step-start', index, stepType: type }; const summaryParts = Array.isArray(step.summary) ? step.summary : []; for (const summary of summaryParts) { const text = readString(asRecord(summary), 'text'); if (text) yield { type: 'thought-summary-delta', index, text }; } const signature = readString(step, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, { callId, name, arguments: '' }); } continue; }
-      if (eventType === 'step.delta') { const delta = asRecord(raw.delta); const index = stepIndex(raw); const deltaType = readString(delta, 'type'); const deltaText = readString(delta, 'text'); if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; } else if (deltaType === 'thought_summary') { if (deltaText) yield { type: 'thought-summary-delta', index, text: deltaText }; } else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; } else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; } continue; }
+      if (eventType === 'step.start') {
+        const index = stepIndex(raw);
+        const step = asRecord(raw.step);
+        const type = stepType(raw);
+        yield { type: 'step-start', index, stepType: type };
+        if (type === 'thought') {
+          const summaryParts = Array.isArray(step.summary) ? step.summary : [];
+          for (const summary of summaryParts) {
+            const text = readString(asRecord(summary), 'text');
+            if (text) {
+              appendThoughtSummary(thoughtSummaryParts, index, text);
+              yield { type: 'thought-summary-delta', index, text };
+            }
+          }
+        }
+        const signature = readString(step, 'signature');
+        if (signature) yield { type: 'thought-signature', index, signature };
+        if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, { callId, name, arguments: '' }); }
+        continue;
+      }
+      if (eventType === 'step.delta') {
+        const delta = asRecord(raw.delta);
+        const index = stepIndex(raw);
+        const deltaType = readString(delta, 'type');
+        const deltaText = readString(delta, 'text');
+        if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
+        else if (deltaType === 'thought_summary') { if (deltaText) { appendThoughtSummary(thoughtSummaryParts, index, deltaText); yield { type: 'thought-summary-delta', index, text: deltaText }; } }
+        else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; }
+        else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
+        continue;
+      }
       if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && pending.arguments && interactionId) { try { const args = JSON.parse(pending.arguments) as unknown; if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.'); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args as Record<string, unknown> }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
-      if (eventType === 'interaction.completed') { const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed'; sawTerminalEvent = true; yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: readUsage(interaction.usage) ?? readUsage(raw.usage) }; return; }
+      if (eventType === 'interaction.completed') {
+        const interaction = asRecord(raw.interaction);
+        interactionId = readString(interaction, 'id') ?? interactionId;
+        const status = readString(interaction, 'status') ?? 'completed';
+        sawTerminalEvent = true;
+        const usage = readUsage(interaction.usage) ?? readUsage(raw.usage);
+        const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts);
+        const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined);
+        if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
+        yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage };
+        return;
+      }
       if (eventType === 'error') { const providerError = asRecord(raw.error); const message = readString(providerError, 'message') ?? 'Gemini returned a streaming error.'; sawTerminalEvent = true; yield { type: 'failed', error: normalizeGeminiError(new Error(message), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) }; return; }
     }
     if (sawRequiresAction || sawTerminalEvent) return;

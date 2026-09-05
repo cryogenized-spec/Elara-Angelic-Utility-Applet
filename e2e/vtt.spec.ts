@@ -151,6 +151,57 @@ test.describe('VTT composer flow', () => {
     await expect(composer).toBeFocused();
   });
 
+  test('reports microphone denial without changing the draft', async ({ page }) => {
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia: async () => { throw new DOMException('Permission denied', 'NotAllowedError'); } },
+      });
+    });
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await composer.fill('permission draft');
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await expect(page.getByRole('status')).toContainText('Permission denied');
+    await expect(composer).toHaveValue('permission draft');
+    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
+  });
+
+  test('reports lack of a supported recorder format without requesting the microphone', async ({ page }) => {
+    await page.evaluate(() => {
+      (window.MediaRecorder as typeof MediaRecorder & { isTypeSupported: (mimeType: string) => boolean }).isTypeSupported = () => false;
+      Object.defineProperty(navigator, 'mediaDevices', {
+        configurable: true,
+        value: { getUserMedia: async () => { throw new Error('getUserMedia should not be called'); } },
+      });
+    });
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await composer.fill('format draft');
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await expect(page.getByRole('status')).toContainText('supported microphone recording format');
+    await expect(composer).toHaveValue('format draft');
+  });
+
+  test('reports an empty transcript without altering the draft', async ({ page }) => {
+    await page.unroute('**/api/transcribe');
+    await page.route('**/api/transcribe', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ transcript: '   ' }),
+      });
+    });
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await composer.fill('silent draft');
+
+    await page.getByRole('button', { name: 'VTT voice input' }).click();
+    await stopRecording(page);
+
+    await expect(page.getByRole('status')).toContainText('No speech was detected.');
+    await expect(composer).toHaveValue('silent draft');
+  });
+
   test('auto-stops after sustained silence and returns to idle', async ({ page }) => {
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('keep ');

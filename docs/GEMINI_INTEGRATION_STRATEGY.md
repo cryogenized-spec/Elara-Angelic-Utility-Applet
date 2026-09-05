@@ -1,4 +1,4 @@
-# Prompt 5 — Gemini Integration Strategy
+# Gemini Integration Strategy
 
 ## Status
 
@@ -6,13 +6,13 @@ Accepted as the canonical Gemini provider strategy for the clean-room rebuild.
 
 ## Purpose
 
-Elara has exactly one production Gemini execution path. The application will talk to one provider boundary; only that provider boundary knows the Google Gen AI SDK and Interactions-specific request/response shapes.
+Elara has one production Gemini execution path. The application talks to one provider boundary; only that provider boundary knows the Google GenAI SDK and Interactions-specific request/response shapes.
 
-The archived application's multiple execution paths are intentionally not reproduced. In particular, the new application must not retain a `generateContent` fallback, a second Gemini client, or a compatibility adapter that can silently route around the Interactions provider.
+The archived application's multiple execution paths are intentionally not reproduced. In particular, the new application does not retain a `generateContent` fallback, a second Gemini client, or a compatibility adapter that can silently route around the Interactions provider.
 
-## Current external facts verified for Prompt 5
+## Current external facts
 
-The current Google documentation says the Interactions API is generally available and recommended for new projects. The original `generateContent` API remains supported by Google but is outside Elara's runtime path. The official JavaScript SDK is `@google/genai`; the npm latest checked for this build is 2.19.0. The SDK exposes `ai.interactions.create(...)`, including streaming, and stateful continuation uses `previous_interaction_id`.
+Google's current documentation exposes the Interactions API with a dedicated `system_instruction` field, optional tool declarations, streaming, and stateful continuation through `previous_interaction_id`. The official JavaScript SDK is `@google/genai`. The application keeps those provider-specific shapes behind its Gemini boundary.
 
 ## Canonical dependency direction
 
@@ -34,50 +34,54 @@ application/chat
 UI + persistence + diagnostics
 ```
 
-The UI never imports `@google/genai`. Persistence never imports it. Diagnostics never parses arbitrary SDK payloads. Worker/security may provide protected credentials but is not a second provider.
+The UI never imports `@google/genai`. Persistence never imports it. Diagnostics never parses arbitrary SDK payloads. The Cloudflare Worker is a protected transport and credential boundary; it is not an alternate character layer.
 
 ## Provider responsibilities
 
 The `gemini/` boundary owns SDK client construction, translation to current Interactions requests, foreground streaming invocation, event/result normalization, provider-error classification, and provider continuity identifiers.
 
-It does not own conversation persistence, UI state, retry policy, analytics, OAuth, attachments, tool execution, memory retrieval, or system-prompt authoring.
+It does not own conversation persistence, UI state, retry policy, analytics, OAuth, attachments, tool execution, memory retrieval, or character authoring.
 
 ## Application-facing request direction
 
-The eventual normalized request contains only product-approved values such as model, input, system-instruction payload, model-aware generation settings, optional prior interaction identifier, stream intent, storage intent, and curated tool declarations. Prompt 28 will freeze the validated schema. Prompt 7 controls which generation settings are legal. Provider-specific field names never escape `gemini/`.
+The normalized request contains product-approved values such as model, input, Character Master System Instruction, model-aware generation settings, optional prior interaction identifier, and curated tool declarations. Provider-specific field names never escape `gemini/`.
+
+## Elara Character Master
+
+Elara's configured `character.systemInstruction` is the application's Character Master System Instruction. It establishes Elara's identity, embodied description, personality, demeanour, continuity, perception of the user, and response behavior.
+
+The application passes that instruction as the system-instruction field. It does not manufacture a generic assistant persona first and then decorate the result with Elara. User input is received and answered from inside the established Elara identity.
+
+There is one character instruction for a turn. Runtime code must not append a competing character prompt for roleplay, VTT, tool use, or task category.
+
+## Tool calling and Workspace
+
+Tool definitions are curated application capabilities. They are not model-generated code and they are not a competing model persona or policy layer.
+
+The Gemini model may request an exposed capability. The application decides whether the request is registered, authorized, validated, confirmed where required, and executable. A capability should only be exposed on a conversational path when that path has a concrete handler for it.
+
+Google Workspace services remain behind the application's OAuth authority and tool execution boundary.
 
 ## Provider response direction
 
-The provider emits normalized lifecycle events. The intended stream includes interaction creation/progress, step lifecycle, thought-summary data, model text deltas, function-call lifecycle, completion/usage, and terminal failure/cancellation states.
+The provider emits normalized lifecycle events including interaction creation/progress, step lifecycle, thought-summary data, model text deltas, function-call lifecycle, completion/usage, and terminal failure/cancellation states.
 
 ## Stateful continuation
 
-Normal multi-turn chat uses `previous_interaction_id`. The application persists the association between its local conversation and the latest provider interaction identifier; the provider translates that into the API request field. Stateful continuation is preferred because the server manages conversation history and thought-signature continuity.
+Normal multi-turn chat uses `previous_interaction_id`. The application persists the association between its local conversation and the latest provider interaction identifier; the provider translates that into the API request field. Stateful continuation is preferred when supported because Gemini manages the interaction history and continuity data.
 
-## Future tool calling and Workspace
+## Memory and context
 
-Tool definitions are curated application capabilities, not arbitrary model-generated code. A later tool registry supplies schemas; a validated application service executes requested calls. Google Workspace services remain behind one OAuth authority and a centralized Google tool boundary. Tool execution is therefore not owned by the Gemini provider.
+Long-term memory/notes remain a separate application context domain. The provider does not query or mutate the memory store directly. Chat/application orchestration supplies only the context that is actually available for the current turn.
 
-## Future character system prompt
+## Credentials and Cloudflare boundary
 
-The character's master identity/personality/roleplay instruction will be maintained as a separate controlled system-instruction source. It is not stored as a user message and is not part of the tool registry. The provider only receives the final approved system instruction as a request input. Prompt 27 authors the production creative-context content.
-
-## Future memory/notes
-
-Long-term notable-event notes are a separate application context domain. The provider does not query or mutate the memory store directly. Chat/application orchestration will later retrieve approved notes and include bounded context in the normalized request.
-
-## Credentials and deployment boundary
-
-The browser must not contain an application-owned Gemini secret. The final credential path is through the security/Worker boundary established by Prompt 12–13. The SDK's ability to initialize in a browser is not permission to ship an application-owned production key there.
+The browser must not contain the application-owned Gemini secret. The Cloudflare Worker holds the Gemini API key as a secret and forwards authorized application requests to Gemini. Cloudflare documents secrets as encrypted Worker bindings accessible through the Worker environment. The Worker therefore protects the credential without becoming part of Elara's character architecture.
 
 ## Error ownership
 
-Gemini-specific failures are normalized at the provider boundary. The normalized diagnostic preserves provider/HTTP status, safe category, provider request/interaction identifier where available, retryability metadata, and timing supplied by the outer lifecycle. It excludes credentials, OAuth tokens, secret headers, and message bodies. Retry decisions belong to chat/lifecycle, not the provider.
+Gemini-specific failures are normalized at the provider boundary. The normalized diagnostic preserves provider/HTTP status, safe category, provider request/interaction identifier where available, retryability metadata, and timing supplied by the outer lifecycle. It excludes credentials, OAuth tokens, secret headers, and message bodies.
 
 ## Explicit exclusions
 
-No `generateContent` or `generateContentStream` execution; no second Gemini client; no fallback routing between Gemini API families; no React/Dexie/OAuth/analytics dependencies; no implicit retry loops; no silent provider-failure swallowing.
-
-## Relationship to later prompts
-
-Prompt 6 owns the live model registry. Prompt 7 owns capability-driven settings. Prompt 8 owns the concrete normalized stream contract. Prompt 9 owns thinking presentation. Prompt 28 freezes the request schema. Prompt 29 freezes provider-error normalization. Prompt 49 evaluates background execution.
+No `generateContent` execution; no second Gemini client; no fallback routing between Gemini API families; no React/Dexie/OAuth/analytics dependencies inside the provider; no implicit retry loops; no silent provider-failure swallowing; no competing character system layer.

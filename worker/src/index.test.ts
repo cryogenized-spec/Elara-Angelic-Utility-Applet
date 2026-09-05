@@ -1,5 +1,4 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ELARA_SYSTEM_INSTRUCTION } from '../../src/character/system-instruction';
 
 const { createInteraction, uploadFile, deleteFile } = vi.hoisted(() => ({
   createInteraction: vi.fn(),
@@ -70,7 +69,7 @@ describe('Gemini Worker boundary', () => {
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello' }),
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
     });
 
     const response = await worker.fetch(request, { ...baseEnv, GEMINI_API_KEY: '' });
@@ -90,7 +89,7 @@ describe('Gemini Worker boundary', () => {
         'Content-Type': 'application/json',
         Origin: 'https://attacker.example',
       },
-      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello' }),
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
     });
 
     const response = await worker.fetch(request, baseEnv);
@@ -114,7 +113,7 @@ describe('Gemini Worker boundary', () => {
     expect(createInteraction).not.toHaveBeenCalled();
   });
 
-  it('passes the canonical Elara system instruction to Gemini when the client omits one', async () => {
+  it('rejects a Gemini turn when the master instruction is missing', async () => {
     createInteraction.mockResolvedValue({});
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
@@ -123,8 +122,23 @@ describe('Gemini Worker boundary', () => {
     });
 
     const response = await worker.fetch(request, baseEnv);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ code: 'validation', message: 'Request did not satisfy the approved Gemini contract.' });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('passes the configured master instruction to Gemini unchanged', async () => {
+    createInteraction.mockResolvedValue({});
+    const customInstruction = 'PERSONA PROTOCOL: ELARA\nRemain in character and follow this exact instruction.';
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: customInstruction }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
     expect(response.status).toBe(200);
-    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({ system_instruction: ELARA_SYSTEM_INSTRUCTION }));
+    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({ system_instruction: customInstruction }));
     await response.text();
   });
 
@@ -141,7 +155,7 @@ describe('Gemini Worker boundary', () => {
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello' }),
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
     });
 
     const response = await worker.fetch(request, baseEnv);

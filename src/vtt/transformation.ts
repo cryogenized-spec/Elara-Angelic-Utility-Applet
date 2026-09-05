@@ -38,14 +38,11 @@ export async function transformVttTranscript(
   if (!cleaned) throw new Error('Cannot transform an empty transcript.');
   if (mode === 'raw') return cleaned;
 
-  const masterInstruction = options?.systemInstruction?.trim();
-  if (!masterInstruction) throw new Error('Character Master System Instruction is required for voice transformation.');
-
   let output = '';
   for await (const event of geminiTurnPort.streamReply({
     model: options?.model || DEFAULT_GEMINI_MODEL,
     input: buildVttTransformInput(cleaned, mode),
-    systemInstruction: masterInstruction,
+    systemInstruction: options?.systemInstruction,
     generationConfig: { maxOutputTokens: 500 },
   }, options?.signal)) {
     if (event.type === 'text-delta') output += event.text;

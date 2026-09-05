@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyboardEvent } from 'react';
-import { Paperclip } from 'lucide-react';
 import { Icon } from '../../ui/icons';
-import { MarkdownIcon } from '../../ui/MarkdownIcon';
 import type { ProviderStatus } from '../../domain/chat';
 import { MarkdownReference } from './MarkdownReference';
 import { VttRecorder, shouldDiscardVttCapture, type VttRecordingState } from '../../vtt/recording';
@@ -177,10 +175,10 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
         {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}
         <footer className="composer-expanded__footer">
           <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
-            <MarkdownIcon size={20} />
+            <Icon name="markdown" size={20} />
           </button>
           <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
-            <Paperclip size={19} strokeWidth={2} aria-hidden="true" />
+            <Icon name="paperclip" size={19} />
           </button>
           <div className="composer-expanded__spacer" />
           <button className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`} type="button" aria-label={vttAriaLabel()} aria-pressed={vttState === 'recording'} disabled={status === 'streaming' || vttState === 'requesting'} onClick={() => void handleVtt(expandedTextareaRef.current)}>
@@ -199,10 +197,10 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: { d
   return <>
     <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
       <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
-        <MarkdownIcon size={20} />
+        <Icon name="markdown" size={20} />
       </button>
       <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
-        <Paperclip size={19} strokeWidth={2} aria-hidden="true" />
+        <Icon name="paperclip" size={19} />
       </button>
       <div className="composer__input-wrap">
         <textarea ref={textareaRef} aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint="send" />

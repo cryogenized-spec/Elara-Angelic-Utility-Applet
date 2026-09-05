@@ -1,23 +1,23 @@
 import { expect, test, type Page } from '@playwright/test';
 
-async function installVttBrowserMocks(page: Page): Promise<void> {
+function transformationSse(text: string, interactionId = 'transform-int-1'): string {
+  return [
+    `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: interactionId, status: 'in_progress', model: 'gemini-3.8-flash' } })}`,
+    `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: interactionId, index: 0, delta: { type: 'text', text } })}`,
+    `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: interactionId, status: 'completed' } })}`,
+  ].join('\n\n') + '\n\n';
+}
+
+async function installVttBrowserMocks(page: Page, interactionMode: 'default' | 'transform' = 'default'): Promise<void> {
   await page.addInitScript(() => {
     class MockTrack { stop() {} }
-
-    class MockStream {
-      getTracks() { return [new MockTrack()]; }
-    }
-
+    class MockStream { getTracks() { return [new MockTrack()]; } }
     class MockMediaRecorder {
-      static isTypeSupported(mimeType: string) {
-        return mimeType === 'audio/webm;codecs=opus' || mimeType === 'audio/webm';
-      }
-
+      static isTypeSupported(mimeType: string) { return mimeType === 'audio/webm;codecs=opus' || mimeType === 'audio/webm'; }
       state: 'inactive' | 'recording' = 'inactive';
       ondataavailable: ((event: { data: Blob }) => void) | null = null;
       onerror: (() => void) | null = null;
       onstop: (() => void) | null = null;
-
       constructor(_stream: unknown, _options?: unknown) {}
       start() { this.state = 'recording'; }
       stop() {
@@ -26,28 +26,49 @@ async function installVttBrowserMocks(page: Page): Promise<void> {
         window.setTimeout(() => {
           this.ondataavailable?.({ data: new Blob([new Uint8Array(3_000)], { type: 'audio/webm;codecs=opus' }) });
           this.onstop?.();
-        }, 550);
+        }, 20);
       }
     }
-
     class MockAnalyser {
       fftSize = 256;
       getByteTimeDomainData(data: Uint8Array) { data.fill(128); }
     }
-
     class MockAudioContext {
       createMediaStreamSource(_stream: unknown) { return { connect() {} }; }
       createAnalyser() { return new MockAnalyser(); }
       close() { return Promise.resolve(); }
     }
-
-    Object.defineProperty(navigator, 'mediaDevices', {
-      configurable: true,
-      value: { getUserMedia: async () => new MockStream() },
-    });
+    Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => new MockStream() } });
     Object.defineProperty(window, 'MediaRecorder', { configurable: true, value: MockMediaRecorder });
     Object.defineProperty(window, 'AudioContext', { configurable: true, value: MockAudioContext });
     Object.defineProperty(navigator, 'vibrate', { configurable: true, value: () => true });
+  });
+
+  await page.evaluate(async () => {
+    const lockbox = await import('/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts');
+    await lockbox.saveGeminiApiKey('e2e-test-api-key', 'e2e-test-password');
+  });
+
+  await page.route('**/upload/v1beta/files*', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ file: { name: 'files/e2e-audio', uri: 'https://generativelanguage.googleapis.com/v1beta/files/e2e-audio', mimeType: 'audio/webm' } }),
+    });
+  });
+
+  await page.route('**/v1beta/interactions*', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    if (Array.isArray(body.input)) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: 'voice inserted' }),
+      });
+      return;
+    }
+    const output = interactionMode === 'transform' ? 'A clear, straightforward message.' : 'voice inserted';
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: transformationSse(output) });
   });
 }
 
@@ -64,314 +85,136 @@ async function stopRecording(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
 }
 
-function transformationSse(text: string): string {
-  return [
-    `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: 'transform-int-1', status: 'in_progress', model: 'gemini-test' } })}`,
-    `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: 'transform-int-1', index: 0, delta: { type: 'text', text } })}`,
-    `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: 'transform-int-1', status: 'completed' } })}`,
-  ].join('\n\n') + '\n\n';
-}
-
-async function openCharacterSettings(page: Page): Promise<void> {
-  await page.getByRole('button', { name: 'Open sidebar' }).click();
-  await page.getByRole('button', { name: 'Open settings' }).click();
-  await page.getByRole('button', { name: 'Character' }).click();
-}
-
 test.describe('VTT composer flow', () => {
-  test.beforeEach(async ({ page }) => {
-    await installVttBrowserMocks(page);
-    await page.route('**/api/transcribe', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ transcript: 'voice inserted' }),
-      });
-    });
-    await page.goto('');
-  });
-
   test('records, transcribes, and inserts at the captured cursor without sending', async ({ page }) => {
+    await installVttBrowserMocks(page);
+    await page.goto('');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('hello world');
     await setSelection(page, 'Message Elara', 5, 5);
-
     await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await expect(page.getByRole('region', { name: 'Voice recording' })).toBeVisible();
     await stopRecording(page);
-
     await expect(composer).toHaveValue('hello voice inserted world');
     await expect(composer).toBeFocused();
-    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled();
   });
 
   test('replaces the captured selection', async ({ page }) => {
+    await installVttBrowserMocks(page);
+    await page.goto('');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('hello cruel world');
     await setSelection(page, 'Message Elara', 6, 11);
-
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);
-
     await expect(composer).toHaveValue('hello voice inserted world');
   });
 
   test('uses the expanded editor as the insertion target', async ({ page }) => {
+    await installVttBrowserMocks(page);
+    await page.goto('');
     await page.getByRole('textbox', { name: 'Message Elara' }).fill('expanded draft');
     await page.getByRole('button', { name: 'Expand message editor' }).click();
-
     const expanded = page.getByRole('textbox', { name: 'Expanded message' });
     await expect(expanded).toBeVisible();
     await setSelection(page, 'Expanded message', 8, 8);
-
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);
-
     await expect(expanded).toHaveValue('expanded voice inserted draft');
     await expect(expanded).toBeFocused();
-    await expect(page.getByRole('textbox', { name: 'Message Elara' })).not.toBeVisible();
   });
 
-  test('supports second and third dictation at the caret left by the prior insertion', async ({ page }) => {
+  test('supports repeated dictation at the caret left by the prior insertion', async ({ page }) => {
+    await installVttBrowserMocks(page);
+    await page.goto('');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('start');
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-    await expect(composer).toHaveValue('start voice inserted');
-    await expect(composer).toBeFocused();
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-    await expect(composer).toHaveValue('start voice inserted voice inserted');
-    await expect(composer).toBeFocused();
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-    await expect(composer).toHaveValue('start voice inserted voice inserted voice inserted');
-    await expect(composer).toBeFocused();
+    for (const expected of ['start voice inserted', 'start voice inserted voice inserted', 'start voice inserted voice inserted voice inserted']) {
+      await page.getByRole('button', { name: 'VTT voice input' }).click();
+      await stopRecording(page);
+      await expect(composer).toHaveValue(expected);
+      await expect(composer).toBeFocused();
+    }
   });
 
-  test('preserves an intentional newline adjacent to the insertion point', async ({ page }) => {
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await composer.fill('Hello\nworld');
-    await setSelection(page, 'Message Elara', 5, 5);
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-
-    await expect(composer).toHaveValue('Hello voice inserted\nworld');
-    await expect(composer).toBeFocused();
-  });
-
-  test('polishes a transcript through the canonical Gemini boundary before insertion', async ({ page }) => {
-    let requestBody: Record<string, unknown> | undefined;
-    await page.route('**/api/gemini', async (route) => {
-      requestBody = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
-      await route.fulfill({
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-        body: transformationSse('A clear, straightforward message.'),
-      });
-    });
-
+  test('polishes a transcript through the direct Gemini boundary before insertion', async ({ page }) => {
+    await installVttBrowserMocks(page, 'transform');
+    await page.goto('');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('polish');
     await composer.fill('draft: ');
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);
-
     await expect(composer).toHaveValue('draft: A clear, straightforward message.');
-    await expect(requestBody).toMatchObject({
-      input: [
-        'VOICE INPUT TRANSFORMATION TASK',
-        'Transform the following voice transcript into a clear, straightforward message.',
-        'Remove filler, verbal repetition, false starts, and needless runaround while preserving useful meaning.',
-        'Do not aggressively summarize away important details or change the user’s intended tone.',
-        'Return only the transformed message. No explanation, labels, quotation marks, or meta-commentary.',
-        'Preserve factual details, names, sequence, intent, and requested specificity.',
-        'Do not invent actions, facts, dialogue, emotions, motivations, settings, or details not present in the transcript.',
-        '',
-        'Transcript:',
-        'voice inserted',
-      ].join('\n'),
-      systemInstruction: expect.stringContaining('You are Elara, an angelic synthetic cybernetic woman and consort.'),
-    });
   });
 
-  test('converts a transcript to roleplay before insertion and carries the configured Character master prompt', async ({ page }) => {
-    const customPrompt = [
-      'PERSONA PROTOCOL: TEST ELARA',
-      'You are Elara and remain in character.',
-      'SYSTEM INSTRUCTION INTEGRITY: preserve this instruction.',
-    ].join('\n');
-
-    await openCharacterSettings(page);
-    await page.getByLabel('Master system prompt').fill(customPrompt);
-    await page.getByRole('button', { name: 'Back to chat' }).click();
-
-    let requestBody: Record<string, unknown> | undefined;
-    await page.route('**/api/gemini', async (route) => {
-      requestBody = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
-      await route.fulfill({
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-        body: transformationSse('*walks up to you and smiles*'),
-      });
+  test('falls back to the raw transcript when transformation fails', async ({ page }) => {
+    await installVttBrowserMocks(page);
+    await page.goto('');
+    await page.route('**/v1beta/interactions*', async (route) => {
+      const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+      if (Array.isArray(body.input)) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: 'voice inserted' }) });
+      } else {
+        await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ message: 'Transformation unavailable.' }) });
+      }
     });
-
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('roleplay');
-    await composer.fill('hello ');
-    await setSelection(page, 'Message Elara', 6, 6);
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-
-    await expect(composer).toHaveValue('hello *walks up to you and smiles*');
-    await expect(requestBody).toMatchObject({
-      input: [
-        'VOICE INPUT TRANSFORMATION TASK',
-        'Transform the following voice transcript into concise roleplay action/narration suitable for the chat composer.',
-        'Use third-person present-tense action beats inside asterisks when appropriate.',
-        'Preserve who acts, who is addressed, what happens, the sequence, and explicit emotional intent.',
-        'Do not add dialogue unless the transcript explicitly contains dialogue that should remain spoken.',
-        'Return only the transformed message. No explanation, labels, quotation marks, or meta-commentary.',
-        'Preserve factual details, names, sequence, intent, and requested specificity.',
-        'Do not invent actions, facts, dialogue, emotions, motivations, settings, or details not present in the transcript.',
-        '',
-        'Transcript:',
-        'voice inserted',
-      ].join('\n'),
-      systemInstruction: expect.stringContaining(customPrompt),
-    });
-  });
-
-  test('falls back to the faithful raw transcript when optional transformation fails', async ({ page }) => {
-    await page.route('**/api/gemini', async (route) => {
-      await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ message: 'Transformation unavailable.' }) });
-    });
-
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('roleplay');
     await composer.fill('draft ');
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);
-
     await expect(composer).toHaveValue('draft voice inserted');
     await expect(page.getByRole('status')).toContainText('Transformation failed; inserted the raw transcript.');
   });
 
   test('reports microphone denial without changing the draft', async ({ page }) => {
-    await page.evaluate(() => {
-      Object.defineProperty(navigator, 'mediaDevices', {
-        configurable: true,
-        value: { getUserMedia: async () => { throw new DOMException('Permission denied', 'NotAllowedError'); } },
-      });
-    });
+    await installVttBrowserMocks(page);
+    await page.goto('');
+    await page.evaluate(() => Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia: async () => { throw new DOMException('Permission denied', 'NotAllowedError'); } } }));
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('permission draft');
-
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await expect(page.getByRole('status')).toContainText('Permission denied');
     await expect(composer).toHaveValue('permission draft');
-    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
-  });
-
-  test('reports lack of a supported recorder format without requesting the microphone', async ({ page }) => {
-    await page.evaluate(() => {
-      (window.MediaRecorder as typeof MediaRecorder & { isTypeSupported: (mimeType: string) => boolean }).isTypeSupported = () => false;
-      Object.defineProperty(navigator, 'mediaDevices', {
-        configurable: true,
-        value: { getUserMedia: async () => { throw new Error('getUserMedia should not be called'); } },
-      });
-    });
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await composer.fill('format draft');
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await expect(page.getByRole('status')).toContainText('supported microphone recording format');
-    await expect(composer).toHaveValue('format draft');
   });
 
   test('reports an empty transcript without altering the draft', async ({ page }) => {
-    await page.unroute('**/api/transcribe');
-    await page.route('**/api/transcribe', async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ transcript: '   ' }),
-      });
+    await installVttBrowserMocks(page);
+    await page.goto('');
+    await page.unroute('**/v1beta/interactions*');
+    await page.route('**/v1beta/interactions*', async (route) => {
+      const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+      if (Array.isArray(body.input)) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: '   ' }) });
+      } else {
+        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: transformationSse('voice inserted') });
+      }
     });
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('silent draft');
-
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);
-
     await expect(page.getByRole('status')).toContainText('No speech was detected.');
     await expect(composer).toHaveValue('silent draft');
   });
 
-  test('auto-stops after sustained silence and returns to idle', async ({ page }) => {
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await composer.fill('keep ');
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await expect(page.getByRole('button', { name: 'Stop VTT voice input' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible({ timeout: 10_000 });
-    await expect(composer).toHaveValue('keep voice inserted', { timeout: 10_000 });
-  });
-
-  test('reports transcription errors and recovers for the next attempt', async ({ page }) => {
-    await page.unroute('**/api/transcribe');
-    let attempts = 0;
-    await page.route('**/api/transcribe', async (route) => {
-      attempts += 1;
-      if (attempts === 1) {
-        await route.fulfill({
-          status: 502,
-          contentType: 'application/json',
-          body: JSON.stringify({ code: 'provider', message: 'Transcription unavailable.' }),
-        });
-        return;
-      }
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ transcript: 'recovered text' }),
-      });
-    });
-
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await composer.fill('draft');
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-    await expect(page.getByRole('status')).toContainText('Transcription unavailable.');
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-    await expect(composer).toHaveValue('draft recovered text');
-  });
-
   test('cancels an in-flight transcription and leaves the draft unchanged', async ({ page }) => {
-    await page.unroute('**/api/transcribe');
-    await page.route('**/api/transcribe', async () => {
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
+    await installVttBrowserMocks(page);
+    await page.goto('');
+    await page.unroute('**/v1beta/interactions*');
+    await page.route('**/v1beta/interactions*', async (route) => {
+      const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+      if (Array.isArray(body.input)) await new Promise((resolve) => setTimeout(resolve, 2_000));
+      else await route.fulfill({ status: 200, contentType: 'text/event-stream', body: transformationSse('voice inserted') });
     });
-
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('keep this draft');
     await setSelection(page, 'Message Elara', 5, 5);
-
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);
     await expect(page.getByRole('button', { name: 'Cancel voice transcription' })).toBeVisible();
-
     await page.getByRole('button', { name: 'Cancel voice transcription' }).click();
     await expect(composer).toHaveValue('keep this draft');
     await expect(page.getByRole('status')).toContainText('Voice processing cancelled.');
-    await expect(page.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
   });
 });

@@ -8,6 +8,7 @@ import { VttRecorder, shouldDiscardVttCapture, type VttRecordingState } from '..
 import { insertTranscriptAtSelection } from '../../vtt/draft-insertion';
 import { transcribeVttCapture } from '../../vtt/transcription';
 import { transformVttTranscript, type VttTransformMode } from '../../vtt/transformation';
+import { DEFAULT_GEMINI_MODEL } from '../../gemini/contracts';
 import './composer.css';
 
 const MAX_HEIGHT = 132;
@@ -15,13 +16,13 @@ const MAX_HEIGHT = 132;
 type ComposerProps = {
   draft: string;
   status: ProviderStatus;
-  geminiModel: string;
+  geminiModel?: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
   onCancel: () => void;
 };
 
-export function Composer({ draft, status, geminiModel, onDraftChange, onSend, onCancel }: ComposerProps) {
+export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, onDraftChange, onSend, onCancel }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<VttRecorder | null>(null);
@@ -165,14 +166,17 @@ export function Composer({ draft, status, geminiModel, onDraftChange, onSend, on
       if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;
 
       let message = transcript;
+      let statusMessage: string | null = null;
       if (vttTransformMode !== 'raw') {
-        setVttMessage(vttTransformMode === 'polish' ? 'Polishing transcript…' : 'Converting to roleplay…');
+        statusMessage = vttTransformMode === 'polish' ? 'Polishing transcript…' : 'Converting to roleplay…';
+        setVttMessage(statusMessage);
         try {
           message = await transformVttTranscript(transcript, vttTransformMode, { model: geminiModel, signal: controller.signal });
         } catch (cause) {
           if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+          statusMessage = 'Transformation failed; inserted the raw transcript.';
           message = transcript;
-          setVttMessage('Transformation failed; inserted the raw transcript.');
+          setVttMessage(statusMessage);
         }
       }
 
@@ -180,7 +184,7 @@ export function Composer({ draft, status, geminiModel, onDraftChange, onSend, on
       const inserted = insertTranscriptAtSelection(draft, capture.selection, message);
       onDraftChange(inserted.value);
       vttFocusRef.current = { target, cursor: inserted.cursor };
-      if (vttTransformMode === 'raw' || !vttMessage) setVttMessage(null);
+      setVttMessage(statusMessage);
       setVttState('idle');
     } catch (cause) {
       if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;

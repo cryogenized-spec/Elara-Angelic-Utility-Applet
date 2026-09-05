@@ -23,6 +23,7 @@ export interface ExecutionSummary {
   id: string;
   steps: string[];
   durationMs: number;
+  thoughtSummary?: string;
 }
 
 export interface ChatMessage {

@@ -34,6 +34,11 @@ class CharacterDatabase extends Dexie {
         if (typeof record.systemInstruction !== 'string') record.systemInstruction = DEFAULT_CHARACTER_PROFILE.systemInstruction;
       });
     });
+    this.version(5).stores({ profiles: 'id, updatedAt' }).upgrade((tx) => {
+      return tx.table('profiles').toCollection().modify((record: CharacterProfile) => {
+        if (record.systemInstruction === OBSOLETE_DEFAULT_INSTRUCTION) record.systemInstruction = DEFAULT_CHARACTER_PROFILE.systemInstruction;
+      });
+    });
   }
 }
 
@@ -91,6 +96,9 @@ export async function loadCharacterProfile(): Promise<CharacterProfile> {
   const existing = await db.profiles.get(PRIMARY_ID);
   if (existing) {
     const normalized = normalizeCharacterProfile(existing);
+    if (existing.systemInstruction === OBSOLETE_DEFAULT_INSTRUCTION && normalized.systemInstruction !== DEFAULT_CHARACTER_PROFILE.systemInstruction) {
+      normalized.systemInstruction = DEFAULT_CHARACTER_PROFILE.systemInstruction;
+    }
     if (JSON.stringify(normalized) !== JSON.stringify(existing)) await db.profiles.put(normalized);
     return normalized;
   }

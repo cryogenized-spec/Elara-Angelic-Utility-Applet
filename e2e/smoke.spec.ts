@@ -127,11 +127,13 @@ test('exposes the local API Lockbox rather than the retired Worker boundary', as
 test('normalizes a direct Gemini network failure without fabricating a response', async ({ page }) => {
   await page.goto('');
   await unlockTestGemini(page);
-  await page.route('**/v1beta/interactions*', (route) => route.abort('failed'));
+  await page.route('**/v1beta/interactions*', async (route) => {
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Provider unavailable.' }) });
+  });
   const composer = page.getByRole('textbox', { name: 'Message Elara' });
   await composer.fill('Verify the live runtime boundary');
   await page.getByRole('button', { name: 'Send message' }).click();
-  await expect(page.getByRole('alert')).toContainText('[GEMINI_UNKNOWN]');
+  await expect(page.getByRole('alert')).toContainText('[GEMINI_PROVIDER]');
   await expect(page.getByText('Verify the live runtime boundary')).toBeVisible();
 });
 

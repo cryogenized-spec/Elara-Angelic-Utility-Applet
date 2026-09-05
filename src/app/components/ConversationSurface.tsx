@@ -50,7 +50,11 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
         const key = responseGroupFor(entry.message);
         const count = entry.variants.length;
         const previousCount = seenCountsRef.current[key];
-        if (!(key in next) || previousCount !== count) next[key] = Math.min(next[key] ?? count - 1, count - 1);
+        if (!(key in next) || (previousCount !== undefined && count > previousCount)) {
+          next[key] = count - 1;
+        } else {
+          next[key] = Math.min(next[key] ?? count - 1, count - 1);
+        }
         seenCountsRef.current[key] = count;
       }
       return next;

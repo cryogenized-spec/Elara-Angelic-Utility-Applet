@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const streamReply = vi.fn();
+const { streamReply } = vi.hoisted(() => ({ streamReply: vi.fn() }));
 
 vi.mock('../gemini/provider', () => ({
   geminiTurnPort: { streamReply },

@@ -26,6 +26,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   const vttTargetRef = useRef<HTMLTextAreaElement | null>(null);
   const vttFocusRef = useRef<{ target: HTMLTextAreaElement; cursor: number } | null>(null);
+  const vttSessionIdRef = useRef(0);
+  const mountedRef = useRef(true);
   const [markdownOpen, setMarkdownOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [vttState, setVttState] = useState<VttRecordingState>('idle');
@@ -56,7 +58,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
     if (!pending) return;
     vttFocusRef.current = null;
     requestAnimationFrame(() => {
-      if (!pending.target.isConnected) return;
+      if (!mountedRef.current || !pending.target.isConnected) return;
       pending.target.focus();
       pending.target.setSelectionRange(pending.cursor, pending.cursor);
     });
@@ -72,6 +74,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
   }, [expanded, vttState]);
 
   useEffect(() => () => {
+    mountedRef.current = false;
+    vttSessionIdRef.current += 1;
     recorderRef.current?.cancel();
     transcriptionAbortRef.current?.abort();
   }, []);
@@ -100,6 +104,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
       return;
     }
     if (vttState === 'processing') {
+      vttSessionIdRef.current += 1;
       transcriptionAbortRef.current?.abort();
       transcriptionAbortRef.current = null;
       setVttMessage('Voice transcription cancelled.');
@@ -110,6 +115,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
     }
     if (vttBusy || !target) return;
 
+    const sessionId = vttSessionIdRef.current + 1;
+    vttSessionIdRef.current = sessionId;
     const selection = {
       start: target.selectionStart ?? draft.length,
       end: target.selectionEnd ?? draft.length,
@@ -120,14 +127,15 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
     setVttElapsed(0);
     const recorder = new VttRecorder({
       selection,
-      onStateChange: setVttState,
-      onRmsChange: setVttRms,
-      onElapsedChange: setVttElapsed,
+      onStateChange: (state) => { if (mountedRef.current && vttSessionIdRef.current === sessionId) setVttState(state); },
+      onRmsChange: (rms) => { if (mountedRef.current && vttSessionIdRef.current === sessionId) setVttRms(rms); },
+      onElapsedChange: (elapsed) => { if (mountedRef.current && vttSessionIdRef.current === sessionId) setVttElapsed(elapsed); },
     });
     recorderRef.current = recorder;
 
     try {
       const capture = await recorder.start();
+      if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;
       recorderRef.current = null;
       setVttElapsed(capture.durationMs);
       setVttRms(0);
@@ -140,18 +148,27 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
       transcriptionAbortRef.current = controller;
       setVttState('processing');
       const transcript = await transcribeVttCapture(capture, controller.signal);
+      if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;
       const inserted = insertTranscriptAtSelection(draft, capture.selection, transcript);
       onDraftChange(inserted.value);
       vttFocusRef.current = { target, cursor: inserted.cursor };
       setVttMessage(null);
       setVttState('idle');
     } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'AbortError') return;
+      if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;
+      if (cause instanceof DOMException && cause.name === 'AbortError') {
+        setVttMessage('Voice transcription cancelled.');
+        setVttState('idle');
+        return;
+      }
       const message = cause instanceof Error ? cause.message : 'Voice transcription failed.';
       setVttMessage(message);
       setVttState('failed');
-      window.setTimeout(() => setVttState('idle'), 1200);
+      window.setTimeout(() => {
+        if (mountedRef.current && vttSessionIdRef.current === sessionId) setVttState('idle');
+      }, 1200);
     } finally {
+      if (vttSessionIdRef.current !== sessionId) return;
       transcriptionAbortRef.current = null;
       recorderRef.current = null;
       vttTargetRef.current = null;
@@ -163,6 +180,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
   function bannerStop(): void {
     if (vttState === 'recording') recorderRef.current?.stop();
     else if (vttState === 'processing') {
+      vttSessionIdRef.current += 1;
       transcriptionAbortRef.current?.abort();
       transcriptionAbortRef.current = null;
       setVttMessage('Voice transcription cancelled.');

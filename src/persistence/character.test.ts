@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeCharacterProfile } from './character';
-import { DEFAULT_CHARACTER_PROFILE } from '../domain/character';
 
 const validArtwork = {
   id: 'art-1',
@@ -36,9 +35,10 @@ describe('character profile normalization', () => {
     expect(normalizeCharacterProfile({ systemInstruction: configured }).systemInstruction).toBe(configured);
   });
 
-  it('uses the canonical master prompt only when no instruction is supplied', () => {
-    expect(normalizeCharacterProfile({}).systemInstruction).toBe(DEFAULT_CHARACTER_PROFILE.systemInstruction);
-    expect(normalizeCharacterProfile({ systemInstruction: undefined }).systemInstruction).toBe(DEFAULT_CHARACTER_PROFILE.systemInstruction);
+  it('uses no system prompt when none is supplied', () => {
+    expect(normalizeCharacterProfile({}).systemInstruction).toBe('');
+    expect(normalizeCharacterProfile({ systemInstruction: undefined }).systemInstruction).toBe('');
+    expect(normalizeCharacterProfile({ systemInstruction: null as never }).systemInstruction).toBe('');
   });
 
   it('does not rewrite custom prompt text while enforcing the storage length limit', () => {

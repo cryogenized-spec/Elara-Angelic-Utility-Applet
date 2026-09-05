@@ -49,8 +49,8 @@ describe('VTT transcription client', () => {
     }));
 
     const request = transcribeVttCapture(capture);
+    const assertion = expect(request).rejects.toEqual(new VttTranscriptionError('timeout', 'Voice transcription timed out.'));
     await vi.advanceTimersByTimeAsync(VTT_TRANSCRIPTION_TIMEOUT_MS);
-
-    await expect(request).rejects.toEqual(new VttTranscriptionError('timeout', 'Voice transcription timed out.'));
+    await assertion;
   });
 });

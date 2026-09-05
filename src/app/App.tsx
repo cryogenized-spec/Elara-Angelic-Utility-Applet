@@ -99,14 +99,16 @@ export function App() {
   }
   async function startNewChat() {
     cancel();
-    activeConversationIdRef.current = '';
+    const pendingConversation: ConversationState = { id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
+    activeConversationIdRef.current = pendingConversation.id;
     setError(null); setDraft('');
-    setConversation((current) => activeConversationIdRef.current === '' ? { id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] } : current);
+    setConversation(pendingConversation);
     try {
       const nextConversation = await createThread();
+      if (activeConversationIdRef.current !== pendingConversation.id) return;
       activeConversationIdRef.current = nextConversation.id;
-      setConversation((current) => activeConversationIdRef.current === nextConversation.id ? nextConversation : current); window.localStorage.setItem(ACTIVE_THREAD_KEY, nextConversation.id); await refreshThreads(); setSidebarOpen(false);
-    } catch (cause) { if (!activeConversationIdRef.current) setError(cause instanceof Error ? cause.message : 'Could not create a new conversation.'); }
+      setConversation(nextConversation); window.localStorage.setItem(ACTIVE_THREAD_KEY, nextConversation.id); await refreshThreads(); setSidebarOpen(false);
+    } catch (cause) { if (activeConversationIdRef.current === pendingConversation.id) { activeConversationIdRef.current = ''; setError(cause instanceof Error ? cause.message : 'Could not create a new conversation.'); } }
   }
 
   async function send() {

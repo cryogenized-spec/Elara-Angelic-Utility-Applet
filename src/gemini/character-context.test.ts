@@ -5,40 +5,30 @@ import { DEFAULT_ROLEPLAY } from '../domain/preferences';
 import { ELARA_SYSTEM_INSTRUCTION, LEGACY_CHARACTER_SYSTEM_INSTRUCTION } from '../character/system-instruction';
 
 describe('buildCharacterInstruction', () => {
-  it('uses the canonical Elara system instruction by default and activates it at runtime', () => {
-    const result = buildCharacterInstruction(DEFAULT_CHARACTER_PROFILE, DEFAULT_ROLEPLAY);
-    expect(result).toContain(ELARA_SYSTEM_INSTRUCTION);
-    expect(result).toContain('CHARACTER EXECUTION DIRECTIVE');
-    expect(result).toContain('supplied master character protocol is active runtime behavior');
-    expect(result).toContain('Default to responding as the configured character in character.');
-    expect(result).toContain('IN-CHARACTER OUTPUT CONTRACT');
-    expect(result).toContain('Every normal conversational response must be authored from the character’s established perspective and voice.');
-    expect(result).toContain('Do not produce generic virtual-assistant greetings');
-    expect(result).not.toContain('CREATIVE ROLEPLAY CONTEXT');
-    expect(result).not.toContain('ROLEPLAY MODE DIRECTIVE');
+  it('uses the canonical Elara system instruction unchanged when roleplay scene context is disabled', () => {
+    expect(buildCharacterInstruction(DEFAULT_CHARACTER_PROFILE, DEFAULT_ROLEPLAY)).toBe(ELARA_SYSTEM_INSTRUCTION.replaceAll('[[user]]', 'the user'));
   });
 
   it('upgrades the legacy placeholder to the canonical instruction', () => {
-    const result = buildCharacterInstruction(
-      { ...DEFAULT_CHARACTER_PROFILE, systemInstruction: LEGACY_CHARACTER_SYSTEM_INSTRUCTION },
-      DEFAULT_ROLEPLAY,
-    );
-    expect(result).toContain(ELARA_SYSTEM_INSTRUCTION);
-    expect(result).toContain('CHARACTER EXECUTION DIRECTIVE');
+    expect(buildCharacterInstruction({ ...DEFAULT_CHARACTER_PROFILE, systemInstruction: LEGACY_CHARACTER_SYSTEM_INSTRUCTION }, DEFAULT_ROLEPLAY))
+      .toBe(ELARA_SYSTEM_INSTRUCTION.replaceAll('[[user]]', 'the user'));
   });
 
-  it('preserves and activates an explicitly customized character instruction', () => {
-    const custom = { ...DEFAULT_CHARACTER_PROFILE, systemInstruction: 'Always answer like a concise museum guide.' };
-    const result = buildCharacterInstruction(custom, DEFAULT_ROLEPLAY);
-    expect(result).toContain(custom.systemInstruction);
-    expect(result).toContain('CHARACTER EXECUTION DIRECTIVE');
-    expect(result).toContain('active runtime behavior');
-    expect(result).toContain('IN-CHARACTER OUTPUT CONTRACT');
-    expect(result).not.toContain(ELARA_SYSTEM_INSTRUCTION);
+  it('preserves an explicitly customized master prompt without appending a competing generic roleplay policy', () => {
+    const custom = { ...DEFAULT_CHARACTER_PROFILE, systemInstruction: 'PERSONA PROTOCOL: ELARA\nDefault to being in character.\nRoleplay at all times.' };
+    expect(buildCharacterInstruction(custom, DEFAULT_ROLEPLAY)).toBe(custom.systemInstruction);
+    expect(buildCharacterInstruction(custom, DEFAULT_ROLEPLAY)).not.toContain('CHARACTER EXECUTION DIRECTIVE');
+    expect(buildCharacterInstruction(custom, DEFAULT_ROLEPLAY)).not.toContain('IN-CHARACTER OUTPUT CONTRACT');
   });
 
-  it('adds an explicit in-character roleplay directive when Roleplay Mode is enabled', () => {
-    const result = buildCharacterInstruction(DEFAULT_CHARACTER_PROFILE, {
+  it('resolves the legacy [[user]] placeholder without changing other prompt content', () => {
+    const custom = { ...DEFAULT_CHARACTER_PROFILE, systemInstruction: 'Stay close to [[user]] and speak directly to [[user]].' };
+    expect(buildCharacterInstruction(custom, DEFAULT_ROLEPLAY)).toBe('Stay close to the user and speak directly to the user.');
+  });
+
+  it('adds only scene context when Roleplay Mode is enabled', () => {
+    const custom = { ...DEFAULT_CHARACTER_PROFILE, systemInstruction: 'PERSONA PROTOCOL: ELARA\nRoleplay at all times.' };
+    const result = buildCharacterInstruction(custom, {
       ...DEFAULT_ROLEPLAY,
       enabled: true,
       environmentPreset: 'bedroom',
@@ -49,19 +39,15 @@ describe('buildCharacterInstruction', () => {
       atmosphere: 'intimate and calm',
     });
 
-    expect(result).toContain(ELARA_SYSTEM_INSTRUCTION);
-    expect(result).toContain('CHARACTER EXECUTION DIRECTIVE');
-    expect(result).toContain('IN-CHARACTER OUTPUT CONTRACT');
-    expect(result).toContain('CREATIVE ROLEPLAY CONTEXT');
-    expect(result).toContain('ROLEPLAY MODE DIRECTIVE');
-    expect(result).toContain('in-character participant');
-    expect(result).toContain('Treat the established fictional environment as the current scene context');
-    expect(result).toContain('Do not break the fictional frame to announce that Roleplay Mode is enabled.');
+    expect(result).toContain('PERSONA PROTOCOL: ELARA');
+    expect(result).toContain('CREATIVE ROLEPLAY SCENE CONTEXT');
+    expect(result).toContain('The character protocol above remains the authoritative roleplay behavior.');
     expect(result).toContain('The Moonlit Room');
     expect(result).toContain('A quiet room with low light.');
     expect(result).toContain('late evening');
     expect(result).toContain('rain outside');
     expect(result).toContain('intimate and calm');
-    expect(result).toContain('italics for physical action');
+    expect(result).not.toContain('ROLEPLAY MODE DIRECTIVE');
+    expect(result).not.toContain('CHARACTER EXECUTION DIRECTIVE');
   });
 });

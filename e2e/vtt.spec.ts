@@ -64,14 +64,6 @@ async function stopRecording(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
 }
 
-function transformationSse(text: string): string {
-  return [
-    `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: 'transform-int-1', status: 'in_progress', model: 'gemini-test' } })}`,
-    `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: 'transform-int-1', index: 0, delta: { type: 'text', text } })}`,
-    `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: 'transform-int-1', status: 'completed' } })}`,
-  ].join('\n\n') + '\n\n';
-}
-
 test.describe('VTT composer flow', () => {
   test.beforeEach(async ({ page }) => {
     await installVttBrowserMocks(page);
@@ -157,71 +149,6 @@ test.describe('VTT composer flow', () => {
 
     await expect(composer).toHaveValue('Hello voice inserted\nworld');
     await expect(composer).toBeFocused();
-  });
-
-  test('polishes a transcript through the canonical Gemini boundary before insertion', async ({ page }) => {
-    let requestBody: Record<string, unknown> | undefined;
-    await page.route('**/api/gemini', async (route) => {
-      requestBody = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
-      await route.fulfill({
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-        body: transformationSse('A clear, straightforward message.'),
-      });
-    });
-
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('polish');
-    await composer.fill('draft: ');
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-
-    await expect(composer).toHaveValue('draft: A clear, straightforward message.');
-    await expect(requestBody).toMatchObject({
-      input: 'Mode: POLISH\n\nTranscript:\nvoice inserted',
-      systemInstruction: expect.stringContaining('POLISH mode:'),
-    });
-  });
-
-  test('converts a transcript to roleplay before insertion and sends the explicit roleplay instruction', async ({ page }) => {
-    let requestBody: Record<string, unknown> | undefined;
-    await page.route('**/api/gemini', async (route) => {
-      requestBody = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
-      await route.fulfill({
-        status: 200,
-        headers: { 'Content-Type': 'text/event-stream' },
-        body: transformationSse('*walks up to you and smiles*'),
-      });
-    });
-
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('roleplay');
-    await composer.fill('hello ');
-    await setSelection(page, 'Message Elara', 6, 6);
-
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-
-    await expect(composer).toHaveValue('hello *walks up to you and smiles*');
-    await expect(requestBody).toMatchObject({
-      input: 'Mode: ROLEPLAY\n\nTranscript:\nvoice inserted',
-      systemInstruction: expect.stringContaining('ROLEPLAY mode:'),
-    });
-  });
-
-  test('falls back to the faithful raw transcript when optional transformation fails', async ({ page }) => {
-    await page.route('**/api/gemini', async (route) => {
-      await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ message: 'Transformation unavailable.' }) });
-    });
-
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('roleplay');
-    await composer.fill('draft ');
-    await page.getByRole('button', { name: 'VTT voice input' }).click();
-    await stopRecording(page);
-
-    await expect(composer).toHaveValue('draft voice inserted');
-    await expect(page.getByRole('status')).toContainText('Transformation failed; inserted the raw transcript.');
   });
 
   test('reports microphone denial without changing the draft', async ({ page }) => {

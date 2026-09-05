@@ -2,6 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiToolContinuationRequest, type GeminiTurnPort, type GeminiTurnRequest, type GeminiUsage } from './contracts';
 import { normalizeGeminiError } from './errors';
 import { getGeminiApiKey } from '../persistence/gemini-api-key';
+import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
@@ -20,7 +21,9 @@ function interactionIdFrom(event: Record<string, unknown>): string | undefined {
 function stepIndex(event: Record<string, unknown>): number { return readNumber(event, 'index') ?? readNumber(asRecord(event.step), 'index') ?? 0; }
 function stepType(event: Record<string, unknown>): string { return readString(asRecord(event.step), 'type') ?? readString(event, 'step_type') ?? 'other'; }
 
-function buildInteractionPayload(request: { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }, declarations: unknown[]) {
+function buildInteractionPayload(request: { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }) {
+  const requestedTools = request.tools ?? [];
+  const declarations = googleGeminiFunctionDeclarations.filter((tool) => requestedTools.includes(tool.name));
   const payload: Record<string, unknown> = {
     model: request.model || DEFAULT_GEMINI_MODEL,
     input: request.input,
@@ -35,12 +38,15 @@ function buildInteractionPayload(request: { model: string; input: unknown; previ
   return payload;
 }
 
+type PendingFunctionCall = { callId: string; name: string; arguments: string };
+
 async function* streamDirectRequest(request: { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const startedAt = performance.now();
   const requestId = crypto.randomUUID();
   let interactionId: string | undefined;
   let sawTerminalEvent = false;
   let sawRequiresAction = false;
+  const pendingFunctions = new Map<number, PendingFunctionCall>();
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
 
   try {
@@ -52,11 +58,8 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
     }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
 
-    const { googleGeminiFunctionDeclarations } = await import('../google/tools/gemini-declarations');
-    const requestedTools = request.tools ?? [];
-    const declarations = googleGeminiFunctionDeclarations.filter((tool) => requestedTools.includes(tool.name));
     const client = new GoogleGenAI({ apiKey });
-    const stream = await client.interactions.create(buildInteractionPayload(request, declarations) as never);
+    const stream = await client.interactions.create(buildInteractionPayload(request, signal ? request : request) as never);
 
     for await (const rawEvent of stream as AsyncIterable<unknown>) {
       if (signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }
@@ -69,7 +72,8 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
         const interaction = asRecord(raw.interaction);
         const id = readString(interaction, 'id') ?? interactionId ?? 'unknown';
         interactionId = id;
-        yield { type: 'interaction-created', interactionId: id, model: readString(interaction, 'model') ?? request.model || DEFAULT_GEMINI_MODEL };
+        const model = readString(interaction, 'model') ?? request.model || DEFAULT_GEMINI_MODEL;
+        yield { type: 'interaction-created', interactionId: id, model };
         continue;
       }
       if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
@@ -80,29 +84,18 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
       }
       if (eventType === 'step.start') {
         const index = stepIndex(raw);
-        yield { type: 'step-start', index, stepType: stepType(raw) };
         const step = asRecord(raw.step);
+        const type = stepType(raw);
+        yield { type: 'step-start', index, stepType: type };
         const summaryParts = Array.isArray(step.summary) ? step.summary : [];
         for (const summary of summaryParts) { const text = readString(asRecord(summary), 'text'); if (text) yield { type: 'thought-summary-delta', index, text }; }
         const signature = readString(step, 'signature');
         if (signature) yield { type: 'thought-signature', index, signature };
-        if (stepType(raw) === 'function_call') {
+        if (type === 'function_call') {
           const callId = readString(step, 'id');
           const name = readString(step, 'name');
-          const args = asRecord(step.arguments ?? step.args);
-          if (callId && name && interactionId) {
-            yield { type: 'tool-call', interactionId, index, callId, name, arguments: args };
-            sawRequiresAction = true;
-          }
+          if (callId && name) pendingFunctions.set(index, { callId, name, arguments: '' });
         }
-        continue;
-      }
-      if (eventType === 'tool-call') {
-        const callId = readString(raw, 'call_id');
-        const name = readString(raw, 'name');
-        const args = asRecord(raw.arguments);
-        if (callId && name && interactionId) yield { type: 'tool-call', interactionId, index: stepIndex(raw), callId, name, arguments: args };
-        sawRequiresAction = true;
         continue;
       }
       if (eventType === 'step.delta') {
@@ -110,12 +103,38 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
         const index = stepIndex(raw);
         const deltaType = readString(delta, 'type');
         const deltaText = readString(delta, 'text');
-        if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
-        else if (deltaType === 'thought_summary') { if (deltaText) yield { type: 'thought-summary-delta', index, text: deltaText }; }
-        else if (deltaType === 'text' && deltaText) yield { type: 'text-delta', index, text: deltaText };
+        if (deltaType === 'thought_signature') {
+          const signature = readString(delta, 'signature');
+          if (signature) yield { type: 'thought-signature', index, signature };
+        } else if (deltaType === 'thought_summary') {
+          if (deltaText) yield { type: 'thought-summary-delta', index, text: deltaText };
+        } else if (deltaType === 'text' && deltaText) {
+          yield { type: 'text-delta', index, text: deltaText };
+        } else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) {
+          const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments');
+          if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments;
+        }
         continue;
       }
-      if (eventType === 'step.stop') { yield { type: 'step-stop', index: stepIndex(raw) }; continue; }
+      if (eventType === 'step.stop') {
+        const index = stepIndex(raw);
+        const pending = pendingFunctions.get(index);
+        if (pending && pending.arguments && interactionId) {
+          try {
+            const args = JSON.parse(pending.arguments) as unknown;
+            if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.');
+            yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args as Record<string, unknown> };
+            sawRequiresAction = true;
+          } catch {
+            const normalized = normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId });
+            yield { type: 'failed', error: normalized };
+            return;
+          }
+          pendingFunctions.delete(index);
+        }
+        yield { type: 'step-stop', index };
+        continue;
+      }
       if (eventType === 'interaction.completed') {
         const interaction = asRecord(raw.interaction);
         interactionId = readString(interaction, 'id') ?? interactionId;

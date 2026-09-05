@@ -46,7 +46,7 @@ function backgroundValue(preferences: ChatAppearancePreferences): string {
 }
 
 function masterCharacterInstruction(character: CharacterProfile): string {
-  return character.systemInstruction.trim();
+  return character.systemInstruction;
 }
 
 export function App() {
@@ -120,7 +120,6 @@ export function App() {
     const text = draft.trim();
     if (!text || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
     const systemInstruction = masterCharacterInstruction(character);
-    if (!systemInstruction) { setError('Character Master System Instruction is empty. Configure it before sending a message.'); return; }
     setDraft(''); setError(null); setStatus('streaming');
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
@@ -170,7 +169,6 @@ export function App() {
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     const systemInstruction = masterCharacterInstruction(character);
-    if (!systemInstruction) { setError('Character Master System Instruction is empty. Configure it before regenerating.'); return; }
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setError(null); setStatus('streaming');
@@ -192,7 +190,6 @@ export function App() {
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     const systemInstruction = masterCharacterInstruction(character);
-    if (!systemInstruction) { setStatus('idle'); setError('Character Master System Instruction is empty. Configure it before using a Workspace capability.'); return; }
     const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut.`;
     try {
       await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
@@ -273,7 +270,7 @@ function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
   else if (event.type === 'completed') {
     const completedAt = Date.now();
     const live = context.liveText.value;
-    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Applied the configured Character Master System Instruction.', 'Accepted the request through the canonical Gemini provider boundary.', 'Executed any requested Google capability through the registered tool executor.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) };
+    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Applied the user-configured system instruction when present.', 'Accepted the request through the canonical Gemini provider boundary.', 'Executed any requested Google capability through the registered tool executor.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) };
     void context.save(completed).then(context.refreshThreads).then(() => { if (isCurrentConversation()) setConversation((current) => current.id === completed.id ? completed : current); }).catch((cause) => { if (isCurrentConversation()) context.setError(cause instanceof Error ? cause.message : 'Could not save the assistant response.'); });
   }
   else if (event.type === 'failed') { if (isCurrentConversation()) { context.setStatus('failed'); context.setError(`${event.error.message} [${event.error.code}]`); } }

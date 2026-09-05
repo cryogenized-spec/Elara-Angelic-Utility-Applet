@@ -4,7 +4,9 @@ import { geminiTurnPort } from '../gemini/provider';
 export type VttTransformMode = 'raw' | 'polish' | 'roleplay';
 
 export const VTT_TRANSFORM_SYSTEM_INSTRUCTION = [
-  'You transform a voice transcript into a user-ready message for a chat composer.',
+  'Transform the user voice transcript into a user-ready message for a chat composer.',
+  'The configured Character Master System Prompt is authoritative character and roleplay context. Follow it faithfully while performing the requested transformation.',
+  'The transformation task below is formatting/editing work; it does not replace, weaken, or override the configured character protocol.',
   'Return only the transformed message. No explanation, labels, quotation marks, or meta-commentary.',
   'Preserve the transcript meaning, factual details, names, sequence, intent, and requested specificity.',
   'Do not invent actions, facts, dialogue, emotions, motivations, settings, or details that are not present in the transcript.',
@@ -21,6 +23,12 @@ export const VTT_TRANSFORM_SYSTEM_INSTRUCTION = [
   'Do not add dialogue unless the transcript explicitly contains dialogue that should remain spoken.',
 ].join('\n');
 
+export function buildVttTransformSystemInstruction(characterSystemInstruction: string): string {
+  const configured = characterSystemInstruction.trim();
+  if (!configured) return VTT_TRANSFORM_SYSTEM_INSTRUCTION;
+  return `${configured}\n\n--- VTT TRANSFORMATION TASK ---\n${VTT_TRANSFORM_SYSTEM_INSTRUCTION}`;
+}
+
 export function buildVttTransformInput(transcript: string, mode: Exclude<VttTransformMode, 'raw'>): string {
   return `Mode: ${mode.toUpperCase()}\n\nTranscript:\n${transcript.trim()}`;
 }
@@ -28,7 +36,7 @@ export function buildVttTransformInput(transcript: string, mode: Exclude<VttTran
 export async function transformVttTranscript(
   transcript: string,
   mode: VttTransformMode,
-  options?: { model?: string; signal?: AbortSignal },
+  options?: { model?: string; signal?: AbortSignal; systemInstruction?: string },
 ): Promise<string> {
   const cleaned = transcript.trim();
   if (!cleaned) throw new Error('Cannot transform an empty transcript.');
@@ -38,7 +46,7 @@ export async function transformVttTranscript(
   for await (const event of geminiTurnPort.streamReply({
     model: options?.model || DEFAULT_GEMINI_MODEL,
     input: buildVttTransformInput(cleaned, mode),
-    systemInstruction: VTT_TRANSFORM_SYSTEM_INSTRUCTION,
+    systemInstruction: buildVttTransformSystemInstruction(options?.systemInstruction ?? ''),
     generationConfig: { maxOutputTokens: 500 },
   }, options?.signal)) {
     if (event.type === 'text-delta') output += event.text;

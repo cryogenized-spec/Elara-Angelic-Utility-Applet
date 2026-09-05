@@ -39,12 +39,14 @@ function executorOptions(options: GoogleToolLoopOptions): GoogleToolExecutorOpti
   };
 }
 
-function errorToolResult(event: Extract<GeminiStreamEvent, { type: 'tool-call' }>, error: { code: string }): GeminiToolContinuationRequest {
+function errorToolResult(event: Extract<GeminiStreamEvent, { type: 'tool-call' }>, error: { code: string }, request: GeminiTurnRequest): GeminiToolContinuationRequest {
   return {
-    model: '',
+    model: request.model,
     previousInteractionId: event.interactionId,
     result: { callId: event.callId, name: event.name, result: { ok: false, error } },
-    tools: [],
+    systemInstruction: request.systemInstruction,
+    generationConfig: request.generationConfig,
+    tools: request.tools,
   };
 }
 
@@ -68,16 +70,12 @@ export async function* streamGoogleToolLoop(
 
       executedCalls += 1;
       if (executedCalls > (options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS)) {
-        continuation = errorToolResult(event, { code: 'TOOL_CALL_LIMIT_EXCEEDED' });
-        continuation.model = request.model;
-        continuation.tools = tools;
+        continuation = errorToolResult(event, { code: 'TOOL_CALL_LIMIT_EXCEEDED' }, { ...request, tools });
         break;
       }
 
       if (!tools.includes(event.name as GoogleToolName)) {
-        continuation = errorToolResult(event, { code: 'TOOL_NOT_PERMITTED' });
-        continuation.model = request.model;
-        continuation.tools = tools;
+        continuation = errorToolResult(event, { code: 'TOOL_NOT_PERMITTED' }, { ...request, tools });
         break;
       }
 

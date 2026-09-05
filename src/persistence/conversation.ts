@@ -94,6 +94,15 @@ export async function appendMessage(message: ChatMessage, conversationId = messa
   return loadConversation(conversationId);
 }
 
+export async function deleteMessage(id: string, conversationId: string): Promise<void> {
+  const message = await db.messages.get(id);
+  if (!message || message.conversationId !== conversationId) throw new Error('Message not found.');
+  await db.transaction('rw', db.messages, db.threads, async () => {
+    await db.messages.delete(id);
+    await db.threads.update(conversationId, { updatedAt: Date.now() });
+  });
+}
+
 export async function saveConversation(conversation: ConversationState): Promise<void> {
   await db.transaction('rw', db.messages, db.threads, async () => {
     await db.messages.bulkPut(conversation.messages.map((message) => ({ ...message, conversationId: conversation.id })));

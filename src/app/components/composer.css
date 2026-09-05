@@ -1,4 +1,4 @@
-.composer.composer { grid-template-columns: 40px 40px minmax(0,1fr) 40px 42px; grid-template-rows: 42px; align-items: stretch; min-width: 0; }
+.composer.composer { grid-template-columns: 40px 40px minmax(0,1fr) auto 40px 42px; grid-template-rows: 42px; align-items: stretch; min-width: 0; }
 .composer textarea { display: block; max-height: 132px; min-height: 42px; overflow-y: hidden; }
 .composer__input-wrap { position: relative; min-width: 0; width: 100%; }
 .composer__input-wrap textarea { padding-right: 42px; }
@@ -14,6 +14,11 @@
 .composer__vtt-button.is-recording { color: var(--text); background: rgba(240, 123, 220, .12); border-color: rgba(240, 123, 220, .28); }
 .composer__vtt-button .icon { opacity: 1; }
 .composer__vtt-status { width: min(100% - 24px, 720px); margin: 6px auto 0; color: var(--muted); font-size: 12px; text-align: center; }
+.composer__vtt-mode { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; padding: 0 5px; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(255,255,255,.035); color: var(--muted); font-size: 10px; font-weight: 700; white-space: nowrap; }
+.composer__vtt-mode span { display: none; }
+.composer__vtt-mode select { max-width: 78px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 10px; font-weight: 700; }
+.composer__vtt-mode select option { background: #14121b; color: #fff; }
+.composer__vtt-mode:focus-within { outline: 2px solid var(--blue); outline-offset: 1px; }
 
 .composer__vtt-banner {
   display: grid;
@@ -64,13 +69,16 @@
 .composer-expanded-open { overflow: hidden; }
 
 @media (max-width: 560px) {
+  .composer.composer { grid-template-columns: 40px minmax(0,1fr) auto 40px 42px; }
+  .composer__vtt-mode { max-width: 88px; }
   .composer__vtt-banner { grid-template-columns: auto minmax(0,1fr) auto; gap: 7px; width: min(100% - 10px, 760px); }
   .composer__vtt-stop { min-width: 42px; width: 42px; padding: 0; }
   .composer__vtt-stop span { display: none; }
 }
 
 @media (max-width: 390px) {
-  .composer.composer { grid-template-columns: 38px 38px minmax(0,1fr) 38px 42px; gap: 6px; }
+  .composer.composer { grid-template-columns: 38px minmax(0,1fr) auto 38px 42px; gap: 6px; }
   .composer__icon, .composer__send { width: 38px; }
   .composer__send { width: 42px; }
+  .composer__vtt-mode { max-width: 80px; }
 }

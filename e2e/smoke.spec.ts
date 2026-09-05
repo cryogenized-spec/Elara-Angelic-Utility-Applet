@@ -3,6 +3,11 @@ import { expect, test } from '@playwright/test';
 const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const pngFile = (name: string) => ({ name, mimeType: 'image/png', buffer: tinyPng });
 
+async function openSettings(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+}
+
 test('loads the Elara shell', async ({ page }) => {
   await page.goto('');
   await expect(page.getByRole('heading', { name: 'Elara' })).toBeVisible();
@@ -53,7 +58,7 @@ test('collapses the Elara character banner when the sidebar opens', async ({ pag
 
 test('shows typography controls and applies the 10–20px text size range', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Typography' }).click();
   await expect(page.getByText('The quick brown fox jumps over the lazy dog.').first()).toBeVisible();
   const slider = page.getByRole('slider', { name: 'Text size' });
@@ -67,7 +72,7 @@ test('shows typography controls and applies the 10–20px text size range', asyn
 test('controls character presentation scale and banner background from Appearance settings', async ({ page }) => {
   await page.goto('');
   const banner = page.getByRole('region', { name: 'Elara character banner' });
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Appearance' }).click();
   const scale = page.getByRole('slider', { name: 'Character presentation scale' });
   await expect(scale).toHaveValue('2');
@@ -81,12 +86,12 @@ test('controls character presentation scale and banner background from Appearanc
 
 test('character identity and master prompt persist independently of tool settings', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Character' }).click();
   await page.getByLabel('AI character name').fill('Elara Prime');
   await page.getByLabel('Master system prompt').fill('Be concise, perceptive, and warmly creative.');
   await page.reload();
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Character' }).click();
   await expect(page.getByLabel('AI character name')).toHaveValue('Elara Prime');
   await expect(page.getByLabel('Master system prompt')).toHaveValue('Be concise, perceptive, and warmly creative.');
@@ -95,7 +100,7 @@ test('character identity and master prompt persist independently of tool setting
 
 test('switches between one active portrait or landscape artwork mode and persists focus', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Character' }).click();
   const portrait = page.getByRole('radio', { name: /Portrait · 4:5/ });
   const landscape = page.getByRole('radio', { name: /Landscape · 16:6/ });
@@ -111,7 +116,7 @@ test('switches between one active portrait or landscape artwork mode and persist
   await horizontal.fill('80');
   await vertical.fill('25');
   await page.reload();
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Character' }).click();
   await expect(page.getByRole('radio', { name: /Landscape · 16:6/ })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('slider', { name: 'Horizontal focus' })).toHaveValue('80');
@@ -120,7 +125,7 @@ test('switches between one active portrait or landscape artwork mode and persist
 
 test('chat background, speaker colours, and user surface style persist', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Appearance' }).click();
   const chatBackground = page.getByRole('radiogroup', { name: 'Chat background mode' });
   await chatBackground.getByRole('radio', { name: 'Gradient' }).click();
@@ -135,7 +140,7 @@ test('chat background, speaker colours, and user surface style persist', async (
   await page.getByRole('radiogroup', { name: 'User message surface style' }).getByRole('radio', { name: 'Gradient' }).click();
   await page.getByLabel('Surface opacity').fill('0.66');
   await page.reload();
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Appearance' }).click();
   await expect(chatBackground.getByRole('radio', { name: 'Gradient' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByLabel('Elara text colour hex')).toHaveValue('#FF00AA');
@@ -146,12 +151,12 @@ test('chat background, speaker colours, and user surface style persist', async (
 
 test('chat image background accepts the supported local image formats', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Appearance' }).click();
   await page.getByRole('radiogroup', { name: 'Chat background mode' }).getByRole('radio', { name: 'Image' }).click();
   await page.locator('input[type="file"]').setInputFiles(pngFile('background.png'));
   await page.reload();
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Appearance' }).click();
   await expect(page.getByRole('radiogroup', { name: 'Chat background mode' }).getByRole('radio', { name: 'Image' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByRole('button', { name: 'Choose background image' })).toBeVisible();
@@ -159,7 +164,7 @@ test('chat image background accepts the supported local image formats', async ({
 
 test('roleplay stays opt-in and reveals environment controls only when enabled', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Roleplay' }).click();
   const toggle = page.getByRole('switch');
   const environment = page.locator('.roleplay-detail select');
@@ -177,7 +182,7 @@ test('roleplay stays opt-in and reveals environment controls only when enabled',
   await page.getByLabel('Weather').fill('Warm and clear');
   await page.getByLabel('Atmosphere / mood').fill('Quiet and cinematic');
   await page.reload();
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Roleplay' }).click();
   const persistedToggle = page.getByRole('switch');
   const persistedEnvironment = page.locator('.roleplay-detail select');
@@ -216,7 +221,7 @@ test('normalizes a simulated Worker network failure without fabricating a respon
 
 test('exposes Gemini model controls and the protected transport boundary', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Gemini' }).click();
   await expect(page.getByLabel('Model')).toBeVisible();
   await expect(page.getByText(/Temperature, top-p and top-k are intentionally not offered/)).toBeVisible();

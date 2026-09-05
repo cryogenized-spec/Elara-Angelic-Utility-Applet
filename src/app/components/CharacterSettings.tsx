@@ -4,6 +4,10 @@ import './character-settings.css';
 
 const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
 const MAX_BYTES = 8 * 1024 * 1024;
+const CONTAINER_RATIOS: Record<CharacterArtworkMode, number> = {
+  portrait: 4 / 5,
+  landscape: 16 / 6,
+};
 
 async function readImage(file: File): Promise<CharacterProfile['artwork']> {
   if (!ACCEPTED_IMAGE_TYPES.has(file.type)) throw new Error('Use a JPG, PNG, or WebP image.');
@@ -23,6 +27,16 @@ async function readImage(file: File): Promise<CharacterProfile['artwork']> {
   return { id: crypto.randomUUID(), mimeType: file.type, name: file.name, width: dimensions.width, height: dimensions.height, dataUrl, focalX: 50, focalY: 50 };
 }
 
+function focusAvailability(artwork: NonNullable<CharacterProfile['artwork']>, mode: CharacterArtworkMode) {
+  const imageRatio = artwork.width / artwork.height;
+  const containerRatio = CONTAINER_RATIOS[mode];
+  const tolerance = 0.005;
+  return {
+    horizontal: imageRatio > containerRatio + tolerance,
+    vertical: imageRatio < containerRatio - tolerance,
+  };
+}
+
 export function CharacterSettings({ profile, onChange }: { profile: CharacterProfile; onChange: (profile: CharacterProfile) => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -38,6 +52,8 @@ export function CharacterSettings({ profile, onChange }: { profile: CharacterPro
   function setMode(mode: CharacterArtworkMode) {
     onChange({ ...profile, artworkMode: mode, artwork: profile.artwork ? { ...profile.artwork, focalX: 50, focalY: 50 } : null });
   }
+
+  const availability = profile.artwork ? focusAvailability(profile.artwork, profile.artworkMode) : { horizontal: true, vertical: true };
 
   return <div className="character-settings">
     <div className="setting-card character-card">
@@ -64,8 +80,17 @@ export function CharacterSettings({ profile, onChange }: { profile: CharacterPro
         {profile.artwork && <button type="button" className="secondary" onClick={() => onChange({ ...profile, artwork: null })}>Remove</button>}
       </div>
       <input ref={inputRef} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { void handleFile(event.target.files?.[0]); event.currentTarget.value = ''; }} />
-      {profile.artwork && <div className="focal-controls"><label>Horizontal focus <input type="range" min={0} max={100} value={profile.artwork.focalX} onChange={(event) => onChange({ ...profile, artwork: { ...profile.artwork!, focalX: Number(event.target.value) } })} /></label><label>Vertical focus <input type="range" min={0} max={100} value={profile.artwork.focalY} onChange={(event) => onChange({ ...profile, artwork: { ...profile.artwork!, focalY: Number(event.target.value) } })} /></label></div>}
-      <p className="character-hint">Only one artwork mode is active at a time. The original image stays in local character storage; focus controls change presentation metadata only.</p>
+      {profile.artwork && <div className="focal-controls">
+        <label className={!availability.horizontal ? 'is-disabled' : undefined}>
+          <span>Horizontal focus <strong>{availability.horizontal ? `${profile.artwork.focalX}%` : 'Centered'}</strong></span>
+          <input aria-label="Horizontal focus" type="range" min={0} max={100} value={availability.horizontal ? profile.artwork.focalX : 50} disabled={!availability.horizontal} onChange={(event) => onChange({ ...profile, artwork: { ...profile.artwork!, focalX: Number(event.target.value) } })} />
+        </label>
+        <label className={!availability.vertical ? 'is-disabled' : undefined}>
+          <span>Vertical focus <strong>{availability.vertical ? `${profile.artwork.focalY}%` : 'Centered'}</strong></span>
+          <input aria-label="Vertical focus" type="range" min={0} max={100} value={availability.vertical ? profile.artwork.focalY : 50} disabled={!availability.vertical} onChange={(event) => onChange({ ...profile, artwork: { ...profile.artwork!, focalY: Number(event.target.value) } })} />
+        </label>
+      </div>}
+      <p className="character-hint">Focus controls follow the source-image and presentation aspect ratios. A centered, disabled control is shown when the image cannot move along that axis.</p>
     </div>
   </div>;
 }

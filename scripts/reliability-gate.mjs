@@ -6,7 +6,6 @@ const requiredFiles = [
   'README.md',
   '.nvmrc',
   'package.json',
-  'tsconfig.json',
   'docs/ARCHITECTURE_DECISION.md',
   'docs/SYSTEM_BOUNDARIES.md',
   'docs/GEMINI_INTEGRATION_STRATEGY.md',
@@ -29,6 +28,7 @@ const requiredFiles = [
   'src/persistence/character.ts',
   'src/persistence/character.test.ts',
   'src/persistence/gemini-api-key.ts',
+  'src/persistence/gemini-api-key.test.ts',
   'src/persistence/preferences.ts',
   'src/google/tools/gemini-declarations.test.ts',
 ];
@@ -66,7 +66,7 @@ while (stack.length) {
 const providerSource = readFileSync(join(root, 'src/gemini/provider.ts'), 'utf8');
 if (!providerSource.includes("from '@google/genai'")) throw new Error('Reliability gate: Gemini must execute directly from the application provider.');
 if (providerSource.includes('GEMINI_WORKER_URL') || providerSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: Gemini provider must not use the Cloudflare Worker.');
-if (!providerSource.includes("getGeminiApiKey")) throw new Error('Reliability gate: Gemini provider must obtain its credential through the local app Lockbox.');
+if (!providerSource.includes('getGeminiApiKey')) throw new Error('Reliability gate: Gemini provider must obtain its credential through the local app Lockbox.');
 if (!providerSource.includes("if (systemInstruction) payload.system_instruction = systemInstruction;")) throw new Error('Reliability gate: empty Character Master must omit system_instruction entirely.');
 
 const markdownSource = readFileSync(join(root, 'src/app/components/MarkdownText.tsx'), 'utf8');
@@ -98,7 +98,18 @@ if (transcriptionSource.includes('GEMINI_WORKER_URL') || transcriptionSource.inc
 if (!transcriptionSource.includes("from '@google/genai'")) throw new Error('Reliability gate: VTT transcription must use the direct Gemini SDK.');
 
 const lockboxSource = readFileSync(join(root, 'src/persistence/gemini-api-key.ts'), 'utf8');
-if (!lockboxSource.includes("elara.gemini.api-key")) throw new Error('Reliability gate: Gemini API credential must have a local Lockbox storage boundary.');
+if (!lockboxSource.includes('import Dexie')) throw new Error('Reliability gate: Gemini API credential must use Dexie persistence.');
+if (!lockboxSource.includes("this.version(1).stores({ secrets: 'id, updatedAt' })")) throw new Error('Reliability gate: Gemini API credential must use a dedicated Dexie Lockbox store.');
+if (!lockboxSource.includes("name: 'PBKDF2'")) throw new Error('Reliability gate: Lockbox password must derive its encryption key with PBKDF2.');
+if (!lockboxSource.includes("name: 'AES-GCM'")) throw new Error('Reliability gate: Gemini API credential must be encrypted with AES-GCM.');
+if (!lockboxSource.includes('crypto.getRandomValues')) throw new Error('Reliability gate: Lockbox encryption must use random salt and IV material.');
+if (lockboxSource.includes('localStorage.setItem')) throw new Error('Reliability gate: Gemini API credential must never be written to localStorage.');
+if (!lockboxSource.includes('removeLegacyPlaintextKey')) throw new Error('Reliability gate: legacy plaintext Gemini API storage must be explicitly removed.');
+if (!lockboxSource.includes('let unlockedApiKey: string | null = null;')) throw new Error('Reliability gate: decrypted Gemini API key must remain session-memory-only.');
+
+const lockboxTestSource = readFileSync(join(root, 'src/persistence/gemini-api-key.test.ts'), 'utf8');
+if (!lockboxTestSource.includes("Invalid Lockbox password.")) throw new Error('Reliability gate: Lockbox tests must cover wrong-password rejection.');
+if (!lockboxTestSource.includes('lockGeminiApiKey')) throw new Error('Reliability gate: Lockbox tests must cover locking and clearing plaintext session state.');
 
 const characterPersistence = readFileSync(join(root, 'src/persistence/character.ts'), 'utf8');
 if (characterPersistence.includes('LEGACY_CHARACTER_SYSTEM_INSTRUCTION')) throw new Error('Reliability gate: legacy character prompt constant must be removed from persistence.');
@@ -128,4 +139,4 @@ function countText(directory, pattern) {
   return count;
 }
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the local API Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, direct executable tool capability exposure, no competing character resolver, singular VTT system instruction, and canonical persistence contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, direct executable tool capability exposure, no competing character resolver, singular VTT system instruction, and encrypted credential persistence contract.`);

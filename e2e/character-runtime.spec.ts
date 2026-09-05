@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+async function openSettings(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+}
+
 test('transmits the saved master persona protocol as the active runtime instruction', async ({ page }) => {
   const requests: Array<Record<string, unknown>> = [];
   await page.route('**/api/gemini', async (route) => {
@@ -17,7 +22,7 @@ test('transmits the saved master persona protocol as the active runtime instruct
   });
 
   await page.goto('');
-  await page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings(page);
   await page.getByRole('button', { name: 'Character' }).click();
 
   const persona = [

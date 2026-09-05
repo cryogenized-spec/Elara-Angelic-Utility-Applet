@@ -7,6 +7,7 @@ export interface ProviderUsage {
   cachedTokens?: number;
   thoughtsTokens?: number;
   totalTokens?: number;
+  thoughtSummary?: string;
 }
 
 export interface ProviderTurnMetadata {

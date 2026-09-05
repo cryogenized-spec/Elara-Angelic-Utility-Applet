@@ -1,6 +1,7 @@
+import { GoogleGenAI } from '@google/genai';
 import type { VttCapture } from './recording';
+import { getGeminiApiKey } from '../persistence/gemini-api-key';
 
-const WORKER_URL = (import.meta.env.VITE_GEMINI_WORKER_URL ?? 'https://elara-gemini.cryogenized.workers.dev').replace(/\/$/, '');
 export const VTT_TRANSCRIPTION_TIMEOUT_MS = 30_000;
 
 function canonicalAudioMimeType(mimeType: string): string {
@@ -19,6 +20,9 @@ export class VttTranscriptionError extends Error {
 
 export async function transcribeVttCapture(capture: VttCapture, signal?: AbortSignal): Promise<string> {
   const mimeType = canonicalAudioMimeType(capture.mimeType);
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey) throw new VttTranscriptionError('configuration', 'Gemini API key is not configured in the app Lockbox.');
+
   const controller = new AbortController();
   let timedOut = false;
   const timeoutId = globalThis.setTimeout(() => {
@@ -31,31 +35,28 @@ export async function transcribeVttCapture(capture: VttCapture, signal?: AbortSi
   else signal?.addEventListener('abort', abortFromCaller, { once: true });
 
   try {
-    let response: Response;
-    try {
-      response = await fetch(`${WORKER_URL}/api/transcribe`, {
-        method: 'POST',
-        headers: { 'Content-Type': mimeType },
-        body: capture.blob,
-        signal: controller.signal,
-      });
-    } catch (cause) {
-      if (timedOut) throw new VttTranscriptionError('timeout', 'Voice transcription timed out.');
-      throw cause;
-    }
+    if (controller.signal.aborted) throw new VttTranscriptionError('cancelled', 'Voice transcription was cancelled.');
+    const client = new GoogleGenAI({ apiKey });
+    const uploaded = await client.files.upload({
+      file: capture.blob,
+      config: { mimeType },
+    });
+    if (!uploaded.uri || !uploaded.mimeType) throw new VttTranscriptionError('provider', 'Gemini did not return a usable uploaded audio file.');
 
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-      const code = typeof record.code === 'string' ? record.code : 'provider';
-      const message = typeof record.message === 'string' ? record.message : 'Voice transcription failed.';
-      throw new VttTranscriptionError(code, message);
-    }
-
-    const record = payload && typeof payload === 'object' ? payload as Record<string, unknown> : {};
-    const transcript = typeof record.transcript === 'string' ? record.transcript.trim() : '';
+    const interaction = await client.interactions.create({
+      model: 'gemini-3.5-transcribe',
+      input: [{ type: 'audio', uri: uploaded.uri, mime_type: uploaded.mimeType }],
+      generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
+      store: false,
+    });
+    const transcript = typeof interaction.output_text === 'string' ? interaction.output_text.trim() : '';
     if (!transcript) throw new VttTranscriptionError('empty', 'No speech was detected.');
     return transcript;
+  } catch (cause) {
+    if (timedOut) throw new VttTranscriptionError('timeout', 'Voice transcription timed out.');
+    if (cause instanceof VttTranscriptionError) throw cause;
+    if (signal?.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) throw new VttTranscriptionError('cancelled', 'Voice transcription was cancelled.');
+    throw new VttTranscriptionError('provider', cause instanceof Error ? cause.message : 'Voice transcription failed.');
   } finally {
     globalThis.clearTimeout(timeoutId);
     signal?.removeEventListener('abort', abortFromCaller);

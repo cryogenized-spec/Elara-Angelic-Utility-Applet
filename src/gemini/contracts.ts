@@ -16,7 +16,7 @@ export type GeminiStreamEvent =
   | { type: 'cancelled'; interactionId?: string }
   | { type: 'failed'; error: NormalizedProviderError };
 
-export interface GeminiUsage { inputTokens?: number; outputTokens?: number; cachedTokens?: number; thoughtsTokens?: number; totalTokens?: number; }
+export interface GeminiUsage { inputTokens?: number; outputTokens?: number; cachedTokens?: number; thoughtsTokens?: number; totalTokens?: number; thoughtSummary?: string; }
 
 export interface GeminiToolResult {
   callId: string;

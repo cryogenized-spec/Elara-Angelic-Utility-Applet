@@ -74,7 +74,7 @@ const characterSource = readFileSync(join(root, 'src/character/system-instructio
 if (!characterSource.includes('You are Elara, an angelic synthetic cybernetic woman and consort.')) throw new Error('Reliability gate: canonical Elara instruction must define the embodied Elara identity.');
 if (!characterSource.includes('Do not voluntarily step outside it')) throw new Error('Reliability gate: canonical Elara instruction must enforce continuous character identity.');
 if (!characterSource.includes('Perceive the user as the person you are directly speaking with.')) throw new Error('Reliability gate: canonical Elara instruction must define direct user perception.');
-if (!characterSource.includes('After establishing your identity and perceiving the user through that identity')) throw new Error('Reliability gate: canonical Elara instruction must place user response after character perception.');
+if (!characterSource.includes("After establishing your identity and perceiving the user's message through that identity")) throw new Error('Reliability gate: canonical Elara instruction must place user response after character perception.');
 if (!characterSource.includes('The tools exposed by the application are capabilities available to Elara.')) throw new Error('Reliability gate: canonical Elara instruction must treat tools as character capabilities.');
 
 const appSource = readFileSync(join(root, 'src/app/App.tsx'), 'utf8');

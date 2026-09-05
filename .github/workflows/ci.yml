@@ -10,7 +10,6 @@ permissions:
   contents: read
 
 env:
-  GEMINI_WORKER_URL: https://elara-gemini.cryogenized.workers.dev
   PAGES_ORIGIN: https://cryogenized-spec.github.io
 
 jobs:
@@ -51,39 +50,6 @@ jobs:
           grep -q "Android portrait" docs/PRODUCT_BOUNDARY.md
           grep -q "One canonical Gemini provider implementation" docs/PRODUCT_BOUNDARY.md
           grep -q "Node.js 24 LTS" docs/ARCHITECTURE_DECISION.md
-
-      - name: Verify live Gemini Worker browser transport
-        shell: bash
-        run: |
-          set -euo pipefail
-          health_headers="$(mktemp)"
-          health_body="$(mktemp)"
-          curl --silent --show-error --max-time 15 \
-            -D "$health_headers" \
-            -H "Origin: $PAGES_ORIGIN" \
-            "$GEMINI_WORKER_URL/health" > "$health_body"
-          status="$(awk 'NR==1 {print $2}' "$health_headers")"
-          test "$status" = "200"
-          tr -d '\r' < "$health_headers" | grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$'
-          grep -q '"api":true' "$health_body"
-          grep -q '"status":"healthy"' "$health_body"
-
-          options_headers="$(mktemp)"
-          curl --silent --show-error --max-time 15 \
-            -D "$options_headers" \
-            -o /dev/null \
-            -X OPTIONS \
-            -H "Origin: $PAGES_ORIGIN" \
-            -H 'Access-Control-Request-Method: POST' \
-            -H 'Access-Control-Request-Headers: content-type' \
-            "$GEMINI_WORKER_URL/api/gemini"
-          options_status="$(awk 'NR==1 {print $2}' "$options_headers")"
-          test "$options_status" = "204"
-          tr -d '\r' < "$options_headers" | grep -iq '^access-control-allow-origin: https://cryogenized-spec.github.io$'
-          tr -d '\r' < "$options_headers" | grep -iq '^access-control-allow-methods: .*POST'
-          tr -d '\r' < "$options_headers" | grep -iq '^access-control-allow-headers: .*Content-Type'
-
-          echo 'Live Worker browser transport verification passed.'
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund

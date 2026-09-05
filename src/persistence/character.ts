@@ -42,6 +42,11 @@ class CharacterDatabase extends Dexie {
         record.systemInstruction = '';
       });
     });
+    this.version(7).stores({ profiles: 'id, updatedAt' }).upgrade((tx) => {
+      return tx.table('profiles').toCollection().modify((record: CharacterProfile) => {
+        record.name = '';
+      });
+    });
   }
 }
 
@@ -58,7 +63,7 @@ export function normalizeCharacterProfile(input: Partial<CharacterProfile> | nul
   const artwork = rawArtwork && typeof rawArtwork === 'object' ? normalizeArtwork(rawArtwork as CharacterArtworkReference) : null;
   return {
     id: PRIMARY_ID,
-    name: typeof input?.name === 'string' ? input.name.trim().slice(0, MAX_NAME_LENGTH) || DEFAULT_CHARACTER_PROFILE.name : DEFAULT_CHARACTER_PROFILE.name,
+    name: typeof input?.name === 'string' ? input.name.trim().slice(0, MAX_NAME_LENGTH) : '',
     systemInstruction: normalizeSystemInstruction(input?.systemInstruction),
     artworkMode: input?.artworkMode === 'landscape' ? 'landscape' : 'portrait',
     artwork,

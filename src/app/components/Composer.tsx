@@ -25,6 +25,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
   const recorderRef = useRef<VttRecorder | null>(null);
   const transcriptionAbortRef = useRef<AbortController | null>(null);
   const vttTargetRef = useRef<HTMLTextAreaElement | null>(null);
+  const vttFocusRef = useRef<{ target: HTMLTextAreaElement; cursor: number } | null>(null);
   const [markdownOpen, setMarkdownOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [vttState, setVttState] = useState<VttRecordingState>('idle');
@@ -48,6 +49,18 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
     document.body.classList.add('composer-expanded-open');
     return () => document.body.classList.remove('composer-expanded-open');
   }, [expanded]);
+
+  useEffect(() => {
+    if (vttState !== 'idle') return;
+    const pending = vttFocusRef.current;
+    if (!pending) return;
+    vttFocusRef.current = null;
+    requestAnimationFrame(() => {
+      if (!pending.target.isConnected) return;
+      pending.target.focus();
+      pending.target.setSelectionRange(pending.cursor, pending.cursor);
+    });
+  }, [vttState, draft]);
 
   useEffect(() => {
     if (!expanded) return;
@@ -129,12 +142,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
       const transcript = await transcribeVttCapture(capture, controller.signal);
       const inserted = insertTranscriptAtSelection(draft, capture.selection, transcript);
       onDraftChange(inserted.value);
+      vttFocusRef.current = { target, cursor: inserted.cursor };
       setVttMessage(null);
-      requestAnimationFrame(() => {
-        const nextTarget = vttTargetRef.current ?? (expanded ? expandedTextareaRef.current : textareaRef.current);
-        nextTarget?.focus();
-        nextTarget?.setSelectionRange(inserted.cursor, inserted.cursor);
-      });
       setVttState('idle');
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') return;

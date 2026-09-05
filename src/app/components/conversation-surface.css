@@ -18,9 +18,11 @@
 .response-variants__button:hover:not(:disabled) { background: rgba(255,255,255,.08); border-color: rgba(110,168,255,.32); color: var(--text); }
 .response-variants__button:disabled { opacity: .24; cursor: default; }
 .response-variants__pagination { min-width: 34px; color: rgba(255,255,255,.42); font-size: 10px; font-variant-numeric: tabular-nums; text-align: center; }
-.message-actions { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; }
-.message-action { min-height: 28px; padding: 0 10px; border: 1px solid rgba(255,255,255,.09); border-radius: 9px; background: rgba(255,255,255,.035); color: rgba(255,255,255,.48); font-size: 10px; }
-.message-action:hover { color: var(--text); border-color: rgba(240,123,220,.3); background: rgba(240,123,220,.08); }
+.message-actions { display: flex; align-items: center; gap: 6px; margin: 5px 2px 0; }
+.message-action { display: grid; place-items: center; width: 30px; height: 28px; padding: 0; border: 1px solid rgba(255,255,255,.08); border-radius: 9px; background: rgba(255,255,255,.025); color: rgba(255,255,255,.4); }
+.message-action:hover, .message-action:focus-visible { color: rgba(255,255,255,.82); border-color: rgba(110,168,255,.32); background: rgba(110,168,255,.08); outline: none; }
+.message-action--danger:hover, .message-action--danger:focus-visible { color: rgba(255,150,180,.95); border-color: rgba(240,123,220,.28); background: rgba(240,123,220,.07); }
+.message-action svg { display: block; }
 
 .execution-summary { margin: 0 0 8px; border-left: 1px solid rgba(110,168,255,.32); background: linear-gradient(90deg, rgba(110,168,255,.06), transparent 65%); }
 .execution-summary.has-thought-summary { border-left-color: rgba(240,123,220,.44); background: linear-gradient(90deg, rgba(240,123,220,.075), rgba(110,168,255,.025), transparent 72%); }

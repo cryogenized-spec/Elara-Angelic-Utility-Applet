@@ -28,10 +28,11 @@ export function RecordingBanner({
   }, [rms]);
 
   useEffect(() => {
+    if (state === 'processing') return undefined;
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return undefined;
     const context = canvas.getContext('2d');
-    if (!context) return;
+    if (!context) return undefined;
 
     let frame = 0;
     let phase = 0;
@@ -90,7 +91,7 @@ export function RecordingBanner({
       observer.disconnect();
       window.cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [state]);
 
   const processing = state === 'processing';
   const requesting = state === 'requesting';
@@ -102,9 +103,16 @@ export function RecordingBanner({
         <span className="composer__vtt-label">{processing ? 'TRANSCRIBING' : requesting ? 'STARTING' : 'REC'}</span>
         <span className="composer__vtt-timer" aria-live="polite">{formatElapsed(elapsedMs)}</span>
       </div>
-      <div className="composer__vtt-signal" aria-hidden="true">
-        <canvas ref={canvasRef} />
-      </div>
+      {processing ? (
+        <div className="composer__vtt-loader" role="status" aria-label="Transcribing voice input">
+          <span className="composer__vtt-loader-orbit" aria-hidden="true"><span /><span /><span /></span>
+          <span className="composer__vtt-loader-text">Transcribing voice…</span>
+        </div>
+      ) : (
+        <div className="composer__vtt-signal" aria-hidden="true">
+          <canvas ref={canvasRef} />
+        </div>
+      )}
       <button
         className="composer__vtt-stop"
         type="button"

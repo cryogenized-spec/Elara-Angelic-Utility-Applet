@@ -52,7 +52,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
   useEffect(() => {
     if (!expanded) return;
     function handleEscape(event: globalThis.KeyboardEvent) {
-      if (event.key === 'Escape' && vttState !== 'recording' && vttState !== 'processing' && vttState !== 'requesting') setExpanded(false);
+      if (event.key === 'Escape' && !vttBusyForState(vttState)) setExpanded(false);
     }
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
@@ -116,6 +116,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
     try {
       const capture = await recorder.start();
       recorderRef.current = null;
+      setVttElapsed(capture.durationMs);
+      setVttRms(0);
       if (shouldDiscardVttCapture(capture.blob.size, capture.durationMs)) {
         setVttMessage('No speech detected.');
         setVttState('idle');
@@ -145,7 +147,7 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
       recorderRef.current = null;
       vttTargetRef.current = null;
       setVttRms(0);
-      if (vttState !== 'processing') setVttElapsed(0);
+      setVttElapsed(0);
     }
   }
 
@@ -242,4 +244,8 @@ export function Composer({ draft, status, onDraftChange, onSend, onCancel }: Com
     {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}
     <MarkdownReference open={markdownOpen} onClose={() => setMarkdownOpen(false)} />
   </>;
+}
+
+function vttBusyForState(state: VttRecordingState): boolean {
+  return state === 'requesting' || state === 'recording' || state === 'processing';
 }

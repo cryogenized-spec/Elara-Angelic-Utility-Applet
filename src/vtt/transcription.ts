@@ -2,6 +2,10 @@ import type { VttCapture } from './recording';
 
 const WORKER_URL = (import.meta.env.VITE_GEMINI_WORKER_URL ?? 'https://elara-gemini.cryogenized.workers.dev').replace(/\/$/, '');
 
+function canonicalAudioMimeType(mimeType: string): string {
+  return mimeType.split(';', 1)[0].trim().toLowerCase();
+}
+
 export class VttTranscriptionError extends Error {
   readonly code: string;
 
@@ -13,9 +17,10 @@ export class VttTranscriptionError extends Error {
 }
 
 export async function transcribeVttCapture(capture: VttCapture, signal?: AbortSignal): Promise<string> {
+  const mimeType = canonicalAudioMimeType(capture.mimeType);
   const response = await fetch(`${WORKER_URL}/api/transcribe`, {
     method: 'POST',
-    headers: { 'Content-Type': capture.mimeType },
+    headers: { 'Content-Type': mimeType },
     body: capture.blob,
     signal,
   });

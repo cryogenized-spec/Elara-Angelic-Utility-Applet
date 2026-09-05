@@ -20,6 +20,7 @@ import {
   Settings,
   ShieldCheck,
   Sparkles,
+  Square,
   Type,
   X,
 } from 'lucide-react';
@@ -45,7 +46,8 @@ export type IconName =
   | 'dots'
   | 'expand'
   | 'collapse'
-  | 'markdown';
+  | 'markdown'
+  | 'stop';
 
 const icons: Record<IconName, LucideIcon> = {
   menu: Menu,
@@ -69,6 +71,7 @@ const icons: Record<IconName, LucideIcon> = {
   expand: Maximize2,
   collapse: Minimize2,
   markdown: FileCode2,
+  stop: Square,
 };
 
 export function Icon({

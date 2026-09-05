@@ -1,18 +1,33 @@
 /* Final composer layout boundary. Loaded after app.css so the composer cannot inherit the legacy four-column grid. */
 .app-shell form.composer {
-  grid-template-columns: 40px 40px minmax(0, 1fr) 40px 42px;
+  position: relative;
+  flex: 0 0 auto;
+  grid-template-columns: 40px 40px minmax(0, 1fr) 42px 42px;
   grid-template-rows: 42px;
   align-items: stretch;
+  gap: 10px;
   grid-auto-flow: column;
+}
+
+.app-shell form.composer > .composer__vtt-control {
+  min-width: 0;
+}
+
+@media (max-width: 560px) {
+  .app-shell form.composer {
+    grid-template-columns: 40px 40px minmax(0, 1fr) 42px 42px;
+    gap: 9px;
+  }
 }
 
 @media (max-width: 390px) {
   .app-shell form.composer {
-    grid-template-columns: 38px 38px minmax(0, 1fr) 38px 42px;
-    gap: 6px;
+    grid-template-columns: 38px 38px minmax(0, 1fr) 40px 42px;
+    gap: 7px;
   }
 
-  .app-shell form.composer > .composer__icon {
+  .app-shell form.composer > .composer__icon,
+  .app-shell form.composer > .composer__vtt-control > .composer__icon {
     width: 38px;
   }
 

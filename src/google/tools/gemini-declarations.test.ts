@@ -10,12 +10,20 @@ describe('Gemini capability declarations', () => {
       'tasks.listTaskLists',
       'tasks.listTasks',
       'tasks.getTask',
+      'docs.getDocument',
+      'chat.listMessages',
+      'chat.getMessage',
       'gmail.listMessages',
       'gmail.getMessage',
       'gmail.listThreads',
       'gmail.getThread',
       'gmail.listLabels',
       'gmail.getLabel',
+      'drive.searchFiles',
+      'drive.getFile',
+      'drive.downloadFile',
+      'sheets.getSpreadsheet',
+      'sheets.readRange',
     ]);
   });
 

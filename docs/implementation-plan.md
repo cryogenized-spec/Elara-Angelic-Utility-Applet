@@ -62,7 +62,7 @@ The Gemini provider contract remains unchanged: it consumes the decrypted key on
 
 ## Phase 6 — Lifecycle/provider integration
 
-- Keep getGeminiApiKey unchanged as the provider-facing interface: it returns only the current in-memory secret, or an empty value while locked.
+- Keep `getGeminiApiKey()` unchanged as the provider-facing interface: it returns only the current in-memory secret, or an empty value while locked.
 - Add a small client-side Lockbox/session controller for visibilitychange, focus, and meaningful activity.
 - Throttle activity timestamp updates; do not write on every pointer/key event.
 - Locking must immediately wipe the module-held key and update the UI without network traffic.

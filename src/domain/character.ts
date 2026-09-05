@@ -22,7 +22,7 @@ export interface CharacterProfile {
 
 export const DEFAULT_CHARACTER_PROFILE: CharacterProfile = {
   id: 'primary',
-  name: 'Elara',
+  name: '',
   systemInstruction: '',
   artworkMode: 'portrait',
   artwork: null,

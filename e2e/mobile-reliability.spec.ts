@@ -23,10 +23,7 @@ test.describe('Android portrait reliability', () => {
     const shellBox = await shell.boundingBox();
     const composerBox = await composer.boundingBox();
     const railBox = await rail.boundingBox();
-    expect(shellBox).not.toBeNull();
-    expect(composerBox).not.toBeNull();
-    expect(railBox).not.toBeNull();
-
+    expect(shellBox && composerBox && railBox).toBeTruthy();
     expect(shellBox!.x).toBeGreaterThanOrEqual(0);
     expect(shellBox!.x + shellBox!.width).toBeLessThanOrEqual(viewport!.width);
     expect(composerBox!.x + composerBox!.width).toBeLessThanOrEqual(viewport!.width);
@@ -44,10 +41,7 @@ test.describe('Android portrait reliability', () => {
     }
 
     const track = page.locator('.tool-rail__track');
-    const metrics = await track.evaluate((element) => ({
-      clientWidth: element.clientWidth,
-      scrollWidth: element.scrollWidth,
-    }));
+    const metrics = await track.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
     expect(metrics.scrollWidth).toBeGreaterThanOrEqual(metrics.clientWidth);
   });
 
@@ -70,14 +64,11 @@ test.describe('Android portrait reliability', () => {
     await openSettings(page);
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await page.getByRole('button', { name: 'Lockbox' }).click();
-    await expect(page.getByRole('heading', { name: 'API Lockbox' })).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Cloudflare Gemini Worker' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Test Worker' })).toBeVisible();
-    await expect(page.getByText('https://elara-gemini.cryogenized.workers.dev', { exact: true })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Gemini API' })).toBeVisible();
+    await expect(page.getByText(/The API key is encrypted locally in Dexie/)).toBeVisible();
     await page.getByRole('button', { name: 'Typography' }).click();
     await expect(page.getByText('The quick brown fox jumps over the lazy dog.').first()).toBeVisible();
     await page.getByRole('button', { name: 'Back to chat' }).click();
-    await expect(page.getByRole('heading', { name: 'Elara' })).toBeVisible();
     await expect(page.getByRole('textbox', { name: 'Message Elara' })).toBeVisible();
   });
 

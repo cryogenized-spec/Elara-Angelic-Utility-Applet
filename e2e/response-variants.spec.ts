@@ -9,10 +9,17 @@ function sse(interactionId: string, text: string): string {
 }
 
 async function unlockTestGemini(page: import('@playwright/test').Page): Promise<void> {
-  await page.evaluate(async () => {
-    const lockbox = await import('/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts');
-    await lockbox.saveGeminiApiKey('e2e-test-api-key', 'e2e-test-password');
-  });
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Lockbox' }).click();
+  const lockbox = page.getByRole('heading', { name: 'Gemini API' }).locator('..').locator('..');
+  await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
+  await page.getByLabel('Lockbox password').fill('e2e-test-password');
+  await page.getByLabel('Confirm Lockbox password').fill('e2e-test-password');
+  await page.getByRole('button', { name: 'Create Lockbox' }).click();
+  await expect(lockbox.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
+  await page.goBack().catch(() => {});
+  if (await page.getByRole('textbox', { name: 'Message Elara' }).count() === 0) await page.reload();
 }
 
 test('regeneration creates navigable response variants for the same prompt', async ({ page }) => {
@@ -36,6 +43,7 @@ test('regeneration creates navigable response variants for the same prompt', asy
   expect(requests[0]?.input).toBe('Give me two concise ideas.');
 
   await page.getByRole('button', { name: 'Regenerate response' }).click();
+  await expect.poll(() => requests.length).toBeGreaterThanOrEqual(2);
   await expect(page.getByText('Second generated answer.')).toBeVisible();
   await expect(page.getByText('2/2')).toBeVisible();
   expect(requests[1]?.system_instruction).toBeUndefined();

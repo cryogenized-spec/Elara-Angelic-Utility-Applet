@@ -13,7 +13,7 @@ interface PortraitBannerProps {
   characterName?: string;
 }
 
-export function PortraitBanner({ collapsed, scale = 2, background = 'midnight', artworkMode = 'portrait', artwork = null, characterName = 'Elara' }: PortraitBannerProps) {
+export function PortraitBanner({ collapsed, scale = 2, background = 'midnight', artworkMode = 'portrait', artwork = null, characterName = '' }: PortraitBannerProps) {
   const artworkStyle = artwork ? { objectPosition: `${artwork.focalX}% ${artwork.focalY}%` } : undefined;
   return <section className={`elara-banner portrait-background-${background}${collapsed ? ' is-collapsed' : ''} portrait-scale-${scale} artwork-mode-${artworkMode}`} aria-label={`${characterName} character banner`}>
     <div className="elara-banner__art" role="img" aria-label={artwork ? `${characterName} artwork` : `${characterName} portrait placeholder`}>

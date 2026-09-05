@@ -17,12 +17,13 @@ type ComposerProps = {
   draft: string;
   status: ProviderStatus;
   geminiModel?: string;
+  systemInstruction: string;
   onDraftChange: (value: string) => void;
   onSend: () => void;
   onCancel: () => void;
 };
 
-export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, onDraftChange, onSend, onCancel }: ComposerProps) {
+export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, systemInstruction, onDraftChange, onSend, onCancel }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<VttRecorder | null>(null);
@@ -171,7 +172,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, on
         statusMessage = vttTransformMode === 'polish' ? 'Polishing transcript…' : 'Converting to roleplay…';
         setVttMessage(statusMessage);
         try {
-          message = await transformVttTranscript(transcript, vttTransformMode, { model: geminiModel, signal: controller.signal });
+          message = await transformVttTranscript(transcript, vttTransformMode, { model: geminiModel, signal: controller.signal, systemInstruction });
         } catch (cause) {
           if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
           statusMessage = 'Transformation failed; inserted the raw transcript.';

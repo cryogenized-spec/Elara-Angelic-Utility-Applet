@@ -60,7 +60,7 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
     const client = new GoogleGenAI({ apiKey });
     const stream = await client.interactions.create(buildInteractionPayload(request) as never);
 
-    for await (const rawEvent of stream as AsyncIterable<unknown>) {
+    for await (const rawEvent of stream as unknown as AsyncIterable<unknown>) {
       if (signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }
       const raw = asRecord(rawEvent);
       const eventType = readString(raw, 'event_type') ?? readString(raw, 'type') ?? '';

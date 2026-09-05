@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeCharacterProfile } from './character';
 import { DEFAULT_CHARACTER_PROFILE } from '../domain/character';
-import { LEGACY_CHARACTER_SYSTEM_INSTRUCTION } from '../character/system-instruction';
 
 const validArtwork = {
   id: 'art-1',
@@ -32,20 +31,20 @@ describe('character profile normalization', () => {
     expect(value.artwork?.focalY).toBe(0);
   });
 
-  it('replaces the legacy generic system prompt with the canonical Elara prompt', () => {
-    expect(normalizeCharacterProfile({ systemInstruction: LEGACY_CHARACTER_SYSTEM_INSTRUCTION }).systemInstruction)
-      .toBe(DEFAULT_CHARACTER_PROFILE.systemInstruction);
-  });
-
-  it('replaces the older generic prompt format with the canonical Elara prompt', () => {
-    const legacyOldPrompt = 'You are Elara, an angelic synthetic companion designed to be a warm, perceptive, creative conversational presence.\n\nIDENTITY\nLegacy identity text.\n\nROLEPLAY\nYou may participate fully in fictional settings and character-driven scenes.';
-    expect(normalizeCharacterProfile({ systemInstruction: legacyOldPrompt }).systemInstruction)
-      .toBe(DEFAULT_CHARACTER_PROFILE.systemInstruction);
-  });
-
-  it('preserves a configured master prompt', () => {
+  it('preserves the configured master prompt verbatim', () => {
     const configured = 'PERSONA PROTOCOL: ELARA\nDefault to being in character.\nRoleplay at all times.';
     expect(normalizeCharacterProfile({ systemInstruction: configured }).systemInstruction).toBe(configured);
+  });
+
+  it('uses the canonical master prompt only when no instruction is supplied', () => {
+    expect(normalizeCharacterProfile({}).systemInstruction).toBe(DEFAULT_CHARACTER_PROFILE.systemInstruction);
+    expect(normalizeCharacterProfile({ systemInstruction: undefined }).systemInstruction).toBe(DEFAULT_CHARACTER_PROFILE.systemInstruction);
+  });
+
+  it('does not rewrite custom prompt text while enforcing the storage length limit', () => {
+    const configured = `START\n${'x'.repeat(50_000)}\nEND`;
+    const normalized = normalizeCharacterProfile({ systemInstruction: configured }).systemInstruction;
+    expect(normalized).toBe(configured.slice(0, 50_000));
   });
 
   it('uses the 0–100 percent focal coordinate convention', () => {

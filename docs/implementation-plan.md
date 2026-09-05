@@ -3,86 +3,84 @@
 ## Gemini API Lockbox v2 — local session security and unlock modes
 
 ### Goal
-Upgrade the existing local Gemini API Lockbox so users can choose one of three session-security modes without changing the Gemini provider contract:
+Upgrade the existing local Gemini API Lockbox so users can choose one of three security modes:
 
-1. **PIN** — the default: a 6–8 digit local unlock PIN.
-2. **Passkey** — optional upgrade from PIN to platform authentication (Android biometric/device credential where supported).
-3. **Off** — optional opt-out: once the user authenticates with the current PIN, security is disabled until explicitly re-enabled or the encrypted key is cleared.
+1. **PIN** — default: 6–8 digit local unlock PIN.
+2. **Passkey** — optional upgrade from PIN to platform authentication (biometric/device credential where supported).
+3. **Off** — optional opt-out: authenticated users can disable the lock gate without persisting the plaintext API key.
 
-The encrypted Gemini API key remains local and the provider continues to consume the same `getGeminiApiKey()` interface.
+The Gemini provider contract remains unchanged: it consumes the decrypted key only through the existing local `getGeminiApiKey()` path.
 
 ## Phase 1 — Security/session model
 
-- Extend the Lockbox persistence model with an explicit security mode (`pin`, `passkey`, `off`) and versioned metadata.
-- Keep the Gemini API key encrypted at rest in IndexedDB with the existing AES-GCM-256 + PBKDF2-SHA-256 construction and current 310,000 iterations.
-- Keep the decrypted API key exclusively in module memory; do not move plaintext key material to persistent browser storage.
-- Add a local activity timestamp and idle-timeout policy. Use client-side signals only; no Google/Gemini network request is needed for stale-session detection.
-- On cold start/reload/process-memory loss, treat the in-memory key as unavailable and enter the configured unlock state.
-- On idle timeout, clear the in-memory key and transition to locked state when security is enabled.
-- Keep local-storage activity metadata non-authoritative; the actual secret boundary remains whether the decrypted key exists in memory.
+- Version the Lockbox metadata to include the selected security mode and any required authentication metadata.
+- Keep the Gemini API key encrypted at rest in IndexedDB using the existing AES-GCM-256 + PBKDF2-SHA-256 construction and current 310,000 iterations.
+- Keep decrypted key material exclusively in JavaScript module memory. Never persist the plaintext key in `localStorage`, `sessionStorage`, or IndexedDB.
+- Add a local activity timestamp for idle-session decisions; no Google/Gemini network call is involved in stale-session detection.
+- Treat a missing in-memory key after reload/cold start as locked when security is enabled.
+- On idle timeout, wipe the in-memory key and transition to locked state.
+- Treat local activity metadata as convenience state, not as a security boundary.
 
 ## Phase 2 — PIN mode (default)
 
-- Replace the current password-first unlock flow with a 6–8 digit numeric PIN setup flow.
-- Validate that the PIN is numeric and exactly 6–8 digits.
-- Use a random salt and AES-GCM encryption for the API key, retaining the stronger existing PBKDF2 iteration count.
-- Add a local failed-attempt throttle/backoff so repeated guesses are slowed without introducing network dependencies.
-- Build a dedicated mobile unlock surface with `inputmode="numeric"`, numeric pattern, password masking, and immediate mount focus.
-- Request focus whenever the locked state becomes active so Android/Chromium can present the numeric keyboard naturally.
-- On incorrect PIN: clear the field, increment failure state, apply the local backoff, and show a concise error.
-- On forgotten PIN: do not attempt insecure recovery. Provide a destructive reset path that removes the encrypted Gemini API key and returns the Lockbox to unconfigured state.
+- Replace the current password-first setup/unlock experience with a 6–8 digit numeric PIN.
+- Validate the PIN as numeric and exactly 6–8 digits.
+- Retain the existing 310,000 PBKDF2 iterations; do not downgrade the KDF for UX speed.
+- Add local failed-attempt backoff/throttling to slow repeated guesses without network dependencies.
+- Use a dedicated mobile unlock surface with `type="password"`, `inputmode="numeric"`, numeric `pattern`, and an appropriate `autocomplete` value for a persistent PIN rather than an OTP.
+- Focus the PIN field whenever the locked surface mounts so Android/Chromium has the opportunity to display the numeric keyboard.
+- On incorrect PIN, clear the field, record the failed attempt, apply backoff, and show a concise error.
+- Provide a destructive reset/recovery path for forgotten PINs. Reset wipes the encrypted Gemini API key and returns the Lockbox to an unconfigured state; there is no PIN recovery that weakens the secret model.
 
 ## Phase 3 — Passkey mode
 
-- Add an explicit **Upgrade to Passkey** action available after successful PIN authentication.
-- Register a platform passkey using WebAuthn with user verification required where supported.
-- Use passkey-derived/wrapped local key material only where the browser/device supports the required WebAuthn capability; never expose the Gemini API key or Lockbox PIN to the credential service.
-- Store only the minimum credential metadata needed by the client; never persist private key material.
-- On cold start or idle timeout, offer the passkey unlock path first when configured.
-- Preserve PIN as a fallback when passkey support is unavailable or when the user deliberately chooses fallback authentication.
-- Provide a clear recovery path if passkey registration is unavailable on the current browser/device.
+- After successful PIN authentication, expose **Upgrade to Passkey**.
+- Register a platform WebAuthn credential with user verification requested.
+- Use WebAuthn only for authentication/key-unwrapping support; never transmit or expose the Gemini API key to the credential provider.
+- Keep only minimal credential metadata needed by the client; private credential material remains managed by the platform authenticator.
+- When passkey mode is configured, cold-start/idle unlock presents passkey authentication first.
+- Keep the 6–8 digit PIN as a deliberate fallback when passkey is unavailable or the user chooses it.
+- Gate passkey-dependent behavior on actual browser/device capability rather than assuming universal support.
 
 ## Phase 4 — Off mode
 
-- Add a third security mode, **Off**, selectable from Lockbox settings.
-- Require successful authentication with the current PIN before allowing security to be disabled.
-- After disabling, do not force a Lockbox prompt solely because the app was reloaded or the tab process was reclaimed; however, never write the plaintext API key to persistent browser storage.
-- Allow security to be re-enabled later from Settings, requiring current authentication before changing the mode.
+- Add **Off** as the third user-selectable mode.
+- Require successful authentication with the current PIN/passkey before disabling security.
+- When Off is selected, do not impose the local unlock gate merely because the page/session restarted. Do not solve this by persisting the plaintext API key; the implementation must keep the same encrypted-at-rest boundary.
+- Allow security to be re-enabled from Settings after authentication.
 
-## Phase 5 — Lockbox UI
+## Phase 5 — Lockbox UI/UX
 
-- Redesign the Lockbox panel around the three modes and current state.
-- Default first-run setup to **PIN**.
-- Show current status clearly: configured/unconfigured, locked/unlocked, and selected security mode.
-- While locked, show the appropriate unlock action:
-  - PIN entry for PIN mode.
-  - Passkey/biometric action first, with PIN fallback, for passkey mode.
-  - No unlock gate for Off mode.
-- Add actions for Upgrade to Passkey, Switch to PIN, Turn Security Off, Turn Security On, Change PIN, and Clear Lockbox as appropriate to state.
-- Make destructive operations explicit and require authentication where necessary.
+- Rework the Lockbox panel to make the three modes explicit and understandable.
+- First-run setup starts in PIN mode.
+- Show configured/unconfigured, locked/unlocked, and active security mode clearly.
+- PIN mode: compact numeric unlock surface that requests focus immediately.
+- Passkey mode: prominent biometric/passkey action with visible PIN fallback.
+- Off mode: no unlock prompt; settings expose an explicit **Turn Security On** action.
+- Add state-appropriate controls for Upgrade to Passkey, Switch to PIN, Change PIN, Turn Security Off/On, and Clear Lockbox.
+- Require authentication for security downgrade/upgrade operations and make destructive clearing explicit.
 
-## Phase 6 — Provider and lifecycle integration
+## Phase 6 — Lifecycle/provider integration
 
-- Keep `getGeminiApiKey()` returning only the currently decrypted in-memory API key.
-- Ensure provider initialization fails cleanly while the Lockbox is locked instead of attempting an empty/undefined credential.
-- Add a lightweight lockbox/session controller that listens to `visibilitychange`, focus, and meaningful user activity.
-- Throttle activity writes and avoid per-keystroke localStorage churn.
-- Ensure locking immediately invalidates the in-memory API key and updates UI state without a network call.
-- Ensure reset/unmount paths clear memory-held key material.
+- Keep `getGeminiApiKey()` unchanged as the provider-facing interface: it returns only the current in-memory secret, or an empty value while locked.
+- Add a small client-side Lockbox/session controller for `visibilitychange`, focus, and meaningful activity.
+- Throttle activity timestamp updates; do not write on every pointer/key event.
+- Locking must immediately wipe the module-held key and update the UI without network traffic.
+- Ensure reset/unmount paths do not retain the decrypted key.
+- Do not alter Gemini request payloads, model settings, or provider generation behavior as part of this security work.
 
 ## Phase 7 — Tests and hardening
 
-- Unit-test PIN validation, encryption/decryption, mode transitions, stale-session logic, activity timestamps, failed-attempt throttling, and destructive reset behavior.
-- Test that the Gemini API key is never persisted in plaintext in IndexedDB/localStorage/sessionStorage.
-- Add browser tests for numeric input focus and locked-state rendering.
-- Add capability-gated WebAuthn tests/mocks for passkey registration and unlock/fallback.
-- Test transitions: first-run → PIN → unlocked → stale → PIN unlock; PIN → passkey → stale → passkey unlock; passkey → PIN fallback; PIN → off → normal use; forgotten PIN → destructive reset.
-- Re-run lint, typecheck, unit tests, production build, Playwright, and E2E CI before merging.
+- Unit-test PIN validation, encryption/decryption, mode transitions, timeout behavior, timestamp logic, failed-attempt backoff, reset/wipe behavior, and provider behavior while locked.
+- Assert that the API key never appears in plaintext in IndexedDB, localStorage, or sessionStorage.
+- Add browser tests for the locked PIN surface, numeric input configuration, focus request, and passkey capability handling.
+- Add WebAuthn mocks for registration, authentication, unsupported-capability fallback, and PIN fallback.
+- Test the complete state transitions: first-run → PIN → unlocked → stale → PIN unlock; PIN → passkey → stale → passkey unlock; passkey → PIN fallback; PIN → Off; Off → security enabled; forgotten PIN → full key wipe.
+- Run lint, typecheck, unit tests, production build, Playwright, and E2E CI before merging.
 
-## Non-goals for this pass
+## Non-goals
 
-- Do not modify Gemini request payloads or provider generation behavior.
-- Do not reintroduce the Cloudflare Worker as a credential transport layer.
-- Do not persist the decrypted Gemini API key in browser storage.
-- Do not make network calls to detect stale sessions or unlock the local Lockbox.
-- Do not alter conversation/folder context scoping as part of the Lockbox work.
+- No network-based stale-session checks.
+- No plaintext API-key persistence.
+- No reintroduction of the Cloudflare Worker as a credential transport layer.
+- No changes to conversation/folder context scoping.

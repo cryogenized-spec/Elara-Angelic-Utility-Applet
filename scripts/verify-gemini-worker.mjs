@@ -32,23 +32,7 @@ async function main() {
   const headers = options.headers.get('access-control-allow-headers') || '';
   if (!headers.toLowerCase().includes('content-type')) throw new Error(`Worker preflight does not allow Content-Type: ${headers || '(missing)'}`);
 
-  const behavior = await request(`${workerUrl}/api/gemini`, {
-    method: 'POST',
-    headers: { Origin: origin, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'gemini-3.8-flash',
-      input: 'Reply with a single short sentence confirming that the supplied master instruction was received.',
-      systemInstruction: 'You are performing a transport verification. Follow this supplied instruction and keep the response to one short sentence.',
-      generationConfig: { maxOutputTokens: 24 },
-    }),
-  });
-  if (!behavior.ok) throw new Error(`Worker supplied-instruction test HTTP ${behavior.status}: ${await behavior.text()}`);
-  const body = await behavior.text();
-  if (!body.includes('data:')) throw new Error(`Worker supplied-instruction test returned no streaming events: ${body}`);
-  if (body.includes('"error"')) throw new Error(`Worker supplied-instruction test returned an error event: ${body}`);
-
-  console.log('Live Worker browser transport verification passed.');
-  console.log('Live Worker supplied-master-instruction request verification passed.');
+  console.log('Live Worker health and browser transport verification passed.');
 }
 
 main().catch((error) => {

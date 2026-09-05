@@ -91,6 +91,17 @@ async function stopRecording(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Stop VTT voice input' }).click();
 }
 
+async function openVttModeMenu(page: Page): Promise<void> {
+  const mic = page.getByRole('button', { name: 'VTT voice input' });
+  const box = await mic.boundingBox();
+  expect(box).toBeTruthy();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await page.waitForTimeout(350);
+  await expect(page.getByRole('menu', { name: 'Voice transcript mode' })).toBeVisible();
+  await page.mouse.up();
+}
+
 test.describe('VTT composer flow', () => {
   test('records, transcribes, and inserts at the captured cursor without sending', async ({ page }) => {
     await installVttBrowserMocks(page);
@@ -101,6 +112,17 @@ test.describe('VTT composer flow', () => {
     await stopRecording(page);
     await expect(composer).toHaveValue('hello voice inserted world');
     await expect(composer).toBeFocused();
+  });
+
+  test('opens the voice mode picker only after a 300ms long press', async ({ page }) => {
+    await installVttBrowserMocks(page);
+    await openVttModeMenu(page);
+    const menu = page.getByRole('menu', { name: 'Voice transcript mode' });
+    await expect(menu.getByRole('menuitemradio', { name: 'Raw', exact: true })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('button', { name: 'Stop VTT voice input' })).toHaveCount(0);
+    await menu.getByRole('menuitemradio', { name: 'Polish', exact: true }).click();
+    await expect(page.getByRole('menu', { name: 'Voice transcript mode' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'VTT voice input' })).toHaveAttribute('data-vtt-mode', 'polish');
   });
 
   test('replaces the captured selection', async ({ page }) => {
@@ -141,7 +163,8 @@ test.describe('VTT composer flow', () => {
   test('polishes a transcript through the direct Gemini boundary before insertion', async ({ page }) => {
     await installVttBrowserMocks(page, 'transform');
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('polish');
+    await openVttModeMenu(page);
+    await page.getByRole('menuitemradio', { name: 'Polish', exact: true }).click();
     await composer.fill('draft: ');
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);
@@ -150,6 +173,7 @@ test.describe('VTT composer flow', () => {
 
   test('falls back to the raw transcript when transformation fails', async ({ page }) => {
     await installVttBrowserMocks(page);
+    await page.unroute('**/v1beta/interactions*');
     await page.route('**/v1beta/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       if (body.model === 'gemini-3.5-transcribe') {
@@ -159,7 +183,8 @@ test.describe('VTT composer flow', () => {
       }
     });
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    await page.getByRole('combobox', { name: 'Voice transcript mode' }).selectOption('roleplay');
+    await openVttModeMenu(page);
+    await page.getByRole('menuitemradio', { name: 'Roleplay', exact: true }).click();
     await composer.fill('draft ');
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);

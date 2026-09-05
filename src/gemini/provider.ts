@@ -21,6 +21,8 @@ function interactionIdFrom(event: Record<string, unknown>): string | undefined {
 function stepIndex(event: Record<string, unknown>): number { return readNumber(event, 'index') ?? readNumber(asRecord(event.step), 'index') ?? 0; }
 function stepType(event: Record<string, unknown>): string { return readString(asRecord(event.step), 'type') ?? readString(event, 'step_type') ?? 'other'; }
 
+type PendingFunctionCall = { callId: string; name: string; arguments: string };
+
 function buildInteractionPayload(request: { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }) {
   const requestedTools = request.tools ?? [];
   const declarations = googleGeminiFunctionDeclarations.filter((tool) => requestedTools.includes(tool.name));
@@ -38,8 +40,6 @@ function buildInteractionPayload(request: { model: string; input: unknown; previ
   return payload;
 }
 
-type PendingFunctionCall = { callId: string; name: string; arguments: string };
-
 async function* streamDirectRequest(request: { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] }, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const startedAt = performance.now();
   const requestId = crypto.randomUUID();
@@ -52,14 +52,13 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
   try {
     const apiKey = await getGeminiApiKey();
     if (!apiKey) {
-      const normalized = normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId });
-      yield { type: 'failed', error: normalized };
+      yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId }) };
       return;
     }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
 
     const client = new GoogleGenAI({ apiKey });
-    const stream = await client.interactions.create(buildInteractionPayload(request, signal ? request : request) as never);
+    const stream = await client.interactions.create(buildInteractionPayload(request) as never);
 
     for await (const rawEvent of stream as AsyncIterable<unknown>) {
       if (signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }
@@ -72,7 +71,7 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
         const interaction = asRecord(raw.interaction);
         const id = readString(interaction, 'id') ?? interactionId ?? 'unknown';
         interactionId = id;
-        const model = readString(interaction, 'model') ?? request.model || DEFAULT_GEMINI_MODEL;
+        const model = readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL);
         yield { type: 'interaction-created', interactionId: id, model };
         continue;
       }
@@ -126,8 +125,7 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
             yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args as Record<string, unknown> };
             sawRequiresAction = true;
           } catch {
-            const normalized = normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId });
-            yield { type: 'failed', error: normalized };
+            yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) };
             return;
           }
           pendingFunctions.delete(index);
@@ -147,16 +145,14 @@ async function* streamDirectRequest(request: { model: string; input: unknown; pr
         const providerError = asRecord(raw.error);
         const message = readString(providerError, 'message') ?? 'Gemini returned a streaming error.';
         sawTerminalEvent = true;
-        const normalized = normalizeGeminiError(new Error(message), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) });
-        yield { type: 'failed', error: normalized };
+        yield { type: 'failed', error: normalizeGeminiError(new Error(message), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
         return;
       }
     }
 
     if (sawRequiresAction) return;
     if (sawTerminalEvent) return;
-    const normalized = normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) });
-    yield { type: 'failed', error: normalized };
+    yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
   } catch (cause) {
     const error = normalizeGeminiError(cause, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) });
     if (error.cancelled || signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }

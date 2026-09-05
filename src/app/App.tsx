@@ -100,6 +100,7 @@ export function App() {
     cancel();
     activeConversationIdRef.current = '';
     setError(null); setDraft('');
+    setConversation({ id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] });
     try {
       const nextConversation = await createThread();
       activeConversationIdRef.current = nextConversation.id;
@@ -109,7 +110,7 @@ export function App() {
 
   async function send() {
     const text = draft.trim();
-    if (!text || status === 'streaming') return;
+    if (!text || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
     setDraft(''); setError(null); setStatus('streaming');
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);

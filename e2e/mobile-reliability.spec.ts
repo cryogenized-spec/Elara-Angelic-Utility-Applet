@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+async function openSettings(page: import('@playwright/test').Page): Promise<void> {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+}
+
 test.describe('Android portrait reliability', () => {
   test('keeps the primary shell inside the viewport and preserves the composer', async ({ page }) => {
     await page.goto('');
@@ -62,7 +67,7 @@ test.describe('Android portrait reliability', () => {
 
   test('keeps Settings navigation recoverable on a narrow portrait viewport', async ({ page }) => {
     await page.goto('');
-    await page.getByRole('button', { name: 'Open settings' }).click();
+    await openSettings(page);
     await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
     await page.getByRole('button', { name: 'Lockbox' }).click();
     await expect(page.getByRole('heading', { name: 'API Lockbox' })).toBeVisible();

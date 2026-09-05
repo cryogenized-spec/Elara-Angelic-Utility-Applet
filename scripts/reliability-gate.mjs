@@ -29,6 +29,7 @@ const requiredFiles = [
   'src/persistence/character.ts',
   'src/persistence/character.test.ts',
   'src/persistence/preferences.ts',
+  'src/google/tools/gemini-declarations.test.ts',
 ];
 
 for (const relative of requiredFiles) {

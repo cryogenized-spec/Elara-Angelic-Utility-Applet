@@ -15,13 +15,24 @@ function validatePin(pin: string): string {
   return value;
 }
 
+async function getUnlockedApiKeyWithPin(pin: string): Promise<string> {
+  const current = validatePin(pin);
+  await unlockGeminiApiKeyWithPin(current);
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey) throw new Error('The Gemini API Lockbox is not configured.');
+  return apiKey;
+}
+
 export async function changeGeminiLockboxPin(currentPin: string, newPin: string): Promise<void> {
   const current = validatePin(currentPin);
   const next = validatePin(newPin);
   if (current === next) throw new Error('Choose a different Lockbox PIN.');
-
-  await unlockGeminiApiKeyWithPin(current);
-  const apiKey = await getGeminiApiKey();
-  if (!apiKey) throw new Error('The Gemini API Lockbox is not configured.');
+  const apiKey = await getUnlockedApiKeyWithPin(current);
   await configureGeminiApiKeyWithPin(apiKey, next);
+}
+
+export async function switchGeminiLockboxToPin(currentPin: string): Promise<void> {
+  const current = validatePin(currentPin);
+  const apiKey = await getUnlockedApiKeyWithPin(current);
+  await configureGeminiApiKeyWithPin(apiKey, current);
 }

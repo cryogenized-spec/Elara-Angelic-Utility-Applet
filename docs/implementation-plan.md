@@ -41,11 +41,13 @@ Passkeys use the WebAuthn PRF extension to derive a credential-bound AES wrappin
 Off mode retains AES-GCM encrypted ciphertext in IndexedDB and stores only a non-exportable local AES CryptoKey for automatic device-local unlock. Turning security off requires an already-unlocked session. Re-enabling security requires choosing a new 6–8 digit PIN, which re-wraps the API key under the Lockbox PIN. Existing passkeys are removed when security is turned off.
 
 ### Phase 5 — UI/UX
-- [ ] Clearly show mode and configured/locked/unlocked state.
-- [ ] PIN: compact numeric unlock surface.
-- [ ] Passkey: biometric/passkey first with PIN fallback.
-- [ ] Off: no lock gate; expose Turn Security On.
-- [ ] Provide Upgrade to Passkey, Switch to PIN, Change PIN, Turn Security Off/On, and Clear Lockbox as applicable.
+- [x] Clearly show mode and configured/locked/unlocked state.
+- [x] PIN: compact numeric unlock surface.
+- [x] Passkey: biometric/passkey first with PIN fallback.
+- [x] Off: no lock gate; expose Turn Security On.
+- [x] Provide Upgrade to Passkey, Switch to PIN, Change PIN, Turn Security Off/On, and Clear Lockbox as applicable.
+
+The Lockbox UI now surfaces the active security mode directly, presents passkey-first unlocking with an explicit PIN fallback, exposes PIN changes and passkey-to-PIN switching, and makes Off visibly distinct from a security-locked session.
 
 ### Phase 6 — Integration
 - [ ] Add client-side lifecycle controller for visibilitychange, focus, and meaningful activity.

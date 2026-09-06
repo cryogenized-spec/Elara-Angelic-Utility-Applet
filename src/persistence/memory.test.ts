@@ -9,13 +9,18 @@ describe('durable memory foundation', () => {
   it('stores a rich memory document', async () => {
     const now = Date.now() - 1000;
     const memory = await createMemory({
-      kind: 'MICRO_OBSERVATION', title: 'Identity note',
+      kind: 'MICRO_OBSERVATION',
+      title: 'Identity note',
       body: 'The character has a stable identity.\n\nMarkdown remains valid stored text.',
-      observedAt: now, confidence: 0.9, importance: 0.95,
+      observedAt: now,
+      confidence: 0.9,
+      importance: 0.95,
       tags: ['identity', 'character'],
       source: { source: 'user', createdAt: now, note: 'Explicit configuration' },
-      supportingMemoryIds: ['memory_supporting'], relatedMemoryIds: ['memory_related'],
-      conflictingMemoryIds: ['memory_conflict'], supersedes: ['memory_old'],
+      supportingMemoryIds: ['memory_supporting'],
+      relatedMemoryIds: ['memory_related'],
+      conflictingMemoryIds: ['memory_conflict'],
+      supersedes: ['memory_old'],
     });
     expect(memory.id).toMatch(/^memory_/);
     expect(memory.title).toBe('Identity note');

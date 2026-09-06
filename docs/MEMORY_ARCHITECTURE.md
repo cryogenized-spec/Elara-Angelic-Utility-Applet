@@ -109,6 +109,16 @@ Repeated consolidation of the same observation is idempotent for the relationshi
 
 Contradiction is represented, not resolved implicitly. Supersession and promotion remain explicit operations for a later decision, and no pass may silently overwrite an established memory merely because new evidence disagrees with it.
 
+## Permission architecture
+
+Memory mutation is capability-gated. The application owns a single granular policy with independent permissions for `save`, `observe`, `consolidate`, `forget`, and `delete` across `model`, `user`, and `system` actors.
+
+The default policy permits the model to save explicit memories, record observations, and request consolidation, while denying model-initiated forget/delete. User and system actors may perform all five operations by default. A policy change is explicit and centralized; UI code and future model prompts must not duplicate or override authorization rules.
+
+Authorization is evaluated before mutation. Storage primitives remain internal persistence operations rather than model-facing capabilities.
+
+`forget` is a reversible lifecycle operation: it archives the record so it is retained but excluded from retrieval. `delete` is a hard removal from the durable store. Both are first-class capabilities, and model access to both is denied by default.
+
 ## Provenance
 
 Provenance is structured metadata, not a free-form note. It must be able to distinguish at least:
@@ -135,3 +145,7 @@ Pass 1 is complete when the canonical rich memory schema, validation/normalizati
 ## Pass 3 completion criterion
 
 Pass 3 is complete when observations can be recorded as first-class evidence and explicitly consolidated into an established memory as support, conflict, or related context without silent replacement, autonomous extraction, or a second persistence path.
+
+## Pass 4 completion criterion
+
+Pass 4 is complete when every model-facing memory mutation crosses one centralized granular authorization boundary, default model policy cannot forget or delete durable memories, human/system forget and delete are explicit capabilities, and permission/forget/delete behavior is covered by focused tests.

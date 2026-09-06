@@ -5,6 +5,7 @@ import { loadRoleplayWorld } from '../../persistence/roleplay-world';
 import './roleplay-settings.css';
 
 const WORLD_UPDATED_EVENT = 'elara-roleplay-world-updated';
+const ROLEPLAY_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/docs/ROLEPLAY_WORLD_CANVAS_GUIDE.md';
 
 export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferences; onChange: (value: RoleplayPreferences) => void }) {
   const [world, setWorld] = useState<RoleplayWorld | null>(null);
@@ -90,6 +91,11 @@ export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferenc
         <strong>Runtime context</strong>
         <span>The world stores persistent setting information. The current device date, time, timezone, and weekday are supplied dynamically during conversation.</span>
       </div>
+
+      <a className="roleplay-guide-link" href={ROLEPLAY_GUIDE_URL} target="_blank" rel="noreferrer">
+        <span>Read the Roleplay World Canvas guide</span>
+        <span aria-hidden="true">→</span>
+      </a>
     </div>}
   </div>;
 }

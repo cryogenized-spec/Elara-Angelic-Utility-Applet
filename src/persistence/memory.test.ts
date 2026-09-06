@@ -45,6 +45,17 @@ describe('durable memory engine', () => {
     expect(withGlobal.map((memory) => memory.content)).not.toContain('A different-folder fact');
   });
 
+  it('supports explicit hierarchical folder retrieval without admitting unrelated siblings', async () => {
+    await createMemory({ content: 'Parent project rule', folderId: 'parent', kind: 'CONTEXTUAL', importance: 1, confidence: 1 });
+    await createMemory({ content: 'Current UI detail', folderId: 'child', kind: 'CONTEXTUAL', importance: 0.9, confidence: 1 });
+    await createMemory({ content: 'Sibling project secret', folderId: 'sibling', kind: 'CONTEXTUAL', importance: 1, confidence: 1 });
+
+    const result = await retrieveMemories({ folderId: 'child', folderIds: ['child', 'parent'], includeGlobal: false, query: 'project detail rule secret' });
+    expect(result.map((memory) => memory.content)).toContain('Parent project rule');
+    expect(result.map((memory) => memory.content)).toContain('Current UI detail');
+    expect(result.map((memory) => memory.content)).not.toContain('Sibling project secret');
+  });
+
   it('honours lifecycle, expiry, bounds, and retrieval bookkeeping', async () => {
     const current = 1_800_000_000_000;
     const first = await createMemory({ content: 'important launch detail', importance: 1, confidence: 1, provenance: 'test' });

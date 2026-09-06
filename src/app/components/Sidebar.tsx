@@ -203,32 +203,32 @@ export function Sidebar({ open, threads, activeId, onClose, onSelect, onNewChat,
           />
         ) : <span className="folder-row__name">{folder.name}</span>}
         <span className="folder-row__count">{threadsInFolder(folder.id).length}</span>
-        <details className="folder-menu" onClick={(event) => event.stopPropagation()}>
-          <summary aria-label={`Folder actions for ${folderPath(folder.id)}`}><Icon name="dots" size={16} /></summary>
-          <div className="folder-menu__panel">
-            <button type="button" onClick={() => { setCreatingUnder(folder.id); setFolderError(null); }}>New subfolder</button>
-            <button type="button" onClick={() => beginFolderRename(folder)}>Rename</button>
-            <label className="sidebar-menu-field">
-              <span>Move to</span>
-              <select aria-label={`Move folder ${folderPath(folder.id)}`} value={folder.parentId ?? ''} onChange={(event) => {
-                try { moveFolder(folder.id, event.target.value || null); setFolderError(null); } catch (cause) { setFolderError(cause instanceof Error ? cause.message : 'Could not move that folder.'); }
-              }}>
-                <option value="">Root</option>
-                {moveTargetOptions(folder.id).map((target) => <option key={target.id} value={target.id}>{folderPath(target.id)}</option>)}
-              </select>
-            </label>
-            <label className="sidebar-menu-field">
-              <span>Memory scope</span>
-              <select aria-label={`Memory scope for ${folderPath(folder.id)}`} value={folder.contextScope} onChange={(event) => setContextScope(folder.id, event.target.value as ConversationFolder['contextScope'])}>
-                <option value="folder">Folder only</option>
-                <option value="global">Global</option>
-              </select>
-              <small>Applies to durable-memory retrieval; normal chat history remains thread-scoped.</small>
-            </label>
-            <button type="button" className="is-danger" onClick={() => removeFolder(folder.id)}>Delete folder</button>
-          </div>
-        </details>
       </summary>
+      <details className="folder-menu" onClick={(event) => event.stopPropagation()}>
+        <summary aria-label={`Folder actions for ${folderPath(folder.id)}`}><Icon name="dots" size={16} /></summary>
+        <div className="folder-menu__panel">
+          <button type="button" onClick={() => { setCreatingUnder(folder.id); setFolderError(null); }}>New subfolder</button>
+          <button type="button" onClick={() => beginFolderRename(folder)}>Rename</button>
+          <label className="sidebar-menu-field">
+            <span>Move to</span>
+            <select aria-label={`Move folder ${folderPath(folder.id)}`} value={folder.parentId ?? ''} onChange={(event) => {
+              try { moveFolder(folder.id, event.target.value || null); setFolderError(null); } catch (cause) { setFolderError(cause instanceof Error ? cause.message : 'Could not move that folder.'); }
+            }}>
+              <option value="">Root</option>
+              {moveTargetOptions(folder.id).map((target) => <option key={target.id} value={target.id}>{folderPath(target.id)}</option>)}
+            </select>
+          </label>
+          <label className="sidebar-menu-field">
+            <span>Memory scope</span>
+            <select aria-label={`Memory scope for ${folderPath(folder.id)}`} value={folder.contextScope} onChange={(event) => setContextScope(folder.id, event.target.value as ConversationFolder['contextScope'])}>
+              <option value="folder">Folder only</option>
+              <option value="global">Global</option>
+            </select>
+            <small>Applies to durable-memory retrieval; normal chat history remains thread-scoped.</small>
+          </label>
+          <button type="button" className="is-danger" onClick={() => removeFolder(folder.id)}>Delete folder</button>
+        </div>
+      </details>
       <div className="folder-node__children">
         {children.map(renderFolder)}
         {threadsInFolder(folder.id).filter(threadMatches).map((thread) => renderThread(thread, true))}

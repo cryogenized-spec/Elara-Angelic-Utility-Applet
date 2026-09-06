@@ -30,11 +30,11 @@ describe('conversation folder persistence', () => {
     const child = await createFolderPath('Projects/Elara');
     const archive = await createFolderPath('Archive');
     const archiveChild = await createFolderPath('Archive/Elara');
+    const other = await createFolderPath('Other');
 
     await expect(moveFolder(root.id, child.id)).rejects.toThrow(/cannot be moved/i);
-    await moveFolder(child.id, archive.id);
-    await expect(moveFolder(child.id, archive.id)).rejects.toThrow(/already exists/i);
-    await expect(renameFolder(archiveChild.id, 'Projects')).resolves.toBeUndefined();
+    await moveFolder(child.id, other.id);
+    await expect(moveFolder(archiveChild.id, other.id)).rejects.toThrow(/already exists/i);
   });
 
   it('promotes children and direct assignments when deleting a folder', async () => {

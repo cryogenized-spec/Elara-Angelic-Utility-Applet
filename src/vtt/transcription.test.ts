@@ -55,7 +55,7 @@ describe('VTT transcription client', () => {
 
   it('rejects an empty transcript response', async () => {
     createInteraction.mockResolvedValue({ output_text: '   ' });
-    await expect(transcribeVttCapture(capture)).rejects.toEqual(new VttTranscriptionError('empty', 'No speech detected.'));
+    await expect(transcribeVttCapture(capture)).rejects.toEqual(new VttTranscriptionError('empty', 'No speech was detected.'));
   });
 
   it('preserves caller cancellation as a typed cancellation error', async () => {

@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useState } from 'react';
 import type { ChatAppearancePreferences } from '../../domain/preferences';
 import './chat-appearance-settings.css';
 
@@ -8,26 +8,55 @@ const GRADIENTS = [
   ['rose', 'Rose'],
 ] as const;
 
+const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif']);
+const ACCEPTED_IMAGE_EXTENSIONS = /\.(?:jpe?g|png|webp|avif)$/i;
+const MAX_BACKGROUND_BYTES = 4 * 1024 * 1024;
+
 function normaliseHex(value: string, fallback: string): string { return /^#[0-9a-fA-F]{6}$/.test(value) ? value.toUpperCase() : fallback; }
 
 export function ChatAppearanceSettings({ value, onChange }: { value: ChatAppearancePreferences; onChange: (value: ChatAppearancePreferences) => void }) {
   const backgroundInput = useRef<HTMLInputElement>(null);
+  const [backgroundError, setBackgroundError] = useState<string | null>(null);
   function patch(patchValue: Partial<ChatAppearancePreferences>) { onChange({ ...value, ...patchValue }); }
+
   function handleBackground(file?: File) {
-    if (!file || !['image/jpeg','image/png','image/webp'].includes(file.type) || file.size > 4 * 1024 * 1024) return;
+    setBackgroundError(null);
+    if (!file) return;
+    const typeSupported = ACCEPTED_IMAGE_TYPES.has(file.type) || (!file.type && ACCEPTED_IMAGE_EXTENSIONS.test(file.name));
+    if (!typeSupported) {
+      setBackgroundError('Use a JPG, PNG, WebP, or AVIF image.');
+      return;
+    }
+    if (file.size > MAX_BACKGROUND_BYTES) {
+      setBackgroundError('Background images must be 4 MB or smaller.');
+      return;
+    }
+
     const reader = new FileReader();
-    reader.onload = () => { if (typeof reader.result === 'string') patch({ chatBackgroundMode: 'image', chatBackgroundValue: reader.result }); };
+    reader.onload = () => {
+      if (typeof reader.result !== 'string' || !reader.result.startsWith('data:image/')) {
+        setBackgroundError('Could not read that image. Please choose another file.');
+        return;
+      }
+      patch({ chatBackgroundMode: 'image', chatBackgroundValue: reader.result });
+    };
+    reader.onerror = () => setBackgroundError('Could not read that image. Please choose another file.');
     reader.readAsDataURL(file);
   }
+
   return <div className="chat-appearance-settings">
     <div className="setting-card appearance-card">
       <strong>Chat background</strong><span>Independent of the character artwork. The presentation is designed around the 9:16 Android canvas.</span>
       <div className="appearance-segment" role="radiogroup" aria-label="Chat background mode">
-        {(['solid','gradient','image'] as const).map((mode) => <button key={mode} type="button" className={value.chatBackgroundMode === mode ? 'is-active' : ''} role="radio" aria-checked={value.chatBackgroundMode === mode} onClick={() => patch({ chatBackgroundMode: mode })}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
+        {(['solid','gradient','image'] as const).map((mode) => <button key={mode} type="button" className={value.chatBackgroundMode === mode ? 'is-active' : ''} role="radio" aria-checked={value.chatBackgroundMode === mode} onClick={() => { setBackgroundError(null); patch({ chatBackgroundMode: mode }); }}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
       </div>
       {value.chatBackgroundMode === 'solid' && <label className="colour-field"><span>Background colour</span><div><input type="color" aria-label="Chat background colour" value={normaliseHex(value.chatBackgroundValue, '#050507')} onChange={(event) => patch({ chatBackgroundValue: event.target.value.toUpperCase() })}/><input value={value.chatBackgroundValue} maxLength={7} aria-label="Chat background hex" onChange={(event) => patch({ chatBackgroundValue: event.target.value })} onBlur={() => patch({ chatBackgroundValue: normaliseHex(value.chatBackgroundValue, '#050507') })}/></div></label>}
       {value.chatBackgroundMode === 'gradient' && <div className="gradient-options">{GRADIENTS.map(([id,label]) => <button key={id} type="button" className={value.chatBackgroundValue === id ? 'is-active' : ''} onClick={() => patch({ chatBackgroundValue: id })}>{label}</button>)}</div>}
-      {value.chatBackgroundMode === 'image' && <><button className="upload-button" type="button" onClick={() => backgroundInput.current?.click()}>Choose background image</button><input ref={backgroundInput} hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => { handleBackground(event.target.files?.[0]); event.currentTarget.value = ''; }}/></>}
+      {value.chatBackgroundMode === 'image' && <>
+        <button className="upload-button" type="button" onClick={() => backgroundInput.current?.click()}>Choose background image</button>
+        <input ref={backgroundInput} hidden type="file" accept="image/jpeg,image/png,image/webp,image/avif" onChange={(event) => { handleBackground(event.target.files?.[0]); event.currentTarget.value = ''; }}/>
+        {backgroundError && <small className="custom-font-error" role="alert">{backgroundError}</small>}
+      </>}
       <label className="setting-range"><span>Background opacity</span><input aria-label="Background opacity" type="range" min={0} max={1} step={0.01} value={value.chatBackgroundOpacity} onChange={(event) => patch({ chatBackgroundOpacity: Number(event.target.value) })}/><output>{Math.round(value.chatBackgroundOpacity * 100)}%</output></label>
       <label className="setting-range"><span>Readability overlay</span><input aria-label="Readability overlay" type="range" min={0} max={0.9} step={0.01} value={value.chatBackgroundOverlay} onChange={(event) => patch({ chatBackgroundOverlay: Number(event.target.value) })}/><output>{Math.round(value.chatBackgroundOverlay * 100)}%</output></label>
       <label className="setting-range"><span>Background blur</span><input aria-label="Background blur" type="range" min={0} max={24} step={1} value={value.chatBackgroundBlur} onChange={(event) => patch({ chatBackgroundBlur: Number(event.target.value) })}/><output>{value.chatBackgroundBlur}px</output></label>

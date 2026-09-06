@@ -20,7 +20,7 @@ type LockboxMode = 'password' | 'pin' | 'passkey' | 'off';
 
 export function GeminiApiLockbox() {
   const [status, setStatus] = useState<LockboxState>('loading');
-  const [mode, setMode] = useState<LockboxMode>('password');
+  const [mode, setMode] = useState<LockboxMode>('pin');
   const [detail, setDetail] = useState('');
   const keyRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
@@ -28,12 +28,12 @@ export function GeminiApiLockbox() {
   const pinRef = useRef<HTMLInputElement>(null);
   const confirmPinRef = useRef<HTMLInputElement>(null);
   const unlockPasswordRef = useRef<HTMLInputElement>(null);
-  
+
   async function refresh() {
     try {
       const [nextStatus, metadata] = await Promise.all([getGeminiLockboxStatus(), getGeminiLockboxMetadata()]);
       setStatus(nextStatus);
-      setMode(metadata?.mode ?? 'password');
+      setMode(metadata?.mode ?? 'pin');
     } catch {
       setStatus('empty');
       setMode('pin');

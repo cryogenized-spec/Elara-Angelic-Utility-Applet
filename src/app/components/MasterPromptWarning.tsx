@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { loadCharacterProfile } from '../../persistence/character';
+import { hasMasterCharacterInstruction } from '../../character/system-instruction';
 import './master-prompt-warning.css';
 
 export function MasterPromptWarning() {
@@ -11,7 +12,7 @@ export function MasterPromptWarning() {
 
     const refresh = () => {
       void loadCharacterProfile().then((profile) => {
-        if (active) setIsEmpty(profile.systemInstruction.trim().length === 0);
+        if (active) setIsEmpty(!hasMasterCharacterInstruction(profile.systemInstruction));
       }).catch(() => {
         if (active) setIsEmpty(false);
       });

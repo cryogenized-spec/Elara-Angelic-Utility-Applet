@@ -8,6 +8,17 @@ function canonicalAudioMimeType(mimeType: string): string {
   return mimeType.split(';', 1)[0].trim().toLowerCase();
 }
 
+async function blobToBase64(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const chunkSize = 0x8000;
+  let binary = '';
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));
+    binary += String.fromCharCode(...chunk);
+  }
+  return globalThis.btoa(binary);
+}
+
 export class VttTranscriptionError extends Error {
   readonly code: string;
 
@@ -32,15 +43,12 @@ export async function transcribeVttCapture(capture: VttCapture, signal?: AbortSi
 
     const client = new GoogleGenAI({ apiKey });
     const operation = (async () => {
-      const uploaded = await client.files.upload({
-        file: capture.blob,
-        config: { mimeType },
-      });
-      if (!uploaded.uri || !uploaded.mimeType) throw new VttTranscriptionError('provider', 'Gemini did not return a usable uploaded audio file.');
+      const audioData = await blobToBase64(capture.blob);
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
       const interaction = await client.interactions.create({
         model: 'gemini-3.5-transcribe',
-        input: [{ type: 'audio', uri: uploaded.uri, mime_type: uploaded.mimeType }],
+        input: [{ type: 'audio', data: audioData, mime_type: mimeType }],
         generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
         store: false,
       });

@@ -1,10 +1,22 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { RoleplayPreferences } from '../../domain/preferences';
 import { childEntities, serializeRoleplayWorld, type RoleplayWorld, type RoleplayWorldEntity } from '../../domain/roleplay-world';
+import { loadRoleplayWorld } from '../../persistence/roleplay-world';
 import './roleplay-settings.css';
 
-export function RoleplaySettings({ value, onChange, world }: { value: RoleplayPreferences; onChange: (value: RoleplayPreferences) => void; world: RoleplayWorld }) {
+const WORLD_UPDATED_EVENT = 'elara-roleplay-world-updated';
+
+export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferences; onChange: (value: RoleplayPreferences) => void }) {
+  const [world, setWorld] = useState<RoleplayWorld | null>(null);
   const [copied, setCopied] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => { void loadRoleplayWorld(value).then((next) => { if (!cancelled) setWorld(next); }); };
+    refresh();
+    window.addEventListener(WORLD_UPDATED_EVENT, refresh);
+    return () => { cancelled = true; window.removeEventListener(WORLD_UPDATED_EVENT, refresh); };
+  }, [value]);
 
   async function copyReference(entity: RoleplayWorldEntity): Promise<void> {
     const token = `${entity.id} [world-ref:${entity.ref}]`;
@@ -12,9 +24,7 @@ export function RoleplaySettings({ value, onChange, world }: { value: RoleplayPr
       await navigator.clipboard.writeText(token);
       setCopied(entity.id);
       window.setTimeout(() => setCopied((current) => current === entity.id ? null : current), 1200);
-    } catch {
-      setCopied(null);
-    }
+    } catch { setCopied(null); }
   }
 
   return <div className="roleplay-settings">
@@ -33,19 +43,16 @@ export function RoleplaySettings({ value, onChange, world }: { value: RoleplayPr
 
       <div className="setting-card roleplay-canvas-card">
         <div className="roleplay-section-heading">
-          <div><span className="roleplay-section-kicker">WORLD CANVAS</span><strong>{world.name}</strong></div>
-          <span className="roleplay-section-hint">{world.entities.length} {world.entities.length === 1 ? 'entity' : 'entities'}</span>
+          <div><span className="roleplay-section-kicker">WORLD CANVAS</span><strong>{world?.name ?? 'Loading world…'}</strong></div>
+          <span className="roleplay-section-hint">{world?.entities.length ?? 0} {(world?.entities.length ?? 0) === 1 ? 'entity' : 'entities'}</span>
         </div>
 
         <div className="roleplay-tree" aria-label="Roleplay world directory tree">
-          {childEntities(world, null).map((entity) => <WorldTreeNode key={entity.id} entity={entity} world={world} depth={0} onCopy={copyReference} copied={copied} />)}
-          {!world.entities.length && <div className="roleplay-tree__empty">The canvas is empty. Describe the setting naturally in chat and Elara can propose the first location.</div>}
+          {world && childEntities(world, null).map((entity) => <WorldTreeNode key={entity.id} entity={entity} world={world} depth={0} onCopy={copyReference} copied={copied} />)}
+          {world && !world.entities.length && <div className="roleplay-tree__empty">The canvas is empty. Describe the setting naturally in chat and Elara can propose the first location.</div>}
         </div>
 
-        <details className="roleplay-yaml">
-          <summary>View world YAML</summary>
-          <pre>{serializeRoleplayWorld(world)}</pre>
-        </details>
+        {world && <details className="roleplay-yaml"><summary>View world YAML</summary><pre>{serializeRoleplayWorld(world)}</pre></details>}
 
         <div className="roleplay-tools">
           <div><span className="roleplay-section-kicker">AI CAPABILITIES</span><strong>Natural language is enough.</strong></div>

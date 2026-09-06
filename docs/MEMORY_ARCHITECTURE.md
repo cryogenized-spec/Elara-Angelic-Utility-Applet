@@ -56,7 +56,7 @@ Build one canonical ranked retrieval engine with explicit relevance signals and 
 
 ### Pass 6 — Gemini integration
 
-Compose a bounded temporary memory-context projection into the existing single Gemini interaction path. Memory failures remain non-fatal to the chat turn.
+Compose the bounded retrieval projection into the existing single Gemini interaction path. Memory retrieval remains application context rather than model-defined instruction, and memory failures remain non-fatal to the chat turn.
 
 ### Pass 7 — Memory Bank UI
 
@@ -131,6 +131,16 @@ The selector is pure and independently testable. IndexedDB recall bookkeeping re
 
 This baseline does not require embeddings or provider-specific semantic search. Those can be added later without changing the durable-memory contract.
 
+## Gemini integration
+
+The canonical Gemini provider requests a bounded memory projection for each normal interaction and appends it to the application-owned system instruction under an explicit `[APPLICATION CONTEXT — DURABLE MEMORY]` marker. The retrieved text is contextual data, not an instruction layer, and it does not replace or rewrite Elara's master character instruction.
+
+The projection is derived from the current active thread's folder scope and the user's input, using the Pass 5 retrieval engine's limits. It is composed immediately before the existing Gemini interaction request so there is still one provider execution path.
+
+Memory retrieval is deliberately best-effort. If IndexedDB, folder lookup, normalization, or retrieval fails, the provider sends the original system instruction without durable-memory context and continues the Gemini turn rather than failing the conversation.
+
+Tool-result continuations use the same provider path and therefore receive the same bounded application context behavior; no separate memory provider or persistence path exists.
+
 ## Provenance
 
 Provenance is structured metadata, not a free-form note. It must be able to distinguish at least:
@@ -165,3 +175,7 @@ Pass 4 is complete when every model-facing memory mutation crosses one centraliz
 ## Pass 5 completion criterion
 
 Pass 5 is complete when ranking and hard budgeting live in a pure canonical retrieval boundary, durable-store code delegates selection to that boundary, scope/lifecycle/expiry are enforced before ranking, context limits are bounded, and retrieval behavior is independently covered by focused tests.
+
+## Pass 6 completion criterion
+
+Pass 6 is complete when the existing single Gemini provider path composes the bounded durable-memory projection without changing the master instruction's role, retrieval failure cannot fail an otherwise valid Gemini turn, normal and tool-continuation requests share the same context boundary, and the integration behavior is independently covered by focused tests.

@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
-import { createMemory } from '../persistence/memory';
+import { saveMemory } from '../memory/store';
 import { createFolderPath } from '../persistence/folders';
 import { appendMemoryContext, loadMemoryContext } from './memory-context';
 
@@ -28,10 +28,10 @@ describe('Gemini durable-memory context boundary', () => {
     window.localStorage.setItem('elara.active-thread', 'thread-1');
     await db.folders.update(ui.id, { contextScope: 'global' });
 
-    await createMemory({ title: 'Project note', body: 'Elara project memory', folderId: project.id, tags: ['project'], confidence: 1, importance: 1 });
-    await createMemory({ title: 'UI note', body: 'Elara UI memory', folderId: ui.id, tags: ['ui'], confidence: 1, importance: 1 });
-    await createMemory({ title: 'Global preference', body: 'Global user preference', folderId: null, tags: ['global'], confidence: 1, importance: 1 });
-    await createMemory({ title: 'Other project', body: 'Other project secret', folderId: sibling.id, tags: ['other'], confidence: 1, importance: 1 });
+    await saveMemory({ title: 'Project note', body: 'Elara project memory', folderId: project.id, tags: ['project'], confidence: 1, importance: 1 });
+    await saveMemory({ title: 'UI note', body: 'Elara UI memory', folderId: ui.id, tags: ['ui'], confidence: 1, importance: 1 });
+    await saveMemory({ title: 'Global preference', body: 'Global user preference', folderId: null, tags: ['global'], confidence: 1, importance: 1 });
+    await saveMemory({ title: 'Other project', body: 'Other project secret', folderId: sibling.id, tags: ['other'], confidence: 1, importance: 1 });
 
     const context = await loadMemoryContext('project preference ui');
     expect(context).toContain('Elara project memory');
@@ -45,8 +45,8 @@ describe('Gemini durable-memory context boundary', () => {
     await db.folderAssignments.put({ id: 'thread-2', threadId: 'thread-2', folderId: folder.id, updatedAt: Date.now() });
     window.localStorage.setItem('elara.active-thread', 'thread-2');
 
-    await createMemory({ title: 'Private note', body: 'Private folder note', folderId: folder.id, confidence: 1, importance: 1 });
-    await createMemory({ title: 'Global note', body: 'Global note that must stay out', folderId: null, confidence: 1, importance: 1 });
+    await saveMemory({ title: 'Private note', body: 'Private folder note', folderId: folder.id, confidence: 1, importance: 1 });
+    await saveMemory({ title: 'Global note', body: 'Global note that must stay out', folderId: null, confidence: 1, importance: 1 });
 
     const context = await loadMemoryContext('note');
     expect(context).toContain('Private folder note');
@@ -55,8 +55,8 @@ describe('Gemini durable-memory context boundary', () => {
 
   it('makes global durable memory available to an unfiled thread', async () => {
     window.localStorage.setItem('elara.active-thread', 'thread-3');
-    await createMemory({ title: 'Global note', body: 'Global unfiled note', folderId: null, confidence: 1, importance: 1 });
-    await createMemory({ title: 'Project note', body: 'Project-only note', folderId: 'folder-a', confidence: 1, importance: 1 });
+    await saveMemory({ title: 'Global note', body: 'Global unfiled note', folderId: null, confidence: 1, importance: 1 });
+    await saveMemory({ title: 'Project note', body: 'Project-only note', folderId: 'folder-a', confidence: 1, importance: 1 });
 
     const context = await loadMemoryContext('note');
     expect(context).toContain('Global unfiled note');

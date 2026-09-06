@@ -15,6 +15,10 @@ Folders support:
 - deleting a folder while promoting its direct child folders and moving directly assigned threads to the deleted folder's parent;
 - a per-folder `Folder only` / `Global` memory-scope setting.
 
+## Persistence
+
+Folders and thread-folder assignments are now persisted in the application's canonical Dexie/IndexedDB database alongside conversations, settings, and workspace shortcuts. A database v5 migration imports the previous localStorage folder cache once and removes that retired cache after a successful import. No second persistence authority is introduced.
+
 ## Context-window semantics
 
 A folder does **not** create a separate Gemini model context window. Context capacity remains a property of the selected model and the current provider interaction/thread.
@@ -30,7 +34,7 @@ This distinction deliberately keeps folder organization separate from model cont
 
 ## Current implementation status
 
-The folder model and UI boundary are implemented locally. The durable-memory retrieval subsystem itself remains a separate future domain in the architecture. Until that retriever exists, the folder scope value is stored as forward-compatible configuration and does not by itself inject memory into Gemini requests.
+The folder model, durable persistence boundary, UI tree, mutation guards, and regression coverage are implemented. The durable-memory retrieval subsystem itself remains a separate future domain in the architecture. Until that retriever exists, the folder scope value is stored as forward-compatible configuration and does not by itself inject memory into Gemini requests.
 
 ## Mobile interaction
 

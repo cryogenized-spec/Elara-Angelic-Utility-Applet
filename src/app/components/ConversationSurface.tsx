@@ -16,6 +16,7 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
   const seenCountsRef = useRef<Record<string, number>>({});
+  const lastViewportHeightRef = useRef<number | null>(null);
 
   function rememberScrollPosition() {
     const element = conversationRef.current;
@@ -75,13 +76,25 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
 
   useEffect(() => {
     const viewport = window.visualViewport;
-    if (!viewport) return undefined;
+    const element = conversationRef.current;
+    if (!viewport || !element) return undefined;
 
     let frame = 0;
+    let lastHeight = element.clientHeight;
+    lastViewportHeightRef.current = viewport.height;
+
     const reanchorAfterViewportChange = () => {
       window.cancelAnimationFrame(frame);
       frame = window.requestAnimationFrame(() => {
-        window.requestAnimationFrame(() => scrollToEnd('auto'));
+        const nextHeight = element.clientHeight;
+        const previousHeight = lastHeight;
+        lastHeight = nextHeight;
+        lastViewportHeightRef.current = viewport.height;
+
+        const heightChanged = nextHeight !== previousHeight;
+        if (!heightChanged || !shouldStickToEndRef.current) return;
+
+        element.scrollTop = element.scrollHeight - element.clientHeight;
       });
     };
 
@@ -89,6 +102,7 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
     return () => {
       window.cancelAnimationFrame(frame);
       viewport.removeEventListener('resize', reanchorAfterViewportChange);
+      lastViewportHeightRef.current = null;
     };
   }, []);
 

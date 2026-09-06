@@ -1,1 +1,0 @@
-PWA icon filenames and service-worker cache need normalization.

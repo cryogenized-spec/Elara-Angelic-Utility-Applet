@@ -1,4 +1,4 @@
-import { createContext, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { ConversationFolder, FolderContextScope, FolderState } from '../../persistence/folders';
 import { assignThreadToFolder, createFolderPath, deleteFolder, loadFolderState, moveFolder, renameFolder, setFolderContextScope } from '../../persistence/folders';
 
@@ -35,13 +35,13 @@ export function FolderProvider({ children }: { children: ReactNode }) {
   const value = useMemo<FolderContextValue>(() => ({
     state,
     ready,
-    async create(path, parentId = null) { const folder = await createFolderPath(path, parentId); await refresh(); return folder; },
-    async rename(id, name) { await renameFolder(id, name); await refresh(); },
-    async remove(id) { await deleteFolder(id); await refresh(); },
-    async move(id, parentId) { await moveFolder(id, parentId); await refresh(); },
-    async assignThread(threadId, folderId) { await assignThreadToFolder(threadId, folderId); await refresh(); },
-    async setContextScope(id, scope) { await setFolderContextScope(id, scope); await refresh(); },
-  }), [ready, refresh, state]);
+    async create(path, parentId = null) { return createFolderPath(path, parentId); },
+    async rename(id, name) { await renameFolder(id, name); },
+    async remove(id) { await deleteFolder(id); },
+    async move(id, parentId) { await moveFolder(id, parentId); },
+    async assignThread(threadId, folderId) { await assignThreadToFolder(threadId, folderId); },
+    async setContextScope(id, scope) { await setFolderContextScope(id, scope); },
+  }), [ready, state]);
 
   return <FolderContext.Provider value={value}>{children}</FolderContext.Provider>;
 }

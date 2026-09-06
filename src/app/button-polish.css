@@ -124,7 +124,8 @@ button:disabled {
 .model-settings__small-button,
 .model-settings__add-button,
 .memory-card__actions button,
-.google-oauth-settings__button--secondary {
+.google-oauth-settings__button--secondary,
+.custom-font-button {
   min-height: 36px;
   padding: 0 10px;
   border-radius: 10px;
@@ -136,6 +137,50 @@ button:disabled {
   justify-content: center;
   gap: 5px;
   white-space: nowrap;
+}
+
+.custom-font-button {
+  border: 1px solid rgba(110, 168, 255, .28);
+  background: rgba(110, 168, 255, .08);
+  color: var(--text);
+}
+
+.custom-font-button:hover {
+  border-color: rgba(110, 168, 255, .46);
+  background: rgba(110, 168, 255, .13);
+}
+
+.custom-font-card {
+  display: grid;
+  gap: 10px;
+}
+
+.custom-font-card strong,
+.custom-font-card span {
+  display: block;
+}
+
+.custom-font-input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(10, 11, 17, .72);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  outline: none;
+}
+
+.custom-font-input:focus {
+  border-color: rgba(110, 168, 255, .42);
+}
+
+.custom-font-error {
+  color: #ffd3dc;
+  font-size: 10px;
+  line-height: 1.4;
 }
 
 /* Icon buttons ------------------------------------------------------------ */
@@ -247,6 +292,7 @@ button:disabled {
 .model-settings__add-button,
 .memory-card__actions button,
 .google-oauth-settings__button--secondary,
+.custom-font-button,
 .tool-pill {
   text-decoration: none;
 }
@@ -269,6 +315,7 @@ button:disabled {
 .model-settings__add-button:not(:disabled):active,
 .memory-card__actions button:not(:disabled):active,
 .google-oauth-settings__button--secondary:not(:disabled):active,
+.custom-font-button:not(:disabled):active,
 .tool-pill:not(:disabled):active {
   transform: translateY(1px);
 }
@@ -278,7 +325,8 @@ button:disabled {
   .model-settings__add-button,
   .memory-card__actions button,
   .google-oauth-settings__button--secondary,
-  .folder-create button {
+  .folder-create button,
+  .custom-font-button {
     min-height: 40px;
   }
 

@@ -1,5 +1,6 @@
 import type { DurableMemory, MemoryInput, MemoryKind, MemoryProvenance } from './types';
-import { saveMemory } from './store';
+import { archiveMemory, deleteMemory, saveMemory } from './store';
+import { authorizeMemoryMutation, type MemoryActor } from './permissions';
 
 export interface MemorySaveRequest {
   title: string;
@@ -9,6 +10,7 @@ export interface MemorySaveRequest {
 }
 
 export interface MemoryCapabilityContext {
+  actor?: MemoryActor;
   conversationId?: string;
   messageId?: string;
   folderId?: string | null;
@@ -17,6 +19,8 @@ export interface MemoryCapabilityContext {
 
 export interface MemoryCapability {
   save(request: MemorySaveRequest, context?: MemoryCapabilityContext): Promise<DurableMemory>;
+  forget(id: string, context?: MemoryCapabilityContext): Promise<DurableMemory>;
+  delete(id: string, context?: MemoryCapabilityContext): Promise<void>;
 }
 
 function elaraProvenance(context: MemoryCapabilityContext = {}): MemoryProvenance {
@@ -30,12 +34,14 @@ function elaraProvenance(context: MemoryCapabilityContext = {}): MemoryProvenanc
 }
 
 /**
- * Deliberate application capability for model-requested memory creation.
- * The caller supplies memory prose and lightweight classification only. The
- * application owns identity, timestamps, provenance, validation and storage.
+ * Deliberate application capability for model-requested memory mutation.
+ * Authorization is checked here, before storage. The caller supplies memory
+ * prose and lightweight classification only; the application owns identity,
+ * timestamps, provenance, validation and persistence.
  */
 export const memory: MemoryCapability = {
   async save(request, context = {}) {
+    authorizeMemoryMutation('save', context);
     const input: MemoryInput = {
       title: request.title,
       body: request.body,
@@ -45,5 +51,15 @@ export const memory: MemoryCapability = {
       source: elaraProvenance(context),
     };
     return saveMemory(input);
+  },
+
+  async forget(id, context = {}) {
+    authorizeMemoryMutation('forget', context);
+    return archiveMemory(id);
+  },
+
+  async delete(id, context = {}) {
+    authorizeMemoryMutation('delete', context);
+    await deleteMemory(id);
   },
 };

@@ -9,6 +9,7 @@ import {
   Mail,
   Maximize2,
   Menu,
+  MessageCircle,
   MessageSquare,
   Mic,
   Minimize2,
@@ -43,6 +44,7 @@ export type IconName =
   | 'type'
   | 'palette'
   | 'chat'
+  | 'message-circle'
   | 'sparkles'
   | 'close'
   | 'search'
@@ -70,6 +72,7 @@ const icons: Record<IconName, LucideIcon> = {
   type: Type,
   palette: Palette,
   chat: MessageSquare,
+  'message-circle': MessageCircle,
   sparkles: Sparkles,
   close: X,
   search: Search,

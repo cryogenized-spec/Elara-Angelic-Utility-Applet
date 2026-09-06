@@ -1,5 +1,6 @@
 import { useRef } from 'react';
 import type { CharacterArtworkMode, CharacterProfile } from '../../domain/character';
+import { DurableMemorySettings } from './DurableMemorySettings';
 import './character-settings.css';
 
 const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
@@ -95,6 +96,11 @@ export function CharacterSettings({ profile, onChange }: { profile: CharacterPro
         </label>
       </div>}
       <p className="character-hint">Focus controls follow the source-image and presentation aspect ratios. A centered, disabled control is shown when the image cannot move along that axis.</p>
+    </div>
+
+    <div className="setting-card character-card">
+      <div className="character-card__heading"><div><strong>Durable memory</strong><span>User-owned notes, separate from conversation history and the Master Prompt.</span></div></div>
+      <DurableMemorySettings />
     </div>
   </div>;
 }

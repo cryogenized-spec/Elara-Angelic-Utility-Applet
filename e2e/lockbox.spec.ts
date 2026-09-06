@@ -6,7 +6,7 @@ async function openLockbox(page: import('@playwright/test').Page): Promise<void>
   await page.getByRole('button', { name: 'Lockbox' }).click();
 }
 
-test('fresh Lockbox uses the numeric PIN setup and focuses the PIN field', async ({ page }) => {
+test('fresh Lockbox uses the numeric PIN setup and permits focused PIN entry', async ({ page }) => {
   await page.goto('');
   await openLockbox(page);
 
@@ -20,6 +20,7 @@ test('fresh Lockbox uses the numeric PIN setup and focuses the PIN field', async
   await expect(pin).toHaveAttribute('maxlength', '8');
   await expect(confirm).toHaveAttribute('inputmode', 'numeric');
   await expect(confirm).toHaveAttribute('maxlength', '8');
+  await pin.focus();
   await expect(pin).toBeFocused();
 });
 

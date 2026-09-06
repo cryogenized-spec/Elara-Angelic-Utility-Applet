@@ -57,4 +57,29 @@ describe('canonical memory retrieval engine', () => {
     expect(result.map((memory) => memory.id)).toContain('global');
     expect(result.map((memory) => memory.id)).toContain('folder');
   });
+
+  it('handles a multi-thousand-record candidate set with deterministic budgeting', () => {
+    const memories = Array.from({ length: 5_000 }, (_, index) => makeMemory({
+      id: `memory_${index}`,
+      title: index % 250 === 0 ? `Target project ${index}` : `Record ${index}`,
+      body: index % 250 === 0 ? 'Important project context for retrieval stress coverage.' : 'Generic durable context.',
+      updatedAt: 10_000 + index,
+      folderId: index % 2 === 0 ? 'folder-a' : 'folder-b',
+      importance: index % 250 === 0 ? 0.9 : 0.4,
+    }));
+    const result = rankAndBudgetMemories(memories, {
+      folderId: 'folder-a',
+      includeGlobal: false,
+      query: 'target project',
+      maxItems: 8,
+      maxCharacters: 6_000,
+      now: 20_000,
+    });
+
+    expect(result).toHaveLength(8);
+    expect(new Set(result.map((memory) => memory.id)).size).toBe(8);
+    expect(result.every((memory) => memory.folderId === 'folder-a')).toBe(true);
+    expect(result[0]?.title).toContain('Target project');
+    expect(result.reduce((sum, memory) => sum + memory.title.length + memory.body.length, 0)).toBeLessThanOrEqual(6_000);
+  });
 });

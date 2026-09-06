@@ -7,6 +7,7 @@ import { classifyGoogleToolFailure, type GoogleToolFailure } from './diagnostics
 import { validateDriveSheetsToolArguments, driveSheetsToolArgumentSchemas, type DriveSheetsToolName } from './drive-sheets-schemas';
 import { validateGoogleReadToolArguments, googleReadToolArgumentSchemas, type GoogleReadToolName } from './read-schemas';
 import { validateRoleplayWorldToolArguments, roleplayWorldToolArgumentSchemas, type RoleplayWorldToolName } from './roleplay-world-schemas';
+import { loadRoleplayPreferences } from '../../persistence/preferences';
 
 export interface GoogleToolExecutionContext { readonly tool: GoogleToolName; readonly descriptor: GoogleToolDescriptor; readonly capability: GoogleCapabilityKey; readonly risk: GoogleToolRisk; readonly arguments: Readonly<Record<string, unknown>>; }
 export type GoogleToolHandler = (context: GoogleToolExecutionContext) => Promise<unknown>;
@@ -52,21 +53,20 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
   let args: Readonly<Record<string, unknown>>;
   try { args = validateArguments(validCall.tool, validCall.arguments); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) }; }
   const capability = safeCapability(descriptor.capability);
+  const isRoleplayTool = validCall.tool.startsWith('roleplay_setting.');
+  if (isRoleplayTool && !(await loadRoleplayPreferences()).enabled) return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
   if (capability !== 'roleplay.world.local') {
     let status: GoogleOAuthStatus;
     try { status = await options.oauth.getStatus(); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) }; }
     if (authorizationNeeded(status, capability)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
   }
-  if (validCall.tool.startsWith('roleplay_setting.') && validCall.tool !== 'roleplay_setting.list' && validCall.tool !== 'roleplay_setting.inspect') {
-    const decision = evaluateWriteConfirmation(descriptor.risk);
-    if (decision.requiresConfirmation) {
-      const requestedAt = (options.now?.() ?? new Date()).toISOString();
-      const confirmation: WriteConfirmationRequest = { tool: descriptor.name, risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>, resourceSummary: confirmationSummary(validCall.tool, args, descriptor.description), requestedAt };
-      const confirm = options.confirm ?? requestRoleplayConfirmation;
-      let approved = false;
-      try { approved = await confirm(confirmation) && isConfirmationFresh(requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
-      if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: 'USER_DECLINED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
-    }
+  if (isRoleplayTool && validCall.tool !== 'roleplay_setting.list' && validCall.tool !== 'roleplay_setting.inspect') {
+    const requestedAt = (options.now?.() ?? new Date()).toISOString();
+    const confirmation: WriteConfirmationRequest = { tool: descriptor.name, risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>, resourceSummary: confirmationSummary(validCall.tool, args, descriptor.description), requestedAt };
+    const confirm = options.confirm ?? requestRoleplayConfirmation;
+    let approved = false;
+    try { approved = await confirm(confirmation) && isConfirmationFresh(requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
+    if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: 'USER_DECLINED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
   } else {
     const decision = evaluateWriteConfirmation(descriptor.risk);
     if (decision.requiresConfirmation && options.confirm) {

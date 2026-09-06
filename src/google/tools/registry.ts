@@ -45,4 +45,10 @@ export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'sheets.writeRange', risk: 'write', capability: 'sheets.write', description: 'Write bounded rows to an explicit A1 range.' },
   { name: 'sheets.appendRows', risk: 'write', capability: 'sheets.write', description: 'Append bounded rows to an explicit spreadsheet range.' },
   { name: 'sheets.batchUpdate', risk: 'write', capability: 'sheets.write', description: 'Apply explicit spreadsheet batch update requests.' },
+  { name: 'roleplay_setting.list', risk: 'read', capability: 'roleplay.world.local', description: 'List persistent Roleplay World Canvas entities.' },
+  { name: 'roleplay_setting.inspect', risk: 'read', capability: 'roleplay.world.local', description: 'Inspect one persistent Roleplay World Canvas entity by id or ref.' },
+  { name: 'roleplay_setting.create', risk: 'write', capability: 'roleplay.world.local', description: 'Propose creation of a persistent Roleplay World Canvas entity.' },
+  { name: 'roleplay_setting.update', risk: 'write', capability: 'roleplay.world.local', description: 'Propose changes to a persistent Roleplay World Canvas entity.' },
+  { name: 'roleplay_setting.move', risk: 'write', capability: 'roleplay.world.local', description: 'Propose moving a persistent Roleplay World Canvas entity.' },
+  { name: 'roleplay_setting.delete', risk: 'destructive', capability: 'roleplay.world.local', description: 'Propose deletion of a persistent Roleplay World Canvas entity and its descendants.' },
 ];

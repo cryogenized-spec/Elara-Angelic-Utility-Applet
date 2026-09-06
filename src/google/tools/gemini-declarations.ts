@@ -11,11 +11,6 @@ export interface GeminiFunctionDeclaration {
   };
 }
 
-/**
- * Gemini sees the registered application capabilities directly.
- * Risk, authorization, confirmation, and execution remain application-side
- * implementation details and are never presented as a competing persona policy.
- */
 export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaration[] = googleToolRegistry.map((descriptor) => ({
   type: 'function',
   name: descriptor.name,
@@ -27,14 +22,8 @@ export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaratio
   },
 }));
 
-/**
- * The ordinary conversational surface contains only capabilities that have
- * concrete execution handlers today. Additional registered write/destructive
- * tools remain available to explicitly wired application workflows until their
- * handlers are complete.
- */
-export function googleGeminiFunctionNames(): readonly string[] {
+export function googleGeminiFunctionNames(includeRoleplay = false): readonly string[] {
   return googleToolRegistry
-    .filter((descriptor) => descriptor.risk === 'read')
+    .filter((descriptor) => descriptor.risk === 'read' || (includeRoleplay && descriptor.name.startsWith('roleplay_setting.')))
     .map((tool) => tool.name);
 }

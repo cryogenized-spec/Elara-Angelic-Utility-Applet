@@ -1,3 +1,5 @@
+import { ELARA_SYSTEM_INSTRUCTION } from '../character/system-instruction';
+
 export type CharacterArtworkMode = 'portrait' | 'landscape';
 
 export interface CharacterArtworkReference {
@@ -22,8 +24,8 @@ export interface CharacterProfile {
 
 export const DEFAULT_CHARACTER_PROFILE: CharacterProfile = {
   id: 'primary',
-  name: '',
-  systemInstruction: '',
+  name: 'Elara',
+  systemInstruction: ELARA_SYSTEM_INSTRUCTION,
   artworkMode: 'portrait',
   artwork: null,
   updatedAt: 0,

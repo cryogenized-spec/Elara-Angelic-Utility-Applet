@@ -16,8 +16,18 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
   const seenCountsRef = useRef<Record<string, number>>({});
-  function rememberScrollPosition() { const element = conversationRef.current; if (!element) return; shouldStickToEndRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160; }
-  function scrollToEnd() { const element = conversationRef.current; if (!element || !shouldStickToEndRef.current) return; element.scrollTo({ top: element.scrollHeight, behavior: 'smooth' }); }
+
+  function rememberScrollPosition() {
+    const element = conversationRef.current;
+    if (!element) return;
+    shouldStickToEndRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160;
+  }
+
+  function scrollToEnd(behavior: ScrollBehavior = 'smooth') {
+    const element = conversationRef.current;
+    if (!element || !shouldStickToEndRef.current) return;
+    element.scrollTo({ top: element.scrollHeight, behavior });
+  }
 
   const visibleMessages = useMemo(() => messages.filter((message) => !deletedIds.has(message.id)), [messages, deletedIds]);
 
@@ -62,7 +72,25 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
   }, [grouped]);
 
   useEffect(() => { scrollToEnd(); }, [visibleMessages.length, visibleMessages.at(-1)?.text]);
-  useEffect(() => { const viewport = window.visualViewport; if (!viewport) return undefined; viewport.addEventListener('resize', scrollToEnd); return () => viewport.removeEventListener('resize', scrollToEnd); }, []);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return undefined;
+
+    let frame = 0;
+    const reanchorAfterViewportChange = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => scrollToEnd('auto'));
+      });
+    };
+
+    viewport.addEventListener('resize', reanchorAfterViewportChange);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      viewport.removeEventListener('resize', reanchorAfterViewportChange);
+    };
+  }, []);
 
   async function handleDelete(message: ChatMessage) {
     try {

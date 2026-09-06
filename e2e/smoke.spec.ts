@@ -52,7 +52,30 @@ test('composer keeps attachment, Markdown, microphone, and Send controls aligned
   expect(Math.abs(micBox!.y - sendBox!.y)).toBeLessThan(2);
 });
 
-test('keyboard geometry moves only the lower chat workspace without resizing the banner', async ({ page }) => {
+test('composer occupies its own layout space instead of overlapping the conversation', async ({ page }) => {
+  await page.goto('');
+  const shell = page.locator('.app-shell');
+  const conversation = page.getByRole('region', { name: 'Conversation' });
+  const composer = page.locator('form.composer');
+  const shellBox = await shell.boundingBox();
+  const conversationBox = await conversation.boundingBox();
+  const composerBox = await composer.boundingBox();
+  expect(shellBox && conversationBox && composerBox).toBeTruthy();
+  expect(conversationBox!.y + conversationBox!.height).toBeLessThanOrEqual(composerBox!.y + 1);
+  expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(shellBox!.y + shellBox!.height + 1);
+
+  await page.evaluate(() => document.documentElement.style.setProperty('--elara-visual-viewport-height', '520px'));
+  await page.waitForTimeout(50);
+  const compactShell = await shell.boundingBox();
+  const compactConversation = await conversation.boundingBox();
+  const compactComposer = await composer.boundingBox();
+  expect(compactShell && compactConversation && compactComposer).toBeTruthy();
+  expect(compactShell!.height).toBeLessThanOrEqual(521);
+  expect(compactConversation!.y + compactConversation!.height).toBeLessThanOrEqual(compactComposer!.y + 1);
+  expect(compactComposer!.y + compactComposer!.height).toBeLessThanOrEqual(compactShell!.y + compactShell!.height + 1);
+});
+
+test('keyboard geometry resizes the visible chat viewport without resizing the banner', async ({ page }) => {
   await page.goto('');
   const shell = page.locator('.app-shell');
   const banner = page.locator('.elara-banner');
@@ -64,7 +87,7 @@ test('keyboard geometry moves only the lower chat workspace without resizing the
   const composerBox = await composer.boundingBox();
   expect(shellBox && bannerBox && conversationBox && composerBox).toBeTruthy();
 
-  await page.evaluate(() => document.documentElement.style.setProperty('--elara-keyboard-height', '300px'));
+  await page.evaluate(() => document.documentElement.style.setProperty('--elara-visual-viewport-height', '520px'));
   await page.waitForTimeout(50);
 
   const keyboardShell = await shell.boundingBox();
@@ -72,11 +95,10 @@ test('keyboard geometry moves only the lower chat workspace without resizing the
   const keyboardConversation = await conversation.boundingBox();
   const keyboardComposer = await composer.boundingBox();
   expect(keyboardShell && keyboardBanner && keyboardConversation && keyboardComposer).toBeTruthy();
-  expect(Math.abs(keyboardShell!.height - shellBox!.height)).toBeLessThanOrEqual(1);
+  expect(Math.abs(keyboardShell!.height - 520)).toBeLessThanOrEqual(1);
   expect(Math.abs(keyboardBanner!.height - bannerBox!.height)).toBeLessThanOrEqual(1);
-  expect(keyboardComposer!.y).toBeLessThanOrEqual(composerBox!.y - 299);
-  expect(keyboardComposer!.y + keyboardComposer!.height).toBeLessThanOrEqual(keyboardShell!.y + keyboardShell!.height - 300 + 1);
   expect(keyboardConversation!.y + keyboardConversation!.height).toBeLessThanOrEqual(keyboardComposer!.y + 1);
+  expect(keyboardComposer!.y + keyboardComposer!.height).toBeLessThanOrEqual(keyboardShell!.y + keyboardShell!.height + 1);
 });
 
 test('collapses the character banner when the sidebar opens', async ({ page }) => {

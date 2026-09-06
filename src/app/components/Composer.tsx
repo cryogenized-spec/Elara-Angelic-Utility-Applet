@@ -186,7 +186,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
       setVttElapsed(capture.durationMs);
       setVttRms(0);
       if (shouldDiscardVttCapture(capture.blob.size, capture.durationMs)) {
-        setVttMessage('No speech detected.');
+        setVttMessage('No speech was detected.');
         setVttState('idle');
         return;
       }

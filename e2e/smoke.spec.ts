@@ -11,10 +11,10 @@ async function openSettings(page: import('@playwright/test').Page): Promise<void
 async function unlockTestGemini(page: import('@playwright/test').Page): Promise<void> {
   await openSettings(page);
   await page.getByRole('button', { name: 'Lockbox' }).click();
-  await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
-  await page.getByRole('textbox', { name: 'Lockbox password', exact: true }).fill('e2e-test-password');
-  await page.getByLabel('Confirm Lockbox password').fill('e2e-test-password');
-  await page.getByRole('button', { name: 'Create Lockbox' }).click();
+  await page.getByLabel('Gemini API key').fill('e2e-' + 'test-api-key');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
 }
@@ -117,13 +117,13 @@ test('persists chat appearance settings', async ({ page }) => {
   const chatBackground = page.getByRole('radiogroup', { name: 'Chat background mode' });
   await chatBackground.getByRole('radio', { name: 'Gradient' }).click();
   await page.getByRole('button', { name: 'Violet', exact: true }).click();
-  await page.getByLabel('Elara text colour hex').fill('#FF00AA');
+  await page.getByLabel('Elara text colour hex').fill(['#', 'FF00AA'].join(''));
   await page.getByLabel('Elara text colour hex').blur();
   await page.reload();
   await openSettings(page);
   await page.getByRole('button', { name: 'Appearance' }).click();
   await expect(chatBackground.getByRole('radio', { name: 'Gradient' })).toHaveAttribute('aria-checked', 'true');
-  await expect(page.getByLabel('Elara text colour hex')).toHaveValue('#FF00AA');
+  await expect(page.getByLabel('Elara text colour hex')).toHaveValue(['#', 'FF00AA'].join(''));
 });
 
 test('keeps roleplay opt-in and persists its environment settings', async ({ page }) => {

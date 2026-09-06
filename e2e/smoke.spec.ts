@@ -74,7 +74,7 @@ test('keyboard geometry moves only the lower chat workspace without resizing the
   expect(keyboardShell && keyboardBanner && keyboardConversation && keyboardComposer).toBeTruthy();
   expect(Math.abs(keyboardShell!.height - shellBox!.height)).toBeLessThanOrEqual(1);
   expect(Math.abs(keyboardBanner!.height - bannerBox!.height)).toBeLessThanOrEqual(1);
-  expect(keyboardComposer!.y).toBeGreaterThanOrEqual(composerBox!.y - 1);
+  expect(keyboardComposer!.y).toBeLessThanOrEqual(composerBox!.y - 299);
   expect(keyboardComposer!.y + keyboardComposer!.height).toBeLessThanOrEqual(keyboardShell!.y + keyboardShell!.height - 300 + 1);
   expect(keyboardConversation!.y + keyboardConversation!.height).toBeLessThanOrEqual(keyboardComposer!.y + 1);
 });

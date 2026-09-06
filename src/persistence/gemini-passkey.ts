@@ -110,8 +110,8 @@ async function unwrapPin(record: PasskeyRecord, prfOutput: ArrayBuffer): Promise
   return new TextDecoder().decode(plaintext);
 }
 
-function createChallenge(): Uint8Array {
-  return crypto.getRandomValues(new Uint8Array(32));
+function createChallenge(): ArrayBuffer {
+  return toArrayBuffer(crypto.getRandomValues(new Uint8Array(32)));
 }
 
 export async function registerGeminiPasskey(pin: string): Promise<void> {
@@ -126,12 +126,13 @@ export async function registerGeminiPasskey(pin: string): Promise<void> {
 
   const rpId = window.location.hostname;
   const prfSalt = crypto.getRandomValues(new Uint8Array(PRF_SALT_BYTES));
+  const userId = crypto.getRandomValues(new Uint8Array(32));
   const creation = await navigator.credentials.create({
     publicKey: {
       challenge: createChallenge(),
       rp: { id: rpId, name: RP_NAME },
       user: {
-        id: crypto.getRandomValues(new Uint8Array(32)),
+        id: toArrayBuffer(userId),
         name: 'local-elara-user',
         displayName: 'Elara User',
       },
@@ -184,17 +185,16 @@ export async function unlockGeminiApiKeyWithPasskey(): Promise<void> {
   if (!isGeminiPasskeySupported()) throw new Error('Passkeys require a secure HTTPS browser context.');
   const record = await db.credentials.get(RECORD_ID);
   if (!record) throw new Error('No passkey is configured for this Lockbox.');
-  const challenge = createChallenge();
   const assertion = await navigator.credentials.get({
     publicKey: {
-      challenge,
+      challenge: createChallenge(),
       rpId: record.rpId,
       userVerification: 'required',
-      allowCredentials: [{ type: 'public-key', id: base64UrlToBytes(record.credentialId) }],
+      allowCredentials: [{ type: 'public-key', id: toArrayBuffer(base64UrlToBytes(record.credentialId)) }],
       extensions: {
         prf: {
           evalByCredential: {
-            [record.credentialId]: { first: base64UrlToBytes(record.prfSalt) },
+            [record.credentialId]: { first: toArrayBuffer(base64UrlToBytes(record.prfSalt)) },
           },
         },
       },

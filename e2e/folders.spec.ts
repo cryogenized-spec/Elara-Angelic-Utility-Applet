@@ -31,9 +31,9 @@ test('folder workspace supports nested creation and moving chats by drag and dro
   await thread.dragTo(elara);
 
   const elaraFolder = folderNode(page, 'Elara');
-  const threadActions = elaraFolder.getByRole('button', { name: 'Thread actions for New conversation' });
-  await expect(threadActions).toBeVisible();
-  await threadActions.click();
+  const threadActions = elaraFolder.locator('details.thread-menu > summary');
+  await expect(threadActions).toHaveAttribute('aria-label', 'Thread actions for New conversation');
+  await threadActions.click({ force: true });
   const moveSelect = page.getByRole('combobox', { name: 'Move New conversation to folder', exact: true });
   await expect(moveSelect).not.toHaveValue('');
   await expect(elaraFolder.locator('.folder-row__count')).toHaveText('1');
@@ -52,9 +52,9 @@ test('folder actions expose rename, move, memory scope, and deletion controls', 
   const folderPath = 'Workspace';
   const folder = folderNode(page, folderPath);
   await expect(folder).toBeVisible();
-  const folderActions = folder.getByRole('button', { name: `Folder actions for ${folderPath}` });
-  await expect(folderActions).toBeVisible();
-  await folderActions.click();
+  const folderActions = folder.locator('details.folder-menu > summary');
+  await expect(folderActions).toHaveAttribute('aria-label', `Folder actions for ${folderPath}`);
+  await folderActions.click({ force: true });
   await expect(folder.getByRole('button', { name: 'Rename' })).toBeVisible();
   await expect(folder.getByRole('combobox', { name: `Move folder ${folderPath}` })).toBeVisible();
   await expect(folder.getByRole('combobox', { name: `Memory scope for ${folderPath}` })).toBeVisible();

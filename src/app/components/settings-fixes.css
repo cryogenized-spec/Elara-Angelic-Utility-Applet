@@ -36,3 +36,62 @@
   display: block;
   margin: 0;
 }
+
+.background-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.background-option {
+  min-width: 0;
+  min-height: 64px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 4px;
+  padding: 10px 11px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 13px;
+  background: rgba(255,255,255,.035);
+  color: var(--muted);
+  text-align: left;
+  box-shadow: none;
+  cursor: pointer;
+}
+
+.background-option > span {
+  margin: 0;
+  color: inherit;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.background-option > small {
+  margin: 0;
+  color: rgba(255,255,255,.48);
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.background-option--midnight { background: linear-gradient(135deg, rgba(110,168,255,.12), rgba(240,123,220,.06)); }
+.background-option--blue-hour { background: linear-gradient(135deg, rgba(68,139,255,.16), rgba(84,197,255,.06)); }
+.background-option--violet { background: linear-gradient(135deg, rgba(157,116,255,.16), rgba(240,123,220,.08)); }
+.background-option--rose { background: linear-gradient(135deg, rgba(255,111,174,.14), rgba(255,198,103,.07)); }
+
+.background-option.is-active {
+  color: var(--text);
+  border-color: rgba(110,168,255,.46);
+  box-shadow: inset 2px 0 0 var(--pink), 0 8px 18px rgba(0,0,0,.14);
+}
+
+.background-option:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+@media (max-width: 420px) {
+  .background-options { grid-template-columns: 1fr; }
+}

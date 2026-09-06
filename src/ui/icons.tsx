@@ -1,11 +1,13 @@
 import type { CSSProperties } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
+  Bot,
   CalendarDays,
   ChevronDown,
   FileCode2,
   ListTodo,
   Loader2,
+  LockKeyhole,
   Mail,
   Maximize2,
   Menu,
@@ -26,6 +28,7 @@ import {
   Square,
   Trash2,
   Type,
+  WandSparkles,
   X,
 } from 'lucide-react';
 
@@ -44,8 +47,11 @@ export type IconName =
   | 'type'
   | 'palette'
   | 'chat'
+  | 'bot'
   | 'message-circle'
   | 'sparkles'
+  | 'wand-sparkles'
+  | 'lock-keyhole'
   | 'close'
   | 'search'
   | 'dots'
@@ -72,8 +78,11 @@ const icons: Record<IconName, LucideIcon> = {
   type: Type,
   palette: Palette,
   chat: MessageSquare,
+  bot: Bot,
   'message-circle': MessageCircle,
   sparkles: Sparkles,
+  'wand-sparkles': WandSparkles,
+  'lock-keyhole': LockKeyhole,
   close: X,
   search: Search,
   dots: MoreHorizontal,

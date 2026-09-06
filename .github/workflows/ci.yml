@@ -70,7 +70,7 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: End-to-end tests
-        run: npm run e2e -- --project=chromium --project=android-portrait
+        run: npm run e2e -- --project=chromium --project=android-portrait --project=onboarding
 
       - name: Final reliability gate
         run: npm run reliability:check

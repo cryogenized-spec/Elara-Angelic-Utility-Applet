@@ -16,7 +16,7 @@ export interface ProviderTurnMetadata {
   interactionId: string;
   startedAt: number;
   completedAt: number;
-  durationMs: number;
+  durationMs?: number;
   usage?: ProviderUsage;
 }
 

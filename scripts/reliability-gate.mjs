@@ -42,7 +42,7 @@ const packageJson = JSON.parse(packageSource);
 for (const script of ['lint', 'typecheck', 'test', 'build', 'e2e', 'reliability:check']) {
   if (typeof packageJson.scripts?.[script] !== 'string') throw new Error(`Reliability gate: missing npm script ${script}`);
 }
-if ((packageSource.match(/"dexie"\s*:/g) ?? []).length !== 1) {
+if ((packageSource.match(/\"dexie\"\s*:/g) ?? []).length !== 1) {
   throw new Error('Reliability gate: package.json must contain exactly one dexie dependency entry.');
 }
 if (packageSource.includes('BLOCK_NONE')) {
@@ -90,8 +90,10 @@ if (!geminiDeclarationSource.includes('description: descriptor.description')) th
 if (!geminiDeclarationSource.includes("filter((descriptor) => descriptor.risk === 'read')")) throw new Error('Reliability gate: default conversational tool surface must only expose currently executable read capabilities.');
 
 const vttSource = readFileSync(join(root, 'src/vtt/transformation.ts'), 'utf8');
+const composerSource = readFileSync(join(root, 'src/app/components/Composer.tsx'), 'utf8');
 if (vttSource.includes('buildVttTransformSystemInstruction')) throw new Error('Reliability gate: VTT must not construct a second competing system instruction.');
-if (!vttSource.includes('systemInstruction: masterInstruction')) throw new Error('Reliability gate: VTT must use the Character Master System Instruction verbatim.');
+if (!vttSource.includes('systemInstruction: options?.systemInstruction')) throw new Error('Reliability gate: VTT transformation must forward its supplied Character Master instruction verbatim.');
+if (!composerSource.includes('transformVttTranscript(transcript, vttTransformMode, { model: geminiModel, signal: controller.signal, systemInstruction })')) throw new Error('Reliability gate: Composer must pass the active Character Master instruction into VTT transformation.');
 
 const transcriptionSource = readFileSync(join(root, 'src/vtt/transcription.ts'), 'utf8');
 if (transcriptionSource.includes('GEMINI_WORKER_URL') || transcriptionSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: VTT transcription must not use the Cloudflare Worker.');

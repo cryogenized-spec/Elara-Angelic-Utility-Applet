@@ -30,13 +30,15 @@ Fresh Lockboxes now default to PIN authentication. Existing legacy password Lock
 - [x] Passkey is primary when configured; PIN remains fallback.
 - [x] Capability-detect and gracefully fall back when unsupported.
 
-The passkey uses the WebAuthn PRF extension to derive a credential-bound symmetric wrapping key. That key wraps the existing Lockbox PIN; a successful passkey assertion recovers the PIN and then uses the existing encrypted API-key path. No Gemini API key material enters WebAuthn. If PRF is unavailable, PIN remains the supported path.
+Passkeys use the WebAuthn PRF extension to derive a credential-bound AES wrapping key for the existing Lockbox PIN. The Gemini API key remains inside the local encrypted Lockbox and is never handed to WebAuthn.
 
 ### Phase 4 — Off
-- [ ] Add Off mode.
-- [ ] Require current authentication before disabling security.
-- [ ] Off must not cause plaintext API-key persistence.
-- [ ] Allow security to be re-enabled after authentication.
+- [x] Add Off mode.
+- [x] Require current authentication before disabling security.
+- [x] Off must not cause plaintext API-key persistence.
+- [x] Allow security to be re-enabled after authentication.
+
+Off mode retains AES-GCM encrypted ciphertext in IndexedDB and stores only a non-exportable local AES CryptoKey for automatic device-local unlock. Turning security off requires an already-unlocked session. Re-enabling security requires choosing a new 6–8 digit PIN, which re-wraps the API key under the Lockbox PIN. Existing passkeys are removed when security is turned off.
 
 ### Phase 5 — UI/UX
 - [ ] Clearly show mode and configured/locked/unlocked state.

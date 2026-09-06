@@ -3,12 +3,65 @@
  *
  * Keeps the existing component-level color/state language while removing the
  * browser chrome, conflicting fixed widths, and uneven touch targets that make
- * the controls read as sloppy. This file is intentionally loaded last so its
- * one-line normalizations win against the accumulated per-component CSS.
+ * the controls read as sloppy.
+ *
+ * The baseline reset is intentionally scoped to the controls this pass touches,
+ * and it is wrapped in :where() so it carries zero specificity. Any deliberate
+ * component-level styling therefore continues to win without needing to be
+ * repeated here. This file is loaded last so the explicit polish rules can
+ * still normalize the known controls.
  */
 
-button,
-summary {
+:where(
+  .glass-menu-button,
+  .icon-button,
+  .composer__icon,
+  .composer__expand,
+  .composer__send,
+  .composer__vtt-button,
+  .composer__vtt-stop,
+  .composer__vtt-menu button,
+  .tool-pill,
+  .sidebar-new-chat,
+  .folder-create button,
+  .folder-toolbar__add,
+  .folder-menu > summary,
+  .folder-menu__panel button,
+  .thread-menu > summary,
+  .thread-menu__panel button,
+  .settings-nav__item,
+  .font-option,
+  .custom-font-button,
+  .art-mode-switch button,
+  .artwork-actions button,
+  .appearance-segment button,
+  .gradient-options button,
+  .upload-button,
+  .model-settings__chip,
+  .model-settings__default-toggle,
+  .model-settings__stop-chip button,
+  .model-settings__add-button,
+  .model-settings__small-button,
+  .model-settings__button,
+  .google-oauth-settings__button,
+  .google-oauth-settings__button--quiet,
+  .google-oauth-settings__button--secondary,
+  .memory-settings__header button,
+  .memory-card__actions button,
+  .memory-editor__actions button,
+  .first-run__template,
+  .first-run__primary,
+  .first-run__secondary,
+  .toggle-switch,
+  .worker-health__button,
+  .workspace-shortcut-menu__summary button,
+  .workspace-shortcut-menu__header button,
+  .workspace-shortcut-menu__item,
+  .quick-action-surface__close,
+  .message-action,
+  .response-variants__button,
+  .execution-summary__toggle
+) {
   margin: 0;
   padding: 0;
   border: 0;
@@ -24,10 +77,58 @@ summary {
   touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
-  transition: color .15s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .12s ease, opacity .15s ease;
 }
 
-button:disabled {
+:where(
+  .glass-menu-button,
+  .icon-button,
+  .composer__icon,
+  .composer__expand,
+  .composer__send,
+  .composer__vtt-button,
+  .composer__vtt-stop,
+  .composer__vtt-menu button,
+  .tool-pill,
+  .sidebar-new-chat,
+  .folder-create button,
+  .folder-toolbar__add,
+  .folder-menu > summary,
+  .folder-menu__panel button,
+  .thread-menu > summary,
+  .thread-menu__panel button,
+  .settings-nav__item,
+  .font-option,
+  .custom-font-button,
+  .art-mode-switch button,
+  .artwork-actions button,
+  .appearance-segment button,
+  .gradient-options button,
+  .upload-button,
+  .model-settings__chip,
+  .model-settings__default-toggle,
+  .model-settings__stop-chip button,
+  .model-settings__add-button,
+  .model-settings__small-button,
+  .model-settings__button,
+  .google-oauth-settings__button,
+  .google-oauth-settings__button--quiet,
+  .google-oauth-settings__button--secondary,
+  .memory-settings__header button,
+  .memory-card__actions button,
+  .memory-editor__actions button,
+  .first-run__template,
+  .first-run__primary,
+  .first-run__secondary,
+  .toggle-switch,
+  .worker-health__button,
+  .workspace-shortcut-menu__summary button,
+  .workspace-shortcut-menu__header button,
+  .workspace-shortcut-menu__item,
+  .quick-action-surface__close,
+  .message-action,
+  .response-variants__button,
+  .execution-summary__toggle
+):disabled {
   cursor: not-allowed;
 }
 
@@ -338,12 +439,5 @@ button:disabled {
     min-height: 40px;
     width: 40px;
     height: 40px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  button,
-  summary {
-    transition: none;
   }
 }

@@ -103,7 +103,10 @@ function normalizeSecurityMetadata(record: Partial<EncryptedGeminiApiKey> | unde
   const security = record?.security;
   if (!security) return defaultSecurityMetadata(now);
   const mode: GeminiLockboxSecurityMode = security.mode === 'pin' || security.mode === 'passkey' || security.mode === 'off' ? security.mode : 'password';
-  const configuredAt = Number.isFinite(security.configuredAt) ? security.configuredAt : (Number.isFinite(record?.updatedAt) ? record!.updatedAt : now);
+  const updatedAt = record?.updatedAt;
+  const configuredAt = Number.isFinite(security.configuredAt)
+    ? security.configuredAt
+    : (updatedAt !== undefined && Number.isFinite(updatedAt) ? updatedAt : now);
   return { mode, authVersion: 1, configuredAt };
 }
 

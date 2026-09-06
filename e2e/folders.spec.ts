@@ -9,7 +9,9 @@ test('folder workspace supports nested creation and moving chats by drag and dro
   await page.goto('');
   await openSidebar(page);
 
-  await page.getByRole('button', { name: 'Create folder' }).click();
+  const createFolder = page.getByRole('button', { name: 'Create folder' });
+  await expect(createFolder).toBeEnabled();
+  await createFolder.click();
   await page.getByRole('textbox', { name: 'New folder name' }).fill('Projects/Elara');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
 
@@ -23,23 +25,31 @@ test('folder workspace supports nested creation and moving chats by drag and dro
   await expect(elara).toBeVisible();
   await thread.dragTo(elara);
 
-  const moveSelect = page.getByRole('combobox', { name: 'Move New conversation to folder' });
+  const elaraFolder = page.locator('details.folder-node').filter({ has: page.locator('.folder-row__name', { hasText: 'Elara' }) }).first();
+  await elaraFolder.locator('.folder-row').click();
+  await elaraFolder.getByRole('button', { name: 'Thread actions for New conversation' }).click();
+  const moveSelect = page.getByRole('combobox', { name: 'Move New conversation to folder', exact: true });
   await expect(moveSelect).not.toHaveValue('');
-  await expect(page.locator('.folder-row__name', { hasText: 'Elara' }).locator('..').locator('.folder-row__count')).toHaveText('1');
+  await expect(elaraFolder.locator('.folder-row__count')).toHaveText('1');
 });
 
 test('folder actions expose rename, move, memory scope, and deletion controls', async ({ page }) => {
   await page.goto('');
   await openSidebar(page);
 
-  await page.getByRole('button', { name: 'Create folder' }).click();
+  const createFolder = page.getByRole('button', { name: 'Create folder' });
+  await expect(createFolder).toBeEnabled();
+  await createFolder.click();
   await page.getByRole('textbox', { name: 'New folder name' }).fill('Workspace');
   await page.getByRole('button', { name: 'Create', exact: true }).click();
 
   const folderPath = 'Workspace';
-  await page.getByRole('button', { name: `Folder actions for ${folderPath}` }).click();
-  await expect(page.getByRole('button', { name: 'Rename' }).last()).toBeVisible();
-  await expect(page.getByRole('combobox', { name: `Move folder ${folderPath}` })).toBeVisible();
-  await expect(page.getByRole('combobox', { name: `Memory scope for ${folderPath}` })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Delete folder' })).toBeVisible();
+  const folder = page.locator('details.folder-node').filter({ has: page.locator('.folder-row__name', { hasText: folderPath }) }).first();
+  await expect(folder).toBeVisible();
+  await folder.locator('.folder-row').click();
+  await folder.getByRole('button', { name: `Folder actions for ${folderPath}` }).click();
+  await expect(folder.getByRole('button', { name: 'Rename' })).toBeVisible();
+  await expect(folder.getByRole('combobox', { name: `Move folder ${folderPath}` })).toBeVisible();
+  await expect(folder.getByRole('combobox', { name: `Memory scope for ${folderPath}` })).toBeVisible();
+  await expect(folder.getByRole('button', { name: 'Delete folder' })).toBeVisible();
 });

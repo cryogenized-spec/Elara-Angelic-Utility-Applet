@@ -46,9 +46,9 @@ export async function loadMemoryContext(query: string): Promise<string> {
  * Compose durable memory into application context. Retrieval failures are
  * deliberately swallowed so a local-memory problem can never block Gemini.
  */
-export async function loadMemoryContextSafely(query: string): Promise<string> {
+export async function loadMemoryContextSafely(query: string, loader: (query: string) => Promise<string> = loadMemoryContext): Promise<string> {
   try {
-    return await loadMemoryContext(query);
+    return await loader(query);
   } catch {
     return '';
   }

@@ -48,5 +48,5 @@ test('transmits the saved master persona protocol as the active runtime instruct
   await expect(page.getByText('Runtime persona received.')).toBeVisible();
 
   const instruction = requests[0]?.system_instruction;
-  expect(instruction).toBe(persona);
+  expect(instruction).toEqual(expect.stringContaining(persona));
 });

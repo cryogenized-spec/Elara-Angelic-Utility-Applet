@@ -6,6 +6,8 @@ type PreferenceRecord =
   | { id: 'roleplay'; value: RoleplayPreferences; updatedAt: number }
   | { id: 'onboarding'; value: { completed: boolean }; updatedAt: number };
 
+const ONBOARDING_STORAGE_KEY = 'elara.onboarding.completed';
+
 class PreferencesDatabase extends Dexie {
   preferences!: Table<PreferenceRecord, string>;
   constructor() {
@@ -84,11 +86,17 @@ export async function saveRoleplayPreferences(value: RoleplayPreferences): Promi
 }
 
 export async function hasCompletedOnboarding(): Promise<boolean> {
+  if (typeof window !== 'undefined' && window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === 'true') return true;
   const record = await db.preferences.get('onboarding');
-  return record?.id === 'onboarding' && record.value.completed === true;
+  if (record?.id === 'onboarding' && record.value.completed === true) {
+    if (typeof window !== 'undefined') window.localStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
+    return true;
+  }
+  return false;
 }
 
 export async function completeOnboarding(): Promise<void> {
+  if (typeof window !== 'undefined') window.localStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
   await db.preferences.put({ id: 'onboarding', value: { completed: true }, updatedAt: Date.now() });
 }
 

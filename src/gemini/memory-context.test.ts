@@ -20,19 +20,22 @@ describe('Gemini durable-memory context boundary', () => {
     expect(result).toContain('User prefers concise answers.');
   });
 
-  it('includes only active-folder and global memories when a folder is global-scoped', async () => {
-    const folder = await createFolderPath('Projects/Elara');
-    await db.folderAssignments.put({ id: 'thread-1', threadId: 'thread-1', folderId: folder.id, updatedAt: Date.now() });
+  it('inherits parent-folder memories while excluding sibling memories when a folder is global-scoped', async () => {
+    const project = await createFolderPath('Projects/Elara');
+    const ui = await createFolderPath('Projects/Elara/UI');
+    const sibling = await createFolderPath('Projects/Other');
+    await db.folderAssignments.put({ id: 'thread-1', threadId: 'thread-1', folderId: ui.id, updatedAt: Date.now() });
     window.localStorage.setItem('elara.active-thread', 'thread-1');
-    await db.folders.update(folder.id, { contextScope: 'global' });
+    await db.folders.update(ui.id, { contextScope: 'global' });
 
-    await createMemory({ content: 'Elara project memory', folderId: folder.id, tags: ['project'], confidence: 1, importance: 1 });
+    await createMemory({ content: 'Elara project memory', folderId: project.id, tags: ['project'], confidence: 1, importance: 1 });
+    await createMemory({ content: 'Elara UI memory', folderId: ui.id, tags: ['ui'], confidence: 1, importance: 1 });
     await createMemory({ content: 'Global user preference', folderId: null, tags: ['global'], confidence: 1, importance: 1 });
-    const other = await createFolderPath('Other');
-    await createMemory({ content: 'Other project secret', folderId: other.id, tags: ['other'], confidence: 1, importance: 1 });
+    await createMemory({ content: 'Other project secret', folderId: sibling.id, tags: ['other'], confidence: 1, importance: 1 });
 
-    const context = await loadMemoryContext('project preference');
+    const context = await loadMemoryContext('project preference ui');
     expect(context).toContain('Elara project memory');
+    expect(context).toContain('Elara UI memory');
     expect(context).toContain('Global user preference');
     expect(context).not.toContain('Other project secret');
   });
@@ -48,5 +51,15 @@ describe('Gemini durable-memory context boundary', () => {
     const context = await loadMemoryContext('note');
     expect(context).toContain('Private folder note');
     expect(context).not.toContain('Global note that must stay out');
+  });
+
+  it('makes global durable memory available to an unfiled thread', async () => {
+    window.localStorage.setItem('elara.active-thread', 'thread-3');
+    await createMemory({ content: 'Global unfiled note', folderId: null, confidence: 1, importance: 1 });
+    await createMemory({ content: 'Project-only note', folderId: 'folder-a', confidence: 1, importance: 1 });
+
+    const context = await loadMemoryContext('note');
+    expect(context).toContain('Global unfiled note');
+    expect(context).not.toContain('Project-only note');
   });
 });

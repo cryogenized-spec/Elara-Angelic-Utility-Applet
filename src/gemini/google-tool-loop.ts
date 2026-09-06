@@ -3,6 +3,7 @@ import { googleToolRegistry } from '../google/tools/registry';
 import { executeGoogleTool, type GoogleToolExecutorOptions } from '../google/tools/executor';
 import { googleReadToolHandlers, GOOGLE_READ_TOOL_NAMES } from '../google/tools/read-handlers';
 import { roleplayWorldToolHandlers } from '../google/tools/roleplay-world-handlers';
+import { requestRoleplayConfirmation } from '../google/confirmation/roleplay-confirmation-ui';
 import { googleOAuthAuthority } from '../google/oauth/authority';
 import { geminiTurnPort } from './provider';
 import { withRuntimeContext } from './runtime-context';
@@ -13,13 +14,13 @@ const DEFAULT_MAX_TOOL_CALLS = 8;
 
 function registryRisk(tool: GoogleToolName): GoogleToolRisk { const descriptor = googleToolRegistry.find((entry) => entry.name === tool); if (!descriptor) throw new Error('Tool is not registered.'); return descriptor.risk; }
 function normalizeTools(tools: readonly GoogleToolName[] | undefined, readOnly: boolean): readonly GoogleToolName[] { const requested = tools?.length ? [...tools] : [...GOOGLE_READ_TOOL_NAMES]; const unique = [...new Set(requested)]; for (const tool of unique) { if (readOnly && registryRisk(tool) !== 'read') throw new Error(`Tool ${tool} is not permitted in read-only mode.`); } return unique; }
-function executorOptions(options: GoogleToolLoopOptions): GoogleToolExecutorOptions { return { oauth: options.executor?.oauth ?? googleOAuthAuthority, handlers: options.executor?.handlers ?? { ...googleReadToolHandlers, ...roleplayWorldToolHandlers }, confirm: options.executor?.confirm, now: options.executor?.now }; }
+function executorOptions(options: GoogleToolLoopOptions, signal?: AbortSignal): GoogleToolExecutorOptions { return { oauth: options.executor?.oauth ?? googleOAuthAuthority, handlers: options.executor?.handlers ?? { ...googleReadToolHandlers, ...roleplayWorldToolHandlers }, confirm: options.executor?.confirm ?? ((request) => request.tool.startsWith('roleplay_setting.') ? requestRoleplayConfirmation(request, signal) : Promise.resolve(false)), now: options.executor?.now }; }
 function errorToolResult(event: Extract<GeminiStreamEvent, { type: 'tool-call' }>, error: { code: string }, request: GeminiTurnRequest): GeminiToolContinuationRequest { return { model: request.model, previousInteractionId: event.interactionId, result: { callId: event.callId, name: event.name, result: { ok: false, error } }, systemInstruction: request.systemInstruction, generationConfig: request.generationConfig, tools: request.tools }; }
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
   const tools = normalizeTools(options.tools ?? request.tools as GoogleToolName[] | undefined, readOnly);
-  const executeOptions = executorOptions(options);
+  const executeOptions = executorOptions(options, signal);
   const systemInstruction = withRuntimeContext(request.systemInstruction);
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
   let executedCalls = 0;

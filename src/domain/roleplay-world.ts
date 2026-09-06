@@ -28,6 +28,8 @@ export function serializeRoleplayWorldYaml(world: RoleplayWorld): string {
   return `${lines.join('\n')}\n`;
 }
 
+export const serializeRoleplayWorld = serializeRoleplayWorldYaml;
+
 export function childEntities(world: RoleplayWorld, parentId: string | null): RoleplayWorldEntity[] { return world.entities.filter((entity) => entity.parentId === parentId).sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)); }
 
 function normalizeEntity(value: unknown): RoleplayWorldEntity | null {

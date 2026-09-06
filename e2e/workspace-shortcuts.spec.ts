@@ -23,6 +23,7 @@ test('executes a shortcut as an internal task rather than an injected user promp
   const conversation = page.getByRole('region', { name: 'Conversation' });
   const before = await conversation.locator('.message').count();
 
+  await expect.poll(() => readStoredShortcutEnabled(page, 'calendar-today')).toBe(true);
   await page.getByRole('button', { name: 'Calendar', exact: true }).click();
   await page.getByRole('menuitem', { name: /Today/ }).click();
 

@@ -1,16 +1,16 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from './conversation';
-import { archiveMemory, createMemory, deleteMemory, getMemory, reinforceMemory, retrieveMemories, updateMemory } from './memory';
+import { archiveMemory, createMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, updateMemory } from './memory';
 
 describe('durable memory engine', () => {
   beforeEach(async () => {
     await db.memories.clear();
   });
 
-  it('creates, updates, reinforces, and deletes a memory', async () => {
+  it('creates, updates, reinforces, promotes, and deletes a memory', async () => {
     const memory = await createMemory({
-      kind: 'CORE',
+      kind: 'MICRO_OBSERVATION',
       content: 'Elara is Gareth\'s synthetic cybernetic consort.',
       confidence: 0.9,
       importance: 0.95,
@@ -24,8 +24,13 @@ describe('durable memory engine', () => {
     expect(updated.content).toContain('canonical');
     expect(updated.importance).toBe(1);
 
+    const promoted = await promoteMemory(memory.id);
+    expect(promoted.kind).toBe('EPISODIC');
+    expect(promoted.reinforcementCount).toBe(1);
+    expect(promoted.lifecycle).toBe('active');
+
     const reinforced = await reinforceMemory(memory.id);
-    expect(reinforced.reinforcementCount).toBe(1);
+    expect(reinforced.reinforcementCount).toBe(2);
     expect(reinforced.lifecycle).toBe('active');
 
     await deleteMemory(memory.id);

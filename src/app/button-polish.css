@@ -1,0 +1,443 @@
+/*
+ * Button polish pass.
+ *
+ * Keeps the existing component-level color/state language while removing the
+ * browser chrome, conflicting fixed widths, and uneven touch targets that make
+ * the controls read as sloppy.
+ *
+ * The baseline reset is intentionally scoped to the controls this pass touches,
+ * and it is wrapped in :where() so it carries zero specificity. Any deliberate
+ * component-level styling therefore continues to win without needing to be
+ * repeated here. This file is loaded last so the explicit polish rules can
+ * still normalize the known controls.
+ */
+
+:where(
+  .glass-menu-button,
+  .icon-button,
+  .composer__icon,
+  .composer__expand,
+  .composer__send,
+  .composer__vtt-button,
+  .composer__vtt-stop,
+  .composer__vtt-menu button,
+  .tool-pill,
+  .sidebar-new-chat,
+  .folder-create button,
+  .folder-toolbar__add,
+  .folder-menu > summary,
+  .folder-menu__panel button,
+  .thread-menu > summary,
+  .thread-menu__panel button,
+  .settings-nav__item,
+  .font-option,
+  .custom-font-button,
+  .art-mode-switch button,
+  .artwork-actions button,
+  .appearance-segment button,
+  .gradient-options button,
+  .upload-button,
+  .model-settings__chip,
+  .model-settings__default-toggle,
+  .model-settings__stop-chip button,
+  .model-settings__add-button,
+  .model-settings__small-button,
+  .model-settings__button,
+  .google-oauth-settings__button,
+  .google-oauth-settings__button--quiet,
+  .google-oauth-settings__button--secondary,
+  .memory-settings__header button,
+  .memory-card__actions button,
+  .memory-editor__actions button,
+  .first-run__template,
+  .first-run__primary,
+  .first-run__secondary,
+  .toggle-switch,
+  .worker-health__button,
+  .workspace-shortcut-menu__summary button,
+  .workspace-shortcut-menu__header button,
+  .workspace-shortcut-menu__item,
+  .quick-action-surface__close,
+  .message-action,
+  .response-variants__button,
+  .execution-summary__toggle
+) {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  line-height: 1.2;
+  color: inherit;
+  text-align: center;
+  cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+:where(
+  .glass-menu-button,
+  .icon-button,
+  .composer__icon,
+  .composer__expand,
+  .composer__send,
+  .composer__vtt-button,
+  .composer__vtt-stop,
+  .composer__vtt-menu button,
+  .tool-pill,
+  .sidebar-new-chat,
+  .folder-create button,
+  .folder-toolbar__add,
+  .folder-menu > summary,
+  .folder-menu__panel button,
+  .thread-menu > summary,
+  .thread-menu__panel button,
+  .settings-nav__item,
+  .font-option,
+  .custom-font-button,
+  .art-mode-switch button,
+  .artwork-actions button,
+  .appearance-segment button,
+  .gradient-options button,
+  .upload-button,
+  .model-settings__chip,
+  .model-settings__default-toggle,
+  .model-settings__stop-chip button,
+  .model-settings__add-button,
+  .model-settings__small-button,
+  .model-settings__button,
+  .google-oauth-settings__button,
+  .google-oauth-settings__button--quiet,
+  .google-oauth-settings__button--secondary,
+  .memory-settings__header button,
+  .memory-card__actions button,
+  .memory-editor__actions button,
+  .first-run__template,
+  .first-run__primary,
+  .first-run__secondary,
+  .toggle-switch,
+  .worker-health__button,
+  .workspace-shortcut-menu__summary button,
+  .workspace-shortcut-menu__header button,
+  .workspace-shortcut-menu__item,
+  .quick-action-surface__close,
+  .message-action,
+  .response-variants__button,
+  .execution-summary__toggle
+):disabled {
+  cursor: not-allowed;
+}
+
+/* Standard action buttons ------------------------------------------------- */
+
+.sidebar-new-chat,
+.artwork-actions button,
+.google-oauth-settings__button,
+.model-settings__button,
+.worker-health__button,
+.memory-settings__header button,
+.memory-editor__actions button,
+.first-run__primary,
+.first-run__secondary {
+  min-width: 0;
+  min-height: 42px;
+  padding: 0 14px;
+  border-radius: 13px;
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1;
+  letter-spacing: .01em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+.first-run__primary,
+.first-run__secondary {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.sidebar-new-chat,
+.artwork-actions button,
+.google-oauth-settings__button,
+.model-settings__button,
+.memory-settings__header button,
+.memory-editor__actions .primary {
+  border-color: rgba(110, 168, 255, .34);
+  background: rgba(110, 168, 255, .08);
+  color: var(--text);
+}
+
+.sidebar-new-chat:hover,
+.artwork-actions button:hover,
+.google-oauth-settings__button:hover,
+.model-settings__button:hover,
+.memory-settings__header button:hover,
+.memory-editor__actions button:hover {
+  border-color: rgba(110, 168, 255, .52);
+  background: rgba(110, 168, 255, .13);
+}
+
+.sidebar-new-chat,
+.artwork-actions button,
+.google-oauth-settings__button,
+.model-settings__button,
+.memory-settings__header button,
+.memory-editor__actions button,
+.first-run__primary,
+.first-run__secondary,
+.worker-health__button {
+  transition: color .15s ease, background-color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .12s ease, opacity .15s ease;
+}
+
+/* Segmented controls and chips ------------------------------------------ */
+
+.art-mode-switch button,
+.appearance-segment button,
+.gradient-options button,
+.upload-button,
+.model-settings__chip {
+  min-height: 42px;
+  padding: 0 11px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  text-align: center;
+}
+
+/* Small inline controls -------------------------------------------------- */
+
+.folder-create button,
+.folder-toolbar__add,
+.model-settings__small-button,
+.model-settings__add-button,
+.memory-card__actions button,
+.google-oauth-settings__button--secondary,
+.custom-font-button {
+  min-height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
+.custom-font-button {
+  border: 1px solid rgba(110, 168, 255, .28);
+  background: rgba(110, 168, 255, .08);
+  color: var(--text);
+}
+
+.custom-font-button:hover {
+  border-color: rgba(110, 168, 255, .46);
+  background: rgba(110, 168, 255, .13);
+}
+
+.custom-font-card {
+  display: grid;
+  gap: 10px;
+}
+
+.custom-font-card strong,
+.custom-font-card span {
+  display: block;
+}
+
+.custom-font-input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(10, 11, 17, .72);
+  color: var(--text);
+  font: inherit;
+  font-size: 11px;
+  outline: none;
+}
+
+.custom-font-input:focus {
+  border-color: rgba(110, 168, 255, .42);
+}
+
+.custom-font-error {
+  color: #ffd3dc;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+/* Icon buttons ------------------------------------------------------------ */
+
+.icon-button,
+.glass-menu-button {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  background: rgba(21, 22, 31, .68);
+  box-shadow: var(--glow);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transition: transform .16s ease, border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+
+.quick-action-surface__close {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  background: rgba(21, 22, 31, .68);
+  box-shadow: var(--glow);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  transition: transform .16s ease, border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+
+.icon-button:hover,
+.glass-menu-button:hover,
+.quick-action-surface__close:hover {
+  transform: translateY(-1px);
+  border-color: rgba(110, 168, 255, .4);
+  background: rgba(29, 31, 43, .86);
+}
+
+.app-shell form.composer > .composer__icon,
+.app-shell form.composer > .composer__vtt-control > .composer__icon,
+.app-shell form.composer > .composer__send {
+  width: 100%;
+  min-width: 0;
+  height: 42px;
+  padding: 0;
+  border-radius: 13px;
+}
+
+.app-shell form.composer > .composer__vtt-control,
+.app-shell form.composer > .composer__vtt-control > .composer__vtt-button {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+}
+
+.composer__expand {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+}
+
+/* Small close / disclosure controls -------------------------------------- */
+
+.workspace-shortcut-menu__summary button,
+.workspace-shortcut-menu__header button,
+.folder-menu > summary,
+.thread-menu > summary {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, .045);
+  color: rgba(255, 255, 255, .68);
+  cursor: pointer;
+}
+
+.workspace-shortcut-menu__summary button:hover,
+.workspace-shortcut-menu__header button:hover,
+.folder-menu > summary:hover,
+.thread-menu > summary:hover {
+  background: rgba(255, 255, 255, .085);
+  color: var(--text);
+}
+
+/* Press and focus feedback ----------------------------------------------- */
+
+.sidebar-new-chat,
+.artwork-actions button,
+.google-oauth-settings__button,
+.model-settings__button,
+.worker-health__button,
+.memory-settings__header button,
+.memory-editor__actions button,
+.model-settings__chip,
+.art-mode-switch button,
+.appearance-segment button,
+.gradient-options button,
+.upload-button,
+.folder-create button,
+.folder-toolbar__add,
+.model-settings__small-button,
+.model-settings__add-button,
+.memory-card__actions button,
+.google-oauth-settings__button--secondary,
+.custom-font-button,
+.tool-pill {
+  text-decoration: none;
+}
+
+.sidebar-new-chat:not(:disabled):active,
+.artwork-actions button:not(:disabled):active,
+.google-oauth-settings__button:not(:disabled):active,
+.model-settings__button:not(:disabled):active,
+.worker-health__button:not(:disabled):active,
+.memory-settings__header button:not(:disabled):active,
+.memory-editor__actions button:not(:disabled):active,
+.model-settings__chip:not(:disabled):active,
+.art-mode-switch button:not(:disabled):active,
+.appearance-segment button:not(:disabled):active,
+.gradient-options button:not(:disabled):active,
+.upload-button:not(:disabled):active,
+.folder-create button:not(:disabled):active,
+.folder-toolbar__add:not(:disabled):active,
+.model-settings__small-button:not(:disabled):active,
+.model-settings__add-button:not(:disabled):active,
+.memory-card__actions button:not(:disabled):active,
+.google-oauth-settings__button--secondary:not(:disabled):active,
+.custom-font-button:not(:disabled):active,
+.tool-pill:not(:disabled):active {
+  transform: translateY(1px);
+}
+
+@media (pointer: coarse) {
+  .model-settings__small-button,
+  .model-settings__add-button,
+  .memory-card__actions button,
+  .google-oauth-settings__button--secondary,
+  .folder-create button,
+  .custom-font-button {
+    min-height: 40px;
+  }
+
+  .message-action,
+  .response-variants__button {
+    min-width: 40px;
+    min-height: 40px;
+    width: 40px;
+    height: 40px;
+  }
+}

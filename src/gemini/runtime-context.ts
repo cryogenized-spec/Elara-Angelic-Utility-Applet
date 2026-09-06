@@ -15,8 +15,10 @@ export function withRuntimeContext(systemInstruction: string | undefined): strin
     '- Treat the persistent World Canvas as authoritative setting context.',
     '- Use roleplay_setting tools to inspect or change persistent world entities when appropriate.',
     '- Persistent world mutations require user confirmation before they are committed.',
-    '- Do not store current date/time/weekday as persistent world facts unless the user explicitly asks for a historical fact.',
-    '- Maintain a coherent physical setting and use initiative to choose a suitable existing location when the narrative requires one.',
+    '- Do not store current date, time, weekday, or timezone as persistent world facts.',
+    '- Always establish or mention a physical setting when roleplaying.',
+    '- Use the current runtime time as dynamic context and use initiative to choose a logical existing location when the narrative calls for one.',
+    '- Physical action and scene narration use italics; spoken dialogue uses ordinary text.',
   ].join('\n');
   const base = systemInstruction?.trim();
   return base ? `${base}\n\n${runtime}` : runtime;

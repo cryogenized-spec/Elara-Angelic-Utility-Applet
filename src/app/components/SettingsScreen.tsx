@@ -27,11 +27,11 @@ const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },
   { id: 'character', label: 'Character', icon: 'sparkles' as const },
   { id: 'typography', label: 'Typography', icon: 'type' as const },
-  { id: 'model', label: 'Gemini', icon: 'chat' as const },
+  { id: 'model', label: 'Gemini', icon: 'bot' as const },
   { id: 'google', label: 'Google', icon: 'shield' as const },
   { id: 'chat', label: 'Chat', icon: 'message-circle' as const },
-  { id: 'roleplay', label: 'Roleplay', icon: 'sparkles' as const },
-  { id: 'security', label: 'Lockbox', icon: 'shield' as const },
+  { id: 'roleplay', label: 'Roleplay', icon: 'wand-sparkles' as const },
+  { id: 'security', label: 'Lockbox', icon: 'lock-keyhole' as const },
 ] as const;
 
 type SettingsSection = typeof settingsSections[number]['id'];

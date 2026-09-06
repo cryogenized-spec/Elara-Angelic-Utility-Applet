@@ -89,7 +89,7 @@ export function SettingsScreen({
   fontSize: number;
   onFontSizeChange: (fontSize: number) => void;
   portraitScale: PortraitScale;
-  onPortraitScaleChange: (scale: PortraitScale) => void;
+  onPortraitScaleChange: ((scale: PortraitScale) => void) | ((scale: 1 | 2 | 3) => void);
   portraitBackground: PortraitBackground;
   onPortraitBackgroundChange: (background: PortraitBackground) => void;
   selectedModel: string;
@@ -109,6 +109,7 @@ export function SettingsScreen({
   const [customUrl, setCustomUrl] = useState('');
   const [customError, setCustomError] = useState<string | null>(null);
   const model = getGeminiModel(selectedModel);
+  const applyPortraitScale = onPortraitScaleChange as (scale: PortraitScale) => void;
 
   function applyCustomFont() {
     setCustomError(null);
@@ -167,11 +168,12 @@ export function SettingsScreen({
                 label="Character presentation scale"
                 min={1}
                 max={3}
+                step={0.5}
                 value={portraitScale}
                 valueLabel={`${portraitScale}×`}
                 minLabel="1×"
                 maxLabel="3×"
-                onChange={(value) => onPortraitScaleChange(Math.min(3, Math.max(1, value)) as PortraitScale)}
+                onChange={(value) => applyPortraitScale(Math.min(3, Math.max(1, value)) as PortraitScale)}
               />
               <div className="background-picker">
                 <div className="background-picker__header">

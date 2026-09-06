@@ -3,7 +3,8 @@ import { DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type ChatAppearancePreferenc
 
 type PreferenceRecord =
   | { id: 'chat-appearance'; value: ChatAppearancePreferences; updatedAt: number }
-  | { id: 'roleplay'; value: RoleplayPreferences; updatedAt: number };
+  | { id: 'roleplay'; value: RoleplayPreferences; updatedAt: number }
+  | { id: 'onboarding'; value: { completed: boolean }; updatedAt: number };
 
 class PreferencesDatabase extends Dexie {
   preferences!: Table<PreferenceRecord, string>;
@@ -15,6 +16,12 @@ class PreferencesDatabase extends Dexie {
         if (record.id === 'chat-appearance') record.value = normalizeChatAppearance(record.value);
         if (record.id === 'roleplay') record.value = normalizeRoleplay(record.value);
       });
+    });
+    this.version(3).stores({ preferences: 'id, updatedAt' }).upgrade(async (tx) => {
+      const existing = await tx.table('preferences').toArray() as PreferenceRecord[];
+      if (existing.some((record) => record.id !== 'onboarding')) {
+        await tx.table('preferences').put({ id: 'onboarding', value: { completed: true }, updatedAt: Date.now() });
+      }
     });
   }
 }
@@ -74,6 +81,15 @@ export async function saveRoleplayPreferences(value: RoleplayPreferences): Promi
   const nextValue = normalizeRoleplay(value);
   await db.preferences.put({ id: 'roleplay', value: nextValue, updatedAt: Date.now() });
   return nextValue;
+}
+
+export async function hasCompletedOnboarding(): Promise<boolean> {
+  const record = await db.preferences.get('onboarding');
+  return record?.id === 'onboarding' && record.value.completed === true;
+}
+
+export async function completeOnboarding(): Promise<void> {
+  await db.preferences.put({ id: 'onboarding', value: { completed: true }, updatedAt: Date.now() });
 }
 
 function normalizeBackgroundValue(mode: ChatAppearancePreferences['chatBackgroundMode'], value: string): string {

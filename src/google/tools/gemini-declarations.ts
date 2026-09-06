@@ -2,7 +2,7 @@ import { googleToolRegistry } from './registry';
 
 export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly name: string; readonly description: string; readonly parameters: { readonly type: 'object'; readonly properties: Record<string, unknown>; readonly additionalProperties: boolean; readonly required?: readonly string[]; }; }
 
-const roleplayProperties: Record<string, unknown> = {
+const roleplayProperties: Record<string, Record<string, unknown>> = {
   'roleplay_setting.list': { parentId: { type: 'string', description: 'Optional parent entity id.' } },
   'roleplay_setting.inspect': { id: { type: 'string' }, ref: { type: 'string', description: 'Opaque 16-hex world reference.' } },
   'roleplay_setting.create': { type: { type: 'string', enum: ['building','room','outdoor','place','area','object','world'] }, name: { type: 'string' }, description: { type: 'string' }, parentId: { type: 'string', description: 'Optional parent entity id.' } },
@@ -12,7 +12,7 @@ const roleplayProperties: Record<string, unknown> = {
 };
 
 export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaration[] = googleToolRegistry.map((descriptor) => {
-  const properties = roleplayProperties[descriptor.name] ?? {};
+  const properties: Record<string, unknown> = roleplayProperties[descriptor.name] ?? {};
   const required = descriptor.name === 'roleplay_setting.create' ? ['type', 'name'] : undefined;
   return { type: 'function', name: descriptor.name, description: descriptor.description, parameters: { type: 'object', properties, additionalProperties: descriptor.name.startsWith('roleplay_setting.') ? false : true, ...(required ? { required } : {}) } };
 });

@@ -17,9 +17,9 @@ describe('Roleplay World Canvas', () => {
   it('builds a deterministic directory tree from parent ids', () => {
     const world = normalizeRoleplayWorld({
       entities: [
-        { id: 'house_01', ref: '0000000000000001', type: 'building', name: 'House', parentId: null },
-        { id: 'bedroom_02', ref: '0000000000000002', type: 'room', name: 'Bedroom', parentId: 'house_01' },
-        { id: 'kitchen_01', ref: '0000000000000003', type: 'room', name: 'Kitchen', parentId: 'house_01' },
+        { id: 'house_01', ref: '0000000000000001', type: 'building', name: 'House', description: '', parentId: null, createdAt: 1, updatedAt: 1 },
+        { id: 'bedroom_02', ref: '0000000000000002', type: 'room', name: 'Bedroom', description: '', parentId: 'house_01', createdAt: 2, updatedAt: 2 },
+        { id: 'kitchen_01', ref: '0000000000000003', type: 'room', name: 'Kitchen', description: '', parentId: 'house_01', createdAt: 3, updatedAt: 3 },
       ],
     });
     expect(childEntities(world, null).map((entity) => entity.id)).toEqual(['house_01']);
@@ -27,7 +27,7 @@ describe('Roleplay World Canvas', () => {
   });
 
   it('rejects malformed opaque refs during normalization', () => {
-    const world = normalizeRoleplayWorld({ entities: [{ id: 'room_01', ref: 'not-a-ref', type: 'room', name: 'Room' }] });
+    const world = normalizeRoleplayWorld({ entities: [{ id: 'room_01', ref: 'not-a-ref', type: 'room', name: 'Room', description: '', parentId: null, createdAt: 1, updatedAt: 1 }] });
     expect(world.entities).toHaveLength(0);
   });
 });

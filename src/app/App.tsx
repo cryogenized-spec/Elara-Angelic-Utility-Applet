@@ -31,6 +31,7 @@ import './app.css';
 import './mobile-viewport.css';
 import './quick-action-rail.css';
 import './components/composer-layout.css';
+import './button-polish.css';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 const DEFAULT_TITLE = 'New conversation';

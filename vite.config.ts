@@ -47,4 +47,7 @@ export default defineConfig({
     sourcemap: true,
     chunkSizeWarningLimit: 600,
   },
+  server: {
+    allowedHosts: true,
+  },
 });

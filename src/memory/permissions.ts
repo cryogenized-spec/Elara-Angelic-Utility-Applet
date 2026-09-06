@@ -5,6 +5,9 @@ export type MemoryPermission = (typeof MEMORY_PERMISSIONS)[number];
 export type MemoryActor = 'model' | 'user' | 'system';
 
 export type MemoryPermissionPolicy = Record<MemoryActor, Record<MemoryPermission, boolean>>;
+export type MemoryPermissionPolicyPatch = Partial<{
+  [K in MemoryActor]: Partial<Record<MemoryPermission, boolean>>;
+}>;
 
 export const DEFAULT_MEMORY_PERMISSION_POLICY: Readonly<MemoryPermissionPolicy> = {
   model: {
@@ -44,7 +47,7 @@ export function getMemoryPermissionPolicy(): MemoryPermissionPolicy {
   return clonePolicy(policy);
 }
 
-export function setMemoryPermissionPolicy(next: Partial<MemoryPermissionPolicy>): MemoryPermissionPolicy {
+export function setMemoryPermissionPolicy(next: MemoryPermissionPolicyPatch): MemoryPermissionPolicy {
   policy = {
     model: { ...policy.model, ...(next.model ?? {}) },
     user: { ...policy.user, ...(next.user ?? {}) },

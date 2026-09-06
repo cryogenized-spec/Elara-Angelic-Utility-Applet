@@ -77,7 +77,10 @@ export async function retrieveMemories(scope: MemoryRetrievalScope = {}): Promis
   const selected = rankAndBudgetMemories(candidates, scope);
   if (selected.length) {
     const recalledAt = Date.now();
-    for (const memory of selected) await saveExisting({ ...memory, lastRecalledAt: recalledAt, recallCount: memory.recallCount + 1 });
+    for (const memory of selected) {
+      const { score: _score, ...durableMemory } = memory;
+      await saveExisting({ ...durableMemory, lastRecalledAt: recalledAt, recallCount: memory.recallCount + 1 });
+    }
   }
   return selected;
 }

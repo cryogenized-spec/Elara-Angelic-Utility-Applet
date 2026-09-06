@@ -8,14 +8,24 @@ const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const KEY_LENGTH = 256;
 
+export const GEMINI_LOCKBOX_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+export type GeminiLockboxSecurityMode = 'password' | 'pin' | 'passkey' | 'off';
+
+export interface GeminiLockboxSecurityMetadata {
+  mode: GeminiLockboxSecurityMode;
+  authVersion: 1;
+  configuredAt: number;
+}
+
 type EncryptedGeminiApiKey = {
   id: 'gemini-api-key';
-  version: 1;
+  version: 2;
   salt: string;
   iv: string;
   ciphertext: string;
   iterations: number;
   updatedAt: number;
+  security: GeminiLockboxSecurityMetadata;
 };
 
 class LockboxDatabase extends Dexie {
@@ -24,11 +34,23 @@ class LockboxDatabase extends Dexie {
   constructor() {
     super(DB_NAME);
     this.version(1).stores({ secrets: 'id, updatedAt' });
+    this.version(2).stores({ secrets: 'id, updatedAt' }).upgrade(async (tx) => {
+      await tx.table<EncryptedGeminiApiKey, string>('secrets').toCollection().modify((record) => {
+        record.version = 2;
+        record.security = {
+          mode: 'password',
+          authVersion: 1,
+          configuredAt: record.updatedAt,
+        };
+      });
+    });
   }
 }
 
 const db = new LockboxDatabase();
 let unlockedApiKey: string | null = null;
+let lastActivityAt: number | null = null;
+let idleTimer: number | null = null;
 
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -52,14 +74,6 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
-function textEncoder(): TextEncoder {
-  return new TextEncoder();
-}
-
-function textDecoder(): TextDecoder {
-  return new TextDecoder();
-}
-
 async function deriveEncryptionKey(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
   if (!passphrase) throw new Error('A Lockbox password is required.');
   const material = await crypto.subtle.importKey(
@@ -78,7 +92,23 @@ async function deriveEncryptionKey(passphrase: string, salt: Uint8Array, iterati
   );
 }
 
-async function encryptApiKey(apiKey: string, passphrase: string): Promise<EncryptedGeminiApiKey> {
+function textEncoder(): TextEncoder { return new TextEncoder(); }
+function textDecoder(): TextDecoder { return new TextDecoder(); }
+
+function defaultSecurityMetadata(now = Date.now()): GeminiLockboxSecurityMetadata {
+  return { mode: 'password', authVersion: 1, configuredAt: now };
+}
+
+function normalizeSecurityMetadata(record: Partial<EncryptedGeminiApiKey> | undefined, now = Date.now()): GeminiLockboxSecurityMetadata {
+  const security = record?.security;
+  if (!security) return defaultSecurityMetadata(now);
+  const mode: GeminiLockboxSecurityMode = security.mode === 'pin' || security.mode === 'passkey' || security.mode === 'off' ? security.mode : 'password';
+  const configuredAt = Number.isFinite(security.configuredAt) ? security.configuredAt : (Number.isFinite(record?.updatedAt) ? record!.updatedAt : now);
+  return { mode, authVersion: 1, configuredAt };
+}
+
+async function encryptApiKey(apiKey: string, passphrase: string, security?: GeminiLockboxSecurityMetadata): Promise<EncryptedGeminiApiKey> {
+  const now = Date.now();
   const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
   const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
   const key = await deriveEncryptionKey(passphrase, salt, PBKDF2_ITERATIONS);
@@ -86,12 +116,13 @@ async function encryptApiKey(apiKey: string, passphrase: string): Promise<Encryp
   const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, toArrayBuffer(plaintext));
   return {
     id: RECORD_ID,
-    version: 1,
+    version: 2,
     salt: toBase64(salt),
     iv: toBase64(iv),
     ciphertext: toBase64(new Uint8Array(ciphertext)),
     iterations: PBKDF2_ITERATIONS,
-    updatedAt: Date.now(),
+    updatedAt: now,
+    security: security ?? defaultSecurityMetadata(now),
   };
 }
 
@@ -116,18 +147,62 @@ function removeLegacyPlaintextKey(): void {
   }
 }
 
-// Remove the temporary plaintext storage key immediately on load. It is never read or migrated.
-removeLegacyPlaintextKey();
+function clearIdleTimer(): void {
+  if (idleTimer !== null && typeof window !== 'undefined') window.clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+function notifyChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('elara-gemini-lockbox-changed'));
+}
+
+function scheduleIdleLock(): void {
+  clearIdleTimer();
+  if (unlockedApiKey === null || typeof window === 'undefined' || lastActivityAt === null) return;
+  const remaining = Math.max(0, GEMINI_LOCKBOX_IDLE_TIMEOUT_MS - (Date.now() - lastActivityAt));
+  idleTimer = window.setTimeout(() => {
+    idleTimer = null;
+    enforceGeminiApiKeyIdleTimeout();
+  }, remaining);
+}
+
+export function isGeminiApiKeyIdle(now = Date.now()): boolean {
+  return unlockedApiKey !== null && lastActivityAt !== null && now - lastActivityAt >= GEMINI_LOCKBOX_IDLE_TIMEOUT_MS;
+}
+
+export function enforceGeminiApiKeyIdleTimeout(now = Date.now()): boolean {
+  if (!isGeminiApiKeyIdle(now)) return false;
+  lockGeminiApiKey();
+  return true;
+}
+
+export function touchGeminiApiKeyActivity(now = Date.now()): void {
+  if (unlockedApiKey === null) return;
+  lastActivityAt = now;
+  scheduleIdleLock();
+}
+
+export function getGeminiLockboxLastActivityAt(): number | null {
+  return lastActivityAt;
+}
 
 export type GeminiLockboxStatus = 'empty' | 'locked' | 'unlocked';
 
 export async function getGeminiLockboxStatus(): Promise<GeminiLockboxStatus> {
+  enforceGeminiApiKeyIdleTimeout();
   if (unlockedApiKey !== null) return unlockedApiKey ? 'unlocked' : 'empty';
   const record = await db.secrets.get(RECORD_ID);
   return record ? 'locked' : 'empty';
 }
 
+export async function getGeminiLockboxMetadata(): Promise<GeminiLockboxSecurityMetadata | null> {
+  const record = await db.secrets.get(RECORD_ID);
+  return record ? normalizeSecurityMetadata(record) : null;
+}
+
 export async function getGeminiApiKey(): Promise<string> {
+  enforceGeminiApiKeyIdleTimeout();
+  if (unlockedApiKey !== null) touchGeminiApiKeyActivity();
   return unlockedApiKey ?? '';
 }
 
@@ -139,30 +214,65 @@ export async function saveGeminiApiKey(value: string, passphrase: string): Promi
   }
   const password = passphrase.trim();
   if (!password) throw new Error('A Lockbox password is required.');
-  const encrypted = await encryptApiKey(apiKey, password);
+  const existing = await db.secrets.get(RECORD_ID);
+  const security = normalizeSecurityMetadata(existing);
+  const encrypted = await encryptApiKey(apiKey, password, security);
   await db.secrets.put(encrypted);
   removeLegacyPlaintextKey();
   unlockedApiKey = apiKey;
+  lastActivityAt = Date.now();
+  scheduleIdleLock();
+  notifyChanged();
 }
 
 export async function unlockGeminiApiKey(passphrase: string): Promise<void> {
   const record = await db.secrets.get(RECORD_ID);
   if (!record) throw new Error('The Gemini API Lockbox is not configured.');
-  const apiKey = await decryptApiKey(record, passphrase.trim());
+  const normalized = { ...record, version: 2 as const, security: normalizeSecurityMetadata(record) };
+  const apiKey = await decryptApiKey(normalized, passphrase.trim());
   if (!apiKey) throw new Error('The encrypted Gemini API key is empty.');
   unlockedApiKey = apiKey;
+  lastActivityAt = Date.now();
+  scheduleIdleLock();
   removeLegacyPlaintextKey();
+  notifyChanged();
 }
 
 export function lockGeminiApiKey(): void {
+  clearIdleTimer();
+  const wasUnlocked = unlockedApiKey !== null;
   unlockedApiKey = null;
+  lastActivityAt = null;
+  if (wasUnlocked) notifyChanged();
 }
 
 export async function clearGeminiApiKey(): Promise<void> {
   await db.secrets.delete(RECORD_ID);
+  clearIdleTimer();
   unlockedApiKey = null;
+  lastActivityAt = null;
   removeLegacyPlaintextKey();
+  notifyChanged();
 }
+
+function installLifecycleController(): void {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  const enforceAndMaybeTouch = (touch = true) => {
+    if (document.visibilityState !== 'visible') return;
+    enforceGeminiApiKeyIdleTimeout();
+    if (touch && unlockedApiKey !== null) touchGeminiApiKeyActivity();
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') enforceAndMaybeTouch(true);
+  });
+  window.addEventListener('focus', () => enforceAndMaybeTouch(true));
+  window.addEventListener('pointerdown', () => enforceAndMaybeTouch(true), { passive: true });
+  window.addEventListener('keydown', () => enforceAndMaybeTouch(true), { passive: true });
+  window.addEventListener('touchstart', () => enforceAndMaybeTouch(true), { passive: true });
+}
+
+installLifecycleController();
+removeLegacyPlaintextKey();
 
 export function maskGeminiApiKey(value: string): string {
   const key = value.trim();

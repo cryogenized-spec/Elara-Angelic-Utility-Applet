@@ -16,10 +16,11 @@ This directory is the authoritative documentation tree for Elara.
 
 ## Memory architecture
 
-- [`MEMORY_ARCHITECTURE.md`](./MEMORY_ARCHITECTURE.md) — authoritative memory store, capability, observation/consolidation, retrieval, Gemini context, and Memory Bank boundaries.
+- [`MEMORY_ARCHITECTURE.md`](./MEMORY_ARCHITECTURE.md) — authoritative memory store, capability, permission policy, observation/consolidation, retrieval, Gemini context, and Memory Bank boundaries.
 - [`../documents/MEMORY_PASS_01_STATUS.md`](../documents/MEMORY_PASS_01_STATUS.md) — foundation pass and retired compatibility seams.
 - [`../documents/MEMORY_PASS_02_STATUS.md`](../documents/MEMORY_PASS_02_STATUS.md) — deliberate `memory.save` capability boundary and cleanup.
 - [`../documents/MEMORY_PASS_03_STATUS.md`](../documents/MEMORY_PASS_03_STATUS.md) — explicit observation recording and consolidation contract.
+- [`../documents/MEMORY_PASS_04_STATUS.md`](../documents/MEMORY_PASS_04_STATUS.md) — centralized permission policy and first-class forget/delete handoff.
 
 ## Google Workspace architecture
 

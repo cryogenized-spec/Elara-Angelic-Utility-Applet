@@ -51,6 +51,7 @@ function isRetrievable(memory: DurableMemory, scope: MemoryRetrievalScope, now: 
   if (memory.lifecycle === 'archived') return false;
   if (memory.expiresAt !== null && memory.expiresAt <= now) return false;
   if (memory.folderId === null) return scope.includeGlobal !== false;
+  if (scope.folderIds?.length) return scope.folderIds.includes(memory.folderId);
   return memory.folderId === (scope.folderId ?? null);
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useEffect, useMemo, useState, type DragEvent, type ReactElement } from 'react';
 import type { ConversationThread } from '../../domain/chat';
 import type { ConversationFolder } from '../../persistence/folders';
 import { useFolders } from '../folders/FolderProvider';
@@ -143,7 +143,7 @@ export function Sidebar({ open, threads, activeId, onClose, onSelect, onNewChat,
   const threadMatches = (thread: ConversationThread) => !query.trim() || thread.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
   const threadsInFolder = (folderId: string) => visibleThreads.filter((thread) => (folderState.assignments[thread.id] ?? null) === folderId);
 
-  function beginDrag(kind: 'thread' | 'folder', id: string, event: React.DragEvent<HTMLElement>): void {
+  function beginDrag(kind: 'thread' | 'folder', id: string, event: DragEvent<HTMLElement>): void {
     if (editingId === id || editingFolderId === id) return;
     const payload = dragPayload(kind, id);
     event.dataTransfer.effectAllowed = 'move';
@@ -156,7 +156,7 @@ export function Sidebar({ open, threads, activeId, onClose, onSelect, onNewChat,
     setDragging(null); setDropTarget(null);
   }
 
-  function dragOver(target: DropTarget, event: React.DragEvent<HTMLElement>): void {
+  function dragOver(target: DropTarget, event: DragEvent<HTMLElement>): void {
     if (!dragging) return;
     const payload = parseDragPayload(dragging);
     if (!payload) return;
@@ -166,7 +166,7 @@ export function Sidebar({ open, threads, activeId, onClose, onSelect, onNewChat,
     setDropTarget(target);
   }
 
-  async function dropOn(targetFolderId: string | null, event: React.DragEvent<HTMLElement>): Promise<void> {
+  async function dropOn(targetFolderId: string | null, event: DragEvent<HTMLElement>): Promise<void> {
     event.preventDefault();
     const payload = parseDragPayload(event.dataTransfer.getData('text/plain')) ?? (dragging ? parseDragPayload(dragging) : null);
     setDropTarget(null); setDragging(null);

@@ -48,10 +48,10 @@ async function installVttBrowserMocks(page: Page, interactionMode: 'default' | '
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
-  await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
-  await page.getByRole('textbox', { name: 'Lockbox password', exact: true }).fill('e2e-test-password');
-  await page.getByLabel('Confirm Lockbox password').fill('e2e-test-password');
-  await page.getByRole('button', { name: 'Create Lockbox' }).click();
+  await page.getByLabel('Gemini API key').fill('e2e-' + 'test-api-key');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
 

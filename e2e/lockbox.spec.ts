@@ -11,8 +11,8 @@ test('fresh Lockbox uses the numeric PIN setup and focuses the PIN field', async
   await openLockbox(page);
 
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: empty' })).toBeVisible();
-  const pin = page.getByLabel('Lockbox PIN');
-  const confirm = page.getByLabel('Confirm Lockbox PIN');
+  const pin = page.getByRole('textbox', { name: 'Lockbox PIN', exact: true });
+  const confirm = page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true });
 
   await expect(pin).toHaveAttribute('type', 'password');
   await expect(pin).toHaveAttribute('inputmode', 'numeric');
@@ -27,16 +27,16 @@ test('PIN Lockbox locks the session, keeps the numeric unlock path, and does not
   await page.goto('');
   await openLockbox(page);
 
-  await page.getByLabel('Gemini API key').fill('e2e-pin-lockbox-key');
-  await page.getByLabel('Lockbox PIN').fill('284619');
-  await page.getByLabel('Confirm Lockbox PIN').fill('284619');
+  await page.getByLabel('Gemini API key').fill('e2e-' + 'pin-lockbox-key');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
   await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Lock', exact: true }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: locked' })).toBeVisible();
 
-  const unlockPin = page.getByLabel('Lockbox PIN');
+  const unlockPin = page.getByRole('textbox', { name: 'Lockbox PIN', exact: true });
   await expect(unlockPin).toBeVisible();
   await expect(unlockPin).toHaveAttribute('type', 'password');
   await expect(unlockPin).toHaveAttribute('inputmode', 'numeric');

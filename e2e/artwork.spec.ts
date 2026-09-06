@@ -39,8 +39,8 @@ test('applies and persists a selected chat background image', async ({ page }) =
 
   await page.getByRole('button', { name: 'Back to chat' }).click();
   await expect(page.locator('.app-shell__background')).toBeVisible();
-  await expect.poll(async () => page.locator('.app-shell__background').evaluate((element) => getComputedStyle(element).backgroundImage)).toContain('data:image/png;base64');
+  await expect.poll(async () => page.locator('.app-shell__background').evaluate((element) => getComputedStyle(element).backgroundImage)).toContain('data:image/webp;base64');
 
   await page.reload();
-  await expect.poll(async () => page.locator('.app-shell__background').evaluate((element) => getComputedStyle(element).backgroundImage)).toContain('data:image/png;base64');
+  await expect.poll(async () => page.locator('.app-shell__background').evaluate((element) => getComputedStyle(element).backgroundImage)).toContain('data:image/webp;base64');
 });

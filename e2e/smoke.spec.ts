@@ -152,23 +152,23 @@ test('persists chat appearance settings', async ({ page }) => {
   await expect(page.getByLabel('Elara text colour hex')).toHaveValue(['#', 'FF00AA'].join(''));
 });
 
-test('keeps roleplay opt-in and persists its environment settings', async ({ page }) => {
+test('keeps roleplay opt-in and persists the World Canvas state', async ({ page }) => {
   await page.goto('');
   await openSettings(page);
   await page.getByRole('button', { name: 'Roleplay' }).click();
   const toggle = page.getByRole('switch');
-  const environment = page.locator('.roleplay-detail select');
   if (await toggle.getAttribute('aria-checked') === 'true') await toggle.click();
-  await expect(environment).toHaveCount(0);
+  await expect(page.getByText('The canvas is empty. Describe the setting naturally in chat and Elara can propose the first location.')).toHaveCount(1);
   await toggle.click();
-  await environment.selectOption('poolside');
-  await page.getByLabel('Environment name').fill('Sunset villa');
+  await expect(toggle).toHaveAttribute('aria-checked', 'true');
   await page.reload();
   await openSettings(page);
   await page.getByRole('button', { name: 'Roleplay' }).click();
   await expect(page.getByRole('switch')).toHaveAttribute('aria-checked', 'true');
-  await expect(page.locator('.roleplay-detail select')).toHaveValue('poolside');
-  await expect(page.getByLabel('Environment name')).toHaveValue('Sunset villa');
+  await expect(page.getByText('WORLD CANVAS', { exact: true })).toBeVisible();
+  await expect(page.getByText('Environment name')).toHaveCount(0);
+  await expect(page.getByText('Time of day')).toHaveCount(0);
+  await expect(page.getByText('Weather')).toHaveCount(0);
 });
 
 test('exposes the local API Lockbox rather than the retired Worker boundary', async ({ page }) => {

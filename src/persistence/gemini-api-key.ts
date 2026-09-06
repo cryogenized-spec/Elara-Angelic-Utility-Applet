@@ -324,11 +324,7 @@ export async function configureGeminiApiKeyWithPin(value: string, pin: string): 
   await saveGeminiApiKeyWithMode(value, pin, 'pin');
 }
 
-export async function setGeminiLockboxSecurityMode(mode: GeminiLockboxSecurityMode): Promise<void> {
-  if (mode === 'off') {
-    await disableGeminiLockboxSecurity();
-    return;
-  }
+export async function setGeminiLockboxSecurityMode(mode: Exclude<GeminiLockboxSecurityMode, 'off'>): Promise<void> {
   const record = await db.secrets.get(RECORD_ID);
   if (!record) throw new Error('The Gemini API Lockbox is not configured.');
   if (unlockedApiKey === null) throw new Error('Unlock the Lockbox before changing its security mode.');
@@ -339,7 +335,7 @@ export async function setGeminiLockboxSecurityMode(mode: GeminiLockboxSecurityMo
     updatedAt: Date.now(),
   });
   securityMode = mode;
-  if (mode === 'off') clearIdleTimer(); else scheduleIdleLock();
+  scheduleIdleLock();
   notifyChanged();
 }
 

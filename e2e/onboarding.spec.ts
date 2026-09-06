@@ -20,7 +20,6 @@ test.describe('First-run onboarding', () => {
     const prompt = dialog.getByLabel('Your Master Prompt');
 
     await dialog.getByRole('button', { name: 'Hotdog Skeleton' }).click();
-    await expect(prompt).toContainText('skeleton');
     await expect(prompt).toHaveValue(/skeleton/i);
     await dialog.getByRole('button', { name: 'Enter' }).click();
     await expect(dialog).toBeHidden();

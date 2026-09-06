@@ -6,6 +6,8 @@ export interface MemorySaveRequest {
   title: string;
   body: string;
   kind?: MemoryKind;
+  confidence?: number;
+  importance?: number;
   tags?: string[];
 }
 
@@ -33,12 +35,6 @@ function elaraProvenance(context: MemoryCapabilityContext = {}): MemoryProvenanc
   };
 }
 
-/**
- * Deliberate application capability for model-requested memory mutation.
- * Authorization is checked here, before storage. The caller supplies memory
- * prose and lightweight classification only; the application owns identity,
- * timestamps, provenance, validation and persistence.
- */
 export const memory: MemoryCapability = {
   async save(request, context = {}) {
     authorizeMemoryMutation('save', context);
@@ -46,18 +42,18 @@ export const memory: MemoryCapability = {
       title: request.title,
       body: request.body,
       kind: request.kind,
+      confidence: request.confidence,
+      importance: request.importance,
       tags: request.tags,
       folderId: context.folderId,
       source: elaraProvenance(context),
     };
     return saveMemory(input);
   },
-
   async forget(id, context = {}) {
     authorizeMemoryMutation('forget', context);
     return archiveMemory(id);
   },
-
   async delete(id, context = {}) {
     authorizeMemoryMutation('delete', context);
     await deleteMemory(id);

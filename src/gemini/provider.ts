@@ -3,6 +3,7 @@ import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiToolContinuati
 import { normalizeGeminiError } from './errors';
 import { getGeminiApiKey } from '../persistence/gemini-api-key';
 import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
+import { appendMemoryContext, loadMemoryContext } from './memory-context';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
@@ -72,7 +73,10 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     if (!apiKey) { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId }) }; return; }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const client = new GoogleGenAI({ apiKey });
-    const stream = await client.interactions.create(buildInteractionPayload(request) as never);
+    const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
+    const memoryContext = await loadMemoryContext(query);
+    const contextualInstruction = appendMemoryContext(request.systemInstruction ?? '', memoryContext);
+    const stream = await client.interactions.create(buildInteractionPayload({ ...request, systemInstruction: contextualInstruction }) as never);
     for await (const rawEvent of stream as unknown as AsyncIterable<unknown>) {
       if (signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }
       const raw = asRecord(rawEvent);

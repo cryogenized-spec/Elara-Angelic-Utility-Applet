@@ -22,6 +22,7 @@ This directory is the authoritative documentation tree for Elara.
 - [`../documents/MEMORY_PASS_03_STATUS.md`](../documents/MEMORY_PASS_03_STATUS.md) — explicit observation recording and consolidation contract.
 - [`../documents/MEMORY_PASS_04_STATUS.md`](../documents/MEMORY_PASS_04_STATUS.md) — centralized permission policy and first-class forget/delete handoff.
 - [`../documents/MEMORY_PASS_05_STATUS.md`](../documents/MEMORY_PASS_05_STATUS.md) — pure ranked retrieval engine and hard context budgeting.
+- [`../documents/MEMORY_PASS_06_STATUS.md`](../documents/MEMORY_PASS_06_STATUS.md) — bounded durable-memory projection in the single Gemini provider path and non-fatal fallback behavior.
 
 ## Google Workspace architecture
 

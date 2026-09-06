@@ -1,6 +1,7 @@
 import type { DurableMemory } from './types';
-import { memory } from './capability';
+import { memory, type MemoryCapabilityContext } from './capability';
 import { getMemory, reinforceMemory, updateMemory } from './store';
+import { authorizeMemoryMutation } from './permissions';
 
 export type ObservationRelation = 'support' | 'conflict' | 'related';
 
@@ -10,12 +11,7 @@ export interface ObservationRequest {
   tags?: string[];
 }
 
-export interface ObservationContext {
-  conversationId?: string;
-  messageId?: string;
-  folderId?: string | null;
-  provenanceNote?: string;
-}
+export interface ObservationContext extends MemoryCapabilityContext {}
 
 function appendUnique(ids: string[], id: string): string[] {
   return ids.includes(id) ? ids : [...ids, id];
@@ -38,7 +34,10 @@ export async function consolidateObservation(
   observationId: string,
   targetMemoryId: string,
   relation: ObservationRelation,
+  context: ObservationContext = {},
 ): Promise<DurableMemory> {
+  authorizeMemoryMutation('consolidate', context);
+
   if (observationId === targetMemoryId) throw new Error('An observation cannot consolidate against itself.');
 
   const observation = await getMemory(observationId);

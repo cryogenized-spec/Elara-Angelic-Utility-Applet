@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { appendMemoryContext } from './memory-context';
-import { safeLoadMemoryContext } from './provider';
+import { appendMemoryContext, loadMemoryContextSafely } from './memory-context';
 
 describe('Gemini durable-memory integration boundary', () => {
   beforeEach(() => {
@@ -15,6 +14,6 @@ describe('Gemini durable-memory integration boundary', () => {
   });
 
   it('returns no memory projection when there is no active thread', async () => {
-    await expect(safeLoadMemoryContext('test query')).resolves.toBe('');
+    await expect(loadMemoryContextSafely('test query')).resolves.toBe('');
   });
 });

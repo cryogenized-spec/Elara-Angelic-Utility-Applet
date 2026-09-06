@@ -1,12 +1,18 @@
-/* Final composer layout boundary. Loaded after app.css so the composer cannot inherit the legacy four-column grid. */
+/* Final composer layout boundary. Keep the editor wide and eliminate the visual seam above it on mobile. */
 .app-shell form.composer {
   position: relative;
   flex: 0 0 auto;
-  grid-template-columns: 38px 38px minmax(0, 1fr) 40px 42px;
+  grid-template-columns: 36px 36px minmax(0, 1fr) 40px 42px;
   grid-template-rows: 42px;
   align-items: stretch;
-  gap: 12px;
+  gap: 8px;
   grid-auto-flow: column;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.app-shell .conversation {
+  padding-bottom: 0;
 }
 
 .app-shell form.composer > .composer__vtt-control {
@@ -15,21 +21,25 @@
   justify-self: center;
 }
 
-@media (max-width: 560px) {
+@media (min-width: 561px) {
   .app-shell form.composer {
     grid-template-columns: 38px 38px minmax(0, 1fr) 40px 42px;
-    gap: 11px;
+    gap: 9px;
   }
 }
 
 @media (max-width: 390px) {
   .app-shell form.composer {
-    grid-template-columns: 36px 36px minmax(0, 1fr) 38px 42px;
-    gap: 8px;
+    grid-template-columns: 34px 34px minmax(0, 1fr) 38px 42px;
+    gap: 6px;
   }
 
   .app-shell form.composer > .composer__icon {
-    width: 36px;
+    width: 34px;
+  }
+
+  .app-shell form.composer > .composer__vtt-control {
+    width: 38px;
   }
 
   .app-shell form.composer > .composer__vtt-control > .composer__icon {

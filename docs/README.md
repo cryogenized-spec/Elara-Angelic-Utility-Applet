@@ -13,6 +13,13 @@ This directory is the authoritative documentation tree for Elara.
 - [`oauth/PASS_06_STATUS.md`](./oauth/PASS_06_STATUS.md) — centralized Google tool execution, risk/confirmation, and safe diagnostics handoff.
 - [`oauth/PASS_07_STATUS.md`](./oauth/PASS_07_STATUS.md) — protected Cloudflare OAuth Worker implementation, session-backed Workspace proxy, and production provisioning handoff.
 - [`future-implementation/README.md`](./future-implementation/README.md) — future infrastructure notes for Worker health, Cron, background execution, push notifications, Telegram, and controlled internet access.
+- [`MEMORY_ARCHITECTURE.md`](./MEMORY_ARCHITECTURE.md) — canonical eight-pass durable-memory architecture and boundary contract.
+
+## Memory architecture
+
+- [`MEMORY_ARCHITECTURE.md`](./MEMORY_ARCHITECTURE.md) — authoritative memory store, capability, retrieval, Gemini context, and Memory Bank boundaries.
+- [`../documents/MEMORY_PASS_01_STATUS.md`](../documents/MEMORY_PASS_01_STATUS.md) — foundation pass and retired compatibility seams.
+- [`../documents/MEMORY_PASS_02_STATUS.md`](../documents/MEMORY_PASS_02_STATUS.md) — deliberate `memory.save` capability boundary and cleanup.
 
 ## Google Workspace architecture
 

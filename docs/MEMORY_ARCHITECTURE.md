@@ -62,6 +62,17 @@ Compose the bounded retrieval projection into the existing single Gemini interac
 
 Turn the existing memory settings surface into a human inspection interface over the same store: search, filters, collapsed records, one-record expansion, Markdown reading view, and direct navigation from search results.
 
+Implemented UI details:
+
+- Memory Bank is a dedicated Settings section rather than being nested inside Character configuration.
+- Inspection reads through canonical `listMemories()` and the pure `filterMemoryRecords()` projection; it does not invoke ranked model retrieval or increment recall bookkeeping merely because a human browses records.
+- Search covers title, body, and tags case-insensitively.
+- Lifecycle, kind, and global-scope filters are available.
+- Records are collapsed by default and only one record is expanded at a time. Opening a result scrolls the selected record into view.
+- Expanded records render stored Markdown through the existing safe Markdown presentation boundary.
+- Human edits continue through canonical store operations; archive/restore, promotion, and permanent delete remain explicit actions. Permanent deletion requires confirmation.
+- No UI-owned IndexedDB table, second memory cache, or durable UI persistence layer is introduced.
+
 ### Pass 8 — Long-horizon hardening
 
 Add migration/corruption recovery, large-dataset performance tests, deletion and permission verification, conflict handling, export/import considerations, and stress coverage at thousands of records.
@@ -179,3 +190,7 @@ Pass 5 is complete when ranking and hard budgeting live in a pure canonical retr
 ## Pass 6 completion criterion
 
 Pass 6 is complete when the existing single Gemini provider path composes the bounded durable-memory projection without changing the master instruction's role, retrieval failure cannot fail an otherwise valid Gemini turn, normal and tool-continuation requests share the same context boundary, and the integration behavior is independently covered by focused tests.
+
+## Pass 7 completion criterion
+
+Pass 7 is complete when Memory Bank provides search, metadata filters, collapsed record inspection, one-record expansion, safe Markdown reading, direct result navigation, and human-owned durable mutations while remaining a presentation projection over the canonical store with no alternate persistence authority.

@@ -1,15 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { DurableMemory, MemoryKind, MemoryLifecycle } from '../../memory/types';
+import type { DurableMemory, MemoryKind } from '../../memory/types';
 import { archiveMemory, deleteMemory, listMemories, promoteMemory, reinforceMemory, saveMemory, updateMemory } from '../../memory/store';
+import { filterMemoryRecords, type MemoryInspectionFilter } from '../../memory/inspection';
 import { sourceLabel } from '../../memory/provenance';
 import { useFolders } from '../folders/FolderProvider';
 import { MarkdownText } from './MarkdownText';
 import './durable-memory-settings.css';
 
 const MEMORY_KINDS: MemoryKind[] = ['CORE', 'CONTEXTUAL', 'EPISODIC', 'MICRO_OBSERVATION'];
-const MEMORY_LIFECYCLES: MemoryLifecycle[] = ['active', 'dormant', 'archived'];
-
-type MemoryFilter = 'all' | MemoryKind | MemoryLifecycle | 'global';
+const MEMORY_LIFECYCLES = ['active', 'dormant', 'archived'] as const;
 
 function folderPath(folderId: string, folders: ReturnType<typeof useFolders>['state']['folders']): string {
   const byId = new Map(folders.map((folder) => [folder.id, folder]));
@@ -27,16 +26,11 @@ function folderPath(folderId: string, folders: ReturnType<typeof useFolders>['st
 }
 
 function formatDate(timestamp: number): string { return new Date(timestamp).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }); }
-function matchesQuery(memory: DurableMemory, query: string): boolean {
-  const needle = query.trim().toLocaleLowerCase();
-  if (!needle) return true;
-  return `${memory.title}\n${memory.body}\n${memory.tags.join(' ')}`.toLocaleLowerCase().includes(needle);
-}
 
 export function DurableMemorySettings() {
   const { state: folderState } = useFolders();
   const [memories, setMemories] = useState<DurableMemory[]>([]);
-  const [filter, setFilter] = useState<MemoryFilter>('all');
+  const [filter, setFilter] = useState<MemoryInspectionFilter>('all');
   const [query, setQuery] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -54,13 +48,7 @@ export function DurableMemorySettings() {
   }
   useEffect(() => { void refresh(); }, []);
 
-  const filtered = useMemo(() => memories.filter((memory) => {
-    const matchesFilter = filter === 'all'
-      || (filter === 'global' && memory.folderId === null)
-      || memory.kind === filter
-      || memory.lifecycle === filter;
-    return matchesFilter && matchesQuery(memory, query);
-  }), [filter, memories, query]);
+  const filtered = useMemo(() => filterMemoryRecords(memories, filter, query), [filter, memories, query]);
 
   useEffect(() => {
     if (expandedId && !filtered.some((memory) => memory.id === expandedId)) setExpandedId(null);
@@ -108,7 +96,7 @@ export function DurableMemorySettings() {
     </div>
 
     <div className="memory-settings__filters">
-      <label><span>Filter</span><select value={filter} onChange={(event) => setFilter(event.target.value as MemoryFilter)}><option value="all">All records</option><optgroup label="Lifecycle">{MEMORY_LIFECYCLES.map((value) => <option key={value} value={value}>{value}</option>)}</optgroup><optgroup label="Kind">{MEMORY_KINDS.map((value) => <option key={value} value={value}>{value.replace('_', ' ')}</option>)}</optgroup><option value="global">Global scope</option></select></label>
+      <label><span>Filter</span><select value={filter} onChange={(event) => setFilter(event.target.value as MemoryInspectionFilter)}><option value="all">All records</option><optgroup label="Lifecycle">{MEMORY_LIFECYCLES.map((value) => <option key={value} value={value}>{value}</option>)}</optgroup><optgroup label="Kind">{MEMORY_KINDS.map((value) => <option key={value} value={value}>{value.replace('_', ' ')}</option>)}</optgroup><option value="global">Global scope</option></select></label>
       <small>{filtered.length} shown · {memories.length} stored · canonical store</small>
     </div>
 

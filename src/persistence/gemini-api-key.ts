@@ -30,6 +30,7 @@ type EncryptedGeminiApiKey = {
   iterations: number;
   updatedAt: number;
   security: GeminiLockboxSecurityMetadata;
+  localKey?: CryptoKey;
 };
 
 class LockboxDatabase extends Dexie {
@@ -57,6 +58,7 @@ const db = new LockboxDatabase();
 let unlockedApiKey: string | null = null;
 let lastActivityAt: number | null = null;
 let idleTimer: number | null = null;
+let securityMode: GeminiLockboxSecurityMode | null = null;
 
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -137,6 +139,13 @@ async function encryptApiKey(apiKey: string, passphrase: string, security?: Gemi
   };
 }
 
+async function encryptApiKeyWithLocalKey(apiKey: string, localKey: CryptoKey): Promise<Pick<EncryptedGeminiApiKey, 'iv' | 'ciphertext'>> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const plaintext = textEncoder().encode(apiKey);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, localKey, toArrayBuffer(plaintext));
+  return { iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(ciphertext)) };
+}
+
 async function decryptApiKey(record: EncryptedGeminiApiKey, passphrase: string): Promise<string> {
   try {
     const salt = fromBase64(record.salt);
@@ -147,6 +156,20 @@ async function decryptApiKey(record: EncryptedGeminiApiKey, passphrase: string):
     return textDecoder().decode(plaintext);
   } catch {
     throw new Error('Invalid Lockbox password.');
+  }
+}
+
+async function decryptApiKeyWithLocalKey(record: EncryptedGeminiApiKey): Promise<string> {
+  if (!record.localKey) throw new Error('The local Lockbox key is unavailable. Re-enable Lockbox security.');
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: toArrayBuffer(fromBase64(record.iv)) },
+      record.localKey,
+      toArrayBuffer(fromBase64(record.ciphertext)),
+    );
+    return textDecoder().decode(plaintext);
+  } catch {
+    throw new Error('The local Lockbox key could not decrypt the Gemini API key.');
   }
 }
 
@@ -169,7 +192,7 @@ function notifyChanged(): void {
 
 function scheduleIdleLock(): void {
   clearIdleTimer();
-  if (unlockedApiKey === null || typeof window === 'undefined' || lastActivityAt === null) return;
+  if (securityMode === 'off' || unlockedApiKey === null || typeof window === 'undefined' || lastActivityAt === null) return;
   const remaining = Math.max(0, GEMINI_LOCKBOX_IDLE_TIMEOUT_MS - (Date.now() - lastActivityAt));
   idleTimer = window.setTimeout(() => {
     idleTimer = null;
@@ -178,7 +201,7 @@ function scheduleIdleLock(): void {
 }
 
 export function isGeminiApiKeyIdle(now = Date.now()): boolean {
-  return unlockedApiKey !== null && lastActivityAt !== null && now - lastActivityAt >= GEMINI_LOCKBOX_IDLE_TIMEOUT_MS;
+  return securityMode !== 'off' && unlockedApiKey !== null && lastActivityAt !== null && now - lastActivityAt >= GEMINI_LOCKBOX_IDLE_TIMEOUT_MS;
 }
 
 export function enforceGeminiApiKeyIdleTimeout(now = Date.now()): boolean {
@@ -188,7 +211,7 @@ export function enforceGeminiApiKeyIdleTimeout(now = Date.now()): boolean {
 }
 
 export function touchGeminiApiKeyActivity(now = Date.now()): void {
-  if (unlockedApiKey === null) return;
+  if (unlockedApiKey === null || securityMode === 'off') return;
   lastActivityAt = now;
   scheduleIdleLock();
 }
@@ -201,9 +224,19 @@ export type GeminiLockboxStatus = 'empty' | 'locked' | 'unlocked';
 
 export async function getGeminiLockboxStatus(): Promise<GeminiLockboxStatus> {
   enforceGeminiApiKeyIdleTimeout();
-  if (unlockedApiKey !== null) return unlockedApiKey ? 'unlocked' : 'empty';
+  if (unlockedApiKey !== null) return 'unlocked';
   const record = await db.secrets.get(RECORD_ID);
-  return record ? 'locked' : 'empty';
+  if (!record) return 'empty';
+  const security = normalizeSecurityMetadata(record);
+  securityMode = security.mode;
+  if (security.mode === 'off') {
+    const apiKey = await decryptApiKeyWithLocalKey(record);
+    unlockedApiKey = apiKey;
+    lastActivityAt = null;
+    clearIdleTimer();
+    return 'unlocked';
+  }
+  return 'locked';
 }
 
 export async function getGeminiLockboxMetadata(): Promise<GeminiLockboxSecurityMetadata | null> {
@@ -242,6 +275,14 @@ async function clearPinFailures(record: EncryptedGeminiApiKey): Promise<void> {
 
 export async function getGeminiApiKey(): Promise<string> {
   enforceGeminiApiKeyIdleTimeout();
+  if (unlockedApiKey === null) {
+    const record = await db.secrets.get(RECORD_ID);
+    if (record && normalizeSecurityMetadata(record).mode === 'off') {
+      securityMode = 'off';
+      unlockedApiKey = await decryptApiKeyWithLocalKey(record);
+      lastActivityAt = null;
+    }
+  }
   if (unlockedApiKey !== null) touchGeminiApiKeyActivity();
   return unlockedApiKey ?? '';
 }
@@ -262,15 +303,20 @@ async function saveGeminiApiKeyWithMode(value: string, secret: string, mode: Gem
   const encrypted = await encryptApiKey(apiKey, credential, security);
   await db.secrets.put(encrypted);
   removeLegacyPlaintextKey();
+  securityMode = mode;
   unlockedApiKey = apiKey;
-  lastActivityAt = now;
-  scheduleIdleLock();
+  lastActivityAt = mode === 'off' ? null : now;
+  if (mode === 'off') clearIdleTimer(); else scheduleIdleLock();
   notifyChanged();
 }
 
 export async function saveGeminiApiKey(value: string, passphrase: string): Promise<void> {
   const existing = await db.secrets.get(RECORD_ID);
   const mode = existing ? normalizeSecurityMetadata(existing).mode : 'password';
+  if (mode === 'off') {
+    await enableGeminiLockboxWithPin(passphrase);
+    return;
+  }
   await saveGeminiApiKeyWithMode(value, passphrase, mode);
 }
 
@@ -279,24 +325,76 @@ export async function configureGeminiApiKeyWithPin(value: string, pin: string): 
 }
 
 export async function setGeminiLockboxSecurityMode(mode: GeminiLockboxSecurityMode): Promise<void> {
+  if (mode === 'off') {
+    await disableGeminiLockboxSecurity();
+    return;
+  }
   const record = await db.secrets.get(RECORD_ID);
   if (!record) throw new Error('The Gemini API Lockbox is not configured.');
+  if (unlockedApiKey === null) throw new Error('Unlock the Lockbox before changing its security mode.');
+  if (normalizeSecurityMetadata(record).mode === 'off') throw new Error('Re-enable Lockbox security with a PIN before selecting another mode.');
   const security = normalizeSecurityMetadata(record);
   await db.secrets.update(RECORD_ID, {
     security: { ...security, mode },
     updatedAt: Date.now(),
   });
+  securityMode = mode;
+  if (mode === 'off') clearIdleTimer(); else scheduleIdleLock();
   notifyChanged();
+}
+
+export async function disableGeminiLockboxSecurity(): Promise<void> {
+  if (unlockedApiKey === null) throw new Error('Unlock the Lockbox before turning security off.');
+  const record = await db.secrets.get(RECORD_ID);
+  if (!record) throw new Error('The Gemini API Lockbox is not configured.');
+  const security = normalizeSecurityMetadata(record);
+  if (security.mode === 'off') return;
+
+  const localKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: KEY_LENGTH }, false, ['encrypt', 'decrypt']);
+  const encrypted = await encryptApiKeyWithLocalKey(unlockedApiKey, localKey);
+  const now = Date.now();
+  await db.secrets.put({
+    ...record,
+    version: 2,
+    salt: '',
+    iv: encrypted.iv,
+    ciphertext: encrypted.ciphertext,
+    updatedAt: now,
+    security: { ...security, mode: 'off', configuredAt: now, failedAttempts: 0, lockedUntil: null },
+    localKey,
+  });
+  securityMode = 'off';
+  lastActivityAt = null;
+  clearIdleTimer();
+  removeLegacyPlaintextKey();
+  notifyChanged();
+}
+
+export async function enableGeminiLockboxWithPin(pin: string): Promise<void> {
+  if (!isGeminiLockboxPin(pin)) throw new Error(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
+  const apiKey = await getGeminiApiKey();
+  if (!apiKey) throw new Error('The Gemini API Lockbox is not configured.');
+  await saveGeminiApiKeyWithMode(apiKey, pin, 'pin');
 }
 
 export async function unlockGeminiApiKey(passphrase: string): Promise<void> {
   const record = await db.secrets.get(RECORD_ID);
   if (!record) throw new Error('The Gemini API Lockbox is not configured.');
-  const normalized = { ...record, version: 2 as const, security: normalizeSecurityMetadata(record) };
+  const normalizedSecurity = normalizeSecurityMetadata(record);
+  securityMode = normalizedSecurity.mode;
+  if (normalizedSecurity.mode === 'off') {
+    unlockedApiKey = await decryptApiKeyWithLocalKey(record);
+    lastActivityAt = null;
+    clearIdleTimer();
+    notifyChanged();
+    return;
+  }
+  const normalized = { ...record, version: 2 as const, security: normalizedSecurity };
   const apiKey = await decryptApiKey(normalized, passphrase.trim());
   if (!apiKey) throw new Error('The encrypted Gemini API key is empty.');
   await clearPinFailures(record);
   unlockedApiKey = apiKey;
+  securityMode = normalizedSecurity.mode;
   lastActivityAt = Date.now();
   scheduleIdleLock();
   removeLegacyPlaintextKey();
@@ -317,6 +415,7 @@ export async function unlockGeminiApiKeyWithPin(pin: string): Promise<void> {
     if (!apiKey) throw new Error('The encrypted Gemini API key is empty.');
     await clearPinFailures(record);
     unlockedApiKey = apiKey;
+    securityMode = security.mode;
     lastActivityAt = Date.now();
     scheduleIdleLock();
     removeLegacyPlaintextKey();
@@ -343,6 +442,7 @@ export async function clearGeminiApiKey(): Promise<void> {
   clearIdleTimer();
   unlockedApiKey = null;
   lastActivityAt = null;
+  securityMode = null;
   removeLegacyPlaintextKey();
   notifyChanged();
 }

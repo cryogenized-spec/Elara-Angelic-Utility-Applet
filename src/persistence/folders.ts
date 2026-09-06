@@ -74,7 +74,7 @@ export function loadFolderState(): FolderState {
 export function createFolderPath(path: string, parentId: string | null = null): ConversationFolder {
   const segments = path.split('/').map(sanitizeName).filter(Boolean).slice(0, 12);
   if (!segments.length) throw new Error('Folder name is required.');
-  let state = readState();
+  const state = readState();
   let currentParent = parentId;
   let currentFolder: ConversationFolder | undefined;
   for (const segment of segments) {
@@ -131,15 +131,16 @@ export function deleteFolder(folderId: string): void {
   const state = readState();
   const folder = state.folders.find((item) => item.id === folderId);
   if (!folder) return;
-  const nestedIds = descendants(state, folderId);
   for (const child of state.folders) {
-    if (child.parentId === folderId) child.parentId = folder.parentId;
+    if (child.parentId === folderId) {
+      child.parentId = folder.parentId;
+      child.updatedAt = now();
+    }
   }
   for (const [threadId, assignedFolderId] of Object.entries(state.assignments)) {
     if (assignedFolderId === folderId) state.assignments[threadId] = folder.parentId;
-    else if (assignedFolderId && nestedIds.has(assignedFolderId)) state.assignments[threadId] = assignedFolderId;
   }
-  state.folders = state.folders.filter((item) => !nestedIds.has(item.id));
+  state.folders = state.folders.filter((item) => item.id !== folderId);
   writeState(state);
 }
 

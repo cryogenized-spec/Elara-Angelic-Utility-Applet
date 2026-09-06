@@ -1,4 +1,4 @@
-/* Final composer layout boundary. Keep the editor wide and eliminate the visual seam above it on mobile. */
+/* Final composer layout boundary. The shell is a flex column, so the composer stays in normal flow and always reserves its own space above the IME. */
 .app-shell form.composer {
   position: relative;
   flex: 0 0 auto;
@@ -12,7 +12,7 @@
 }
 
 .app-shell .conversation {
-  padding-bottom: 0;
+  padding-bottom: 8px;
 }
 
 .app-shell form.composer > .composer__vtt-control {

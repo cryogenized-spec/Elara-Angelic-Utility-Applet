@@ -17,8 +17,8 @@ export interface GeminiLockboxSecurityMetadata {
   mode: GeminiLockboxSecurityMode;
   authVersion: 1;
   configuredAt: number;
-  failedAttempts?: number;
-  lockedUntil?: number | null;
+  failedAttempts: number;
+  lockedUntil: number | null;
 }
 
 type EncryptedGeminiApiKey = {
@@ -226,7 +226,7 @@ function remainingPinLockMs(security: GeminiLockboxSecurityMetadata, now = Date.
 
 async function recordPinFailure(record: EncryptedGeminiApiKey): Promise<GeminiLockboxSecurityMetadata> {
   const security = normalizeSecurityMetadata(record);
-  const failedAttempts = (security.failedAttempts ?? 0) + 1;
+  const failedAttempts = security.failedAttempts + 1;
   const delay = pinBackoffMs(failedAttempts);
   const lockedUntil = delay > 0 ? Date.now() + delay : null;
   const updatedSecurity = { ...security, failedAttempts, lockedUntil };
@@ -236,7 +236,7 @@ async function recordPinFailure(record: EncryptedGeminiApiKey): Promise<GeminiLo
 
 async function clearPinFailures(record: EncryptedGeminiApiKey): Promise<void> {
   const security = normalizeSecurityMetadata(record);
-  if ((security.failedAttempts ?? 0) === 0 && !security.lockedUntil) return;
+  if (security.failedAttempts === 0 && !security.lockedUntil) return;
   await db.secrets.update(RECORD_ID, { security: { ...security, failedAttempts: 0, lockedUntil: null }, updatedAt: Date.now() });
 }
 
@@ -253,8 +253,8 @@ async function saveGeminiApiKeyWithMode(value: string, secret: string, mode: Gem
     return;
   }
   const credential = secret.trim();
-  if (!credential) throw new Error(mode === 'pin' ? 'A Lockbox PIN is required.' : 'A Lockbox password is required.');
-  if (mode === 'pin' && !isGeminiLockboxPin(credential)) {
+  if (!credential) throw new Error(mode === 'pin' || mode === 'passkey' ? 'A Lockbox PIN is required.' : 'A Lockbox password is required.');
+  if ((mode === 'pin' || mode === 'passkey') && !isGeminiLockboxPin(credential)) {
     throw new Error(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
   }
   const now = Date.now();
@@ -278,6 +278,17 @@ export async function configureGeminiApiKeyWithPin(value: string, pin: string): 
   await saveGeminiApiKeyWithMode(value, pin, 'pin');
 }
 
+export async function setGeminiLockboxSecurityMode(mode: GeminiLockboxSecurityMode): Promise<void> {
+  const record = await db.secrets.get(RECORD_ID);
+  if (!record) throw new Error('The Gemini API Lockbox is not configured.');
+  const security = normalizeSecurityMetadata(record);
+  await db.secrets.update(RECORD_ID, {
+    security: { ...security, mode },
+    updatedAt: Date.now(),
+  });
+  notifyChanged();
+}
+
 export async function unlockGeminiApiKey(passphrase: string): Promise<void> {
   const record = await db.secrets.get(RECORD_ID);
   if (!record) throw new Error('The Gemini API Lockbox is not configured.');
@@ -297,7 +308,7 @@ export async function unlockGeminiApiKeyWithPin(pin: string): Promise<void> {
   const record = await db.secrets.get(RECORD_ID);
   if (!record) throw new Error('The Gemini API Lockbox is not configured.');
   const security = normalizeSecurityMetadata(record);
-  if (security.mode !== 'pin') throw new Error('This Lockbox is configured for password unlock.');
+  if (security.mode !== 'pin' && security.mode !== 'passkey') throw new Error('This Lockbox is configured for password unlock.');
   const retryMs = remainingPinLockMs(security);
   if (retryMs > 0) throw new Error(`Too many failed PIN attempts. Try again in ${Math.ceil(retryMs / 1000)} seconds.`);
   try {

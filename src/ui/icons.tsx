@@ -5,6 +5,7 @@ import {
   ChevronDown,
   FileCode2,
   ListTodo,
+  Loader2,
   Mail,
   Maximize2,
   Menu,
@@ -51,7 +52,8 @@ export type IconName =
   | 'markdown'
   | 'stop'
   | 'refresh'
-  | 'trash';
+  | 'trash'
+  | 'loader';
 
 const icons: Record<IconName, LucideIcon> = {
   menu: Menu,
@@ -78,6 +80,7 @@ const icons: Record<IconName, LucideIcon> = {
   stop: Square,
   refresh: RefreshCw,
   trash: Trash2,
+  loader: Loader2,
 };
 
 export function Icon({

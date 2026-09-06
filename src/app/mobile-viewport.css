@@ -13,10 +13,27 @@ html, body, #root { overflow: hidden; }
 }
 
 @media (max-width: 560px) {
-  /* Keep the composer itself flush to the viewport edge; the shell owns the
-     intentional 15px breathing room above the Android keyboard/navigation area. */
+  /* Mobile canvas: the chat content owns the full usable width; the left
+     control spine is an overlay, not a layout ruler. */
   .app-shell {
     padding-bottom: 15px;
+  }
+
+  .app-shell .elara-banner {
+    flex: 0 0 auto;
+    min-height: 142px;
+  }
+
+  .app-shell .tool-rail,
+  .app-shell .tool-notice,
+  .app-shell .conversation,
+  .app-shell .error,
+  .app-shell form.composer {
+    margin-left: 0;
+  }
+
+  .app-shell .conversation {
+    padding-left: 7px;
   }
 
   .app-shell form.composer {

@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type { ChatMessage, ConversationState, ConversationThread } from '../domain/chat';
+import type { DurableMemory } from '../domain/memory';
 import { DEFAULT_GEMINI_MODEL, getGeminiModel } from '../gemini/model-registry';
 import { defaultsForModel, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import type { StoredWorkspaceShortcut } from './workspace-shortcuts';
@@ -40,6 +41,7 @@ export class ElaraDatabase extends Dexie {
   workspaceShortcuts!: Table<StoredWorkspaceShortcut, string>;
   folders!: Table<StoredConversationFolder, string>;
   folderAssignments!: Table<StoredFolderAssignment, string>;
+  memories!: Table<DurableMemory, string>;
 
   constructor() {
     super('elara-angelic-utility-applet');
@@ -99,6 +101,15 @@ export class ElaraDatabase extends Dexie {
       } catch {
         // A malformed legacy cache should not block the database upgrade.
       }
+    });
+    this.version(6).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+      memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt',
     });
   }
 }

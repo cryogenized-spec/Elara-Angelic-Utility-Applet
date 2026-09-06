@@ -52,7 +52,7 @@ Introduce granular memory permissions. Application policy is authoritative and i
 
 ### Pass 5 — Retrieval engine
 
-Build one canonical ranked retrieval engine with explicit relevance signals and a hard context budget. Retrieval may consider lexical/semantic relevance, project relationship, recency, importance, confidence, reinforcement, lifecycle, memory kind, and explicit entity relationships.
+Build one canonical ranked retrieval engine with explicit relevance signals and a hard context budget. Retrieval may consider lexical relevance, recency, importance, confidence, reinforcement, lifecycle, memory kind, folder/project scope, and explicit entity relationships. Semantic embeddings remain a later enhancement rather than a prerequisite for a correct bounded baseline.
 
 ### Pass 6 — Gemini integration
 
@@ -119,6 +119,18 @@ Authorization is evaluated before mutation. Storage primitives remain internal p
 
 `forget` is a reversible lifecycle operation: it archives the record so it is retained but excluded from retrieval. `delete` is a hard removal from the durable store. Both are first-class capabilities, and model access to both is denied by default.
 
+## Retrieval engine
+
+Retrieval is a pure selection boundary over durable memory records. It does not own IndexedDB and does not mutate durable records.
+
+The baseline score is intentionally bounded and explainable. It combines lexical query relevance from title/body/tags, importance, confidence, capped reinforcement, recency decay, lifecycle and memory-kind priors, and explicit relationship density.
+
+Retrieval first applies lifecycle/expiry and folder/global scope filters, then ranks candidates, then enforces hard record and character limits. The current defaults are 8 records and 6,000 title+body characters, with absolute caps of 20 records and 20,000 characters.
+
+The selector is pure and independently testable. IndexedDB recall bookkeeping remains in the canonical store after selection, so reading memories does not create a second persistence authority.
+
+This baseline does not require embeddings or provider-specific semantic search. Those can be added later without changing the durable-memory contract.
+
 ## Provenance
 
 Provenance is structured metadata, not a free-form note. It must be able to distinguish at least:
@@ -149,3 +161,7 @@ Pass 3 is complete when observations can be recorded as first-class evidence and
 ## Pass 4 completion criterion
 
 Pass 4 is complete when every model-facing memory mutation crosses one centralized granular authorization boundary, default model policy cannot forget or delete durable memories, human/system forget and delete are explicit capabilities, and permission/forget/delete behavior is covered by focused tests.
+
+## Pass 5 completion criterion
+
+Pass 5 is complete when ranking and hard budgeting live in a pure canonical retrieval boundary, durable-store code delegates selection to that boundary, scope/lifecycle/expiry are enforced before ranking, context limits are bounded, and retrieval behavior is independently covered by focused tests.

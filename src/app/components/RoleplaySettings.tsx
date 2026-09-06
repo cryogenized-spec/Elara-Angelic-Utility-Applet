@@ -2,27 +2,25 @@ import type { RoleplayPreferences } from '../../domain/preferences';
 import './roleplay-settings.css';
 
 export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferences; onChange: (value: RoleplayPreferences) => void }) {
+  const toggleRoleplay = () => onChange({ ...value, enabled: !value.enabled });
+
   return <div className="roleplay-settings">
-    <div
-      className={`setting-card roleplay-toggle-card${value.enabled ? ' is-enabled' : ''}`}
-      onClick={() => onChange({ ...value, enabled: !value.enabled })}
-    >
+    <div className={`setting-card roleplay-toggle-card${value.enabled ? ' is-enabled' : ''}`}>
       <div className="roleplay-toggle-card__copy">
         <strong>Roleplay Mode</strong>
         <span>Creative/fictional context with explicit scene-format conventions.</span>
       </div>
       <button
         type="button"
-        className={`toggle-switch${value.enabled ? ' is-on' : ''}`}
+        className={`roleplay-switch${value.enabled ? ' is-on' : ''}`}
         role="switch"
         aria-label={value.enabled ? 'Roleplay mode on' : 'Roleplay mode off'}
         aria-checked={value.enabled}
-        onClick={(event) => {
-          event.stopPropagation();
-          onChange({ ...value, enabled: !value.enabled });
-        }}
+        onClick={toggleRoleplay}
       >
-        <span className="toggle-switch__knob" aria-hidden="true" />
+        <span className="roleplay-switch__track" aria-hidden="true">
+          <span className="roleplay-switch__thumb" />
+        </span>
       </button>
     </div>
 
@@ -35,7 +33,7 @@ export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferenc
             <span className="roleplay-section-kicker">WORLD CANVAS</span>
             <strong>Setting</strong>
           </div>
-          <span className="roleplay-section-hint">Editable context</span>
+          <span className="roleplay-section-hint">Living context</span>
         </div>
         <label className="roleplay-field">
           <span>Setting name</span>
@@ -64,13 +62,6 @@ export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferenc
             onChange={(event) => onChange({ ...value, atmosphere: event.target.value })}
           />
         </label>
-        <div className="roleplay-assist">
-          <div>
-            <strong>AI-assisted setting</strong>
-            <span>Keep the canvas authoritative; let Elara help expand or reorganize it rather than relying on rigid presets.</span>
-          </div>
-          <span className="roleplay-assist__badge">PLANNED</span>
-        </div>
       </div>
 
       <div className="setting-card roleplay-format">

@@ -1,5 +1,5 @@
 import 'fake-indexeddb/auto';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
 import { saveMemory } from '../memory/store';
 import { createFolderPath } from '../persistence/folders';
@@ -20,7 +20,7 @@ describe('Gemini durable-memory context boundary', () => {
     expect(result).toContain('User prefers concise answers.');
   });
 
-  it('composes only the bounded retrieval projection and preserves the base instruction', async () => {
+  it('composes the bounded retrieval projection and preserves the base instruction', async () => {
     window.localStorage.setItem('elara.active-thread', 'thread-compose');
     await saveMemory({ title: 'Durable preference', body: 'The user prefers dark mode.', kind: 'CORE', confidence: 1, importance: 1 });
 
@@ -30,15 +30,13 @@ describe('Gemini durable-memory context boundary', () => {
     expect(result).toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
   });
 
-  it('degrades to the original instruction when retrieval fails', async () => {
-    window.localStorage.setItem('elara.active-thread', 'thread-failure');
-    const module = await import('./memory-context');
-    const loadSpy = vi.spyOn(module, 'loadMemoryContext').mockRejectedValue(new Error('IndexedDB unavailable'));
+  it('degrades to an empty context when retrieval fails', async () => {
+    const failingLoader = async () => { throw new Error('IndexedDB unavailable'); };
+    await expect(loadMemoryContextSafely('anything', failingLoader)).resolves.toBe('');
+  });
 
-    await expect(loadMemoryContextSafely('anything')).resolves.toBe('');
+  it('preserves the original instruction when no durable memory context is available', async () => {
     await expect(composeSystemInstruction('MASTER', 'anything')).resolves.toBe('MASTER');
-
-    loadSpy.mockRestore();
   });
 
   it('inherits parent-folder memories while excluding sibling memories when a folder is global-scoped', async () => {

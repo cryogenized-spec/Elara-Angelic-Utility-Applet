@@ -44,7 +44,7 @@ Expose an application-owned memory capability so Elara can explicitly request th
 
 ### Pass 3 — Observation and consolidation
 
-Introduce observations as lower-lifecycle evidence and explicit consolidation/promotion into established memories. Repeated evidence reinforces a memory; contradictions remain visible rather than being silently overwritten.
+Introduce observations as lower-lifecycle evidence and explicit consolidation into established memories. Supporting observations reinforce a target; conflicting observations remain linked and visible rather than silently replacing the target; related observations add context without mutating target prose.
 
 ### Pass 4 — Permission architecture
 
@@ -95,6 +95,20 @@ Required fields:
 
 Folder/project scope remains an application concern and may be represented alongside the document when the current conversation/folder architecture requires it.
 
+## Observations and consolidation
+
+An observation is persisted as a `MICRO_OBSERVATION` memory record. Recording an observation does not promote or merge it into an established memory.
+
+Consolidation is explicit and directional. A caller names the observation, target memory, and relationship:
+
+- `support` — link the observation as supporting evidence and reinforce the target;
+- `conflict` — link the observation as conflicting evidence while leaving the target prose and reinforcement count unchanged;
+- `related` — link the observation as contextual evidence without mutating target content.
+
+Repeated consolidation of the same observation is idempotent for the relationship itself. Support may still count as a deliberate reinforcement event, so callers should only invoke it when new evidence is actually being accepted.
+
+Contradiction is represented, not resolved implicitly. Supersession and promotion remain explicit operations for a later decision, and no pass may silently overwrite an established memory merely because new evidence disagrees with it.
+
 ## Provenance
 
 Provenance is structured metadata, not a free-form note. It must be able to distinguish at least:
@@ -110,10 +124,14 @@ Future passes may add conversation, message, or source references without changi
 
 The memory store owns durable records and record invariants. The retrieval engine owns ranking and context budgeting. The Memory Bank owns presentation. Omnisearch owns query UX. Gemini integration owns temporary context composition. Memory tools are capability adapters. None of these surfaces may become an alternate persistence authority.
 
-Ordinary conversation history is not automatically converted into permanent memory. Autonomous extraction and consolidation are explicitly deferred until their dedicated passes.
+Ordinary conversation history is not automatically converted into permanent memory. Observation creation and consolidation are explicit operations; autonomous extraction remains explicitly deferred until a dedicated future pass.
 
 Memory persistence is best-effort from the chat path: a storage failure must never prevent an otherwise valid conversational response from being presented.
 
 ## Pass 1 completion criterion
 
 Pass 1 is complete when the canonical rich memory schema, validation/normalization, deterministic identifiers, structured provenance, and Dexie-backed store are independently testable and existing application callers remain operational without introducing a second memory database.
+
+## Pass 3 completion criterion
+
+Pass 3 is complete when observations can be recorded as first-class evidence and explicitly consolidated into an established memory as support, conflict, or related context without silent replacement, autonomous extraction, or a second persistence path.

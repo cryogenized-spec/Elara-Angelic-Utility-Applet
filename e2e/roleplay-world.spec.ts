@@ -11,7 +11,7 @@ test('Roleplay uses a persistent world canvas instead of environment forms', asy
   await openRoleplay(page);
   const toggle = page.getByRole('switch', { name: 'Roleplay mode off' });
   await toggle.click();
-  await expect(page.getByText('WORLD CANVAS')).toBeVisible();
+  await expect(page.getByText('WORLD CANVAS', { exact: true })).toBeVisible();
   await expect(page.getByText('The canvas is empty. Describe the setting naturally in chat and Elara can propose the first location.')).toBeVisible();
   await expect(page.getByText('Runtime context')).toBeVisible();
   await expect(page.getByText('Natural language is enough.')).toBeVisible();

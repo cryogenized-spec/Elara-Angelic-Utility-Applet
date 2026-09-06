@@ -9,12 +9,16 @@ const IV_BYTES = 12;
 const KEY_LENGTH = 256;
 
 export const GEMINI_LOCKBOX_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+export const GEMINI_LOCKBOX_PIN_MIN_LENGTH = 6;
+export const GEMINI_LOCKBOX_PIN_MAX_LENGTH = 8;
 export type GeminiLockboxSecurityMode = 'password' | 'pin' | 'passkey' | 'off';
 
 export interface GeminiLockboxSecurityMetadata {
   mode: GeminiLockboxSecurityMode;
   authVersion: 1;
   configuredAt: number;
+  failedAttempts?: number;
+  lockedUntil?: number | null;
 }
 
 type EncryptedGeminiApiKey = {
@@ -41,6 +45,8 @@ class LockboxDatabase extends Dexie {
           mode: 'password',
           authVersion: 1,
           configuredAt: record.updatedAt,
+          failedAttempts: 0,
+          lockedUntil: null,
         };
       });
     });
@@ -74,6 +80,9 @@ function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return copy.buffer;
 }
 
+function textEncoder(): TextEncoder { return new TextEncoder(); }
+function textDecoder(): TextDecoder { return new TextDecoder(); }
+
 async function deriveEncryptionKey(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
   if (!passphrase) throw new Error('A Lockbox password is required.');
   const material = await crypto.subtle.importKey(
@@ -92,11 +101,8 @@ async function deriveEncryptionKey(passphrase: string, salt: Uint8Array, iterati
   );
 }
 
-function textEncoder(): TextEncoder { return new TextEncoder(); }
-function textDecoder(): TextDecoder { return new TextDecoder(); }
-
 function defaultSecurityMetadata(now = Date.now()): GeminiLockboxSecurityMetadata {
-  return { mode: 'password', authVersion: 1, configuredAt: now };
+  return { mode: 'password', authVersion: 1, configuredAt: now, failedAttempts: 0, lockedUntil: null };
 }
 
 function normalizeSecurityMetadata(record: Partial<EncryptedGeminiApiKey> | undefined, now = Date.now()): GeminiLockboxSecurityMetadata {
@@ -107,7 +113,9 @@ function normalizeSecurityMetadata(record: Partial<EncryptedGeminiApiKey> | unde
   const configuredAt = Number.isFinite(security.configuredAt)
     ? security.configuredAt
     : (updatedAt !== undefined && Number.isFinite(updatedAt) ? updatedAt : now);
-  return { mode, authVersion: 1, configuredAt };
+  const failedAttempts = Number.isInteger(security.failedAttempts) && security.failedAttempts >= 0 ? security.failedAttempts : 0;
+  const lockedUntil = typeof security.lockedUntil === 'number' && Number.isFinite(security.lockedUntil) ? security.lockedUntil : null;
+  return { mode, authVersion: 1, configuredAt, failedAttempts, lockedUntil };
 }
 
 async function encryptApiKey(apiKey: string, passphrase: string, security?: GeminiLockboxSecurityMetadata): Promise<EncryptedGeminiApiKey> {
@@ -203,29 +211,71 @@ export async function getGeminiLockboxMetadata(): Promise<GeminiLockboxSecurityM
   return record ? normalizeSecurityMetadata(record) : null;
 }
 
+export function isGeminiLockboxPin(value: string): boolean {
+  return new RegExp(`^\\d{${GEMINI_LOCKBOX_PIN_MIN_LENGTH},${GEMINI_LOCKBOX_PIN_MAX_LENGTH}}$`).test(value);
+}
+
+function pinBackoffMs(failedAttempts: number): number {
+  if (failedAttempts < 4) return 0;
+  return Math.min(60_000, 1_000 * 2 ** Math.min(failedAttempts - 4, 6));
+}
+
+function remainingPinLockMs(security: GeminiLockboxSecurityMetadata, now = Date.now()): number {
+  return security.lockedUntil ? Math.max(0, security.lockedUntil - now) : 0;
+}
+
+async function recordPinFailure(record: EncryptedGeminiApiKey): Promise<GeminiLockboxSecurityMetadata> {
+  const security = normalizeSecurityMetadata(record);
+  const failedAttempts = (security.failedAttempts ?? 0) + 1;
+  const delay = pinBackoffMs(failedAttempts);
+  const lockedUntil = delay > 0 ? Date.now() + delay : null;
+  const updatedSecurity = { ...security, failedAttempts, lockedUntil };
+  await db.secrets.update(RECORD_ID, { security: updatedSecurity, updatedAt: Date.now() });
+  return updatedSecurity;
+}
+
+async function clearPinFailures(record: EncryptedGeminiApiKey): Promise<void> {
+  const security = normalizeSecurityMetadata(record);
+  if ((security.failedAttempts ?? 0) === 0 && !security.lockedUntil) return;
+  await db.secrets.update(RECORD_ID, { security: { ...security, failedAttempts: 0, lockedUntil: null }, updatedAt: Date.now() });
+}
+
 export async function getGeminiApiKey(): Promise<string> {
   enforceGeminiApiKeyIdleTimeout();
   if (unlockedApiKey !== null) touchGeminiApiKeyActivity();
   return unlockedApiKey ?? '';
 }
 
-export async function saveGeminiApiKey(value: string, passphrase: string): Promise<void> {
+async function saveGeminiApiKeyWithMode(value: string, secret: string, mode: GeminiLockboxSecurityMode): Promise<void> {
   const apiKey = value.trim();
   if (!apiKey) {
     await clearGeminiApiKey();
     return;
   }
-  const password = passphrase.trim();
-  if (!password) throw new Error('A Lockbox password is required.');
-  const existing = await db.secrets.get(RECORD_ID);
-  const security = normalizeSecurityMetadata(existing);
-  const encrypted = await encryptApiKey(apiKey, password, security);
+  const credential = secret.trim();
+  if (!credential) throw new Error(mode === 'pin' ? 'A Lockbox PIN is required.' : 'A Lockbox password is required.');
+  if (mode === 'pin' && !isGeminiLockboxPin(credential)) {
+    throw new Error(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
+  }
+  const now = Date.now();
+  const security: GeminiLockboxSecurityMetadata = { mode, authVersion: 1, configuredAt: now, failedAttempts: 0, lockedUntil: null };
+  const encrypted = await encryptApiKey(apiKey, credential, security);
   await db.secrets.put(encrypted);
   removeLegacyPlaintextKey();
   unlockedApiKey = apiKey;
-  lastActivityAt = Date.now();
+  lastActivityAt = now;
   scheduleIdleLock();
   notifyChanged();
+}
+
+export async function saveGeminiApiKey(value: string, passphrase: string): Promise<void> {
+  const existing = await db.secrets.get(RECORD_ID);
+  const mode = existing ? normalizeSecurityMetadata(existing).mode : 'password';
+  await saveGeminiApiKeyWithMode(value, passphrase, mode);
+}
+
+export async function configureGeminiApiKeyWithPin(value: string, pin: string): Promise<void> {
+  await saveGeminiApiKeyWithMode(value, pin, 'pin');
 }
 
 export async function unlockGeminiApiKey(passphrase: string): Promise<void> {
@@ -234,11 +284,39 @@ export async function unlockGeminiApiKey(passphrase: string): Promise<void> {
   const normalized = { ...record, version: 2 as const, security: normalizeSecurityMetadata(record) };
   const apiKey = await decryptApiKey(normalized, passphrase.trim());
   if (!apiKey) throw new Error('The encrypted Gemini API key is empty.');
+  await clearPinFailures(record);
   unlockedApiKey = apiKey;
   lastActivityAt = Date.now();
   scheduleIdleLock();
   removeLegacyPlaintextKey();
   notifyChanged();
+}
+
+export async function unlockGeminiApiKeyWithPin(pin: string): Promise<void> {
+  if (!isGeminiLockboxPin(pin)) throw new Error(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
+  const record = await db.secrets.get(RECORD_ID);
+  if (!record) throw new Error('The Gemini API Lockbox is not configured.');
+  const security = normalizeSecurityMetadata(record);
+  if (security.mode !== 'pin') throw new Error('This Lockbox is configured for password unlock.');
+  const retryMs = remainingPinLockMs(security);
+  if (retryMs > 0) throw new Error(`Too many failed PIN attempts. Try again in ${Math.ceil(retryMs / 1000)} seconds.`);
+  try {
+    const normalized = { ...record, version: 2 as const, security };
+    const apiKey = await decryptApiKey(normalized, pin.trim());
+    if (!apiKey) throw new Error('The encrypted Gemini API key is empty.');
+    await clearPinFailures(record);
+    unlockedApiKey = apiKey;
+    lastActivityAt = Date.now();
+    scheduleIdleLock();
+    removeLegacyPlaintextKey();
+    notifyChanged();
+  } catch (error) {
+    if (error instanceof Error && error.message === 'The encrypted Gemini API key is empty.') throw error;
+    const updatedSecurity = await recordPinFailure(record);
+    const retry = remainingPinLockMs(updatedSecurity);
+    if (retry > 0) throw new Error(`Invalid PIN. Try again in ${Math.ceil(retry / 1000)} seconds.`);
+    throw new Error('Invalid PIN.');
+  }
 }
 
 export function lockGeminiApiKey(): void {

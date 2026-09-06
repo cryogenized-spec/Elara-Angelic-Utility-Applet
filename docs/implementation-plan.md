@@ -24,11 +24,13 @@ Default Phase 1 idle timeout is 15 minutes. The activity timestamp is held in mo
 Fresh Lockboxes now default to PIN authentication. Existing legacy password Lockboxes remain password-authenticated and are not silently re-encrypted. PIN failures use persisted local backoff metadata; successful unlock clears the failure state.
 
 ### Phase 3 — Passkey
-- [ ] After successful PIN authentication, offer Upgrade to Passkey.
-- [ ] Register platform WebAuthn with user verification requested.
-- [ ] Use WebAuthn for authentication/key-unwrapping support only; never expose Gemini API key to the credential service.
-- [ ] Passkey is primary when configured; PIN remains fallback.
-- [ ] Capability-detect and gracefully fall back when unsupported.
+- [x] After successful PIN authentication, offer Upgrade to Passkey.
+- [x] Register platform WebAuthn with user verification requested.
+- [x] Use WebAuthn for authentication/key-unwrapping support only; never expose Gemini API key to the credential service.
+- [x] Passkey is primary when configured; PIN remains fallback.
+- [x] Capability-detect and gracefully fall back when unsupported.
+
+The passkey uses the WebAuthn PRF extension to derive a credential-bound symmetric wrapping key. That key wraps the existing Lockbox PIN; a successful passkey assertion recovers the PIN and then uses the existing encrypted API-key path. No Gemini API key material enters WebAuthn. If PRF is unavailable, PIN remains the supported path.
 
 ### Phase 4 — Off
 - [ ] Add Off mode.

@@ -145,7 +145,6 @@ export async function registerGeminiPasskey(pin: string): Promise<void> {
         residentKey: 'preferred',
         userVerification: 'required',
       },
-      userVerification: 'required',
       attestation: 'none',
       extensions: {
         prf: {

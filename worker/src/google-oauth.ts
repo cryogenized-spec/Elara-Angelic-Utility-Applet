@@ -263,6 +263,7 @@ function allowedGoogleTarget(capability: GoogleCapabilityKey, target: URL): bool
     'drive.files.write': [['www.googleapis.com', '/drive/v3/']],
     'sheets.read': [['sheets.googleapis.com', '/v4/spreadsheets/']],
     'sheets.write': [['sheets.googleapis.com', '/v4/spreadsheets/']],
+    'roleplay.world.local': [],
   };
   return rules[capability].some(([allowedHost, prefix]) => allowedHost === host && path.startsWith(prefix));
 }

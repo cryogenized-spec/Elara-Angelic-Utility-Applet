@@ -51,6 +51,14 @@ describe('memory permission boundary', () => {
     expect(policy.model.delete).toBe(false);
   });
 
+  it('checks policy before observation creation independently of save', async () => {
+    setMemoryPermissionPolicy({ model: { observe: false } });
+    await expect(recordObservation({ title: 'Evidence', body: 'Do not persist.' })).rejects.toThrow(
+      'Memory permission denied: observe',
+    );
+    expect(await db.memories.count()).toBe(0);
+  });
+
   it('checks policy before observation consolidation', async () => {
     const target = await memory.save({ title: 'Established', body: 'Original claim.' });
     const observation = await recordObservation({ title: 'Evidence', body: 'Evidence supports it.' });

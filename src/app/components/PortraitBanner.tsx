@@ -21,7 +21,7 @@ export function PortraitBanner({ collapsed, scale = 2, background = 'midnight', 
     </div>
     <div className="elara-banner__copy"><span className="eyebrow">ANGELIC UTILITY APPLET</span><h1>{characterName}</h1><span className="presence"><i /> Online · ready</span></div>
     {!collapsed && (
-      <div className="elara-banner__portrait-float" aria-label={artwork ? `${characterName} portrait` : `${characterName} portrait placeholder`}>
+      <div className="elara-banner__portrait elara-banner__portrait-float" aria-label={artwork ? `${characterName} portrait` : `${characterName} portrait placeholder`}>
         {artwork ? <img className="elara-banner__portrait-image" src={artwork.dataUrl} alt="" style={artworkStyle} /> : <div className="elara-banner__portrait-placeholder"><div className="elara-banner__halo" /><div className="elara-banner__silhouette">{characterName.slice(0, 1).toUpperCase()}</div></div>}
       </div>
     )}

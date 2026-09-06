@@ -16,7 +16,7 @@ This directory is the authoritative documentation tree for Elara.
 
 ## Memory architecture
 
-- [`MEMORY_ARCHITECTURE.md`](./MEMORY_ARCHITECTURE.md) — authoritative memory store, capability, permission policy, observation/consolidation, retrieval, Gemini context, and Memory Bank boundaries.
+- [`MEMORY_ARCHITECTURE.md`](./MEMORY_ARCHITECTURE.md) — authoritative memory store, capability, permission policy, observation/consolidation, retrieval, Gemini context, Memory Bank, and long-horizon hardening boundaries.
 - [`../documents/MEMORY_PASS_01_STATUS.md`](../documents/MEMORY_PASS_01_STATUS.md) — foundation pass and retired compatibility seams.
 - [`../documents/MEMORY_PASS_02_STATUS.md`](../documents/MEMORY_PASS_02_STATUS.md) — deliberate `memory.save` capability boundary and cleanup.
 - [`../documents/MEMORY_PASS_03_STATUS.md`](../documents/MEMORY_PASS_03_STATUS.md) — explicit observation recording and consolidation contract.
@@ -24,6 +24,7 @@ This directory is the authoritative documentation tree for Elara.
 - [`../documents/MEMORY_PASS_05_STATUS.md`](../documents/MEMORY_PASS_05_STATUS.md) — pure ranked retrieval engine and hard context budgeting.
 - [`../documents/MEMORY_PASS_06_STATUS.md`](../documents/MEMORY_PASS_06_STATUS.md) — bounded durable-memory projection in the single Gemini provider path and non-fatal fallback behavior.
 - [`../documents/MEMORY_PASS_07_STATUS.md`](../documents/MEMORY_PASS_07_STATUS.md) — dedicated Memory Bank inspection UI, canonical search/filter projection, Markdown reading view, and human-owned memory management.
+- [`../documents/MEMORY_PASS_08_STATUS.md`](../documents/MEMORY_PASS_08_STATUS.md) — read-only integrity diagnostics, multi-thousand retrieval stress coverage, and long-horizon hardening boundaries.
 
 ## Google Workspace architecture
 

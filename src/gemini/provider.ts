@@ -3,7 +3,7 @@ import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiToolContinuati
 import { normalizeGeminiError } from './errors';
 import { getGeminiApiKey } from '../persistence/gemini-api-key';
 import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
-import { appendMemoryContext, loadMemoryContext } from './memory-context';
+import { composeSystemInstruction } from './memory-context';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
@@ -25,14 +25,6 @@ function appendThoughtSummary(parts: Map<number, string>, index: number, text: s
 function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
   const summary = [...parts.entries()].sort(([left], [right]) => left - right).map(([, text]) => text.trim()).filter(Boolean).join('\n\n').trim();
   return summary || undefined;
-}
-
-export async function safeLoadMemoryContext(query: string): Promise<string> {
-  try {
-    return await loadMemoryContext(query);
-  } catch {
-    return '';
-  }
 }
 
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
@@ -82,8 +74,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const client = new GoogleGenAI({ apiKey, httpOptions: { retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
-    const memoryContext = await safeLoadMemoryContext(query);
-    const contextualInstruction = appendMemoryContext(request.systemInstruction ?? '', memoryContext);
+    const contextualInstruction = await composeSystemInstruction(request.systemInstruction, query);
     const stream = await client.interactions.create(buildInteractionPayload({ ...request, systemInstruction: contextualInstruction }) as never);
     for await (const rawEvent of stream as unknown as AsyncIterable<unknown>) {
       if (signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }

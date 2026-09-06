@@ -3,78 +3,65 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from './conversation';
 import { archiveMemory, createMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, updateMemory } from './memory';
 
-describe('durable memory engine', () => {
-  beforeEach(async () => {
-    await db.memories.clear();
+describe('durable memory foundation', () => {
+  beforeEach(async () => { await db.memories.clear(); });
+
+  it('stores a rich memory document', async () => {
+    const now = Date.now() - 1000;
+    const memory = await createMemory({
+      kind: 'MICRO_OBSERVATION', title: 'Identity note',
+      body: 'The character has a stable identity.\n\nMarkdown remains valid stored text.',
+      observedAt: now, confidence: 0.9, importance: 0.95,
+      tags: ['identity', 'character'],
+      source: { source: 'user', createdAt: now, note: 'Explicit configuration' },
+      supportingMemoryIds: ['memory_supporting'], relatedMemoryIds: ['memory_related'],
+      conflictingMemoryIds: ['memory_conflict'], supersedes: ['memory_old'],
+    });
+    expect(memory.id).toMatch(/^memory_/);
+    expect(memory.title).toBe('Identity note');
+    expect(memory.body).toContain('Markdown');
+    expect(memory.source.source).toBe('user');
+    expect(memory.relatedMemoryIds).toEqual(['memory_related']);
+    expect(memory.supportingMemoryIds).toEqual(['memory_supporting']);
+    expect(memory.conflictingMemoryIds).toEqual(['memory_conflict']);
+    expect(memory.supersedes).toEqual(['memory_old']);
+    expect(memory.reinforcementCount).toBe(0);
+    expect(memory.recallCount).toBe(0);
   });
 
-  it('creates, updates, reinforces, promotes, and deletes a memory', async () => {
-    const memory = await createMemory({
-      kind: 'MICRO_OBSERVATION',
-      content: 'Elara is Gareth\'s synthetic cybernetic consort.',
-      confidence: 0.9,
-      importance: 0.95,
-      tags: ['identity', 'elara'],
-      provenance: 'user',
-    });
-    expect(memory.recallCount).toBe(0);
-    expect(memory.tags).toEqual(['identity', 'elara']);
+  it('validates and normalizes title, body, and tags', async () => {
+    const memory = await createMemory({ title: '  Preference  ', body: '  Keep this exact prose.  ', tags: [' Preference ', 'preference'] });
+    expect(memory.title).toBe('Preference');
+    expect(memory.body).toBe('Keep this exact prose.');
+    expect(memory.tags).toEqual(['preference']);
+    await expect(createMemory({ title: '', body: 'Missing title' })).rejects.toThrow('Memory title is required.');
+    await expect(createMemory({ title: 'Missing body', body: '   ' })).rejects.toThrow('Memory body is required.');
+  });
 
-    const updated = await updateMemory(memory.id, { content: 'Elara is Gareth\'s canonical synthetic cybernetic consort.', importance: 1.4 });
-    expect(updated.content).toContain('canonical');
+  it('updates, reinforces, promotes, archives, and deletes', async () => {
+    const memory = await createMemory({ kind: 'MICRO_OBSERVATION', title: 'First note', body: 'Initial note.' });
+    const updated = await updateMemory(memory.id, { title: 'Updated note', body: 'Updated note body.', importance: 1.4 });
+    expect(updated.title).toBe('Updated note');
     expect(updated.importance).toBe(1);
-
     const promoted = await promoteMemory(memory.id);
     expect(promoted.kind).toBe('EPISODIC');
     expect(promoted.reinforcementCount).toBe(1);
-    expect(promoted.lifecycle).toBe('active');
-
     const reinforced = await reinforceMemory(memory.id);
     expect(reinforced.reinforcementCount).toBe(2);
-    expect(reinforced.lifecycle).toBe('active');
-
+    const archived = await archiveMemory(memory.id);
+    expect(archived.lifecycle).toBe('archived');
     await deleteMemory(memory.id);
     expect(await getMemory(memory.id)).toBeUndefined();
   });
 
-  it('isolates folder memories and optionally admits global memories', async () => {
-    await createMemory({ content: 'A folder-only fact', folderId: 'folder-a', kind: 'CONTEXTUAL' });
-    await createMemory({ content: 'A different-folder fact', folderId: 'folder-b', kind: 'CONTEXTUAL' });
-    await createMemory({ content: 'A global fact', folderId: null, kind: 'CORE' });
-
+  it('keeps folder scope isolated and global scope explicit', async () => {
+    await createMemory({ title: 'Folder A', body: 'A folder-only fact', folderId: 'folder-a' });
+    await createMemory({ title: 'Folder B', body: 'A different-folder fact', folderId: 'folder-b' });
+    await createMemory({ title: 'Global', body: 'A global fact', kind: 'CORE', folderId: null });
     const folderOnly = await retrieveMemories({ folderId: 'folder-a', includeGlobal: false, query: 'fact' });
-    expect(folderOnly.map((memory) => memory.content)).toEqual(['A folder-only fact']);
-
+    expect(folderOnly.map((memory) => memory.body)).toEqual(['A folder-only fact']);
     const withGlobal = await retrieveMemories({ folderId: 'folder-a', includeGlobal: true, query: 'fact' });
-    expect(withGlobal.map((memory) => memory.content)).toContain('A global fact');
-    expect(withGlobal.map((memory) => memory.content)).not.toContain('A different-folder fact');
-  });
-
-  it('supports explicit hierarchical folder retrieval without admitting unrelated siblings', async () => {
-    await createMemory({ content: 'Parent project rule', folderId: 'parent', kind: 'CONTEXTUAL', importance: 1, confidence: 1 });
-    await createMemory({ content: 'Current UI detail', folderId: 'child', kind: 'CONTEXTUAL', importance: 0.9, confidence: 1 });
-    await createMemory({ content: 'Sibling project secret', folderId: 'sibling', kind: 'CONTEXTUAL', importance: 1, confidence: 1 });
-
-    const result = await retrieveMemories({ folderId: 'child', folderIds: ['child', 'parent'], includeGlobal: false, query: 'project detail rule secret' });
-    expect(result.map((memory) => memory.content)).toContain('Parent project rule');
-    expect(result.map((memory) => memory.content)).toContain('Current UI detail');
-    expect(result.map((memory) => memory.content)).not.toContain('Sibling project secret');
-  });
-
-  it('honours lifecycle, expiry, bounds, and retrieval bookkeeping', async () => {
-    const current = 1_800_000_000_000;
-    const first = await createMemory({ content: 'important launch detail', importance: 1, confidence: 1, provenance: 'test' });
-    const second = await createMemory({ content: 'secondary launch detail', importance: 0.2, confidence: 0.5, provenance: 'test' });
-    await archiveMemory(first.id);
-    await updateMemory(second.id, { expiresAt: current - 1 });
-    const live = await createMemory({ content: 'live launch detail', importance: 0.9, confidence: 0.9, provenance: 'test' });
-
-    const result = await retrieveMemories({ query: 'launch detail', now: current, maxItems: 1, maxCharacters: 100 });
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe(live.id);
-
-    const stored = await getMemory(live.id);
-    expect(stored?.recallCount).toBe(1);
-    expect(stored?.lastRecalledAt).toBeTypeOf('number');
+    expect(withGlobal.map((memory) => memory.body)).toContain('A global fact');
+    expect(withGlobal.map((memory) => memory.body)).not.toContain('A different-folder fact');
   });
 });

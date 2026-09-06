@@ -16,7 +16,7 @@ html, body, #root { overflow: hidden; }
   /* Mobile canvas: the chat content owns the full usable width; the left
      control spine is an overlay, not a layout ruler. */
   .app-shell {
-    padding-bottom: 15px;
+    padding-bottom: 0;
   }
 
   .app-shell .elara-banner {
@@ -38,7 +38,7 @@ html, body, #root { overflow: hidden; }
 
   .app-shell form.composer {
     padding-bottom: 0;
-    margin-bottom: calc(var(--elara-keyboard-height, 0px) + 15px);
+    margin-bottom: 0;
   }
 }
 

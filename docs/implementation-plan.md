@@ -5,12 +5,14 @@
 Three user-selectable modes: PIN (default, 6–8 digits), Passkey (optional biometric/platform-authenticator upgrade with PIN fallback), and Off (optional opt-out, while retaining encrypted-at-rest storage and never persisting plaintext key). The provider-facing getGeminiApiKey() contract remains unchanged.
 
 ### Phase 1 — Security/session
-- Version Lockbox metadata with mode and auth metadata.
-- Retain AES-GCM-256 + PBKDF2-SHA-256 at 310,000 iterations.
-- Decrypted API key remains module memory only.
-- Add local activity timestamp and idle timeout; no network checks.
-- Cold start/reload with enabled security and no in-memory key becomes locked.
-- Idle timeout wipes in-memory key.
+- [x] Version Lockbox metadata with mode and auth metadata.
+- [x] Retain AES-GCM-256 + PBKDF2-SHA-256 at 310,000 iterations.
+- [x] Decrypted API key remains module memory only.
+- [x] Add local activity timestamp and idle timeout; no network checks.
+- [x] Cold start/reload with enabled security and no in-memory key becomes locked.
+- [x] Idle timeout wipes in-memory key.
+
+Default Phase 1 idle timeout is 15 minutes. The activity timestamp is held in module memory rather than persisted, and browser lifecycle events enforce the timeout locally. Authentication remains the existing password flow until Phase 2 replaces it with the default PIN flow.
 
 ### Phase 2 — PIN default
 - 6–8 digit numeric PIN setup/unlock.

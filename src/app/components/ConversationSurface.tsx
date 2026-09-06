@@ -6,6 +6,8 @@ import { Icon } from '../../ui/icons';
 import { MarkdownText } from './MarkdownText';
 import './conversation-surface.css';
 
+const BOTTOM_STICK_THRESHOLD_PX = 32;
+
 function responseGroupFor(message: ChatMessage): string {
   return message.responseGroupId || message.id;
 }
@@ -16,18 +18,17 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
   const seenCountsRef = useRef<Record<string, number>>({});
-  const lastViewportHeightRef = useRef<number | null>(null);
 
   function rememberScrollPosition() {
     const element = conversationRef.current;
     if (!element) return;
-    shouldStickToEndRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 160;
+    shouldStickToEndRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_STICK_THRESHOLD_PX;
   }
 
   function scrollToEnd(behavior: ScrollBehavior = 'smooth') {
     const element = conversationRef.current;
     if (!element || !shouldStickToEndRef.current) return;
-    element.scrollTo({ top: element.scrollHeight, behavior });
+    element.scrollTo({ top: Math.max(0, element.scrollHeight - element.clientHeight), behavior });
   }
 
   const visibleMessages = useMemo(() => messages.filter((message) => !deletedIds.has(message.id)), [messages, deletedIds]);
@@ -75,35 +76,15 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
   useEffect(() => { scrollToEnd(); }, [visibleMessages.length, visibleMessages.at(-1)?.text]);
 
   useEffect(() => {
-    const viewport = window.visualViewport;
     const element = conversationRef.current;
-    if (!viewport || !element) return undefined;
+    if (!element || typeof ResizeObserver === 'undefined') return undefined;
 
-    let frame = 0;
-    let lastHeight = element.clientHeight;
-    lastViewportHeightRef.current = viewport.height;
-
-    const reanchorAfterViewportChange = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        const nextHeight = element.clientHeight;
-        const previousHeight = lastHeight;
-        lastHeight = nextHeight;
-        lastViewportHeightRef.current = viewport.height;
-
-        const heightChanged = nextHeight !== previousHeight;
-        if (!heightChanged || !shouldStickToEndRef.current) return;
-
-        element.scrollTop = element.scrollHeight - element.clientHeight;
-      });
-    };
-
-    viewport.addEventListener('resize', reanchorAfterViewportChange);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      viewport.removeEventListener('resize', reanchorAfterViewportChange);
-      lastViewportHeightRef.current = null;
-    };
+    const observer = new ResizeObserver(() => {
+      if (!shouldStickToEndRef.current) return;
+      element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
 
   async function handleDelete(message: ChatMessage) {

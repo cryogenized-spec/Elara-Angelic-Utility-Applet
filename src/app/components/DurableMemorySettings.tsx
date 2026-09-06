@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { DurableMemory, MemoryKind, MemoryLifecycle } from '../../domain/memory';
-import { archiveMemory, createMemory, deleteMemory, listMemories, promoteMemory, reinforceMemory, updateMemory } from '../../persistence/memory';
+import type { DurableMemory, MemoryKind, MemoryLifecycle } from '../../memory/types';
+import { archiveMemory, deleteMemory, listMemories, promoteMemory, reinforceMemory, saveMemory, updateMemory } from '../../memory/store';
 import { sourceLabel } from '../../memory/provenance';
 import { useFolders } from '../folders/FolderProvider';
 import './durable-memory-settings.css';
@@ -63,7 +63,7 @@ export function DurableMemorySettings() {
       const confidence = Number(draft.confidence); const importance = Number(draft.importance);
       if (!Number.isFinite(confidence) || !Number.isFinite(importance)) throw new Error('Confidence and importance must be numbers.');
       if (editingId) await updateMemory(editingId, { title: draft.title, body: draft.body, kind: draft.kind, folderId: draft.folderId || null, confidence, importance, tags });
-      else await createMemory({ title: draft.title, body: draft.body, kind: draft.kind, folderId: draft.folderId || null, confidence, importance, tags, source: { source: 'user', createdAt: Date.now() } });
+      else await saveMemory({ title: draft.title, body: draft.body, kind: draft.kind, folderId: draft.folderId || null, confidence, importance, tags, source: { source: 'user', createdAt: Date.now() } });
       resetDraft(); await refresh();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save that memory.'); }
   }

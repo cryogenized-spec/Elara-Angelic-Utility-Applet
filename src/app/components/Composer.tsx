@@ -291,16 +291,17 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
 
   const banner = vttBusy ? <RecordingBanner state={vttState} rms={vttRms} elapsedMs={vttElapsed} onStop={bannerStop} /> : null;
 
-  function vttControl(target: HTMLTextAreaElement | null) {
+  function vttControl(targetRef: { current: HTMLTextAreaElement | null }) {
     return <div className="composer__vtt-control" ref={vttModeControlRef}>
       <button
         className={`composer__icon composer__vtt-button${vttState === 'recording' ? ' is-recording' : ''}`}
         type="button"
         aria-label={micAriaLabel()}
         aria-pressed={vttState === 'recording'}
+        data-vtt-mode={vttTransformMode}
         disabled={composerLocked}
         onPointerDown={(event) => { if (event.pointerType === 'mouse' && event.button !== 0) return; beginVttPress(); }}
-        onPointerUp={() => endVttPress(target)}
+        onPointerUp={() => endVttPress(targetRef.current)}
         onPointerCancel={cancelVttPress}
         onKeyDown={handleVttKeyDown}
         onKeyUp={handleVttKeyUp}
@@ -310,9 +311,9 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
       </button>
       {vttModeOpen && (
         <div className="composer__vtt-menu" role="menu" aria-label="Voice transcript mode">
-          <button type="button" role="menuitem" className={vttTransformMode === 'raw' ? 'is-active' : ''} aria-label="Raw" onClick={() => selectVttMode('raw')}><span>Raw</span><small>Faithful transcript</small></button>
-          <button type="button" role="menuitem" className={vttTransformMode === 'polish' ? 'is-active' : ''} aria-label="Polish" onClick={() => selectVttMode('polish')}><span>Polish</span><small>Clean natural prose</small></button>
-          <button type="button" role="menuitem" className={vttTransformMode === 'roleplay' ? 'is-active' : ''} aria-label="Roleplay" onClick={() => selectVttMode('roleplay')}><span>Roleplay</span><small>Convert to scene prose</small></button>
+          <button type="button" role="menuitemradio" aria-checked={vttTransformMode === 'raw'} className={vttTransformMode === 'raw' ? 'is-active' : ''} aria-label="Raw" onClick={() => selectVttMode('raw')}><span>Raw</span><small>Faithful transcript</small></button>
+          <button type="button" role="menuitemradio" aria-checked={vttTransformMode === 'polish'} className={vttTransformMode === 'polish' ? 'is-active' : ''} aria-label="Polish" onClick={() => selectVttMode('polish')}><span>Polish</span><small>Clean natural prose</small></button>
+          <button type="button" role="menuitemradio" aria-checked={vttTransformMode === 'roleplay'} className={vttTransformMode === 'roleplay' ? 'is-active' : ''} aria-label="Roleplay" onClick={() => selectVttMode('roleplay')}><span>Roleplay</span><small>Convert to scene prose</small></button>
         </div>
       )}
     </div>;
@@ -371,7 +372,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
             <Icon name="paperclip" size={19} />
           </button>
           <div className="composer-expanded__spacer" />
-          {vttControl(expandedTextareaRef.current)}
+          {vttControl(expandedTextareaRef)}
           <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
             <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
           </button>
@@ -396,7 +397,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           <Icon name="expand" size={15} />
         </button>
       </div>
-      {vttControl(textareaRef.current)}
+      {vttControl(textareaRef)}
       <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()}>
         <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
       </button>

@@ -29,14 +29,30 @@ function record(value: unknown): Record<string, unknown> {
 }
 
 function statusFrom(error: unknown): number | undefined {
-  const value = record(error).status;
-  return typeof value === 'number' ? value : undefined;
+  const source = record(error);
+  const direct = source.status;
+  if (typeof direct === 'number' && Number.isFinite(direct)) return direct;
+
+  const responseStatus = record(source.response).status;
+  if (typeof responseStatus === 'number' && Number.isFinite(responseStatus)) return responseStatus;
+
+  const causeStatus = record(source.cause).status;
+  if (typeof causeStatus === 'number' && Number.isFinite(causeStatus)) return causeStatus;
+
+  const details = record(source.error);
+  const nestedStatus = details.status;
+  if (typeof nestedStatus === 'number' && Number.isFinite(nestedStatus)) return nestedStatus;
+
+  return undefined;
 }
 
 function messageFrom(error: unknown): string {
-  if (error instanceof Error) return error.message;
-  const message = record(error).message;
-  return typeof message === 'string' ? message : 'The Gemini request failed.';
+  if (error instanceof Error && error.message) return error.message;
+  const source = record(error);
+  const message = source.message;
+  if (typeof message === 'string' && message) return message;
+  const nestedMessage = record(source.error).message;
+  return typeof nestedMessage === 'string' && nestedMessage ? nestedMessage : 'The Gemini request failed.';
 }
 
 function categoryFor(status: number | undefined): ProviderErrorCategory {

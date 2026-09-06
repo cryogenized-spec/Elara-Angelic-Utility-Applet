@@ -19,6 +19,7 @@ export const googleCapabilityKeySchema = z.enum([
   'drive.files.write',
   'sheets.read',
   'sheets.write',
+  'roleplay.world.local',
 ]);
 
 export type GoogleCapabilityKey = z.infer<typeof googleCapabilityKeySchema>;

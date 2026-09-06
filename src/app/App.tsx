@@ -14,6 +14,7 @@ import type { GoogleToolName } from '../google/tools/contracts';
 import { googleGeminiFunctionNames } from '../google/tools/gemini-declarations';
 import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import { getGeminiModel } from '../gemini/model-registry';
+import { resolveMasterCharacterInstruction } from '../character/system-instruction';
 import { Icon } from '../ui/icons';
 import { fontFamilyForCss, type FontSelection } from '../ui/fontRegistry';
 import { useVisualViewport } from '../ui/useVisualViewport';
@@ -44,10 +45,6 @@ function backgroundValue(preferences: ChatAppearancePreferences): string {
     return 'linear-gradient(135deg,#070914,#14172a)';
   }
   return preferences.chatBackgroundMode === 'image' ? `url(${preferences.chatBackgroundValue})` : preferences.chatBackgroundValue;
-}
-
-function masterCharacterInstruction(character: CharacterProfile): string {
-  return character.systemInstruction;
 }
 
 export function App() {
@@ -118,11 +115,10 @@ export function App() {
       setConversation(nextConversation); window.localStorage.setItem(ACTIVE_THREAD_KEY, nextConversation.id); await refreshThreads(); setSidebarOpen(false);
     } catch (cause) { if (activeConversationIdRef.current === pendingConversation.id) { activeConversationIdRef.current = ''; setError(cause instanceof Error ? cause.message : 'Could not create a new conversation.'); } }
   }
-
   async function send() {
     const text = draft.trim();
     if (!text || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
-    const systemInstruction = masterCharacterInstruction(character);
+    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
     setDraft(''); setError(null); setStatus('streaming');
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
@@ -147,31 +143,23 @@ export function App() {
     const targetIndex = conversation.messages.findIndex((message) => message.id === messageId);
     const target = targetIndex >= 0 ? conversation.messages[targetIndex] : undefined;
     if (!target || target.role !== 'assistant') return;
-
     let groupId = target.responseGroupId;
     let workingConversation = conversation;
     if (!groupId) {
       groupId = target.id;
-      const promoted: ConversationState = {
-        ...conversation,
-        updatedAt: Date.now(),
-        messages: conversation.messages.map((message) => message.id === target.id ? { ...message, responseGroupId: groupId, responseVariant: 1 } : message),
-      };
+      const promoted: ConversationState = { ...conversation, updatedAt: Date.now(), messages: conversation.messages.map((message) => message.id === target.id ? { ...message, responseGroupId: groupId, responseVariant: 1 } : message) };
       workingConversation = promoted;
       setConversation(promoted);
       try { await saveConversation(promoted); await refreshThreads(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not prepare that response for regeneration.'); return; }
     }
-
     const prompt = [...workingConversation.messages.slice(0, targetIndex)].reverse().find((message) => message.role === 'user');
     if (!prompt) { setError('Could not find the original user prompt for this response.'); return; }
     const promptIndex = workingConversation.messages.findIndex((message) => message.id === prompt.id);
-    const previousInteractionId = promptIndex >= 0
-      ? [...workingConversation.messages.slice(0, promptIndex)].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId
-      : undefined;
+    const previousInteractionId = promptIndex >= 0 ? [...workingConversation.messages.slice(0, promptIndex)].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId : undefined;
     const nextVariant = workingConversation.messages.filter((message) => message.role === 'assistant' && (message.responseGroupId ?? message.id) === groupId).length + 1;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = masterCharacterInstruction(character);
+    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setError(null); setStatus('streaming');
@@ -192,7 +180,7 @@ export function App() {
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = masterCharacterInstruction(character);
+    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
     const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut.`;
     try {
       await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
@@ -212,7 +200,6 @@ export function App() {
     if (activeConversationIdRef.current !== conversationId) return;
     setConversation((current) => activeConversationIdRef.current === conversationId ? base : current);
     const isCurrentConversation = () => activeConversationIdRef.current === conversationId;
-
     if (options.tools?.length) {
       const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
       for await (const event of streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)) {
@@ -233,7 +220,7 @@ export function App() {
 
   function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); }
   async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
-  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that conversation.'); } }
+  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
   async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } }
   async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) { const record = workspaceShortcuts.find((item) => item.id === shortcut.id); if (!record) { setError('That Workspace shortcut is not available.'); return; } await runWorkspaceShortcut(record); }
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
@@ -246,9 +233,7 @@ export function App() {
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
   const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity } as React.CSSProperties), [chatAppearance]);
   const visibleMessages = conversation.messages.filter((message) => message.conversationId === conversation.id);
-
   if (settingsOpen) return <SettingsScreen font={font} onFontChange={setFont} fontSize={fontSize} onFontSizeChange={setFontSize} portraitScale={portraitScale} onPortraitScaleChange={setPortraitScale} portraitBackground={portraitBackground} onPortraitBackgroundChange={setPortraitBackground} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} onBack={() => setSettingsOpen(false)} />;
-
   return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
     <div className="app-shell__background" aria-hidden="true" />
     <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button></div>
@@ -256,7 +241,7 @@ export function App() {
     <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
     <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={fontSize} onRegenerate={(messageId) => void regenerate(messageId)} />
     {error && <div className="error" role="alert">{error}</div>}
-    <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={masterCharacterInstruction(character)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
+    <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
     <Sidebar open={sidebarOpen} threads={threads} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => void switchThread(id)} onNewChat={() => void startNewChat()} onRename={(id, title) => void handleRename(id, title)} onArchive={(id) => void handleArchive(id)} onDelete={(id) => void handleDelete(id)} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
     {firstRunWelcomeOpen && <FirstRunWelcome character={character} onSaveCharacter={handleCharacterChange} onComplete={finishFirstRun} />}
   </main>;
@@ -275,9 +260,14 @@ function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
   else if (event.type === 'completed') {
     const completedAt = Date.now();
     const live = context.liveText.value;
-    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, durationMs: event.durationMs, usage: event.usage }, executionSummary: { id: crypto.randomUUID(), steps: ['Applied the user-configured system instruction when present.', 'Accepted the request through the canonical Gemini provider boundary.', 'Executed any requested Google capability through the registered tool executor.', 'Finalized and persisted the assistant turn.'], durationMs: event.durationMs } } : message) };
-    void context.save(completed).then(context.refreshThreads).then(() => { if (isCurrentConversation()) setConversation((current) => current.id === completed.id ? completed : current); }).catch((cause) => { if (isCurrentConversation()) context.setError(cause instanceof Error ? cause.message : 'Could not save the assistant response.'); });
+    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, ...(message.providerTurn ? { ...message.providerTurn } : {}) } } : message) };
+    if (isCurrentConversation()) {
+      context.setConversation(completed);
+      void context.save(completed).then(context.refreshThreads).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the response.'));
+    }
   }
-  else if (event.type === 'failed') { if (isCurrentConversation()) { context.setStatus('failed'); context.setError(`${event.error.message} [${event.error.code}]`); } }
-  else if (event.type === 'cancelled') { if (isCurrentConversation()) context.setStatus('idle'); }
+  else if (event.type === 'error') {
+    if (!isCurrentConversation()) return;
+    context.setStatus('failed'); context.setError(event.message);
+  }
 }

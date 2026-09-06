@@ -11,7 +11,7 @@ export interface ObservationRequest {
   tags?: string[];
 }
 
-export interface ObservationContext extends MemoryCapabilityContext {}
+export type ObservationContext = MemoryCapabilityContext;
 
 function appendUnique(ids: string[], id: string): string[] {
   return ids.includes(id) ? ids : [...ids, id];
@@ -19,6 +19,7 @@ function appendUnique(ids: string[], id: string): string[] {
 
 /** Record a fresh piece of evidence without promoting it into an established memory. */
 export async function recordObservation(request: ObservationRequest, context: ObservationContext = {}): Promise<DurableMemory> {
+  authorizeMemoryMutation('observe', context);
   return memory.save(
     { title: request.title, body: request.body, kind: 'MICRO_OBSERVATION', tags: request.tags },
     context,

@@ -20,11 +20,36 @@ export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferenc
 
   async function copyReference(entity: RoleplayWorldEntity): Promise<void> {
     const token = `${entity.id} [world-ref:${entity.ref}]`;
+    let copiedSuccessfully = false;
     try {
-      await navigator.clipboard.writeText(token);
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(token);
+        copiedSuccessfully = true;
+      }
+    } catch {
+      copiedSuccessfully = false;
+    }
+
+    if (!copiedSuccessfully) {
+      const textarea = document.createElement('textarea');
+      textarea.value = token;
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.left = '-9999px';
+      textarea.style.top = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      try { copiedSuccessfully = document.execCommand('copy'); } catch { copiedSuccessfully = false; }
+      textarea.remove();
+    }
+
+    if (copiedSuccessfully) {
       setCopied(entity.id);
       window.setTimeout(() => setCopied((current) => current === entity.id ? null : current), 1200);
-    } catch { setCopied(null); }
+    } else {
+      setCopied(null);
+    }
   }
 
   return <div className="roleplay-settings">
@@ -76,7 +101,7 @@ function WorldTreeNode({ entity, world, depth, onCopy, copied }: { entity: Rolep
       <span className="roleplay-tree__branch">{children.length ? '▾' : '·'}</span>
       <span className="roleplay-tree__id">{entity.id}</span>
       <span className="roleplay-tree__name">{entity.name}</span>
-      <button type="button" className="roleplay-tree__copy" aria-label={`Copy reference for ${entity.id}`} onClick={() => void onCopy(entity)}>{copied === entity.id ? '✓' : '⧉'}</button>
+      <button type="button" className="roleplay-tree__copy" aria-label={`Copy reference for ${entity.id}`} title="Copy AI reference" onClick={() => void onCopy(entity)}>{copied === entity.id ? '✓' : '⧉'}</button>
     </div>
     <div className="roleplay-tree__meta" style={{ paddingLeft: `${depth * 14 + 24}px` }}>
       <span>{entity.type}</span>

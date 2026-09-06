@@ -1,6 +1,6 @@
-import { formatMemoryContext, retrieveMemories } from '../persistence/memory';
+import { formatMemoryContext, retrieveMemories } from '../memory/store';
 import { loadFolderState } from '../persistence/folders';
-import type { MemoryRetrievalScope } from '../domain/memory';
+import type { MemoryRetrievalScope } from '../memory/types';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 

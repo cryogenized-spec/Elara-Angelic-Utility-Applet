@@ -69,9 +69,10 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
     if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: 'USER_DECLINED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
   } else {
     const decision = evaluateWriteConfirmation(descriptor.risk);
-    if (decision.requiresConfirmation && options.confirm) {
+    if (decision.requiresConfirmation) {
       const requestedAt = (options.now?.() ?? new Date()).toISOString();
       const confirmation: WriteConfirmationRequest = { tool: descriptor.name, risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>, resourceSummary: descriptor.description, requestedAt };
+      if (!options.confirm) return { ok: false, correlationId: id, tool: validCall.tool, code: 'CONFIRMATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
       let approved = false;
       try { approved = await options.confirm(confirmation) && isConfirmationFresh(requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
       if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: 'USER_DECLINED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };

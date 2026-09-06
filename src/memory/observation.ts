@@ -1,4 +1,4 @@
-import type { DurableMemory, MemoryCapabilityContext, MemoryKind } from './types';
+import type { DurableMemory } from './types';
 import { memory } from './capability';
 import { getMemory, reinforceMemory, updateMemory } from './store';
 
@@ -49,9 +49,10 @@ export async function consolidateObservation(
   if (!target) throw new Error('Target memory not found.');
 
   if (relation === 'support') {
-    return reinforceMemory(target.id).then((reinforced) => updateMemory(reinforced.id, {
+    const reinforced = await reinforceMemory(target.id);
+    return updateMemory(reinforced.id, {
       supportingMemoryIds: appendUnique(reinforced.supportingMemoryIds, observation.id),
-    }));
+    });
   }
 
   if (relation === 'conflict') {
@@ -64,5 +65,3 @@ export async function consolidateObservation(
     relatedMemoryIds: appendUnique(target.relatedMemoryIds, observation.id),
   });
 }
-
-export type { MemoryKind };

@@ -110,6 +110,8 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
       transcriptionAbortRef.current?.abort();
       recorderRef.current = null;
       transcriptionAbortRef.current = null;
+      vttTargetRef.current = null;
+      vttFocusRef.current = null;
     };
   }, []);
 
@@ -136,6 +138,10 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     return 'Raw';
   }
 
+  function currentVttTarget(): HTMLTextAreaElement | null {
+    return expanded ? expandedTextareaRef.current : textareaRef.current;
+  }
+
   async function handleVtt(target: HTMLTextAreaElement | null): Promise<void> {
     if (status === 'streaming') return;
     if (vttState === 'recording') {
@@ -152,15 +158,16 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
       setVttElapsed(0);
       return;
     }
-    if (vttBusy || !target) return;
+    const activeTarget = vttTargetRef.current ?? target;
+    if (vttBusy || !activeTarget) return;
 
     const sessionId = vttSessionIdRef.current + 1;
     vttSessionIdRef.current = sessionId;
     const selection = {
-      start: target.selectionStart ?? draft.length,
-      end: target.selectionEnd ?? draft.length,
+      start: activeTarget.selectionStart ?? draft.length,
+      end: activeTarget.selectionEnd ?? draft.length,
     };
-    vttTargetRef.current = target;
+    vttTargetRef.current = activeTarget;
     setVttMessage(null);
     setVttRms(0);
     setVttElapsed(0);
@@ -204,10 +211,11 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
         }
       }
 
-      if (!mountedRef.current || vttSessionIdRef.current !== sessionId) return;
+      const insertionTarget = vttTargetRef.current;
+      if (!mountedRef.current || vttSessionIdRef.current !== sessionId || !insertionTarget || !insertionTarget.isConnected) return;
       const inserted = insertTranscriptAtSelection(draft, capture.selection, message);
       onDraftChange(inserted.value);
-      vttFocusRef.current = { target, cursor: inserted.cursor };
+      vttFocusRef.current = { target: insertionTarget, cursor: inserted.cursor };
       setVttMessage(statusMessage);
       setVttState('idle');
     } catch (cause) {
@@ -234,7 +242,10 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }
 
   function beginVttPress(): void {
-    if (status === 'streaming' || (!textareaRef.current && !expandedTextareaRef.current)) return;
+    if (status === 'streaming') return;
+    const target = currentVttTarget();
+    if (!target) return;
+    vttTargetRef.current = target;
     if (vttState === 'recording' || vttState === 'processing' || vttState === 'requesting') {
       vttPressActiveRef.current = true;
       vttLongPressTriggeredRef.current = false;
@@ -259,7 +270,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
       vttPressTimerRef.current = null;
     }
     if (vttLongPressTriggeredRef.current) return;
-    void handleVtt(target);
+    void handleVtt(vttTargetRef.current ?? target ?? currentVttTarget());
   }
 
   function cancelVttPress(): void {
@@ -281,7 +292,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   function handleVttKeyUp(event: KeyboardEvent<HTMLButtonElement>): void {
     if (event.key !== 'Enter' && event.key !== ' ') return;
     event.preventDefault();
-    endVttPress(expanded ? expandedTextareaRef.current : textareaRef.current);
+    endVttPress(currentVttTarget());
   }
 
   function selectVttMode(mode: VttTransformMode): void {

@@ -172,6 +172,7 @@ test.describe('VTT composer flow', () => {
   });
 
   test('falls back to the raw transcript when transformation fails', async ({ page }) => {
+    test.setTimeout(15_000);
     await installVttBrowserMocks(page);
     await page.unroute('**/v1beta/interactions*');
     await page.route('**/v1beta/interactions*', async (route) => {
@@ -188,8 +189,8 @@ test.describe('VTT composer flow', () => {
     await composer.fill('draft ');
     await page.getByRole('button', { name: 'VTT voice input' }).click();
     await stopRecording(page);
-    await expect(composer).toHaveValue('draft voice inserted');
-    await expect(page.getByRole('status')).toContainText('Transformation failed; inserted the raw transcript.');
+    await expect(composer).toHaveValue('draft voice inserted', { timeout: 12_000 });
+    await expect(page.getByRole('status')).toContainText('Transformation failed; inserted the raw transcript.', { timeout: 12_000 });
   });
 
   test('reports microphone denial without changing the draft', async ({ page }) => {

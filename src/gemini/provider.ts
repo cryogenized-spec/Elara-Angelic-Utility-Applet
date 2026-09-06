@@ -27,6 +27,14 @@ function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
   return summary || undefined;
 }
 
+export async function safeLoadMemoryContext(query: string): Promise<string> {
+  try {
+    return await loadMemoryContext(query);
+  } catch {
+    return '';
+  }
+}
+
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
 type InteractionRequest = { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] };
 
@@ -74,7 +82,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const client = new GoogleGenAI({ apiKey, httpOptions: { retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
-    const memoryContext = await loadMemoryContext(query);
+    const memoryContext = await safeLoadMemoryContext(query);
     const contextualInstruction = appendMemoryContext(request.systemInstruction ?? '', memoryContext);
     const stream = await client.interactions.create(buildInteractionPayload({ ...request, systemInstruction: contextualInstruction }) as never);
     for await (const rawEvent of stream as unknown as AsyncIterable<unknown>) {
@@ -94,10 +102,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           const summaryBlocks = Array.isArray(step.summary) ? step.summary : [];
           for (const summaryBlock of summaryBlocks) {
             const text = readString(asRecord(summaryBlock), 'text');
-            if (text) {
-              appendThoughtSummary(thoughtSummaryParts, index, text);
-              yield { type: 'thought-summary-delta', index, text };
-            }
+            if (text) { appendThoughtSummary(thoughtSummaryParts, index, text); yield { type: 'thought-summary-delta', index, text }; }
           }
         }
         const signature = readString(step, 'signature');
@@ -106,11 +111,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         continue;
       }
       if (eventType === 'step.delta') {
-        const delta = asRecord(raw.delta);
-        const index = stepIndex(raw);
-        const deltaType = readString(delta, 'type');
-        const content = asRecord(delta.content);
-        const deltaText = readString(delta, 'text') ?? readString(content, 'text');
+        const delta = asRecord(raw.delta); const index = stepIndex(raw); const deltaType = readString(delta, 'type'); const content = asRecord(delta.content); const deltaText = readString(delta, 'text') ?? readString(content, 'text');
         if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
         else if (deltaType === 'thought_summary') { if (deltaText) { appendThoughtSummary(thoughtSummaryParts, index, deltaText); yield { type: 'thought-summary-delta', index, text: deltaText }; } }
         else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; }
@@ -119,16 +120,9 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
       }
       if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && pending.arguments && interactionId) { try { const args = JSON.parse(pending.arguments) as unknown; if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.'); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args as Record<string, unknown> }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
       if (eventType === 'interaction.completed') {
-        const interaction = asRecord(raw.interaction);
-        interactionId = readString(interaction, 'id') ?? interactionId;
-        const status = readString(interaction, 'status') ?? 'completed';
-        sawTerminalEvent = true;
-        const usage = readUsage(interaction.usage) ?? readUsage(raw.usage);
-        const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts);
-        const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined);
-        if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
-        yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage };
-        return;
+        const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed'; sawTerminalEvent = true;
+        const usage = readUsage(interaction.usage) ?? readUsage(raw.usage); const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts); const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined); if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
+        yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage }; return;
       }
       if (eventType === 'error') { const providerError = asRecord(raw.error); const message = readString(providerError, 'message') ?? 'Gemini returned a streaming error.'; sawTerminalEvent = true; yield { type: 'failed', error: normalizeGeminiError(new Error(message), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) }; return; }
     }

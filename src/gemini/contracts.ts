@@ -14,7 +14,8 @@ export type GeminiStreamEvent =
   | { type: 'step-stop'; index: number }
   | { type: 'completed'; interactionId: string; status: string; durationMs: number; usage?: GeminiUsage }
   | { type: 'cancelled'; interactionId?: string }
-  | { type: 'failed'; error: NormalizedProviderError };
+  | { type: 'failed'; error: NormalizedProviderError }
+  | { type: 'error'; message: string; error?: NormalizedProviderError };
 
 export interface GeminiUsage { inputTokens?: number; outputTokens?: number; cachedTokens?: number; thoughtsTokens?: number; totalTokens?: number; thoughtSummary?: string; }
 

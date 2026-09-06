@@ -5,7 +5,7 @@ import { DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type ChatAppearancePreferenc
 import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
 import { ensureWorkspaceShortcuts, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
-import { loadChatAppearance, loadRoleplayPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
+import { completeOnboarding, hasCompletedOnboarding, loadChatAppearance, loadRoleplayPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
 import { demoThreadTitlePort } from '../chat/thread-title-port';
 import { geminiTurnPort } from '../gemini/provider';
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
@@ -23,6 +23,7 @@ import { TopToolRail } from './components/TopToolRail';
 import { PortraitBanner } from './components/PortraitBanner';
 import { ConversationSurface } from './components/ConversationSurface';
 import { Composer } from './components/Composer';
+import { FirstRunWelcome } from './components/FirstRunWelcome';
 import type { WorkspaceShortcutDefinition } from './quick-actions/shortcuts';
 import { DEFAULT_QUICK_ACTIONS } from './quick-actions/defaults';
 import '../ui/fonts.css';
@@ -57,6 +58,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [firstRunWelcomeOpen, setFirstRunWelcomeOpen] = useState(false);
   const [workspaceShortcuts, setWorkspaceShortcuts] = useState<StoredWorkspaceShortcut[]>([]);
   const [font, setFont] = useState<FontSelection>({ kind: 'built-in', family: 'Inter' });
   const [fontSize, setFontSize] = useState(15);
@@ -77,13 +79,14 @@ export function App() {
     const initialActiveConversationId = activeConversationIdRef.current;
     void (async () => {
       try {
-        const [loadedThreads, savedGeminiSettings, loadedCharacter, loadedAppearance, loadedRoleplay, loadedShortcuts] = await Promise.all([loadThreads(), loadGeminiSettings(), loadCharacterProfile(), loadChatAppearance(), loadRoleplayPreferences(), ensureWorkspaceShortcuts()]);
+        const [loadedThreads, savedGeminiSettings, loadedCharacter, loadedAppearance, loadedRoleplay, loadedShortcuts, onboardingComplete] = await Promise.all([loadThreads(), loadGeminiSettings(), loadCharacterProfile(), loadChatAppearance(), loadRoleplayPreferences(), ensureWorkspaceShortcuts(), hasCompletedOnboarding()]);
         const storedActive = window.localStorage.getItem(ACTIVE_THREAD_KEY);
         const activeId = storedActive && loadedThreads.some((thread) => thread.id === storedActive) ? storedActive : (loadedThreads[0]?.id ?? 'primary');
         const loadedConversation = await loadConversation(activeId);
         if (cancelled || activeConversationIdRef.current !== initialActiveConversationId) return;
         activeConversationIdRef.current = activeId;
         setThreads(loadedThreads); setConversation(loadedConversation); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel); setCharacter(loadedCharacter); setChatAppearance(loadedAppearance); setRoleplay(loadedRoleplay); setWorkspaceShortcuts(loadedShortcuts);
+        setFirstRunWelcomeOpen(!onboardingComplete);
         window.localStorage.setItem(ACTIVE_THREAD_KEY, activeId);
       } catch { if (!cancelled) setError('Could not load the local application settings.'); }
     })();
@@ -230,7 +233,7 @@ export function App() {
 
   function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); }
   async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
-  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
+  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that conversation.'); } }
   async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } }
   async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) { const record = workspaceShortcuts.find((item) => item.id === shortcut.id); if (!record) { setError('That Workspace shortcut is not available.'); return; } await runWorkspaceShortcut(record); }
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
@@ -239,6 +242,7 @@ export function App() {
   async function handleCharacterChange(next: CharacterProfile) { setCharacter(next); try { const saved = await saveCharacterProfile(next); setCharacter(saved); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save character settings.'); } }
   async function handleChatAppearanceChange(next: ChatAppearancePreferences) { const safe = { ...DEFAULT_CHAT_APPEARANCE, ...next, chatBackgroundOpacity: Math.max(0, Math.min(1, next.chatBackgroundOpacity)), chatBackgroundOverlay: Math.max(0, Math.min(.9, next.chatBackgroundOverlay)), chatBackgroundBlur: Math.max(0, Math.min(24, next.chatBackgroundBlur)), userSurfaceOpacity: Math.max(.2, Math.min(1, next.userSurfaceOpacity)) }; setChatAppearance(safe); try { setChatAppearance(await saveChatAppearance(safe)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save chat appearance.'); } }
   async function handleRoleplayChange(next: RoleplayPreferences) { setRoleplay(next); try { setRoleplay(await saveRoleplayPreferences(next)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save roleplay settings.'); } }
+  async function finishFirstRun(): Promise<void> { await completeOnboarding(); setFirstRunWelcomeOpen(false); }
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
   const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity } as React.CSSProperties), [chatAppearance]);
   const visibleMessages = conversation.messages.filter((message) => message.conversationId === conversation.id);
@@ -254,6 +258,7 @@ export function App() {
     {error && <div className="error" role="alert">{error}</div>}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={masterCharacterInstruction(character)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
     <Sidebar open={sidebarOpen} threads={threads} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => void switchThread(id)} onNewChat={() => void startNewChat()} onRename={(id, title) => void handleRename(id, title)} onArchive={(id) => void handleArchive(id)} onDelete={(id) => void handleDelete(id)} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />
+    {firstRunWelcomeOpen && <FirstRunWelcome character={character} onSaveCharacter={handleCharacterChange} onComplete={finishFirstRun} />}
   </main>;
 }
 

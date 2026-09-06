@@ -4,50 +4,26 @@ export const MEMORY_PERMISSIONS = ['save', 'observe', 'consolidate', 'forget', '
 export type MemoryPermission = (typeof MEMORY_PERMISSIONS)[number];
 export type MemoryActor = 'model' | 'user' | 'system';
 
-export type MemoryPermissionPolicy = Record<MemoryActor, Record<MemoryPermission, boolean>>;
-export type MemoryPermissionPolicyPatch = Partial<{
-  [K in MemoryActor]: Partial<Record<MemoryPermission, boolean>>;
-}>;
+type MemoryPermissionSet = Record<MemoryPermission, boolean>;
+export type MemoryPermissionPolicy = Record<MemoryActor, MemoryPermissionSet>;
+export type PartialMemoryPermissionSet = Partial<MemoryPermissionSet>;
+export type PartialMemoryPermissionPolicy = Partial<Record<MemoryActor, PartialMemoryPermissionSet>>;
 
 export const DEFAULT_MEMORY_PERMISSION_POLICY: Readonly<MemoryPermissionPolicy> = {
-  model: {
-    save: true,
-    observe: true,
-    consolidate: true,
-    forget: false,
-    delete: false,
-  },
-  user: {
-    save: true,
-    observe: true,
-    consolidate: true,
-    forget: true,
-    delete: true,
-  },
-  system: {
-    save: true,
-    observe: true,
-    consolidate: true,
-    forget: true,
-    delete: true,
-  },
+  model: { save: true, observe: true, consolidate: true, forget: false, delete: false },
+  user: { save: true, observe: true, consolidate: true, forget: true, delete: true },
+  system: { save: true, observe: true, consolidate: true, forget: true, delete: true },
 };
 
 let policy: MemoryPermissionPolicy = clonePolicy(DEFAULT_MEMORY_PERMISSION_POLICY);
 
 function clonePolicy(source: MemoryPermissionPolicy): MemoryPermissionPolicy {
-  return {
-    model: { ...source.model },
-    user: { ...source.user },
-    system: { ...source.system },
-  };
+  return { model: { ...source.model }, user: { ...source.user }, system: { ...source.system } };
 }
 
-export function getMemoryPermissionPolicy(): MemoryPermissionPolicy {
-  return clonePolicy(policy);
-}
+export function getMemoryPermissionPolicy(): MemoryPermissionPolicy { return clonePolicy(policy); }
 
-export function setMemoryPermissionPolicy(next: MemoryPermissionPolicyPatch): MemoryPermissionPolicy {
+export function setMemoryPermissionPolicy(next: PartialMemoryPermissionPolicy): MemoryPermissionPolicy {
   policy = {
     model: { ...policy.model, ...(next.model ?? {}) },
     user: { ...policy.user, ...(next.user ?? {}) },
@@ -61,12 +37,7 @@ export function resetMemoryPermissionPolicy(): MemoryPermissionPolicy {
   return getMemoryPermissionPolicy();
 }
 
-export function authorizeMemoryMutation(
-  permission: MemoryPermission,
-  context: Pick<MemoryCapabilityContext, 'actor'> = {},
-): void {
+export function authorizeMemoryMutation(permission: MemoryPermission, context: Pick<MemoryCapabilityContext, 'actor'> = {}): void {
   const actor: MemoryActor = context.actor ?? 'model';
-  if (!policy[actor][permission]) {
-    throw new Error(`Memory permission denied: ${permission}`);
-  }
+  if (!policy[actor][permission]) throw new Error(`Memory permission denied: ${permission}`);
 }

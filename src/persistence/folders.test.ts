@@ -28,11 +28,13 @@ describe('conversation folder persistence', () => {
   it('prevents cycles and duplicate sibling names while moving', async () => {
     const root = await createFolderPath('Projects');
     const child = await createFolderPath('Projects/Elara');
-    const other = await createFolderPath('Archive');
+    const archive = await createFolderPath('Archive');
+    const archiveChild = await createFolderPath('Archive/Elara');
 
     await expect(moveFolder(root.id, child.id)).rejects.toThrow(/cannot be moved/i);
-    await moveFolder(child.id, other.id);
-    await expect(renameFolder(child.id, 'Projects')).rejects.toThrow(/already exists/i);
+    await moveFolder(child.id, archive.id);
+    await expect(moveFolder(child.id, archive.id)).rejects.toThrow(/already exists/i);
+    await expect(renameFolder(archiveChild.id, 'Projects')).resolves.toBeUndefined();
   });
 
   it('promotes children and direct assignments when deleting a folder', async () => {

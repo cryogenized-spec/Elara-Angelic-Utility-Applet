@@ -40,6 +40,7 @@ export function GeminiApiLockbox() {
   const pinRef = useRef<HTMLInputElement>(null);
   const confirmPinRef = useRef<HTMLInputElement>(null);
   const currentPinRef = useRef<HTMLInputElement>(null);
+  const switchPinRef = useRef<HTMLInputElement>(null);
   const newPinRef = useRef<HTMLInputElement>(null);
   const confirmNewPinRef = useRef<HTMLInputElement>(null);
   const upgradePinRef = useRef<HTMLInputElement>(null);
@@ -198,17 +199,18 @@ export function GeminiApiLockbox() {
   }
 
   async function switchToPin() {
-    const currentPin = read(currentPinRef);
+    const currentPin = read(switchPinRef);
     if (!isGeminiLockboxPin(currentPin)) return setDetail(`Enter the current ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN to switch back to PIN mode.`);
     try {
       await switchGeminiLockboxToPin(currentPin);
       await removeGeminiPasskey();
-      clearInputs(currentPinRef);
+      clearInputs(switchPinRef);
       setMode('pin');
       setStatus('unlocked');
       setHasPasskey(false);
       setDetail('Switched to PIN mode. Your existing PIN remains active.');
     } catch (error) {
+      clearInputs(switchPinRef);
       setDetail(error instanceof Error ? error.message : 'Could not switch to PIN mode.');
     }
   }
@@ -248,7 +250,7 @@ export function GeminiApiLockbox() {
     try {
       await removeGeminiPasskey();
       await clearGeminiApiKey();
-      clearInputs(keyRef, passwordRef, confirmPasswordRef, pinRef, confirmPinRef, currentPinRef, newPinRef, confirmNewPinRef, upgradePinRef, unlockPasswordRef, reenablePinRef, reenablePinConfirmRef);
+      clearInputs(keyRef, passwordRef, confirmPasswordRef, pinRef, confirmPinRef, currentPinRef, switchPinRef, newPinRef, confirmNewPinRef, upgradePinRef, unlockPasswordRef, reenablePinRef, reenablePinConfirmRef);
       setStatus('empty');
       setMode('pin');
       setHasPasskey(false);
@@ -256,6 +258,12 @@ export function GeminiApiLockbox() {
     } catch (error) {
       setDetail(error instanceof Error ? error.message : 'Could not clear the Gemini API Lockbox.');
     }
+  }
+
+  function lock() {
+    lockGeminiApiKey();
+    setStatus('locked');
+    setDetail('Lockbox locked. The API key is no longer available to the Gemini client.');
   }
 
   const dataState = status === 'unlocked' ? 'healthy' : status === 'empty' ? 'degraded' : 'unknown';
@@ -342,7 +350,7 @@ export function GeminiApiLockbox() {
           <div className="worker-health__endpoint">Encrypted at rest · session unlocked · security mode: Passkey · PIN fallback enabled</div>
           <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={lock}>Lock</button><button className="model-settings__button worker-health__button" type="button" onClick={() => void turnOffSecurity()}>Turn Security Off</button><button className="model-settings__button worker-health__button" type="button" onClick={() => void clear()}>Clear Lockbox</button></div>
           <div className="worker-health__endpoint"><strong>Switch to PIN</strong> · keep the current PIN and remove the device passkey.
-            <label className="character-field" style={{ marginTop: '0.6rem' }}><span>Current PIN</span><input ref={currentPinRef} type="password" aria-label="Current PIN for switch to PIN" placeholder="Current PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="current-password" onKeyDown={(event) => { if (event.key === 'Enter') void switchToPin(); }} /></label>
+            <label className="character-field" style={{ marginTop: '0.6rem' }}><span>Current PIN</span><input ref={switchPinRef} type="password" aria-label="Current PIN for switch to PIN" placeholder="Current PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="current-password" onKeyDown={(event) => { if (event.key === 'Enter') void switchToPin(); }} /></label>
             <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={() => void switchToPin()}>Switch to PIN</button></div>
           </div>
           <div className="worker-health__endpoint"><strong>Change PIN</strong> · changing the PIN also removes the existing passkey because its wrapped secret is bound to the old PIN.

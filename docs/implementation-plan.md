@@ -58,10 +58,10 @@ The Lockbox UI now surfaces the active security mode directly, presents passkey-
 ### Phase 7 — Tests
 - [ ] Unit-test crypto, PIN validation, mode transitions, stale timeout, activity, backoff, reset/wipe, and locked-provider behavior.
 - [x] Assert plaintext key never appears in IndexedDB/localStorage/sessionStorage.
-- [ ] Browser-test lock UI, numeric input/focus, and WebAuthn capability/fallback.
+- [x] Browser-test Lockbox UI, numeric input/focus, and graceful passkey fallback when WebAuthn is unavailable.
 - [ ] Run lint, typecheck, unit, build, Playwright, and E2E before merge.
 
-The storage-boundary test now inspects the real IndexedDB record and both browser storage surfaces to ensure the Gemini API key itself is never persisted in plaintext.
+The storage-boundary test now inspects the real IndexedDB record and both browser storage surfaces to ensure the Gemini API key itself is never persisted in plaintext. Browser coverage now exercises the PIN-first setup surface, numeric constraints and focus behavior, session lock/re-unlock, and the no-passkey fallback path in an environment without WebAuthn support.
 
 ### Non-goals
 No network-based stale checks, no plaintext API-key storage, no Worker credential transport, and no conversation/folder context changes.

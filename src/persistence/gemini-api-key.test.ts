@@ -65,7 +65,7 @@ describe('encrypted Gemini API Lockbox', () => {
     await configureGeminiApiKeyWithPin(TEST_KEY, PIN);
     expect(await getGeminiLockboxMetadata()).toMatchObject({ mode: 'pin', authVersion: 1, failedAttempts: 0, lockedUntil: null });
     lockGeminiApiKey();
-    await expect(unlockGeminiApiKeyWithPin('wrong1')).rejects.toThrow('Invalid PIN');
+    await expect(unlockGeminiApiKeyWithPin('111111')).rejects.toThrow('Invalid PIN');
     await unlockGeminiApiKeyWithPin(PIN);
     expect(await getGeminiApiKey()).toBe(TEST_KEY);
     expect(await getGeminiLockboxMetadata()).toMatchObject({ failedAttempts: 0, lockedUntil: null });

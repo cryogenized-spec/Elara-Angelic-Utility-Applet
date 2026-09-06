@@ -75,7 +75,7 @@ Implemented UI details:
 
 ### Pass 8 — Long-horizon hardening
 
-Add migration/corruption recovery, large-dataset performance tests, deletion and permission verification, conflict handling, export/import considerations, and stress coverage at thousands of records.
+Harden the same canonical store for long-running use without introducing a second authority. The implementation adds a read-only integrity health scan, multi-thousand-record retrieval stress coverage, and focused protection around deletion/permission semantics and conflict handling. Recovery remains explicit: malformed durable records are reported rather than silently deleted or rewritten. Export/import remains a future extension point, not an alternate persistence mechanism.
 
 ## Canonical memory document
 
@@ -140,7 +140,17 @@ Retrieval first applies lifecycle/expiry and folder/global scope filters, then r
 
 The selector is pure and independently testable. IndexedDB recall bookkeeping remains in the canonical store after selection, so reading memories does not create a second persistence authority.
 
+A multi-thousand-record stress test exercises ranking, scope filtering, uniqueness, ordering, and hard-budget enforcement over 5,000 candidates. The test asserts deterministic invariants rather than a fragile wall-clock threshold.
+
 This baseline does not require embeddings or provider-specific semantic search. Those can be added later without changing the durable-memory contract.
+
+## Long-horizon integrity
+
+Durable storage remains strict: records written through the canonical store are normalized and schema-validated, and retrieval never persists its ephemeral `score` field.
+
+`inspectMemoryStore()` provides a read-only integrity scan over the same IndexedDB table. It reports total, valid, and invalid records plus identifiers when available. It never repairs, deletes, or rewrites a malformed record because automatic destructive recovery would violate durability guarantees. A future migration/import surface can use the same schema boundary to perform an explicit, reviewable transformation.
+
+The health scan is intentionally separate from normal browsing and retrieval. A healthy store therefore has no special runtime cost during ordinary chat, while operators and future maintenance UI can detect corruption without creating a second memory store.
 
 ## Gemini integration
 
@@ -194,3 +204,7 @@ Pass 6 is complete when the existing single Gemini provider path composes the bo
 ## Pass 7 completion criterion
 
 Pass 7 is complete when Memory Bank provides search, metadata filters, collapsed record inspection, one-record expansion, safe Markdown reading, direct result navigation, and human-owned durable mutations while remaining a presentation projection over the canonical store with no alternate persistence authority.
+
+## Pass 8 completion criterion
+
+Pass 8 is complete when the canonical durable-memory store has explicit read-only integrity diagnostics, malformed records are surfaced without destructive implicit repair, large candidate sets are covered by stress tests with hard retrieval budgets, and deletion/permission/conflict semantics remain explicitly tested without introducing a second persistence authority.

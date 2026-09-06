@@ -55,8 +55,15 @@ describe('Google OAuth scope registry', () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it('uses HTTPS provider scope URIs', () => {
-    for (const entry of googleScopeRegistry) expect(entry.scope.startsWith('https://www.googleapis.com/auth/')).toBe(true);
+  it('uses HTTPS provider scope URIs for Google capabilities', () => {
+    for (const entry of googleScopeRegistry) {
+      if (entry.capability === 'roleplay.world.local') continue;
+      expect(entry.scope.startsWith('https://www.googleapis.com/auth/')).toBe(true);
+    }
+  });
+
+  it('keeps the local Roleplay capability provider-free', () => {
+    expect(getGoogleScope('roleplay.world.local').scope).toBe('');
   });
 
   it('keeps Gmail authorization granular', () => {

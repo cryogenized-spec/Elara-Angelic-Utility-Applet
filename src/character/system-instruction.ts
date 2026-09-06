@@ -5,3 +5,7 @@
  * First-run onboarding may offer optional templates for the user to choose.
  */
 export const ELARA_SYSTEM_INSTRUCTION = '';
+
+export function hasMasterCharacterInstruction(value: string | null | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}

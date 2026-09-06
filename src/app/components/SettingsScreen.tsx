@@ -9,6 +9,7 @@ import type { GeminiSettings } from '../../gemini/settings-engine';
 import { getGeminiModel, GEMINI_MODELS } from '../../gemini/model-registry';
 import { GeminiApiLockbox } from './GeminiApiLockbox';
 import { CharacterSettings } from './CharacterSettings';
+import { DurableMemorySettings } from './DurableMemorySettings';
 import { RoleplaySettings } from './RoleplaySettings';
 import { ChatAppearanceSettings } from './ChatAppearanceSettings';
 import { GoogleOAuthSettings } from './GoogleOAuthSettings';
@@ -26,6 +27,7 @@ import './workspace-shortcut-settings.css';
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },
   { id: 'character', label: 'Character', icon: 'sparkles' as const },
+  { id: 'memory', label: 'Memory Bank', icon: 'brain' as const },
   { id: 'typography', label: 'Typography', icon: 'type' as const },
   { id: 'model', label: 'Gemini', icon: 'bot' as const },
   { id: 'google', label: 'Google', icon: 'shield' as const },
@@ -209,6 +211,15 @@ export function SettingsScreen({
               <h2>Character</h2>
               <p>Define the AI identity and soft-coded master behaviour. Tool schemas and application capabilities remain hard-coded and separate.</p>
               <CharacterSettings profile={character} onChange={onCharacterChange} />
+            </div>
+          )}
+
+          {section === 'memory' && (
+            <div className="settings-copy">
+              <span className="panel-kicker">DURABLE CONTEXT</span>
+              <h2>Memory Bank</h2>
+              <p>Inspect, search, edit, archive, promote, restore, or permanently delete durable memory. This is a projection over the same canonical store used by Gemini retrieval.</p>
+              <DurableMemorySettings />
             </div>
           )}
 

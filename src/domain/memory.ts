@@ -35,6 +35,8 @@ export interface MemoryInput {
 
 export interface MemoryRetrievalScope {
   folderId?: string | null;
+  /** Explicit folder ancestry allowed for retrieval, ordered nearest-first. */
+  folderIds?: string[];
   includeGlobal?: boolean;
   now?: number;
   maxItems?: number;

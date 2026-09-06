@@ -12,6 +12,18 @@ html, body, #root { overflow: hidden; }
   overscroll-behavior-y: contain;
 }
 
+@media (max-width: 560px) {
+  /* Keep the composer itself flush to the viewport edge; the shell owns the
+     intentional 15px breathing room above the Android keyboard/navigation area. */
+  .app-shell {
+    padding-bottom: 15px;
+  }
+
+  .app-shell form.composer {
+    padding-bottom: 0;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .conversation { scroll-behavior: auto; }
 }

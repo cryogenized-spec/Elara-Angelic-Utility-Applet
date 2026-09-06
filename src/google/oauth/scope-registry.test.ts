@@ -47,7 +47,10 @@ describe('Google OAuth scope registry', () => {
   it('keeps provider scope strings out of model-facing tool contracts', async () => {
     const contracts = await import('../tools/contracts');
     const source = JSON.stringify(contracts.googleToolCallSchema);
-    for (const entry of googleScopeRegistry) expect(source).not.toContain(entry.scope);
+    for (const entry of googleScopeRegistry) {
+      if (!entry.scope) continue;
+      expect(source).not.toContain(entry.scope);
+    }
   });
 
   it('uses unique application capability keys', () => {

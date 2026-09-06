@@ -29,7 +29,7 @@ export function MasterPromptWarning() {
   if (!isEmpty) return null;
 
   return (
-    <div className="master-prompt-warning" role="status" aria-live="polite">
+    <div className="master-prompt-warning" aria-live="polite">
       <span className="master-prompt-warning__dash" aria-hidden="true" />
       <span>Master Prompt is currently empty. You can add one in Settings → Character.</span>
     </div>

@@ -61,8 +61,8 @@ test('composer occupies its own layout space instead of overlapping the conversa
   const conversationBox = await conversation.boundingBox();
   const composerBox = await composer.boundingBox();
   expect(shellBox && conversationBox && composerBox).toBeTruthy();
-  expect(conversationBox!.bottom).toBeLessThanOrEqual(composerBox!.y + 1);
-  expect(composerBox!.bottom).toBeLessThanOrEqual(shellBox!.bottom + 1);
+  expect(conversationBox!.y + conversationBox!.height).toBeLessThanOrEqual(composerBox!.y + 1);
+  expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(shellBox!.y + shellBox!.height + 1);
 
   await page.evaluate(() => document.documentElement.style.setProperty('--elara-visual-viewport-height', '520px'));
   await page.waitForTimeout(50);
@@ -71,8 +71,8 @@ test('composer occupies its own layout space instead of overlapping the conversa
   const compactComposer = await composer.boundingBox();
   expect(compactShell && compactConversation && compactComposer).toBeTruthy();
   expect(compactShell!.height).toBeLessThanOrEqual(521);
-  expect(compactConversation!.bottom).toBeLessThanOrEqual(compactComposer!.y + 1);
-  expect(compactComposer!.bottom).toBeLessThanOrEqual(compactShell!.bottom + 1);
+  expect(compactConversation!.y + compactConversation!.height).toBeLessThanOrEqual(compactComposer!.y + 1);
+  expect(compactComposer!.y + compactComposer!.height).toBeLessThanOrEqual(compactShell!.y + compactShell!.height + 1);
 });
 
 test('collapses the character banner when the sidebar opens', async ({ page }) => {

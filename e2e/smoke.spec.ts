@@ -145,7 +145,7 @@ test('keeps roleplay opt-in and persists its environment settings', async ({ pag
   await expect(page.getByLabel('Environment name')).toHaveValue('Sunset villa');
 });
 
-test('exposes the local API Lockbox rather than the retired Worker boundary', async ({ page }) =>
+test('exposes the local API Lockbox rather than the retired Worker boundary', async ({ page }) => {
   await page.goto('');
   await openSettings(page);
   await page.getByRole('button', { name: 'Lockbox' }).click();

@@ -28,8 +28,6 @@ function writeViewportMetrics() {
   const offsetTop = visualViewport?.offsetTop ?? 0;
   const keyboardHeight = Math.max(0, window.innerHeight - visualHeight - offsetTop);
 
-  root.style.setProperty('--elara-visual-viewport-height', `${Math.round(visualHeight)}px`);
-  root.style.setProperty('--elara-visual-viewport-offset-top', `${Math.round(offsetTop)}px`);
   root.style.setProperty('--elara-keyboard-height', `${Math.round(keyboardHeight)}px`);
 }
 
@@ -39,7 +37,11 @@ export function useVisualViewport() {
 
     writeViewportMetrics();
     const visualViewport = getVisualViewport();
-    const update = () => requestAnimationFrame(writeViewportMetrics);
+    let frame = 0;
+    const update = () => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(writeViewportMetrics);
+    };
 
     window.addEventListener('resize', update, { passive: true });
     visualViewport?.addEventListener('resize', update);
@@ -49,12 +51,11 @@ export function useVisualViewport() {
     virtualKeyboard?.addEventListener('geometrychange', update);
 
     return () => {
+      window.cancelAnimationFrame(frame);
       window.removeEventListener('resize', update);
       visualViewport?.removeEventListener('resize', update);
       visualViewport?.removeEventListener('scroll', update);
       virtualKeyboard?.removeEventListener('geometrychange', update);
-      document.documentElement.style.removeProperty('--elara-visual-viewport-height');
-      document.documentElement.style.removeProperty('--elara-visual-viewport-offset-top');
       document.documentElement.style.removeProperty('--elara-keyboard-height');
     };
   }, []);

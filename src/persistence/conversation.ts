@@ -7,6 +7,7 @@ import type { StoredWorkspaceShortcut } from './workspace-shortcuts';
 const PRIMARY_ID = 'primary';
 const DEFAULT_TITLE = 'New conversation';
 const GEMINI_SETTINGS_ID = 'gemini';
+const FOLDER_STORAGE_KEY = 'elara.conversation-folders.v1';
 
 interface StoredThread extends ConversationThread { title: string; }
 export interface StoredGeminiSettings {
@@ -16,11 +17,29 @@ export interface StoredGeminiSettings {
   updatedAt: number;
 }
 
-class ElaraDatabase extends Dexie {
+export interface StoredConversationFolder {
+  id: string;
+  name: string;
+  parentId: string | null;
+  contextScope: 'folder' | 'global';
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StoredFolderAssignment {
+  id: string;
+  threadId: string;
+  folderId: string | null;
+  updatedAt: number;
+}
+
+export class ElaraDatabase extends Dexie {
   messages!: Table<ChatMessage, string>;
   threads!: Table<StoredThread, string>;
   settings!: Table<StoredGeminiSettings, string>;
   workspaceShortcuts!: Table<StoredWorkspaceShortcut, string>;
+  folders!: Table<StoredConversationFolder, string>;
+  folderAssignments!: Table<StoredFolderAssignment, string>;
 
   constructor() {
     super('elara-angelic-utility-applet');
@@ -44,10 +63,47 @@ class ElaraDatabase extends Dexie {
       settings: 'id, updatedAt',
       workspaceShortcuts: 'id, service, enabled, order, updatedAt',
     });
+    this.version(5).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+    }).upgrade(async (transaction) => {
+      const folderTable = transaction.table('folders');
+      const assignmentTable = transaction.table('folderAssignments');
+      try {
+        const raw = window.localStorage.getItem(FOLDER_STORAGE_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as {
+          folders?: StoredConversationFolder[];
+          assignments?: Record<string, string | null>;
+        };
+        if (Array.isArray(parsed.folders)) {
+          const folders = parsed.folders.filter((folder) =>
+            !!folder && typeof folder.id === 'string' && typeof folder.name === 'string' &&
+            (typeof folder.parentId === 'string' || folder.parentId === null) &&
+            (folder.contextScope === 'folder' || folder.contextScope === 'global') &&
+            typeof folder.createdAt === 'number' && typeof folder.updatedAt === 'number',
+          );
+          await folderTable.bulkPut(folders);
+        }
+        if (parsed.assignments && typeof parsed.assignments === 'object') {
+          const assignments = Object.entries(parsed.assignments)
+            .filter(([threadId, folderId]) => typeof threadId === 'string' && (typeof folderId === 'string' || folderId === null))
+            .map(([threadId, folderId]) => ({ id: threadId, threadId, folderId, updatedAt: Date.now() } satisfies StoredFolderAssignment));
+          if (assignments.length) await assignmentTable.bulkPut(assignments);
+        }
+        window.localStorage.removeItem(FOLDER_STORAGE_KEY);
+      } catch {
+        // A malformed legacy cache should not block the database upgrade.
+      }
+    });
   }
 }
 
-const db = new ElaraDatabase();
+export const db = new ElaraDatabase();
 
 function threadFromConversation(conversation: ConversationState): StoredThread {
   return { id: conversation.id, title: conversation.title, createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, archived: false };

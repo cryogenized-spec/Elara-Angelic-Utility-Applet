@@ -72,7 +72,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     const apiKey = await getGeminiApiKey();
     if (!apiKey) { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId }) }; return; }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
-    const client = new GoogleGenAI({ apiKey });
+    const client = new GoogleGenAI({ apiKey, httpOptions: { retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
     const memoryContext = await loadMemoryContext(query);
     const contextualInstruction = appendMemoryContext(request.systemInstruction ?? '', memoryContext);

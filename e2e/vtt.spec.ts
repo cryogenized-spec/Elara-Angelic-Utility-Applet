@@ -26,7 +26,7 @@ async function installVttBrowserMocks(page: Page, interactionMode: 'default' | '
         window.setTimeout(() => {
           this.ondataavailable?.({ data: new Blob([new Uint8Array(3_000)], { type: 'audio/webm;codecs=opus' }) });
           this.onstop?.();
-        }, 20);
+        }, 650);
       }
     }
     class MockAnalyser {

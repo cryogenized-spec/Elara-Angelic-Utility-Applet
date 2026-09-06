@@ -29,7 +29,7 @@ const settingsSections = [
   { id: 'typography', label: 'Typography', icon: 'type' as const },
   { id: 'model', label: 'Gemini', icon: 'chat' as const },
   { id: 'google', label: 'Google', icon: 'shield' as const },
-  { id: 'chat', label: 'Chat', icon: 'chat' as const },
+  { id: 'chat', label: 'Chat', icon: 'message-circle' as const },
   { id: 'roleplay', label: 'Roleplay', icon: 'sparkles' as const },
   { id: 'security', label: 'Lockbox', icon: 'shield' as const },
 ] as const;

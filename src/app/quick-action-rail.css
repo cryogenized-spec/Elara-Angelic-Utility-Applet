@@ -65,7 +65,7 @@
 
 @media (pointer: coarse) {
   .tool-pill { min-height: 44px; }
-  .app-shell:has(.artwork-mode-portrait) .tool-pill { min-height: 42px; }
+  .app-shell:has(.artwork-mode-portrait) .tool-pill { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -53,7 +53,7 @@ export async function transcribeVttCapture(capture: VttCapture, signal?: AbortSi
         store: false,
       });
       const transcript = typeof interaction.output_text === 'string' ? interaction.output_text.trim() : '';
-      if (!transcript) throw new VttTranscriptionError('empty', 'No speech was detected.');
+      if (!transcript) throw new VttTranscriptionError('empty', 'No speech detected.');
       return transcript;
     })();
 

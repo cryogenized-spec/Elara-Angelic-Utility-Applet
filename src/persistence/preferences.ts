@@ -104,7 +104,7 @@ function normalizeBackgroundValue(mode: ChatAppearancePreferences['chatBackgroun
   if (mode === 'solid') return safeHex(value, DEFAULT_CHAT_APPEARANCE.chatBackgroundValue);
   if (mode === 'gradient') return value === 'violet' || value === 'rose' || value === 'midnight' ? value : 'midnight';
   if (typeof value !== 'string' || value.length > 6_000_000) return '';
-  if (!/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(value)) return '';
+  if (!/^data:image\/(?:jpeg|png|webp|avif);base64,[a-z0-9+/=]+$/i.test(value)) return '';
   return value;
 }
 

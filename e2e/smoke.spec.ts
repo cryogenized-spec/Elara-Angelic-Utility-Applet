@@ -157,10 +157,9 @@ test('keeps roleplay opt-in and persists the World Canvas state', async ({ page 
   await openSettings(page);
   await page.getByRole('button', { name: 'Roleplay' }).click();
   const toggle = page.getByRole('switch');
-  if (await toggle.getAttribute('aria-checked') === 'true') await toggle.click();
-  await expect(page.getByText('The canvas is empty. Describe the setting naturally in chat and Elara can propose the first location.')).toHaveCount(1);
-  await toggle.click();
+  if (await toggle.getAttribute('aria-checked') !== 'true') await toggle.click();
   await expect(toggle).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText('The canvas is empty. Describe the setting naturally in chat and Elara can propose the first location.')).toHaveCount(1);
   await page.reload();
   await openSettings(page);
   await page.getByRole('button', { name: 'Roleplay' }).click();

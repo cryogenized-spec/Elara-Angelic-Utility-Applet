@@ -7,6 +7,7 @@ const DEFAULT_MAX_CHARACTERS = 6_000;
 const MAX_CONTENT_LENGTH = 2_000;
 const MAX_TAG_LENGTH = 40;
 const MAX_TAGS = 12;
+const MEMORY_PROMOTION_ORDER: MemoryKind[] = ['MICRO_OBSERVATION', 'EPISODIC', 'CONTEXTUAL', 'CORE'];
 
 export type MemoryRecord = DurableMemory;
 
@@ -115,6 +116,23 @@ export async function reinforceMemory(id: string, confidence?: number, importanc
     lifecycle: 'active',
     confidence: confidence === undefined ? existing.confidence : clampScore(confidence),
     importance: importance === undefined ? existing.importance : clampScore(importance),
+    reinforcementCount: existing.reinforcementCount + 1,
+    updatedAt: Date.now(),
+  };
+  await memoriesTable().put(next);
+  return next;
+}
+
+export async function promoteMemory(id: string, targetKind?: MemoryKind): Promise<DurableMemory> {
+  const existing = await memoriesTable().get(id);
+  if (!existing) throw new Error('Memory not found.');
+  const currentIndex = MEMORY_PROMOTION_ORDER.indexOf(existing.kind);
+  const requestedIndex = targetKind === undefined ? currentIndex + 1 : MEMORY_PROMOTION_ORDER.indexOf(targetKind);
+  const nextIndex = Math.max(currentIndex, Math.min(MEMORY_PROMOTION_ORDER.length - 1, requestedIndex));
+  const next: DurableMemory = {
+    ...existing,
+    kind: MEMORY_PROMOTION_ORDER[nextIndex] ?? existing.kind,
+    lifecycle: 'active',
     reinforcementCount: existing.reinforcementCount + 1,
     updatedAt: Date.now(),
   };

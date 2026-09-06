@@ -35,6 +35,7 @@ export const googleScopeRegistry: readonly GoogleScopeDescriptor[] = [
   { capability: 'drive.files.write', scope: 'https://www.googleapis.com/auth/drive.file', access: 'write', sensitivity: 'non-sensitive', rationale: 'Per-file Drive access is preferred over broad Drive access.' },
   { capability: 'sheets.read', scope: 'https://www.googleapis.com/auth/drive.file', access: 'read', sensitivity: 'non-sensitive', rationale: 'Per-file access is preferred for explicitly selected or app-created spreadsheets.' },
   { capability: 'sheets.write', scope: 'https://www.googleapis.com/auth/drive.file', access: 'write', sensitivity: 'non-sensitive', rationale: 'Per-file access is preferred for explicitly selected or app-created spreadsheets.' },
+  { capability: 'roleplay.world.local', scope: '', access: 'write', sensitivity: 'non-sensitive', rationale: 'Application-local Roleplay World Canvas; no Google OAuth scope is required.' },
 ];
 
 const registryByCapability = new Map(googleScopeRegistry.map((entry) => [entry.capability, entry]));

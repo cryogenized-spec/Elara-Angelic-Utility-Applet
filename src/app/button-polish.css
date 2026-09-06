@@ -18,6 +18,8 @@ summary {
   color: inherit;
   text-align: center;
   cursor: pointer;
+  -webkit-appearance: none;
+  appearance: none;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
   user-select: none;

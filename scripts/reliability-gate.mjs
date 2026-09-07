@@ -41,6 +41,7 @@ if (!providerSource.includes("from '@google/genai'")) throw new Error('Reliabili
 if (providerSource.includes('GEMINI_WORKER_URL') || providerSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: Gemini provider must not use the Cloudflare Worker.');
 if (!providerSource.includes('getGeminiApiKey')) throw new Error('Reliability gate: Gemini provider must obtain its credential through the local app Lockbox.');
 if (!providerSource.includes("if (systemInstruction) payload.system_instruction = systemInstruction;")) throw new Error('Reliability gate: empty Character Master must omit system_instruction entirely.');
+if (!providerSource.includes('request.results')) throw new Error('Reliability gate: Gemini tool-result continuation must support grouped results.');
 
 const markdownSource = readFileSync(join(root, 'src/app/components/MarkdownText.tsx'), 'utf8');
 if (!markdownSource.includes('skipHtml')) throw new Error('Reliability gate: restricted Markdown renderer must explicitly skip raw HTML.');
@@ -70,12 +71,15 @@ if (!roleplayWorldSource.includes('crypto.subtle.digest')) throw new Error('Reli
 const roleplayBrokerSource = readFileSync(join(root, 'src/google/confirmation/roleplay-broker.ts'), 'utf8');
 if (!roleplayBrokerSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Roleplay mutations must use the shared Google confirmation broker.');
 const googleBrokerSource = readFileSync(join(root, 'src/google/confirmation/broker.ts'), 'utf8');
+if (!googleBrokerSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google mutations must support grouped confirmation requests.');
 if (!googleBrokerSource.includes('data-decision="accept"') || !googleBrokerSource.includes('data-decision="decline"')) throw new Error('Reliability gate: Google mutations must expose explicit user confirmation controls.');
 if (!googleBrokerSource.includes('aria-label')) throw new Error('Reliability gate: Google confirmation controls must be accessible.');
 const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
-if (!toolLoopSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Google tool loop must route writes through the shared confirmation broker.');
+if (!toolLoopSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google tool loop must route mutation batches through the shared confirmation broker.');
+if (!toolLoopSource.includes('results:')) throw new Error('Reliability gate: Google tool loop must return grouped tool results to Gemini.');
 const executorSource = readFileSync(join(root, 'src/google/tools/executor.ts'), 'utf8');
 if (!executorSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: direct Google tool execution must retain the shared confirmation broker.');
+if (!executorSource.includes('confirmationRequestForCall')) throw new Error('Reliability gate: Google executor must expose safe confirmation request derivation for batched mutations.');
 const calendarServiceSource = readFileSync(join(root, 'src/google/calendar/service.ts'), 'utf8');
 if (!calendarServiceSource.includes("authorize('calendar.events.write')")) throw new Error('Reliability gate: Calendar writes must use the dedicated write capability.');
 const calendarHandlerSource = readFileSync(join(root, 'src/google/tools/service-handlers.ts'), 'utf8');
@@ -117,4 +121,4 @@ if (!characterPersistence.includes("record.systemInstruction = '';")) throw new 
 
 if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24') throw new Error('Reliability gate: Node baseline must remain 24.');
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract.`);

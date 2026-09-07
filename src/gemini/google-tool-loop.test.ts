@@ -17,7 +17,7 @@ async function* events(...items: unknown[]) {
 
 const oauth = {
   authorize: async (capability: string) => ({ capability: capability as never, fetch: async () => new Response('{}', { status: 200 }) }),
-  getStatus: async () => ({ state: 'connected' as const, grantedCapabilities: ['calendar.events.read' as const, 'tasks.write' as const] }),
+  getStatus: async () => ({ state: 'connected' as const, grantedCapabilities: ['calendar.events.read' as const, 'calendar.events.write' as const, 'tasks.write' as const] }),
   disconnect: async () => undefined,
 };
 

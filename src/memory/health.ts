@@ -8,6 +8,14 @@ export interface MemoryStoreHealth {
   invalidIds: string[];
 }
 
+export function normalizeInvalidMemoryId(record: unknown): string {
+  if (record && typeof record === 'object') {
+    const candidate = record as Partial<{ id: unknown }>;
+    if (typeof candidate.id === 'string' && candidate.id.trim()) return candidate.id;
+  }
+  return '<unknown>';
+}
+
 /**
  * Read-only integrity scan for the canonical durable memory table.
  * Invalid records are reported, never silently rewritten or deleted.
@@ -18,11 +26,7 @@ export async function inspectMemoryStore(): Promise<MemoryStoreHealth> {
 
   for (const record of records) {
     const result = durableMemorySchema.safeParse(record);
-    if (!result.success) {
-      const candidate = record as Partial<{ id: unknown }>;
-      if (typeof candidate.id === 'string' && candidate.id.trim()) invalidIds.push(candidate.id);
-      else invalidIds.push('<unknown>');
-    }
+    if (!result.success) invalidIds.push(normalizeInvalidMemoryId(record));
   }
 
   return {

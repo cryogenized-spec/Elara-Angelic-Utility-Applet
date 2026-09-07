@@ -1,13 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createInteraction, getGeminiApiKey, GoogleGenAI } = vi.hoisted(() => ({
+const { createInteraction, getGeminiApiKey, getGeminiLockboxStatus, GoogleGenAI } = vi.hoisted(() => ({
   createInteraction: vi.fn(),
   getGeminiApiKey: vi.fn(),
+  getGeminiLockboxStatus: vi.fn(),
   GoogleGenAI: vi.fn(),
 }));
 
 vi.mock('@google/genai', () => ({ GoogleGenAI }));
-vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey }));
+vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey, getGeminiLockboxStatus }));
 
 import { geminiTurnPort } from './provider';
 
@@ -19,14 +20,15 @@ describe('Gemini provider credential preflight', () => {
   beforeEach(() => {
     createInteraction.mockReset();
     getGeminiApiKey.mockReset();
+    getGeminiLockboxStatus.mockReset();
     GoogleGenAI.mockReset();
     GoogleGenAI.mockImplementation(function MockGoogleGenAI(this: { interactions: { create: typeof createInteraction } }) {
       this.interactions = { create: createInteraction };
     });
   });
 
-  it('fails before constructing the SDK when the Lockbox has no usable key', async () => {
-    getGeminiApiKey.mockResolvedValue('');
+  it('fails before constructing the SDK when the Lockbox is empty', async () => {
+    getGeminiLockboxStatus.mockResolvedValue('empty');
 
     const collected: unknown[] = [];
     for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Hello.' })) collected.push(event);
@@ -41,11 +43,34 @@ describe('Gemini provider credential preflight', () => {
         retryable: false,
       },
     });
+    expect(getGeminiApiKey).not.toHaveBeenCalled();
     expect(GoogleGenAI).not.toHaveBeenCalled();
     expect(createInteraction).not.toHaveBeenCalled();
   });
 
-  it('constructs the SDK and reaches interactions.create after credential preflight', async () => {
+  it('fails before constructing the SDK when the Lockbox is locked', async () => {
+    getGeminiLockboxStatus.mockResolvedValue('locked');
+
+    const collected: unknown[] = [];
+    for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Hello while locked.' })) collected.push(event);
+
+    expect(collected).toHaveLength(1);
+    expect(collected[0]).toMatchObject({
+      type: 'failed',
+      error: {
+        category: 'configuration',
+        code: 'GEMINI_LOCKBOX_LOCKED',
+        message: 'Gemini API key is locked in the app Lockbox. Unlock the Lockbox before sending.',
+        retryable: false,
+      },
+    });
+    expect(getGeminiApiKey).not.toHaveBeenCalled();
+    expect(GoogleGenAI).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('constructs the SDK and reaches interactions.create after an unlocked credential preflight', async () => {
+    getGeminiLockboxStatus.mockResolvedValue('unlocked');
     getGeminiApiKey.mockResolvedValue('test-gemini-key');
     createInteraction.mockResolvedValue(events(
       { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },

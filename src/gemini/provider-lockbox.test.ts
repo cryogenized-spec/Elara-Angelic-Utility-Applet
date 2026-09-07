@@ -38,7 +38,11 @@ describe('Gemini provider and Lockbox boundary', () => {
     expect(collected).toHaveLength(1);
     expect(collected[0]).toMatchObject({
       type: 'failed',
-      error: { category: 'configuration', code: 'GEMINI_CONFIGURATION' },
+      error: {
+        category: 'configuration',
+        code: 'GEMINI_LOCKBOX_LOCKED',
+        message: 'Gemini API key is locked in the app Lockbox. Unlock the Lockbox before sending.',
+      },
     });
     expect(GoogleGenAI).not.toHaveBeenCalled();
     expect(createInteraction).not.toHaveBeenCalled();

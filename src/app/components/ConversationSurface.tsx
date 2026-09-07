@@ -104,7 +104,7 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
         if (message.role !== 'assistant') {
           return <article className="message message-user user-surface-frosted" key={message.id}>
             <header className="message-meta"><span>YOU</span><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
-            <div className="message-body" style={{ fontSize: `${fontSize}px` }}><MarkdownText text={message.text || '…'} /></div>
+            <div className="message-body" style={{ fontSize: `${fontSize}px` }}><MarkdownText text={message.text} /></div>
             <div className="message-actions" aria-label="Message actions">
               <button type="button" className="message-action" aria-label="Delete message" title="Delete message" onClick={() => void handleDelete(message)}><Icon name="trash" size={15} /></button>
             </div>
@@ -122,7 +122,9 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
             <span className="response-variants__pagination" aria-live="polite">{selectedIndex + 1}/{variants.length}</span>
             <button type="button" className="response-variants__button" aria-label="Next response" disabled={selectedIndex === variants.length - 1} onClick={() => setSelectedVariants((current) => ({ ...current, [groupId]: Math.min(variants.length - 1, selectedIndex + 1) }))}>›</button>
           </div>}
-          <div className="message-body" style={{ fontSize: `${fontSize}px` }}><MarkdownText text={selected.text || '…'} /></div>
+          <div className="message-body" style={{ fontSize: `${fontSize}px` }}>
+            {selected.text ? <MarkdownText text={selected.text} /> : <span className="message-empty" aria-label="No response text received">No response received.</span>}
+          </div>
           <div className="message-actions" aria-label="Message actions">
             <button type="button" className="message-action" aria-label="Regenerate response" title="Regenerate response" onClick={() => onRegenerate(selected.id)}><Icon name="refresh" size={15} /></button>
             <button type="button" className="message-action message-action--danger" aria-label="Delete message" title="Delete message" onClick={() => void handleDelete(selected)}><Icon name="trash" size={15} /></button>

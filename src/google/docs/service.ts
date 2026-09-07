@@ -37,8 +37,9 @@ export class GoogleDocsService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
   async getDocument(documentId: string): Promise<DocumentPayload> {
+    const safeDocumentId = bounded(documentId, 'document ID', MAX_DOCUMENT_ID_LENGTH);
     const access = await this.oauth.authorize('docs.read');
-    const response = await access.fetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(bounded(documentId, 'document ID', MAX_DOCUMENT_ID_LENGTH))}`);
+    const response = await access.fetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(safeDocumentId)}`);
     return this.readJson(response);
   }
 

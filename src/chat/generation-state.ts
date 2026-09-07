@@ -209,9 +209,11 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
       // A new interaction NEVER resets transcript or trace: tool continuations
       // belong to the same generation. Freeze in-flight steps from the
       // previous interaction so their timers stay honest, then continue.
+      // A re-announced (duplicate) id is not a boundary: leave running steps
+      // and the active tool untouched.
       const seen = next.interactionIds.includes(event.interactionId);
       const steps =
-        next.steps.length > 0
+        !seen && next.steps.length > 0
           ? next.steps.map((step) =>
               step.state === 'running' ? { ...step, state: 'done' as const, endedAt: receivedAt } : step,
             )
@@ -222,7 +224,7 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
         model: next.model ?? event.model,
         interactionIds: seen ? next.interactionIds : [...next.interactionIds, event.interactionId],
         currentInteractionId: event.interactionId,
-        activeTool: undefined,
+        activeTool: seen ? next.activeTool : undefined,
       };
     }
     case 'interaction-status': {
@@ -397,7 +399,7 @@ export function buildExecutionSummary(state: GenerationState): ExecutionSummary 
     durationMs: Math.max(0, Math.round((state.endedAt ?? state.startedAt) - state.startedAt)),
     thoughtSummary:
       summary && summary.length > MAX_PERSISTED_THOUGHT_SUMMARY_CHARS
-        ? summary.slice(0, MAX_PERSISTED_THOUGHT_SUMMARY_CHARS)
+        ? `${summary.slice(0, MAX_PERSISTED_THOUGHT_SUMMARY_CHARS)}…`
         : summary,
   };
 }

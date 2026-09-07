@@ -97,7 +97,10 @@ export function GenerationTrace({ generation }: { generation: GenerationState })
       <span className="generation-trace__sr-status" role="status">
         {PHASE_LABELS[generation.phase]}
       </span>
-      <header className="generation-trace__header">
+      <header
+        className="generation-trace__header"
+        title={generation.interactionIds.length > 0 ? `interactions: ${generation.interactionIds.join(', ')}` : undefined}
+      >
         <span className="generation-trace__dot" aria-hidden="true" />
         <span className="generation-trace__phase">{PHASE_LABELS[generation.phase]}</span>
         <span className="generation-trace__time" aria-hidden="true">{formatMs(turnDurationMs(generation, now))}</span>

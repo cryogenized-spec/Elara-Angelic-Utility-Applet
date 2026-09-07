@@ -7,6 +7,8 @@ import {
   canRetryFailedTurn,
   createGenerationArbiter,
   dispatchGenerationEvent,
+  isFailedPartialTarget,
+  regenerateBaseFor,
   syncGenerationEvent,
   type FailedTurnAttempt,
   type GenerationSyncContext,
@@ -42,7 +44,6 @@ function createHarness(
   let error: string | null = null;
   let structured: NormalizedProviderError | null = null;
   const saved: ConversationState[] = [];
-  const streamFailed = { value: false };
   const context: GenerationSyncContext = {
     assistantMessage,
     base,
@@ -68,10 +69,9 @@ function createHarness(
     refreshThreads: async () => undefined,
     isActiveGeneration: () => options.active ?? true,
     ensureAssistant: () => undefined,
-    streamFailed,
     onFailedAttempt: options.onFailedAttempt,
   };
-  return { context, base, read: () => ({ conversation, status, error, structured, saved, streamFailed: streamFailed.value }) };
+  return { context, base, read: () => ({ conversation, status, error, structured, saved }) };
 }
 
 function runTurn(
@@ -176,14 +176,13 @@ describe('generation sync: one-assistant-message invariant', () => {
       { type: 'cancelled', interactionId: 'i-1' },
     ]);
 
-    const { conversation, status, error, structured, saved, streamFailed } = harness.read();
+    const { conversation, status, error, structured, saved } = harness.read();
     expect(conversation).toEqual(harness.base);
     expect(conversation.messages.some((message) => message.role === 'assistant')).toBe(false);
     expect(status).toBe('idle');
     expect(error).toBeNull();
     expect(structured).toBeNull();
     expect(saved).toHaveLength(0);
-    expect(streamFailed).toBe(false);
   });
 
   it('keeps structured failures with code, status, and retryability', () => {
@@ -205,12 +204,11 @@ describe('generation sync: one-assistant-message invariant', () => {
       },
     ]);
 
-    const { status, error, structured, saved, streamFailed } = harness.read();
+    const { status, error, structured, saved } = harness.read();
     expect(status).toBe('failed');
     expect(error).toBe('[GEMINI_RATE_LIMIT] Slow down.');
     expect(structured).toMatchObject({ providerStatus: 429, providerCode: 'RESOURCE_EXHAUSTED', retryable: true });
     expect(saved).toHaveLength(0);
-    expect(streamFailed).toBe(true);
   });
 
   it('captures the failed attempt so a retry can replace it', () => {
@@ -348,6 +346,36 @@ describe('canRetryFailedTurn', () => {
   });
 });
 
+describe('follow-up turns after a failure', () => {
+  const persisted: ConversationState = {
+    id: 'thread-1',
+    title: 'Follow-up',
+    createdAt: BASE_TIME,
+    updatedAt: BASE_TIME,
+    messages: [
+      { id: 'user-1', role: 'user', text: 'Hello.', createdAt: BASE_TIME, conversationId: 'thread-1' },
+      { id: 'assistant-1', role: 'assistant', text: 'Hi.', createdAt: BASE_TIME, conversationId: 'thread-1' },
+    ],
+  };
+  const partial: ChatMessage = { id: 'assistant-partial', role: 'assistant', text: 'abc', createdAt: BASE_TIME, conversationId: 'thread-1' };
+  const live: ConversationState = { ...persisted, messages: [...persisted.messages, partial] };
+  const attempt: FailedTurnAttempt = { generationId: 'gen-1', base: persisted, input: 'Hello.' };
+
+  it('streams follow-ups from the pre-failure base so the partial cannot go zombie', () => {
+    expect(regenerateBaseFor(live, attempt)).toBe(persisted);
+    expect(regenerateBaseFor(live, null)).toBe(live);
+    expect(regenerateBaseFor(live, { ...attempt, base: { ...persisted, id: 'thread-2' } })).toBe(live);
+  });
+
+  it('recognizes the unpersisted partial as a retry target, not a regenerate target', () => {
+    expect(isFailedPartialTarget(live, attempt, 'assistant-partial')).toBe(true);
+    expect(isFailedPartialTarget(live, attempt, 'assistant-1')).toBe(false);
+    expect(isFailedPartialTarget(live, null, 'assistant-partial')).toBe(false);
+    expect(isFailedPartialTarget(persisted, attempt, 'assistant-partial')).toBe(false);
+    expect(isFailedPartialTarget(live, attempt, 'missing')).toBe(false);
+  });
+});
+
 describe('cross-generation arbitration', () => {
   it('rejects late events from a superseded runner: conversation, error, retry, and persistence stay untouched', async () => {
     // One shared application store, two independent turn runners.
@@ -387,7 +415,6 @@ describe('cross-generation arbitration', () => {
       refreshThreads: async () => undefined,
       isActiveGeneration: () => arbiter.isActive(generationId),
       ensureAssistant: () => undefined,
-      streamFailed: { value: false },
       onFailedAttempt: (attempt) => {
         attempts.push(attempt);
       },
@@ -481,7 +508,6 @@ describe('cross-generation arbitration', () => {
       refreshThreads: async () => undefined,
       isActiveGeneration: () => activeThread === 'thread-1' && arbiter.isActive('gen-A'),
       ensureAssistant: () => undefined,
-      streamFailed: { value: false },
       onFailedAttempt: (attempt) => {
         attempts.push(attempt);
       },

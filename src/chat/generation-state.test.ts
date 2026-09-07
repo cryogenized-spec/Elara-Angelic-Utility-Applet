@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { GeminiStreamEvent } from '../gemini/contracts';
 import {
+  MAX_PERSISTED_THOUGHT_SUMMARY_CHARS,
   applyGenerationEvent,
   buildExecutionSummary,
   createGenerationState,
@@ -132,6 +133,42 @@ describe('generation-state reducer', () => {
     expect(state.phase).toBe('completed');
     expect(state.interactionIds).toEqual(['i-1', 'i-2']);
     expect(state.transcript).toBe('Working on it. Task created.');
+  });
+
+  it('ignores a re-announced interaction id instead of freezing live steps', () => {
+    let state = createGenerationState('gen-dup', { startedAt: 0 });
+    const send = (event: GeminiStreamEvent, receivedAt: number) => {
+      state = applyGenerationEvent(state, { generationId: 'gen-dup', event, receivedAt });
+    };
+    send({ type: 'interaction-created', interactionId: 'i-1', model: 'm' }, 10);
+    send({ type: 'step-start', index: 0, stepType: 'thought' }, 20);
+    send({ type: 'tool-call', interactionId: 'i-1', index: 1, callId: 'c-1', name: 'tasks.createTask', arguments: {} }, 30);
+    expect(state.activeTool?.name).toBe('tasks.createTask');
+
+    // Duplicate announcement of the same interaction: not a boundary.
+    send({ type: 'interaction-created', interactionId: 'i-1', model: 'm' }, 40);
+    expect(state.interactionIds).toEqual(['i-1']);
+    expect(state.steps.every((step) => step.state === 'running')).toBe(true);
+    expect(state.activeTool?.name).toBe('tasks.createTask');
+
+    // A genuinely new interaction still closes the previous round.
+    send({ type: 'interaction-created', interactionId: 'i-2', model: 'm' }, 50);
+    expect(state.interactionIds).toEqual(['i-1', 'i-2']);
+    expect(state.steps.every((step) => step.state === 'done')).toBe(true);
+    expect(state.activeTool).toBeUndefined();
+  });
+
+  it('marks truncated persisted thought summaries with an ellipsis', () => {
+    const state = drive(
+      [
+        { type: 'thought-summary-delta', index: 0, text: 'x'.repeat(9000) },
+        { type: 'completed', interactionId: 'i-1', status: 'completed', durationMs: 5 },
+      ],
+      'gen-truncate',
+    );
+    const summary = buildExecutionSummary(state);
+    expect(summary.thoughtSummary?.length).toBe(MAX_PERSISTED_THOUGHT_SUMMARY_CHARS + 1);
+    expect(summary.thoughtSummary?.endsWith('…')).toBe(true);
   });
 
   it('ignores stale events from superseded generations by reference', () => {

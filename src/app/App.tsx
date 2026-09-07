@@ -21,7 +21,7 @@ import {
   type GenerationPhase,
   type GenerationState,
 } from '../chat/generation-state';
-import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
+import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, isFailedPartialTarget, regenerateBaseFor, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
 import { createTurnWatchdog } from '../chat/turn-watchdog';
 import type { GoogleToolName } from '../google/tools/contracts';
 import { googleGeminiFunctionNames } from '../google/tools/gemini-declarations';
@@ -171,14 +171,18 @@ export function App() {
 
   async function regenerate(messageId: string) {
     if (status === 'streaming') return;
-    const targetIndex = conversation.messages.findIndex((message) => message.id === messageId);
-    const target = targetIndex >= 0 ? conversation.messages[targetIndex] : undefined;
+    // Regenerating the failed partial itself means "redo this response":
+    // replace it via retry rather than appending a variant next to it.
+    if (isFailedPartialTarget(conversation, failedAttempt, messageId)) { await retryLastTurn(); return; }
+    const effectiveBase = regenerateBaseFor(conversation, failedAttempt);
+    const targetIndex = effectiveBase.messages.findIndex((message) => message.id === messageId);
+    const target = targetIndex >= 0 ? effectiveBase.messages[targetIndex] : undefined;
     if (!target || target.role !== 'assistant') return;
     let groupId = target.responseGroupId;
-    let workingConversation = conversation;
+    let workingConversation = effectiveBase;
     if (!groupId) {
       groupId = target.id;
-      const promoted: ConversationState = { ...conversation, updatedAt: Date.now(), messages: conversation.messages.map((message) => message.id === target.id ? { ...message, responseGroupId: groupId, responseVariant: 1 } : message) };
+      const promoted: ConversationState = { ...effectiveBase, updatedAt: Date.now(), messages: effectiveBase.messages.map((message) => message.id === target.id ? { ...message, responseGroupId: groupId, responseVariant: 1 } : message) };
       workingConversation = promoted;
       setConversation(promoted);
       try { await saveConversation(promoted); await refreshThreads(); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not prepare that response for regeneration.'); return; }
@@ -217,7 +221,7 @@ export function App() {
     const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut.`;
     let turnId: string | null = null;
     try {
-      turnId = await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
+      turnId = await streamAssistantTurn(hiddenTask, regenerateBaseFor(conversation, failedAttempt), conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
@@ -251,12 +255,11 @@ export function App() {
     };
     const idleStallMs = options.watchdog?.idleStallMs ?? DEFAULT_IDLE_STALL_TIMEOUT_MS;
     const absoluteMs = options.watchdog?.absoluteMs ?? DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS;
-    const streamFailed = { value: false };
     let terminalWhileActive = false;
     let current = createGenerationState(generationId, { supersedesGenerationId: options.supersedesGenerationId, startedAt: performance.now() });
     setGeneration(current);
     setStructuredError(null);
-    const syncContext: GenerationSyncContext = { assistantMessage, base, input, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isActiveGeneration, ensureAssistant, streamFailed, onFailedAttempt: setFailedAttempt };
+    const syncContext: GenerationSyncContext = { assistantMessage, base, input, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isActiveGeneration, ensureAssistant, onFailedAttempt: captureFailedAttempt };
 
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
@@ -335,6 +338,11 @@ export function App() {
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed'); setError(cause instanceof Error ? cause.message : 'The response failed.');
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
+  }
+
+  function captureFailedAttempt(attempt: FailedTurnAttempt) {
+    // Snapshot the message list: the retry base must never observe later mutations.
+    setFailedAttempt({ ...attempt, base: { ...attempt.base, messages: [...attempt.base.messages] } });
   }
 
   function openLockbox() { setSettingsSection('security'); setSettingsOpen(true); }

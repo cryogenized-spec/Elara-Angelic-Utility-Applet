@@ -61,7 +61,6 @@ export interface GenerationSyncContext {
   /** Runner predicate: this turn's conversation is current AND its generation is still active. */
   isActiveGeneration: () => boolean;
   ensureAssistant: () => void;
-  streamFailed: { value: boolean };
   /** Reported on terminal failure so a later retry can replace the attempt. */
   onFailedAttempt?: (attempt: FailedTurnAttempt) => void;
 }
@@ -90,6 +89,33 @@ export function canRetryFailedTurn(
     attempt.base.id === conversationId &&
     attempt.input.trim().length > 0
   );
+}
+
+/**
+ * Follow-up turns (regeneration, shortcuts) must stream from the pre-failure
+ * base when one exists for this thread. Streaming from the live conversation
+ * would carry the unpersisted failed partial forward and persist it next to
+ * its replacement — a zombie message.
+ */
+export function regenerateBaseFor(
+  conversation: ConversationState,
+  attempt: FailedTurnAttempt | null,
+): ConversationState {
+  return attempt !== null && attempt.base.id === conversation.id ? attempt.base : conversation;
+}
+
+/**
+ * True when the target exists only as the unpersisted failed partial. The
+ * correct action is retry (replace), not regenerate (append a variant).
+ */
+export function isFailedPartialTarget(
+  conversation: ConversationState,
+  attempt: FailedTurnAttempt | null,
+  targetId: string,
+): boolean {
+  if (attempt === null || attempt.base.id !== conversation.id) return false;
+  if (attempt.base.messages.some((message) => message.id === targetId)) return false;
+  return conversation.messages.some((message) => message.id === targetId);
 }
 
 function buildUsage(usage: GeminiUsage | undefined, thoughtSummary: string | undefined): ProviderUsage | undefined {
@@ -123,6 +149,7 @@ export function syncGenerationEvent(
 
   if (event.type === 'completed') {
     context.ensureAssistant();
+    if (!isActiveGeneration()) return;
     const completedAt = Date.now();
     const completedMessage: ChatMessage = {
       ...assistantMessage,
@@ -141,18 +168,15 @@ export function syncGenerationEvent(
       },
     };
     const completed: ConversationState = { ...base, updatedAt: completedAt, messages: [...base.messages, completedMessage] };
-    if (isActiveGeneration()) {
-      context.setConversation(completed);
-      void context
-        .save(completed)
-        .then(context.refreshThreads)
-        .catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the response.'));
-    }
+    context.setConversation(completed);
+    void context
+      .save(completed)
+      .then(context.refreshThreads)
+      .catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the response.'));
     return;
   }
 
   if (event.type === 'failed') {
-    context.streamFailed.value = true;
     if (!isActiveGeneration()) return;
     context.setStatus('failed');
     context.setStructuredError(event.error);
@@ -168,7 +192,6 @@ export function syncGenerationEvent(
   }
 
   if (event.type === 'error') {
-    context.streamFailed.value = true;
     if (!isActiveGeneration()) return;
     context.setStatus('failed');
     if (event.error) {

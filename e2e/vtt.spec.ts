@@ -63,12 +63,17 @@ async function installVttBrowserMocks(page: Page, interactionMode: 'default' | '
     });
   });
 
-  await page.route('**/v1/interactions*', async (route) => {
+  await page.route('**/v1beta/interactions*', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     if (body.model === 'gemini-3.5-transcribe') {
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: 'voice inserted' }) });
       return;
     }
+    await route.continue();
+  });
+
+  await page.route('**/v1/interactions*', async (route) => {
+    const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     const output = interactionMode === 'transform' ? 'A clear, straightforward message.' : 'voice inserted';
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: transformationSse(output) });
   });
@@ -172,12 +177,7 @@ test.describe('VTT composer flow', () => {
     await installVttBrowserMocks(page);
     await page.unroute('**/v1/interactions*');
     await page.route('**/v1/interactions*', async (route) => {
-      const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
-      if (body.model === 'gemini-3.5-transcribe') {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: 'voice inserted' }) });
-      } else {
-        await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ message: 'Transformation unavailable.' }) });
-      }
+      await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ message: 'Transformation unavailable.' }) });
     });
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await openVttModeMenu(page);
@@ -203,12 +203,16 @@ test.describe('VTT composer flow', () => {
     await installVttBrowserMocks(page);
     await page.unroute('**/v1/interactions*');
     await page.route('**/v1/interactions*', async (route) => {
+      await route.continue();
+    });
+    await page.unroute('**/v1beta/interactions*');
+    await page.route('**/v1beta/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       if (body.model === 'gemini-3.5-transcribe') {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: '   ' }) });
-      } else {
-        await route.fulfill({ status: 200, contentType: 'text/event-stream', body: transformationSse('voice inserted') });
+        return;
       }
+      await route.continue();
     });
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('silent draft');
@@ -222,9 +226,13 @@ test.describe('VTT composer flow', () => {
     await installVttBrowserMocks(page);
     await page.unroute('**/v1/interactions*');
     await page.route('**/v1/interactions*', async (route) => {
+      await route.continue();
+    });
+    await page.unroute('**/v1beta/interactions*');
+    await page.route('**/v1beta/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       if (body.model === 'gemini-3.5-transcribe') await new Promise((resolve) => setTimeout(resolve, 2_000));
-      else await route.fulfill({ status: 200, contentType: 'text/event-stream', body: transformationSse('voice inserted') });
+      else await route.continue();
     });
     const composer = page.getByRole('textbox', { name: 'Message Elara' });
     await composer.fill('keep this draft');

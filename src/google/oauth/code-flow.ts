@@ -19,6 +19,25 @@ interface CodeClient {
   requestCode(): void;
 }
 
+interface GoogleIdentityServicesWithCode {
+  accounts: {
+    oauth2: {
+      initCodeClient(config: {
+        client_id: string;
+        scope: string;
+        include_granted_scopes?: boolean;
+        ux_mode?: 'popup' | 'redirect';
+        redirect_uri?: string;
+        callback?: (response: CodeResponse) => void;
+        error_callback?: (error: { type?: string }) => void;
+        state?: string;
+        login_hint?: string;
+        hd?: string;
+      }): CodeClient;
+    };
+  };
+}
+
 export async function requestGoogleAuthorizationCode(config: {
   clientId: string;
   scope: string;
@@ -30,7 +49,7 @@ export async function requestGoogleAuthorizationCode(config: {
   if (typeof window === 'undefined') throw new Error('Google authorization-code flow is unavailable outside a browser.');
   if (!config.redirectUri.trim()) throw new Error('Google authorization-code redirect URI is required.');
 
-  const google = await loadGoogleIdentityServices();
+  const google = await loadGoogleIdentityServices() as unknown as GoogleIdentityServicesWithCode;
   return new Promise<GoogleAuthorizationCodeResponse>((resolve, reject) => {
     const client = google.accounts.oauth2.initCodeClient({
       client_id: config.clientId,

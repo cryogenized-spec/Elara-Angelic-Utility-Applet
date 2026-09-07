@@ -129,9 +129,8 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
 }
 
 async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = false): Promise<string> {
-  if (!loadStored().grantedCapabilities.includes(capability) || !tokenStillValid()) {
-    await acquireToken(capability, allowInteraction ? '' : 'none');
-  }
+  const current = loadStored();
+  if (!current.grantedCapabilities.includes(capability) || !tokenStillValid()) await acquireToken(capability, allowInteraction ? '' : 'none');
   if (!tokenStillValid() || !session) throw new Error('Google authorization did not return a usable access token.');
   return session.accessToken;
 }
@@ -160,8 +159,9 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
     throw new Error('Google authorization has expired or was revoked. Reauthorize this Google capability in Settings.');
   }
 
-  if (!session) throw new Error('Google authorization did not return a refreshed access token.');
-  response = await fetch(new Request(target, requestOptions(session.accessToken)));
+  const refreshedToken = session?.accessToken;
+  if (!refreshedToken) throw new Error('Google authorization did not return a refreshed access token.');
+  response = await fetch(new Request(target, requestOptions(refreshedToken)));
   if (response.status === 401) {
     stored.needsReauthorization = true;
     session = null;

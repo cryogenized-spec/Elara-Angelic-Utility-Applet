@@ -2,9 +2,11 @@ import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import { googleToolNameSchema } from '../../src/google/tools/contracts';
 import { googleGeminiFunctionDeclarations } from '../../src/google/tools/gemini-declarations';
-import { handleGoogleOAuthRequest, type GoogleOAuthEnv } from './google-oauth';
 
-export interface Env extends GoogleOAuthEnv { GEMINI_API_KEY: string; ALLOWED_ORIGINS?: string; }
+export interface Env {
+  GEMINI_API_KEY: string;
+  ALLOWED_ORIGINS?: string;
+}
 
 const toolResultSchema = z.object({
   callId: z.string().min(1).max(256),
@@ -21,7 +23,13 @@ const requestSchema = z.object({
   systemInstruction: z.string().min(1).max(50_000),
   tools: z.array(googleToolNameSchema).max(40).optional(),
   toolResult: toolResultSchema.optional(),
-  generationConfig: z.object({ thinkingLevel: z.string().optional(), thinkingSummaries: z.enum(['auto', 'none']).optional(), maxOutputTokens: z.number().int().min(1).optional(), seed: z.number().int().min(0).optional(), stopSequences: z.array(z.string().min(1).max(128)).max(5).optional() }).optional(),
+  generationConfig: z.object({
+    thinkingLevel: z.string().optional(),
+    thinkingSummaries: z.enum(['auto', 'none']).optional(),
+    maxOutputTokens: z.number().int().min(1).optional(),
+    seed: z.number().int().min(0).optional(),
+    stopSequences: z.array(z.string().min(1).max(128)).max(5).optional(),
+  }).optional(),
 }).refine((value) => Boolean(value.input || value.toolResult), 'Either input or toolResult is required.');
 
 type SafeEvent = Record<string, unknown>;
@@ -30,18 +38,79 @@ type PendingFunctionCall = { callId: string; name: string; arguments: string };
 const VTT_MAX_AUDIO_BYTES = 2 * 1024 * 1024;
 const VTT_ALLOWED_MIME_TYPES = new Set(['audio/webm', 'audio/webm;codecs=opus', 'audio/ogg', 'audio/ogg;codecs=opus']);
 
-function configuredOrigins(env: Env): string[] { return (env.ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean); }
-function allowedOrigin(request: Request, env: Env): string | null { const origin = request.headers.get('Origin'); if (!origin) return null; return configuredOrigins(env).includes(origin) ? origin : null; }
-function corsHeaders(request: Request, env: Env): Headers { const headers = new Headers({ 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, X-Elara-Google-Capability, X-Elara-Google-Target', Vary: 'Origin' }); const origin = allowedOrigin(request, env); if (origin) { headers.set('Access-Control-Allow-Origin', origin); headers.set('Access-Control-Allow-Credentials', 'true'); } return headers; }
-function jsonResponse(request: Request, env: Env, body: unknown, status = 200): Response { const headers = corsHeaders(request, env); headers.set('Content-Type', 'application/json; charset=utf-8'); headers.set('Cache-Control', 'no-store'); return new Response(JSON.stringify(body), { status, headers }); }
-function healthResponse(request: Request, env: Env): Response { const hasCredential = Boolean(env.GEMINI_API_KEY); const hasOriginPolicy = configuredOrigins(env).length > 0; return jsonResponse(request, env, { service: 'elara-gemini', status: hasCredential && hasOriginPolicy ? 'healthy' : 'degraded', api: true, credentialConfigured: hasCredential, originPolicyConfigured: hasOriginPolicy }, 200); }
-function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
-function stringValue(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
-function numberValue(record: Record<string, unknown>, key: string): number | undefined { const value = record[key]; return typeof value === 'number' && Number.isFinite(value) ? value : undefined; }
-function interactionId(event: Record<string, unknown>): string | undefined { return stringValue(event, 'interaction_id') ?? stringValue(event, 'interactionId') ?? stringValue(asRecord(event.interaction), 'id'); }
-function indexOf(event: Record<string, unknown>): number { return numberValue(event, 'index') ?? numberValue(asRecord(event.step), 'index') ?? 0; }
-function sse(eventName: string, data: SafeEvent): string { return `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`; }
-function selectedTools(toolNames: readonly string[] | undefined) { if (!toolNames?.length) return undefined; const allowed = new Set(toolNames); return googleGeminiFunctionDeclarations.filter((tool) => allowed.has(tool.name)); }
+function configuredOrigins(env: Env): string[] {
+  return (env.ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+}
+
+function allowedOrigin(request: Request, env: Env): string | null {
+  const origin = request.headers.get('Origin');
+  return configuredOrigins(env).includes(origin ?? '') ? origin : null;
+}
+
+function corsHeaders(request: Request, env: Env): Headers {
+  const headers = new Headers({
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type',
+    Vary: 'Origin',
+  });
+  const origin = allowedOrigin(request, env);
+  if (origin) {
+    headers.set('Access-Control-Allow-Origin', origin);
+    headers.set('Access-Control-Allow-Credentials', 'true');
+  }
+  return headers;
+}
+
+function jsonResponse(request: Request, env: Env, body: unknown, status = 200): Response {
+  const headers = corsHeaders(request, env);
+  headers.set('Content-Type', 'application/json; charset=utf-8');
+  headers.set('Cache-Control', 'no-store');
+  return new Response(JSON.stringify(body), { status, headers });
+}
+
+function healthResponse(request: Request, env: Env): Response {
+  const hasCredential = Boolean(env.GEMINI_API_KEY);
+  const hasOriginPolicy = configuredOrigins(env).length > 0;
+  return jsonResponse(request, env, {
+    service: 'elara-gemini',
+    status: hasCredential && hasOriginPolicy ? 'healthy' : 'degraded',
+    api: true,
+    credentialConfigured: hasCredential,
+    originPolicyConfigured: hasOriginPolicy,
+  }, 200);
+}
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {};
+}
+
+function stringValue(record: Record<string, unknown>, key: string): string | undefined {
+  const value = record[key];
+  return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function numberValue(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function interactionId(event: Record<string, unknown>): string | undefined {
+  return stringValue(event, 'interaction_id') ?? stringValue(event, 'interactionId') ?? stringValue(asRecord(event.interaction), 'id');
+}
+
+function indexOf(event: Record<string, unknown>): number {
+  return numberValue(event, 'index') ?? numberValue(asRecord(event.step), 'index') ?? 0;
+}
+
+function sse(eventName: string, data: SafeEvent): string {
+  return `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
+}
+
+function selectedTools(toolNames: readonly string[] | undefined) {
+  if (!toolNames?.length) return undefined;
+  const allowed = new Set(toolNames);
+  return googleGeminiFunctionDeclarations.filter((tool) => allowed.has(tool.name));
+}
 
 function toGenerationConfig(config: z.infer<typeof requestSchema>['generationConfig']) {
   if (!config) return undefined;
@@ -223,18 +292,18 @@ async function handleTranscribe(request: Request, env: Env): Promise<Response> {
   }
 }
 
-export default { async fetch(request: Request, env: Env): Promise<Response> {
-  const googleOAuthResponse = await handleGoogleOAuthRequest(request, env);
-  if (googleOAuthResponse) return googleOAuthResponse;
-  const pathname = new URL(request.url).pathname;
-  if (pathname === '/health') return healthResponse(request, env);
-  if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
-  if (request.method !== 'POST') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
-  try {
-    if (pathname === '/api/gemini') return await handleGemini(request, env);
-    if (pathname === '/api/transcribe') return await handleTranscribe(request, env);
-    return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
-  } catch {
-    return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502);
-  }
-} };
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const pathname = new URL(request.url).pathname;
+    if (pathname === '/health') return healthResponse(request, env);
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+    if (request.method !== 'POST') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
+    try {
+      if (pathname === '/api/gemini') return await handleGemini(request, env);
+      if (pathname === '/api/transcribe') return await handleTranscribe(request, env);
+      return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
+    } catch {
+      return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502);
+    }
+  },
+};

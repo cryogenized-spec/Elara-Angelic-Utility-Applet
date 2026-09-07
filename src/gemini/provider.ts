@@ -72,7 +72,10 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     const apiKey = await getGeminiApiKey();
     if (!apiKey) { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId }) }; return; }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
-    const client = new GoogleGenAI({ apiKey, apiVersion: 'v1', httpOptions: { retryOptions: { attempts: 1 } } });
+    // GoogleGenAI selects the Developer API's version via httpOptions.apiVersion.
+    // Keeping this inside httpOptions is important: a top-level apiVersion is not
+    // part of the stable browser configuration contract for @google/genai.
+    const client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
     const contextualInstruction = await composeSystemInstruction(request.systemInstruction, query);
     const stream = await client.interactions.create(buildInteractionPayload({ ...request, systemInstruction: contextualInstruction }) as never);

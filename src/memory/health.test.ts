@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
-import { inspectMemoryStore } from './health';
+import { inspectMemoryStore, normalizeInvalidMemoryId } from './health';
 import { saveMemory } from './store';
 
 describe('durable memory health scan', () => {
@@ -33,10 +33,11 @@ describe('durable memory health scan', () => {
     await expect(db.memories.get('memory_corrupt')).resolves.toEqual({ id: 'memory_corrupt', title: 'Broken record' });
   });
 
-  it('marks malformed records without usable ids as unknown', async () => {
-    await db.memories.put({ id: 'memory_unknown', title: 'Broken record' } as never);
-    const health = await inspectMemoryStore();
-    expect(health.invalidIds).toEqual(['memory_unknown']);
-    expect(health.invalid).toBe(1);
+  it('marks malformed records without usable ids as unknown', () => {
+    expect(normalizeInvalidMemoryId({ title: 'No id' })).toBe('<unknown>');
+    expect(normalizeInvalidMemoryId({ id: '' })).toBe('<unknown>');
+    expect(normalizeInvalidMemoryId({ id: '  ' })).toBe('<unknown>');
+    expect(normalizeInvalidMemoryId({ id: 'memory_known' })).toBe('memory_known');
+    expect(normalizeInvalidMemoryId(null)).toBe('<unknown>');
   });
 });

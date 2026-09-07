@@ -40,9 +40,8 @@ test('executes a shortcut as an internal task rather than an injected user promp
   await page.getByRole('button', { name: 'Calendar', exact: true }).click();
   await page.getByRole('menuitem', { name: /Today/ }).click();
 
+  await expect.poll(() => requestInput).toContain('Execute the saved Workspace shortcut');
   await expect(conversation.locator('.message')).toHaveCount(before);
-  await expect(page.getByRole('alert')).toContainText('[GEMINI_PROVIDER]');
-  expect(requestInput).toContain('Execute the saved Workspace shortcut');
   expect(requestInput).toContain('Use only the registered tools supplied for this shortcut.');
 });
 

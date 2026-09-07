@@ -1,3 +1,12 @@
+import type { FontSelection } from '../ui/fontRegistry';
+
+export interface AppUiPreferences {
+  font: FontSelection;
+  chatTextSize: number;
+  portraitScale: 1 | 2 | 3;
+  portraitBackground: 'midnight' | 'blue-hour' | 'violet' | 'rose';
+}
+
 export interface ChatAppearancePreferences {
   chatBackgroundMode: 'solid' | 'gradient' | 'image';
   chatBackgroundValue: string;
@@ -21,6 +30,13 @@ export interface RoleplayPreferences {
   weather: string;
   atmosphere: string;
 }
+
+export const DEFAULT_APP_UI: AppUiPreferences = {
+  font: { kind: 'built-in', family: 'Inter' },
+  chatTextSize: 15,
+  portraitScale: 2,
+  portraitBackground: 'midnight',
+};
 
 export const DEFAULT_CHAT_APPEARANCE: ChatAppearancePreferences = {
   chatBackgroundMode: 'solid',

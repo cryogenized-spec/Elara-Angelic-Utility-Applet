@@ -17,7 +17,7 @@ async function* events(...items: unknown[]) {
 
 const oauth = {
   authorize: async (capability: string) => ({ capability: capability as never, fetch: async () => new Response('{}', { status: 200 }) }),
-  getStatus: async () => ({ state: 'connected' as const, grantedCapabilities: ['calendar.events.read' as const] }),
+  getStatus: async () => ({ state: 'connected' as const, grantedCapabilities: ['calendar.events.read' as const, 'tasks.write' as const] }),
   disconnect: async () => undefined,
 };
 
@@ -71,5 +71,28 @@ describe('streamGoogleToolLoop', () => {
 
     await expect(consume()).rejects.toThrow('not permitted in read-only mode');
     expect(streamReply).not.toHaveBeenCalled();
+  });
+
+  it('routes a Google write through explicit confirmation before the handler executes', async () => {
+    const handler = vi.fn(async () => ({ id: 'task-1' }));
+    const confirm = vi.fn(async (request) => request.risk === 'write');
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-write-1', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction-write-1', index: 0, callId: 'call-write-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', task: { title: 'Buy milk' } } },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction-write-2', status: 'completed', durationMs: 12 },
+    ));
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Add a task to buy milk.', systemInstruction, tools: ['tasks.createTask'] },
+      { tools: ['tasks.createTask'], readOnly: false, executor: { oauth, handlers: { 'tasks.createTask': handler }, confirm } },
+    )) {
+      // Consume the complete interaction.
+    }
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ tool: 'tasks.createTask', risk: 'write' }));
+    expect(handler).toHaveBeenCalledOnce();
   });
 });

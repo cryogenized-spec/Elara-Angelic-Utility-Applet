@@ -3,6 +3,7 @@ import type { WriteConfirmationRequest } from './policy';
 const HOST_ID = 'elara-google-confirmation';
 let pendingResolve: ((approved: boolean[]) => void) | null = null;
 let pendingHost: HTMLElement | null = null;
+let pendingCount = 0;
 
 export function requestGoogleToolConfirmation(request: WriteConfirmationRequest, signal?: AbortSignal): Promise<boolean> {
   return requestGoogleToolConfirmations([request], signal).then((decisions) => decisions[0] ?? false);
@@ -13,6 +14,7 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
 
   return new Promise((resolve) => {
     pendingResolve = resolve;
+    pendingCount = requests.length;
     const host = document.createElement('section');
     pendingHost = host;
     host.id = HOST_ID;
@@ -43,6 +45,7 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     const finish = (decisions: boolean[]) => {
       const currentResolve = pendingResolve;
       pendingResolve = null;
+      pendingCount = 0;
       pendingHost = null;
       signal?.removeEventListener('abort', onAbort);
       host.remove();
@@ -67,10 +70,13 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
 
 export function dismissGoogleToolConfirmation(): void {
   if (!pendingResolve) return;
-  pendingResolve([false]);
+  const currentResolve = pendingResolve;
+  const count = pendingCount;
   pendingResolve = null;
+  pendingCount = 0;
   pendingHost?.remove();
   pendingHost = null;
+  currentResolve(Array.from({ length: count }, () => false));
 }
 
 function escapeHtml(value: string): string {

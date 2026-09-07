@@ -66,11 +66,7 @@ async function installVttBrowserMocks(page: Page, interactionMode: 'default' | '
   await page.route('**/v1/interactions*', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     if (body.model === 'gemini-3.5-transcribe') {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: 'voice inserted' }),
-      });
+      await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: 'voice inserted' }) });
       return;
     }
     const output = interactionMode === 'transform' ? 'A clear, straightforward message.' : 'voice inserted';

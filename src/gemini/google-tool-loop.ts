@@ -1,45 +1,97 @@
-import type { GoogleToolName, GoogleToolRisk } from '../google/tools/contracts';
-import { googleToolRegistry } from '../google/tools/registry';
-import { executeGoogleTool, type GoogleToolExecutorOptions } from '../google/tools/executor';
+import type { GeminiToolContinuationRequest, GeminiToolResult, GeminiTurnRequest, GeminiStreamEvent } from './contracts';
+import { geminiTurnPort } from './provider';
+import { executeGoogleTool, confirmationRequestForCall, type GoogleToolHandlers, type GoogleToolExecutorOptions } from '../google/tools/executor';
+import type { GoogleToolCall, GoogleToolName } from '../google/tools/contracts';
 import { googleServiceToolHandlers } from '../google/tools/service-handlers';
 import { googleReadToolHandlers } from '../google/tools/read-handlers';
 import { roleplayWorldToolHandlers } from '../google/tools/roleplay-world-handlers';
-import { requestGoogleToolConfirmation } from '../google/confirmation/broker';
-import { googleOAuthAuthority } from '../google/oauth/authority';
-import { geminiTurnPort } from './provider';
+import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
 import { withRuntimeContext } from './runtime-context';
-import type { GeminiStreamEvent, GeminiToolContinuationRequest, GeminiTurnRequest } from './contracts';
 
-export interface GoogleToolLoopOptions { readonly tools?: readonly GoogleToolName[]; readonly executor?: Partial<GoogleToolExecutorOptions>; readonly maxToolCalls?: number; readonly readOnly?: boolean; }
+export interface GoogleToolLoopOptions {
+  readonly tools?: readonly GoogleToolName[];
+  readonly readOnly?: boolean;
+  readonly maxToolCalls?: number;
+  readonly executor?: Partial<GoogleToolExecutorOptions>;
+}
+
 const DEFAULT_MAX_TOOL_CALLS = 8;
 
-function registryRisk(tool: GoogleToolName): GoogleToolRisk { const descriptor = googleToolRegistry.find((entry) => entry.name === tool); if (!descriptor) throw new Error('Tool is not registered.'); return descriptor.risk; }
-function normalizeTools(tools: readonly GoogleToolName[] | undefined, readOnly: boolean): readonly GoogleToolName[] { const requested = tools?.length ? [...tools] : [...Object.keys(googleReadToolHandlers) as GoogleToolName[]]; const unique = [...new Set(requested)]; for (const tool of unique) { if (readOnly && registryRisk(tool) !== 'read') throw new Error(`Tool ${tool} is not permitted in read-only mode.`); } return unique; }
-function executorOptions(options: GoogleToolLoopOptions, signal?: AbortSignal): GoogleToolExecutorOptions { return { oauth: options.executor?.oauth ?? googleOAuthAuthority, handlers: options.executor?.handlers ?? { ...googleServiceToolHandlers, ...googleReadToolHandlers, ...roleplayWorldToolHandlers }, confirm: options.executor?.confirm ?? ((request) => requestGoogleToolConfirmation(request, signal)), now: options.executor?.now }; }
-function errorToolResult(event: Extract<GeminiStreamEvent, { type: 'tool-call' }>, error: { code: string }, request: GeminiTurnRequest): GeminiToolContinuationRequest { return { model: request.model, previousInteractionId: event.interactionId, result: { callId: event.callId, name: event.name, result: { ok: false, error } }, systemInstruction: request.systemInstruction, generationConfig: request.generationConfig, tools: request.tools }; }
+function normalizeTools(tools: readonly GoogleToolName[] | undefined): readonly GoogleToolName[] {
+  return tools?.length ? tools : Object.keys(googleReadToolHandlers) as GoogleToolName[];
+}
+
+function executorOptions(options: GoogleToolLoopOptions, signal: AbortSignal): GoogleToolExecutorOptions {
+  return {
+    oauth: options.executor?.oauth ?? (undefined as never),
+    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...options.executor?.handlers },
+    confirm: options.executor?.confirm,
+    now: options.executor?.now,
+  };
+}
+
+function errorToolResult(call: GoogleToolCall, message: string): GeminiToolResult {
+  return { callId: call.callId, name: call.name, result: { ok: false, error: message } };
+}
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
-  const tools = normalizeTools(options.tools ?? request.tools as GoogleToolName[] | undefined, readOnly);
-  const executeOptions = executorOptions(options, signal);
+  const tools = normalizeTools(request.tools ?? options.tools);
+  const maxToolCalls = Math.max(1, Math.min(options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS, 20));
+  for (const tool of tools) {
+    if (!Object.prototype.hasOwnProperty.call(googleServiceToolHandlers, tool) && !Object.prototype.hasOwnProperty.call(roleplayWorldToolHandlers, tool) && !Object.prototype.hasOwnProperty.call(googleReadToolHandlers, tool)) throw new Error(`Tool ${tool} is not registered.`);
+    if (readOnly && !Object.prototype.hasOwnProperty.call(googleReadToolHandlers, tool) && !tool.startsWith('roleplay_setting.')) throw new Error(`Tool ${tool} is not permitted in read-only mode.`);
+  }
+
+  const executeOptions = executorOptions(options, signal as AbortSignal);
   const systemInstruction = withRuntimeContext(request.systemInstruction);
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
   let executedCalls = 0;
+
   while (true) {
-    let continuation: GeminiToolContinuationRequest | null = null;
+    const pendingCalls: GoogleToolCall[] = [];
+    let interactionId = '';
     for await (const event of stream) {
       yield event;
-      if (event.type !== 'tool-call') continue;
-      executedCalls += 1;
-      if (executedCalls > (options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS)) { continuation = errorToolResult(event, { code: 'TOOL_CALL_LIMIT_EXCEEDED' }, { ...request, tools, systemInstruction }); break; }
-      if (!tools.includes(event.name as GoogleToolName)) { continuation = errorToolResult(event, { code: 'TOOL_NOT_PERMITTED' }, { ...request, tools, systemInstruction }); break; }
-      const result = await executeGoogleTool({ tool: event.name as GoogleToolName, arguments: event.arguments }, executeOptions);
-      continuation = result.ok
-        ? { model: request.model, previousInteractionId: event.interactionId, result: { callId: event.callId, name: event.name, result: result.result }, systemInstruction, generationConfig: request.generationConfig, tools }
-        : { model: request.model, previousInteractionId: event.interactionId, result: { callId: event.callId, name: event.name, result: { ok: false, code: result.code, message: result.failure.message, requiresUserAction: result.failure.requiresUserAction } }, systemInstruction, generationConfig: request.generationConfig, tools };
-      break;
+      if (event.type === 'interaction-created') interactionId = event.interactionId;
+      if (event.type === 'tool-call') {
+        pendingCalls.push({ callId: event.callId, name: event.name as GoogleToolName, arguments: event.arguments });
+      }
+      if (signal?.aborted || event.type === 'cancelled' || event.type === 'failed') return;
     }
-    if (!continuation) return;
+
+    if (pendingCalls.length === 0) return;
+    if (!interactionId) interactionId = pendingCalls[0].callId;
+
+    const results: GeminiToolResult[] = [];
+    const mutationEntries: Array<{ call: GoogleToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
+    for (const call of pendingCalls.slice(0, maxToolCalls)) {
+      const confirmation = confirmationRequestForCall(call);
+      if (confirmation) mutationEntries.push({ call, confirmation });
+      else {
+        const result = await executeGoogleTool(call, executeOptions);
+        results.push(result.ok ? { callId: call.callId, name: call.name, result: result.result } : errorToolResult(call, result.code));
+      }
+    }
+    for (const call of pendingCalls.slice(maxToolCalls)) results.push(errorToolResult(call, 'Google tool-call limit exceeded for this turn.'));
+
+    if (mutationEntries.length) {
+      const decisions = await requestGoogleToolConfirmations(mutationEntries.map((entry) => entry.confirmation), signal);
+      for (let index = 0; index < mutationEntries.length; index += 1) {
+        const entry = mutationEntries[index];
+        const approved = decisions[index] === true;
+        if (!approved) {
+          results.push(errorToolResult(entry.call, 'USER_DECLINED'));
+          continue;
+        }
+        const result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+        results.push(result.ok ? { callId: entry.call.callId, name: entry.call.name, result: result.result } : errorToolResult(entry.call, result.code));
+      }
+    }
+
+    const continuation: GeminiToolContinuationRequest = { model: request.model, previousInteractionId: interactionId, results, systemInstruction, generationConfig: request.generationConfig, tools };
     stream = geminiTurnPort.streamToolResult(continuation, signal);
+    executedCalls += pendingCalls.length;
+    if (executedCalls >= maxToolCalls) return;
   }
 }

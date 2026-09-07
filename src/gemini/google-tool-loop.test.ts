@@ -77,6 +77,24 @@ describe('streamGoogleToolLoop', () => {
     expect(streamReply).not.toHaveBeenCalled();
   });
 
+  it('dispatches to Gemini even when a registered tool handler is missing', async () => {
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-drift', model: 'gemini-3.8-flash' },
+      { type: 'text-delta', index: 0, text: 'I can still answer this without the unavailable integration.' },
+      { type: 'completed', interactionId: 'interaction-drift', status: 'completed', durationMs: 8 },
+    ));
+
+    const collected: Array<unknown> = [];
+    for await (const event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Hello there.', systemInstruction, tools: ['calendar.listEvents'] },
+      { tools: ['calendar.listEvents'], executor: { oauth, handlers: {} } },
+    )) collected.push(event);
+
+    expect(streamReply).toHaveBeenCalledOnce();
+    expect(streamReply).toHaveBeenCalledWith(expect.objectContaining({ tools: ['calendar.listEvents'] }), undefined);
+    expect(collected.at(-1)).toMatchObject({ type: 'completed', interactionId: 'interaction-drift' });
+  });
+
   it('routes a Google write through explicit confirmation before the handler executes', async () => {
     const handler = vi.fn(async () => ({ id: 'task-1' }));
     const confirm = vi.fn(async (request) => request.risk === 'write');

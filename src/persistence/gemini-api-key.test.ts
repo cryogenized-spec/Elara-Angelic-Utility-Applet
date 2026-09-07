@@ -25,6 +25,7 @@ const TEST_KEY = 'test-gemini-key-material';
 const PASSWORD = 'correct-horse-battery-staple';
 const PIN = '284619';
 const NEW_PIN = '731528';
+const LEGACY_STORAGE_KEY = 'elara.gemini.api-key';
 
 beforeEach(async () => {
   await clearGeminiApiKey();
@@ -35,6 +36,18 @@ describe('encrypted Gemini API Lockbox', () => {
     expect(await getGeminiLockboxStatus()).toBe('empty');
     expect(await getGeminiLockboxMetadata()).toBeNull();
     expect(await getGeminiApiKey()).toBe('');
+  });
+
+  it('migrates a legacy localStorage API key into the device-local encrypted Lockbox', async () => {
+    window.localStorage.setItem(LEGACY_STORAGE_KEY, TEST_KEY);
+
+    expect(await getGeminiLockboxStatus()).toBe('unlocked');
+    expect(await getGeminiApiKey()).toBe(TEST_KEY);
+    expect(await getGeminiLockboxMetadata()).toMatchObject({ mode: 'off', authVersion: 1 });
+    expect(window.localStorage.getItem(LEGACY_STORAGE_KEY)).toBeNull();
+
+    lockGeminiApiKey();
+    expect(await getGeminiApiKey()).toBe(TEST_KEY);
   });
 
   it('encrypts a key, keeps it available only while unlocked, and restores it with the password', async () => {

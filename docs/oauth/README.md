@@ -1,40 +1,106 @@
-# Elara OAuth + Google Workspace — Future-Self Handoff
+# Elara OAuth + Google Workspace — Implementation Handoff
 
-> **Purpose:** This directory is the authoritative handoff for the Google OAuth, Workspace integrations, background execution, and related infrastructure work. A future implementation pass must read this file before changing OAuth, Google tools, or background execution.
+> **Purpose:** This directory is the authoritative handoff for Google OAuth, Workspace integrations, authorization capabilities, and the future background-execution layer. Read this file before changing OAuth or Google tools.
 >
-> **Status:** Pass 2 (Google connection settings UI), Pass 3 (scope audit), Pass 4 (Drive/Docs/Sheets service adapters), Pass 5 (Drive/Sheets model-tool surface), Pass 6 (centralized tool execution/risk/diagnostics gate), and the protected OAuth Worker implementation are now present in the clean app repository. Production provisioning and live lifecycle verification remain outstanding; the source boundary itself is no longer missing.
+> **Current status:** The abandoned Cloudflare Worker OAuth implementation has been retired. The Worker remains a Gemini/transcription service only. The existing application-side Google contracts, scope registry, focused Workspace adapters, tool registry, confirmation boundary, and Memory/Chat architecture remain intact. The next implementation pass replaces the old Worker-backed OAuth authority with the new direct application authorization design.
 
 ## 0. Non-negotiable architecture
 
 Elara has exactly one Google authorization authority. Calendar, Tasks, Gmail, Drive, Docs, and Sheets services must consume authorization state from that authority; they must not create their own OAuth clients, consent stores, token refresh logic, or ad-hoc scope registries.
 
-The React/PWA layer must never own Google client secrets, refresh tokens, raw access tokens, token exchange, token refresh, or provider-specific OAuth internals. The browser may initiate authorization and consume normalized authorization state.
+The React/PWA layer must never own Google client secrets, refresh tokens, or provider-specific token-exchange internals. The browser may initiate authorization and consume normalized authorization state.
 
 The model-visible Google surface is an explicit allow-list of named operations. Never create a universal `google.request`, arbitrary HTTP tool, token-bearing tool, scope-editing tool, or endpoint-discovery tool. Tool schemas must contain no OAuth scope strings, credentials, secrets, or raw provider URLs.
 
-The character/master system prompt remains user-editable application configuration. Google OAuth, tool schemas, capability exposure, authorization, and security remain hard-coded application architecture.
+The Elara master persona/system prompt remains user-editable application configuration. Google OAuth, tool schemas, capability exposure, authorization, confirmation, and security remain hard-coded application architecture.
 
-## 1. Current repository starting point
+## 1. Pass 1 — retire the abandoned Worker OAuth boundary ✅
 
-The repository now contains these foundations:
+Completed.
 
-- `docs/GOOGLE_OAUTH_ARCHITECTURE.md` — single OAuth authority, server-side authorization-code boundary, offline refresh, secure redirects, revocation semantics.
-- `docs/INCREMENTAL_AUTHORIZATION.md` — demand-driven, contextual incremental consent rules.
-- `docs/GOOGLE_SCOPE_REGISTRY.md` — application capability registry and least-privilege rules.
-- `docs/GOOGLE_OAUTH_SETTINGS_UI.md` — intended user-facing Google authorization settings surface.
-- `docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md` — structured failure semantics.
-- `docs/GOOGLE_TOOL_BOUNDARY.md` — model-visible Google allow-list and execution boundary.
-- `docs/GOOGLE_TOOL_EXECUTION.md` — centralized tool risk, confirmation, authorization, and diagnostics gate.
-- `docs/GOOGLE_OAUTH_WORKER_IMPLEMENTATION.md` — protected Worker source, session storage, token encryption, and capability-bound Workspace proxy.
-- `docs/oauth/PASS_07_STATUS.md` — implementation and production-provisioning handoff for the protected Worker boundary.
-- `src/google/tools/contracts.ts` and `src/google/tools/registry.ts` — explicit named Google tool contracts and descriptors.
-- `src/google/oauth/authority.ts` and `src/google/oauth/scope-registry.ts` — browser-side OAuth boundary and application scope registry.
-- `worker/src/google-oauth.ts` and `worker/src/index.ts` — server-side OAuth authority and route integration.
-- `docs/GOOGLE_CALENDAR_SERVICE.md`, `docs/GOOGLE_TASKS_SERVICE.md`, `docs/GOOGLE_DOCS_SERVICE.md`, `docs/GOOGLE_GMAIL_SERVICE.md`, `docs/GOOGLE_DRIVE_SERVICE.md`, `docs/GOOGLE_SHEETS_SERVICE.md` — focused Workspace service-boundary direction.
+The old Cloudflare Worker Google OAuth implementation has been removed from the repository:
 
-Do not replace these with a second architecture. Extend them.
+- removed `worker/src/google-oauth.ts`;
+- removed its dedicated `worker/src/google-oauth.test.ts` suite;
+- removed `worker/.dev.vars.example` because it only described the retired OAuth secrets/session storage;
+- removed the dedicated Google OAuth KV namespace and OAuth variables from `worker/wrangler.toml`;
+- removed the obsolete Worker OAuth implementation and deployment/status handoff documents;
+- removed the Worker OAuth route from `worker/src/index.ts`;
+- removed the OAuth-specific CORS request headers from the Gemini Worker;
+- retained the Worker itself for Gemini streaming, Gemini tool declarations, health, and audio transcription.
 
-## 2. Google Workspace target
+This deliberately does **not** delete the application-side Google contracts, capability model, service adapters, or tool execution boundary. Those are the pieces the replacement OAuth authority will consume.
+
+## 2. Pass 2 — replace the browser authority with the new Google authorization model
+
+This is the next implementation target.
+
+Desired user experience:
+
+1. Settings exposes a **Google Workspace** connection surface.
+2. The user connects Google once.
+3. Google sign-in/consent occurs only when authorization is actually required.
+4. Calendar, Tasks, Gmail, Drive, Docs, and Sheets can be enabled incrementally rather than requesting every permission up front.
+5. Existing authorization persists across app reloads and normal sessions.
+6. A normal chat interaction does not trigger a fresh Google login every time.
+7. Reauthorization happens only when Google or the stored authorization state genuinely requires it.
+8. Google Keep is intentionally out of scope.
+
+The replacement must use a modern authorization-code/PKCE design appropriate to the final deployment environment. Exact token/session storage and backend ownership are implementation decisions for Pass 2; they must be chosen so the browser never becomes the durable owner of a Google refresh credential.
+
+## 3. Application boundaries that already exist
+
+The repository already contains reusable application-side foundations:
+
+- `src/google/oauth/contracts.ts` — capability keys, normalized OAuth state, and authority contracts;
+- `src/google/oauth/scope-registry.ts` — centralized capability-to-scope mappings and sensitivity metadata;
+- `src/google/tools/contracts.ts` and `src/google/tools/registry.ts` — explicit named Google tool contracts;
+- `src/google/tools/executor.ts` — centralized authorization, confirmation, risk, diagnostics, and execution gate;
+- focused Calendar, Tasks, Gmail, Drive, Docs, and Sheets service adapters;
+- `src/app/components/GoogleOAuthSettings.tsx` — the user-facing Google Workspace settings surface;
+- existing confirmation infrastructure for write/destructive/send operations.
+
+Preserve these boundaries when replacing the authorization transport. Do not reintroduce a second Google database or service-specific OAuth implementations.
+
+## 4. Capability model
+
+The application authorization layer is capability-oriented. Current capabilities include:
+
+- Calendar event read/write;
+- Calendar list/settings read;
+- Tasks read/write;
+- Docs read/write;
+- Chat read/write;
+- Gmail read/modify/labels/send;
+- Drive file read/write;
+- Sheets read/write.
+
+The final release should expose only capabilities actually needed by the user-visible tools. Keep Google Keep excluded.
+
+## 5. Incremental authorization rules
+
+Authorization is demand-driven.
+
+A user can connect Google without granting every Workspace permission. When a tool or settings action needs a capability that is not currently granted, the application should present the missing capability in context and initiate the corresponding Google authorization step.
+
+Do not equate “Google connected” with “all Google services authorized.” A normalized partial/needs-consent/recovery state is expected.
+
+Do not force consent on app startup merely because the user opened Elara.
+
+## 6. Token/session rules
+
+The final architecture must preserve these invariants:
+
+- no Google client secret in the browser;
+- no durable Google refresh token in IndexedDB or ordinary app storage;
+- no access-token material in model prompts or tool arguments;
+- token refresh is handled by the authorization authority, not copied into every service adapter;
+- revoked/expired credentials become explicit normalized states that the UI and tool boundary can remediate;
+- disconnect removes local authorization state and attempts provider revocation where supported.
+
+A short-lived access token may be used for an authorized provider request, but raw provider credentials must never become model-visible state.
+
+## 7. Google service integration
 
 The first production Workspace set is:
 
@@ -45,234 +111,140 @@ The first production Workspace set is:
 5. Google Docs
 6. Google Sheets
 
-The intended end state is an agent that can perform useful task-management and productivity work through these services while preserving least privilege, auditable tool calls, explicit mutation risk, and user-controlled authorization.
+Focused adapters should remain responsible for provider-specific request/response shaping. The OAuth authority should remain responsible for authorization state and token lifecycle. The tool executor should remain responsible for whether a tool call is permitted to execute.
 
-## 3. OAuth implementation plan — eight passes
+Do not turn the service adapters into OAuth clients and do not expose arbitrary provider HTTP access to Gemini.
 
-### Pass 1 — Production OAuth authority
+## 8. Safe Google write workflow
 
-Implemented in source as `worker/src/google-oauth.ts`; production provisioning and live verification remain.
+Google read operations may execute when the required capability is currently authorized and the registered tool policy permits the read.
 
-Responsibilities implemented:
+Google writes, destructive operations, and email sends must pass the existing confirmation boundary.
 
-- Google OAuth client configuration references via Worker secrets/vars.
-- Authorization-code flow.
-- Strong random `state` bound to a short-lived server-side record and HttpOnly state cookie.
-- PKCE S256.
-- Exact HTTPS callback URI configuration.
-- Authorization-code exchange at the protected Worker boundary.
-- Encrypted persistent refresh-token storage in dedicated KV.
-- Encrypted short-lived access-token caching and silent refresh.
-- Refresh-token replacement when Google returns a new refresh token.
-- Revocation/disconnect.
-- Granted-scope inventory mapped to application capabilities.
-- Revoked-grant classification.
-- Safe error handling without returning credentials or raw provider secrets.
-- Capability-bound Workspace proxy used by the existing focused service adapters.
+The desired Calendar workflow is:
 
-The browser still never receives a Google access or refresh token. It uses the HttpOnly Worker session cookie and normalized capability status.
+`Gemini proposes → application creates a structured mutation proposal → user selects/approves proposed items → application executes only the approved mutations → provider response is normalized → returned links/results are shown to the user`
 
-Google's current documentation describes the server-side authorization-code flow, `access_type=offline` for refresh credentials, and `state` validation as the appropriate pattern for server-side applications. citeturn736197search0turn736197search1turn736197search3
+A proposal card should support selective approval and an all-selected action. The application, not the model, decides what actually executes.
 
-Important: do not send the user through Google sign-in every time Elara opens. Persist the refresh credential and silently mint/refresh short-lived access tokens. Request offline access and incremental authorization. Only use explicit re-consent when the authorization state actually requires user interaction.
+## 9. Google tool runtime contract
 
-### Pass 2 — Google connection settings UI
+Model/tool runtime instructions must remain separate from the Elara master persona prompt.
 
-Implemented. Settings exposes overall Google connection state and independent Calendar, Tasks, Gmail, Drive, Docs, and Sheets capability state. Gmail label administration and sending remain separately authorized capabilities.
+The runtime should provide the model with a small, explicit set of Google operations and their current capability state. It must not expose OAuth secrets, generic HTTP access, scope manipulation, or provider-internal session details.
 
-Do not let the UI contain scope strings or token logic. It calls application-facing OAuth commands and renders normalized state.
+When a tool requires missing authorization, the runtime should return a structured authorization-needed result rather than attempting to manufacture credentials or silently bypass the application boundary.
 
-### Pass 3 — Finalize scope registry and least privilege
+## 10. Pass 3 — final scope audit
 
-Implemented. The provider mappings are recorded in `docs/GOOGLE_SCOPE_REGISTRY.md` and tested in `src/google/oauth/scope-registry.test.ts`.
+Re-audit every final Google capability against the exact provider methods used.
 
-Current audited direction:
+Least-privilege direction:
 
-- Calendar: event-specific read/write scopes where sufficient; calendar-list/settings scopes only for those functions.
-- Tasks: `tasks.readonly` for reads and `tasks` for management.
-- Drive: `drive.file` where the feature operates on selected/app-created files; avoid broad Drive access unless proven necessary.
-- Docs: `drive.file` where sufficient; method-specific Docs scopes only when needed for broader document access.
-- Sheets: `drive.file` where a per-file workflow is sufficient; spreadsheet-specific scopes only when broader access is required.
-- Gmail: separate read, modify, label, and send capabilities; do not request modification rights merely to send mail.
+- Calendar: event-specific read/write scopes where sufficient, plus calendar-list/settings scopes only for those features;
+- Tasks: readonly for reads and full Tasks scope for management;
+- Drive: `drive.file` where selected/app-created-file workflows are sufficient;
+- Docs: use file-level access where sufficient and method-specific broader scope only when required;
+- Sheets: prefer per-file access where sufficient;
+- Gmail: keep read, modify, labels, and send capabilities separate.
 
-Sensitive/restricted scopes require verification/compliance review before production release.
+Re-check current Google scope sensitivity/restriction classifications immediately before production release.
 
-### Pass 4 — Drive, Docs, and Sheets service implementations
+## 11. Pass 4 — service adapter hardening
 
-Implemented as focused application-side adapters:
+Verify the focused adapters with the final authorization transport:
 
-- Drive with listing/search, metadata retrieval, authorized blob download, export, create, metadata update, and folder move.
-- Docs with get/create/batchUpdate.
-- Sheets with spreadsheet metadata, targeted range reads, bounded value writes, row appends, and explicit spreadsheet batch updates.
+- encoded IDs and provider path components;
+- bounded response/request sizes;
+- safe pagination;
+- field projection where appropriate;
+- normalized application errors;
+- no token leakage in logs, persistence, tool results, or diagnostics.
 
-The service adapters request application capabilities from the single OAuth authority, encode provider path components, use field projection where appropriate, and bound high-risk/large payload operations.
+## 12. Pass 5 — operational OAuth lifecycle
 
-### Pass 5 — Expand the model-visible tool schema
+The finished authorization authority must handle:
 
-Implemented for Drive and Sheets.
+- first connection;
+- incremental consent;
+- denied consent;
+- partial grants;
+- app reload with an existing authorization;
+- access-token expiry;
+- silent refresh;
+- refresh-token replacement when returned by Google;
+- revoked grants;
+- disconnect;
+- provider/network failures;
+- remediation when reauthorization is actually required.
 
-Drive:
+A repeated Google login on every Elara launch is a bug, not an intended lifecycle.
 
-- `drive.searchFiles`
-- `drive.getFile`
-- `drive.downloadFile`
-- `drive.createFile`
-- `drive.updateFile`
-- `drive.moveFile`
+## 13. Pass 6 — mutation watchdog / confirmation UI
 
-Sheets:
+Build a structured application-side watchdog for Google mutations.
 
-- `sheets.getSpreadsheet`
-- `sheets.readRange`
-- `sheets.writeRange`
-- `sheets.appendRows`
-- `sheets.batchUpdate`
+For multiple proposed Calendar events, the user should be able to approve all, approve a selected subset, or approve a single proposal. The UI must make the exact mutation targets legible before execution.
 
-Dedicated Zod argument contracts prevent malformed/oversized Drive and Sheets calls before provider execution. No arbitrary HTTP or universal Google request tool exists.
+Only approved mutations may be sent to the Google service adapter. Successful provider responses should surface useful returned metadata, including links where Google returns them.
 
-### Pass 6 — Confirmation, diagnostics, and failure handling
+## 14. Pass 7 — end-to-end verification
 
-Implemented at the application tool boundary.
+Required browser/integration coverage includes:
 
-`src/google/tools/executor.ts` now provides a centralized gate that validates the tool call, resolves the registered descriptor, verifies current OAuth capability state, applies the existing read/write/destructive/send confirmation policy, invokes a registered service handler, and returns a correlation ID with a normalized success/failure result.
-
-`src/google/tools/diagnostics.ts` provides safe tool-level failure classes for validation, authorization, confirmation, network, rate-limit, provider, and unknown failures. Raw handler exceptions are deliberately not returned.
-
-The executor also integrates the existing freshness-bound confirmation policy. A write/destructive/send operation cannot run without explicit approval.
-
-The execution boundary is documented in `docs/GOOGLE_TOOL_EXECUTION.md`.
-
-### Pass 7 — End-to-end verification and production hardening
-
-Source implementation is now in place. The remaining work is verification and infrastructure rather than inventing another OAuth architecture.
-
-Required test matrix:
-
-- initial Google authorization;
+- initial Google connection;
 - incremental Calendar authorization;
 - incremental Tasks authorization;
 - incremental Gmail authorization;
 - incremental Drive authorization;
 - incremental Docs authorization;
 - incremental Sheets authorization;
-- authorization denial;
-- partial consent;
-- reconnect/re-consent;
-- access-token expiry and silent refresh;
-- refresh-token replacement;
-- revoked grant;
+- denial and cancellation;
+- partial authorization;
+- app reload with an existing connection;
+- expired access token with silent refresh;
+- revoked authorization;
 - disconnect;
-- app reload with existing Google connection;
-- Worker restart;
-- API quota/error responses;
-- pagination;
 - malformed tool arguments;
+- missing capability remediation;
 - confirmation gating;
-- no credential leakage to logs/persistence/tool payloads.
+- selective mutation approval;
+- all-approved mutation execution;
+- no credential leakage;
+- Gemini tool-loop interaction with Google tools.
 
-Run unit tests, integration tests, browser/E2E tests, live API smoke tests where credentials can be safely supplied, and the repository reliability gate.
+Run the repository unit tests, build, browser/E2E suite, and any safe live-provider smoke checks available in the deployment environment.
 
-### Pass 8 — Background execution, Cron, and user re-contact
+## 15. Pass 8 — background execution
 
-Build the server-side continuation layer only after interactive Google operations are reliable.
+Only after interactive Google operations are stable should the background layer be added.
 
-Target architecture:
+Target shape:
 
-`Cron/scheduled job → durable background execution → OAuth authority refresh → Google API operation → persist normalized result/state → push notification → app resumes/display`
+`scheduled trigger → durable job → authorization authority refresh → Google API operation → persist normalized result/state → user notification → app display`
 
-The browser must not be the thing that performs the background work. A closed/killed tab must not prevent an already-authorized scheduled job from running.
+The browser must not be required to remain open for an already-authorized scheduled job to continue.
 
-## 4. Health/status light design
+## 16. Infrastructure note
 
-Implement this separately from Google OAuth.
+The Gemini Worker still exists. It is no longer the Google OAuth authority and must not regain Google OAuth/session/token responsibilities.
 
-The app should automatically check the production Worker health endpoint when the app becomes active and refresh it periodically while open.
+The Google authorization implementation should be deployed in the smallest secure backend boundary that actually matches the final hosting environment. Do not rebuild the old Worker OAuth layer under a new name.
 
-Use separate signals:
+## 17. Health/status design
 
-- **Worker:** green when the production Worker health endpoint is reachable and healthy; red when unreachable/unhealthy.
-- **Gemini:** only green after a real provider request succeeds; Worker health alone is not proof that Gemini is functioning.
-- **Google:** per-service capability status based on authorization state plus current service/token checks.
+Keep service health separate:
 
-Suggested normalized states:
+- **Worker:** health of the Gemini/transcription Worker;
+- **Gemini:** verified provider request health, not merely Worker reachability;
+- **Google:** authorization/capability/service state.
 
-- `healthy`
-- `degraded`
-- `offline`
-- `unauthorized`
-- `unknown`
+Recommended normalized states include `healthy`, `degraded`, `offline`, `unauthorized`, and `unknown`.
 
-Never collapse these into one misleading "everything is green" indicator.
+Never present a single “everything is healthy” light when only one dependency has been checked.
 
-## 5. Automatic app startup checks
+## 18. Current next action
 
-At app startup/activation:
+**Pass 2:** replace `src/google/oauth/authority.ts` so it no longer points at the retired Cloudflare Worker OAuth endpoints, then implement the new persistent/incremental authorization flow behind the existing capability contracts.
 
-1. Check Worker health.
-2. Read normalized Google connection state.
-3. Do not force Google consent merely because the app opened.
-4. Silently refresh credentials server-side where possible.
-5. Only request user interaction when authorization genuinely requires it.
-6. Optionally run a low-cost Gemini verification only when appropriate; avoid unnecessary model traffic on every foreground event.
-
-## 6. Future background/contact architecture
-
-The eventual background layer should support:
-
-- scheduled reminders;
-- recurring productivity jobs;
-- background Google operations;
-- durable job state;
-- idempotency and safe retry;
-- execution history/audit state;
-- user-visible failure/remediation;
-- Web Push when the app is closed;
-- later optional Telegram integration if desired.
-
-WhatsApp integration is explicitly out of the current scope.
-
-## 7. Future internet access
-
-A later phase may add internet/research access for the agent. This must be a dedicated capability/tool boundary with explicit allow-listing, validation, rate limits, provenance, and safety controls. Never expose an unrestricted raw HTTP request tool to the model.
-
-The likely future concept is a controlled web/research service rather than direct model access to arbitrary network sockets.
-
-## 8. Google verification/compliance notes
-
-Before production launch, review Google's current OAuth verification requirements against the exact final scopes. Sensitive and restricted scopes can trigger verification requirements, and restricted-scope server-side access can create additional security-assessment obligations.
-
-Keep the application home page, privacy policy, terms where applicable, verified domains, redirect URIs, and OAuth consent configuration aligned with the actual deployed architecture.
-
-Do not claim production readiness until the required Google verification/compliance work has been completed or the use case clearly qualifies for an applicable exception.
-
-## 9. Documentation anchors
-
-Use Google's and Cloudflare's live documentation at implementation time. The relevant current references cover OAuth web-server authorization/offline refresh/incremental authorization, OAuth policies, the Google scope catalogue, Calendar authorization, Drive file access/download/export, Docs methods, Sheets values and batch updates, Tasks, Gmail, Cloudflare Cron Triggers, durable scheduled execution, and Web Push.
-
-Because these APIs, scope classifications, verification requirements, and runtime capabilities can change, the future implementer must re-check the live official documentation immediately before each pass.
-
-## 10. Completion checklist
-
-OAuth is not complete until all of the following are true:
-
-- one server-side OAuth authority exists;
-- refresh credentials are stored securely server-side;
-- browser has no Google refresh token or client secret;
-- incremental authorization works per capability;
-- every final scope is justified and documented;
-- Calendar, Tasks, Gmail, Drive, Docs, and Sheets services execute through focused adapters;
-- model-visible Google tools are explicit and validated;
-- write/destructive/send confirmation is enforced;
-- token expiry refreshes without an unnecessary user login;
-- revocation and denial produce clear remediation states;
-- health indicators distinguish Worker/Gemini/Google;
-- E2E and live smoke tests pass;
-- reliability gate passes;
-- Google verification/compliance status is documented;
-- background execution design is tested before Cron jobs are considered production-ready.
-
-## 11. Handoff rule for future Elara sessions
-
-Before making changes, read this README plus `docs/oauth/PASS_07_STATUS.md`, `docs/GOOGLE_OAUTH_WORKER_IMPLEMENTATION.md`, and the existing Google tool/service documents. Inspect the current `main` branch rather than trusting old commit hashes. Revalidate all Google and Cloudflare assumptions against current official documentation. Preserve the architectural boundaries. Do not resurrect legacy providers, `generateContent()`, client-side OAuth token storage, arbitrary Google HTTP tools, or browser-dependent background execution.
-
-**Next immediate implementation target:** production provisioning and full Pass 7 verification of the now-implemented OAuth Worker boundary. The source implementation is present; remaining blockers are KV namespace provisioning, Worker secrets/configuration, Google Cloud OAuth client registration/verification, deployment, and live end-to-end testing.
+Before implementation, re-check Google's current official OAuth guidance and the exact final scope requirements against the deployment architecture.

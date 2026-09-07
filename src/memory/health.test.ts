@@ -34,9 +34,9 @@ describe('durable memory health scan', () => {
   });
 
   it('marks malformed records without usable ids as unknown', async () => {
-    await db.memories.put({ title: 'No id' } as never);
+    await db.memories.put({ id: 'memory_unknown', title: 'Broken record' } as never);
     const health = await inspectMemoryStore();
+    expect(health.invalidIds).toEqual(['memory_unknown']);
     expect(health.invalid).toBe(1);
-    expect(health.invalidIds).toEqual(['<unknown>']);
   });
 });

@@ -208,7 +208,7 @@ export function App() {
         if (event.type === 'cancelled') return;
       }
     } else {
-      const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction };
+      const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
       for await (const event of geminiTurnPort.streamReply(request, controller.signal)) {
         handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText, isCurrentConversation });
         if (event.type === 'interaction-created') liveText.value = '';
@@ -221,7 +221,7 @@ export function App() {
   function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); }
   async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
   async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
-  async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } }
+  async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } } }
   async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) { const record = workspaceShortcuts.find((item) => item.id === shortcut.id); if (!record) { setError('That Workspace shortcut is not available.'); return; } await runWorkspaceShortcut(record); }
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }
@@ -250,12 +250,12 @@ export function App() {
 type StreamContext = { assistantMessage: ChatMessage; base: ConversationState; setConversation: Dispatch<SetStateAction<ConversationState>>; setStatus: (status: ProviderStatus) => void; setError: (error: string | null) => void; save: (conversation: ConversationState) => Promise<void>; refreshThreads: () => Promise<void>; startedAt: number; model: string; liveText: { value: string }; isCurrentConversation: () => boolean };
 
 function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
-  const { assistantMessage, base, setConversation, isCurrentConversation } = context;
+  const { assistantMessage, base, isCurrentConversation } = context;
   if (event.type === 'text-delta') {
     context.liveText.value += event.text;
     const liveText = context.liveText.value;
     if (!isCurrentConversation()) return;
-    setConversation((current) => current.id === base.id ? { ...base, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message) } : current);
+    context.setConversation((current) => current.id === base.id ? { ...base, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message) } : current);
   }
   else if (event.type === 'completed') {
     const completedAt = Date.now();
@@ -265,6 +265,11 @@ function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
       context.setConversation(completed);
       void context.save(completed).then(context.refreshThreads).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the response.'));
     }
+  }
+  else if (event.type === 'failed') {
+    if (!isCurrentConversation()) return;
+    context.setStatus('failed');
+    context.setError(`[${event.error.code}] ${event.error.message}`);
   }
   else if (event.type === 'error') {
     if (!isCurrentConversation()) return;

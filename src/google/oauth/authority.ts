@@ -1,88 +1,166 @@
 import { googleCapabilityKeySchema, type AuthorizedGoogleRequest, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus as GoogleOAuthStatusContract } from './contracts';
+import { classifyGoogleOAuthFailure } from './diagnostics';
+import { getGoogleScope } from './scope-registry';
+import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 
-const DEFAULT_OAUTH_BASE_URL = 'https://elara-gemini.cryogenized.workers.dev';
-const OAUTH_BASE_URL = (import.meta.env.VITE_GOOGLE_OAUTH_BASE_URL as string | undefined)?.trim() || DEFAULT_OAUTH_BASE_URL;
+const GOOGLE_API_HOSTS = new Set([
+  'www.googleapis.com',
+  'tasks.googleapis.com',
+  'docs.googleapis.com',
+  'chat.googleapis.com',
+  'gmail.googleapis.com',
+  'sheets.googleapis.com',
+]);
+const STORAGE_KEY = 'elara.google.authorization.v2';
+const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
+const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 
-function assertSameOriginRedirect(url: URL): void {
-  if (url.protocol !== 'https:') throw new Error('Google OAuth redirect must use HTTPS.');
-  if (url.origin !== new URL(OAUTH_BASE_URL).origin) throw new Error('Unexpected Google OAuth redirect origin.');
-}
+type StoredAuthorization = {
+  version: 2;
+  grantedCapabilities: GoogleCapabilityKey[];
+  account?: { email?: string; displayName?: string };
+  updatedAt: string;
+};
 
-function capabilityParam(capability: GoogleCapabilityKey): string {
-  return encodeURIComponent(googleCapabilityKeySchema.parse(capability));
-}
+type AccessSession = {
+  accessToken: string;
+  expiresAt: number;
+  grantedCapabilities: GoogleCapabilityKey[];
+};
 
-async function readJson<T>(response: Response): Promise<T> {
-  if (!response.ok) {
-    const text = await response.text().catch(() => '');
-    throw new Error(`Google OAuth authority request failed (${response.status})${text ? `: ${text.slice(0, 240)}` : ''}`);
+let loaded = false;
+let stored: StoredAuthorization = { version: 2, grantedCapabilities: [], updatedAt: new Date(0).toISOString() };
+let session: AccessSession | null = null;
+
+function loadStored(): StoredAuthorization {
+  if (loaded) return stored;
+  loaded = true;
+  if (typeof localStorage === 'undefined') return stored;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return stored;
+    const parsed = JSON.parse(raw) as Partial<StoredAuthorization>;
+    const capabilities = Array.isArray(parsed.grantedCapabilities)
+      ? parsed.grantedCapabilities.filter((value): value is GoogleCapabilityKey => googleCapabilityKeySchema.safeParse(value).success)
+      : [];
+    stored = {
+      version: 2,
+      grantedCapabilities: [...new Set(capabilities)],
+      ...(parsed.account ? { account: { email: parsed.account.email, displayName: parsed.account.displayName } } : {}),
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
+    };
+  } catch {
+    stored = { version: 2, grantedCapabilities: [], updatedAt: new Date().toISOString() };
   }
-  return response.json() as Promise<T>;
+  return stored;
+}
+
+function saveStored(): void {
+  stored.updatedAt = new Date().toISOString();
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+}
+
+function ensureClientId(): string {
+  if (!CLIENT_ID) throw new Error('Google Workspace is not configured: VITE_GOOGLE_CLIENT_ID is missing.');
+  return CLIENT_ID;
+}
+
+function hasCapability(capability: GoogleCapabilityKey): boolean {
+  return loadStored().grantedCapabilities.includes(capability);
+}
+
+function authorizationState(): GoogleOAuthStatusContract['state'] {
+  const count = loadStored().grantedCapabilities.length;
+  if (count === 0) return 'disconnected';
+  return count >= 6 ? 'connected' : 'partially-authorized';
+}
+
+function assertGoogleApiTarget(input: RequestInfo | URL): URL {
+  const url = new URL(input instanceof Request ? input.url : String(input));
+  if (url.protocol !== 'https:' || !GOOGLE_API_HOSTS.has(url.hostname)) throw new Error('Google Workspace target is outside the approved API boundary.');
+  return url;
+}
+
+function tokenStillValid(): boolean {
+  return Boolean(session && session.expiresAt > Date.now() + ACCESS_TOKEN_REFRESH_SKEW_MS);
+}
+
+async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'): Promise<void> {
+  const descriptor = getGoogleScope(capability);
+  if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
+  const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: descriptor.scope, prompt });
+  session = {
+    accessToken: response.access_token!,
+    expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
+    grantedCapabilities: [...new Set([...(loadStored().grantedCapabilities), capability])],
+  };
+  stored.grantedCapabilities = session.grantedCapabilities;
+  saveStored();
+}
+
+async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = false): Promise<string> {
+  if (!hasCapability(capability) || !tokenStillValid()) {
+    await acquireToken(capability, allowInteraction ? '' : 'none');
+  }
+  if (!tokenStillValid() || !session) throw new Error('Google authorization did not return a usable access token.');
+  return session.accessToken;
 }
 
 async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  const request = new Request(input, init);
-  if (request.url.startsWith(`${OAUTH_BASE_URL}/api/google/oauth/`)) throw new Error('Google OAuth authority requests cannot be proxied as Workspace operations.');
-  const proxyHeaders = new Headers();
-  const accept = request.headers.get('Accept');
-  const contentType = request.headers.get('Content-Type');
-  const ifMatch = request.headers.get('If-Match');
-  if (accept) proxyHeaders.set('Accept', accept);
-  if (contentType) proxyHeaders.set('Content-Type', contentType);
-  if (ifMatch) proxyHeaders.set('If-Match', ifMatch);
-  proxyHeaders.set('X-Elara-Google-Capability', capability);
-  proxyHeaders.set('X-Elara-Google-Target', request.url);
-  return fetch(`${OAUTH_BASE_URL}/api/google/oauth/proxy`, {
-    method: request.method,
-    credentials: 'include',
-    headers: proxyHeaders,
-    body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer(),
-  });
+  const target = assertGoogleApiTarget(input);
+  let token = await ensureToken(capability, false);
+  const request = new Request(target, init);
+  const headers = new Headers(request.headers);
+  headers.set('Authorization', `Bearer ${token}`);
+  headers.set('Accept', headers.get('Accept') ?? 'application/json');
+
+  let response = await fetch(new Request(target, { method: request.method, headers, body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer() }));
+  if (response.status !== 401) return response;
+
+  session = null;
+  try {
+    await acquireToken(capability, 'none');
+    token = await ensureToken(capability, false);
+  } catch {
+    throw new Error('Google authorization has expired or was revoked. Reauthorize this Google capability in Settings.');
+  }
+
+  const retryHeaders = new Headers(request.headers);
+  retryHeaders.set('Authorization', `Bearer ${token}`);
+  retryHeaders.set('Accept', retryHeaders.get('Accept') ?? 'application/json');
+  response = await fetch(new Request(target, { method: request.method, headers: retryHeaders, body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer() }));
+  if (response.status === 401) throw new Error('Google rejected the refreshed authorization. Reauthorize this capability in Settings.');
+  return response;
 }
 
 export const googleOAuthAuthority: GoogleOAuthAuthority = {
   async authorize(capability) {
-    googleCapabilityKeySchema.parse(capability);
-    const status = await this.getStatus();
-    const available = status.grantedCapabilities.includes(capability) && !['disconnected', 'needs-consent', 'revoked', 'reauthorization-required', 'token-recovery'].includes(status.state);
-    if (!available) {
-      const response = await fetch(`${OAUTH_BASE_URL}/api/google/oauth/start?capability=${capabilityParam(capability)}`, {
-        method: 'GET',
-        credentials: 'include',
-        headers: { Accept: 'application/json', Origin: window.location.origin },
-      });
-      const payload = await readJson<{ authorizationUrl: string }>(response);
-      const redirect = new URL(payload.authorizationUrl);
-      if (redirect.protocol !== 'https:') throw new Error('Google authorization URL must be HTTPS.');
-      if (!['https:', 'http:'].includes(window.location.protocol) || redirect.hostname === window.location.hostname) throw new Error('Unexpected Google authorization redirect.');
-      window.location.assign(redirect.toString());
-      return { capability, fetch: async () => { throw new Error('OAuth redirect is pending; authorized Google requests cannot start in this page state.'); } } satisfies AuthorizedGoogleRequest;
-    }
-    return { capability, fetch: (input, init) => authorizedFetch(capability, input, init) } satisfies AuthorizedGoogleRequest;
+    const parsed = googleCapabilityKeySchema.parse(capability);
+    if (!getGoogleScope(parsed).scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
+    await acquireToken(parsed, hasCapability(parsed) ? 'none' : '');
+    return { capability: parsed, fetch: (input, init) => authorizedFetch(parsed, input, init) } satisfies AuthorizedGoogleRequest;
   },
 
   async getStatus() {
-    const response = await fetch(`${OAUTH_BASE_URL}/api/google/oauth/status`, {
-      method: 'GET',
-      credentials: 'include',
-      headers: { Accept: 'application/json', Origin: window.location.origin },
-      cache: 'no-store',
-    });
-    return readJson<GoogleOAuthStatusContract>(response);
+    const current = loadStored();
+    return {
+      state: authorizationState(),
+      grantedCapabilities: [...current.grantedCapabilities],
+      ...(current.account ? { account: current.account } : {}),
+    } satisfies GoogleOAuthStatusContract;
   },
 
   async disconnect() {
-    const response = await fetch(`${OAUTH_BASE_URL}/api/google/oauth/disconnect`, {
-      method: 'POST',
-      credentials: 'include',
-      headers: { Accept: 'application/json', Origin: window.location.origin },
-    });
-    await readJson<{ disconnected: true }>(response);
+    const token = session?.accessToken;
+    if (token) await revokeGoogleAccessToken(token).catch(() => undefined);
+    session = null;
+    stored = { version: 2, grantedCapabilities: [], updatedAt: new Date().toISOString() };
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
   },
 };
 
-export function validateGoogleOAuthCallbackUrl(candidate: string | URL): URL {
-  const url = typeof candidate === 'string' ? new URL(candidate) : candidate;
-  assertSameOriginRedirect(url);
-  return url;
+export function normalizeGoogleOAuthError(input: { error?: string; errorDescription?: string; status?: number }): Error {
+  const result = classifyGoogleOAuthFailure(input);
+  return new Error(result.message);
 }

@@ -1,3 +1,4 @@
+import { GoogleCalendarService } from '../calendar/service';
 import { GoogleChatService } from '../chat/service';
 import { GoogleDocsService } from '../docs/service';
 import { GoogleDriveService } from '../drive/service';
@@ -8,6 +9,7 @@ import { GoogleTasksService } from '../tasks/service';
 import type { GoogleToolHandlers } from './executor';
 import { googleReadToolHandlers } from './read-handlers';
 
+const calendar = new GoogleCalendarService(googleOAuthAuthority);
 const chat = new GoogleChatService(googleOAuthAuthority);
 const docs = new GoogleDocsService(googleOAuthAuthority);
 const drive = new GoogleDriveService(googleOAuthAuthority);
@@ -69,6 +71,11 @@ function bytesToBase64(bytes: Uint8Array): string {
 
 export const googleServiceToolHandlers: GoogleToolHandlers = {
   ...googleReadToolHandlers,
+
+  'calendar.createEvent': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return calendar.createEvent({ calendarId: stringArg(args, 'calendarId', false), event: recordArg(args, 'event')! });
+  },
 
   'tasks.createTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);

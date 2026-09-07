@@ -31,13 +31,15 @@ describe('executeGoogleTool', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('requires explicit confirmation for writes', async () => {
+  it('returns a declined result when the explicit confirmation hook rejects a write', async () => {
     const handler = vi.fn(async () => ({ id: 'file-1' }));
+    const confirm = vi.fn(async () => false);
     const result = await executeGoogleTool(
       { tool: 'drive.updateFile', arguments: { fileId: 'file-1', patch: { name: 'Renamed' } } },
-      { oauth: oauthFor('drive.files.write'), handlers: { 'drive.updateFile': handler }, now: () => new Date('2026-09-04T06:00:00.000Z') },
+      { oauth: oauthFor('drive.files.write'), handlers: { 'drive.updateFile': handler }, confirm, now: () => new Date('2026-09-04T06:00:00.000Z') },
     );
-    expect(result).toMatchObject({ ok: false, code: 'CONFIRMATION_REQUIRED', confirmation: { tool: 'drive.updateFile', risk: 'write' } });
+    expect(result).toMatchObject({ ok: false, code: 'USER_DECLINED', confirmation: { tool: 'drive.updateFile', risk: 'write' } });
+    expect(confirm).toHaveBeenCalledOnce();
     expect(handler).not.toHaveBeenCalled();
   });
 

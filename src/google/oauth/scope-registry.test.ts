@@ -4,6 +4,8 @@ import { getGoogleScope, googleScopeRegistry } from './scope-registry';
 const REQUIRED_CAPABILITIES = [
   'calendar.events.read',
   'calendar.events.write',
+  'calendar.list.read',
+  'calendar.settings.read',
   'tasks.read',
   'tasks.write',
   'gmail.read',
@@ -16,11 +18,15 @@ const REQUIRED_CAPABILITIES = [
   'docs.write',
   'sheets.read',
   'sheets.write',
+  'chat.read',
+  'chat.write',
 ] as const;
 
 const EXPECTED_SCOPES: Record<(typeof REQUIRED_CAPABILITIES)[number], string> = {
   'calendar.events.read': 'https://www.googleapis.com/auth/calendar.events.readonly',
   'calendar.events.write': 'https://www.googleapis.com/auth/calendar.events',
+  'calendar.list.read': 'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+  'calendar.settings.read': 'https://www.googleapis.com/auth/calendar.settings.readonly',
   'tasks.read': 'https://www.googleapis.com/auth/tasks.readonly',
   'tasks.write': 'https://www.googleapis.com/auth/tasks',
   'gmail.read': 'https://www.googleapis.com/auth/gmail.readonly',
@@ -33,6 +39,8 @@ const EXPECTED_SCOPES: Record<(typeof REQUIRED_CAPABILITIES)[number], string> = 
   'docs.write': 'https://www.googleapis.com/auth/drive.file',
   'sheets.read': 'https://www.googleapis.com/auth/drive.file',
   'sheets.write': 'https://www.googleapis.com/auth/drive.file',
+  'chat.read': 'https://www.googleapis.com/auth/chat.messages.readonly',
+  'chat.write': 'https://www.googleapis.com/auth/chat.messages',
 };
 
 describe('Google OAuth scope registry', () => {
@@ -74,5 +82,10 @@ describe('Google OAuth scope registry', () => {
     expect(getGoogleScope('gmail.modify').scope).not.toBe(getGoogleScope('gmail.labels').scope);
     expect(getGoogleScope('gmail.send').scope).not.toBe(getGoogleScope('gmail.modify').scope);
     expect(getGoogleScope('gmail.send').scope).not.toBe(getGoogleScope('gmail.labels').scope);
+  });
+
+  it('uses message scopes for the Chat message service boundary', () => {
+    expect(getGoogleScope('chat.read').scope).toBe('https://www.googleapis.com/auth/chat.messages.readonly');
+    expect(getGoogleScope('chat.write').scope).toBe('https://www.googleapis.com/auth/chat.messages');
   });
 });

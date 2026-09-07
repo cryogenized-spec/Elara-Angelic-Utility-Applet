@@ -1,7 +1,9 @@
 import Dexie, { type Table } from 'dexie';
-import { DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
+import { BUILT_IN_FONTS, googleFontFamilyFromCss2Url, type FontSelection } from '../ui/fontRegistry';
+import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 
 type PreferenceRecord =
+  | { id: 'app-ui'; value: AppUiPreferences; updatedAt: number }
   | { id: 'chat-appearance'; value: ChatAppearancePreferences; updatedAt: number }
   | { id: 'roleplay'; value: RoleplayPreferences; updatedAt: number }
   | { id: 'onboarding'; value: { completed: boolean }; updatedAt: number };
@@ -25,10 +27,32 @@ class PreferencesDatabase extends Dexie {
         await tx.table('preferences').put({ id: 'onboarding', value: { completed: true }, updatedAt: Date.now() });
       }
     });
+    this.version(4).stores({ preferences: 'id, updatedAt' });
   }
 }
 
 const db = new PreferencesDatabase();
+
+export function normalizeAppUiPreferences(value: Partial<AppUiPreferences> | null | undefined): AppUiPreferences {
+  const merged = { ...DEFAULT_APP_UI, ...(value ?? {}) };
+  return {
+    font: normalizeFont(merged.font),
+    chatTextSize: clamp(merged.chatTextSize, 10, 24, DEFAULT_APP_UI.chatTextSize),
+    portraitScale: merged.portraitScale === 1 || merged.portraitScale === 3 ? merged.portraitScale : 2,
+    portraitBackground: merged.portraitBackground === 'blue-hour' || merged.portraitBackground === 'violet' || merged.portraitBackground === 'rose' ? merged.portraitBackground : 'midnight',
+  };
+}
+
+export async function loadAppUiPreferences(): Promise<AppUiPreferences> {
+  const record = await db.preferences.get('app-ui');
+  return record?.id === 'app-ui' ? normalizeAppUiPreferences(record.value) : DEFAULT_APP_UI;
+}
+
+export async function saveAppUiPreferences(value: AppUiPreferences): Promise<AppUiPreferences> {
+  const nextValue = normalizeAppUiPreferences(value);
+  await db.preferences.put({ id: 'app-ui', value: nextValue, updatedAt: Date.now() });
+  return nextValue;
+}
 
 export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences> | null | undefined): ChatAppearancePreferences {
   const merged = { ...DEFAULT_CHAT_APPEARANCE, ...(value ?? {}) };
@@ -49,6 +73,17 @@ export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences
   };
 }
 
+export async function loadChatAppearance(): Promise<ChatAppearancePreferences> {
+  const record = await db.preferences.get('chat-appearance');
+  return record?.id === 'chat-appearance' ? normalizeChatAppearance(record.value) : DEFAULT_CHAT_APPEARANCE;
+}
+
+export async function saveChatAppearance(value: ChatAppearancePreferences): Promise<ChatAppearancePreferences> {
+  const nextValue = normalizeChatAppearance(value);
+  await db.preferences.put({ id: 'chat-appearance', value: nextValue, updatedAt: Date.now() });
+  return nextValue;
+}
+
 export function normalizeRoleplay(value: Partial<RoleplayPreferences> | null | undefined): RoleplayPreferences {
   const merged = { ...DEFAULT_ROLEPLAY, ...(value ?? {}) };
   const allowedPresets: RoleplayPreferences['environmentPreset'][] = ['none', 'house', 'bedroom', 'living-room', 'office', 'poolside', 'outdoors', 'custom'];
@@ -61,17 +96,6 @@ export function normalizeRoleplay(value: Partial<RoleplayPreferences> | null | u
     weather: safeText(merged.weather, 160),
     atmosphere: safeText(merged.atmosphere, 240),
   };
-}
-
-export async function loadChatAppearance(): Promise<ChatAppearancePreferences> {
-  const record = await db.preferences.get('chat-appearance');
-  return record?.id === 'chat-appearance' ? normalizeChatAppearance(record.value) : DEFAULT_CHAT_APPEARANCE;
-}
-
-export async function saveChatAppearance(value: ChatAppearancePreferences): Promise<ChatAppearancePreferences> {
-  const nextValue = normalizeChatAppearance(value);
-  await db.preferences.put({ id: 'chat-appearance', value: nextValue, updatedAt: Date.now() });
-  return nextValue;
 }
 
 export async function loadRoleplayPreferences(): Promise<RoleplayPreferences> {
@@ -98,6 +122,15 @@ export async function hasCompletedOnboarding(): Promise<boolean> {
 export async function completeOnboarding(): Promise<void> {
   if (typeof window !== 'undefined') window.localStorage.setItem(ONBOARDING_STORAGE_KEY, 'true');
   await db.preferences.put({ id: 'onboarding', value: { completed: true }, updatedAt: Date.now() });
+}
+
+function normalizeFont(value: FontSelection | undefined): FontSelection {
+  if (!value || typeof value !== 'object') return DEFAULT_APP_UI.font;
+  if (value.kind === 'built-in' && BUILT_IN_FONTS.some((font) => font.family === value.family)) return value;
+  if (value.kind === 'custom' && typeof value.family === 'string' && value.family.trim() && typeof value.stylesheetUrl === 'string' && googleFontFamilyFromCss2Url(value.stylesheetUrl) === value.family.trim()) {
+    return { kind: 'custom', family: value.family.trim(), stylesheetUrl: value.stylesheetUrl };
+  }
+  return DEFAULT_APP_UI.font;
 }
 
 function normalizeBackgroundValue(mode: ChatAppearancePreferences['chatBackgroundMode'], value: string): string {

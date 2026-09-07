@@ -5,6 +5,12 @@
 .memory-settings__header span { color: var(--muted-text, #a7adbd); font-size: 0.78rem; line-height: 1.45; }
 .memory-settings__header button, .memory-card__actions button, .memory-editor__actions button { border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(255,255,255,.045); color: inherit; min-height: 38px; padding: 8px 11px; }
 .memory-settings__header button, .memory-editor__actions .primary { background: rgba(160,130,255,.16); border-color: rgba(190,170,255,.3); }
+.memory-settings__guide { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 11px 12px; border: 1px solid rgba(190,170,255,.16); border-radius: 13px; background: rgba(155,130,255,.035); }
+.memory-settings__guide > div { display: grid; gap: 3px; min-width: 0; }
+.memory-settings__guide strong { font-size: .78rem; }
+.memory-settings__guide span { color: var(--muted-text, #a7adbd); font-size: .72rem; line-height: 1.4; }
+.memory-settings__guide a { flex: 0 0 auto; color: inherit; font-size: .72rem; font-weight: 650; text-decoration: none; white-space: nowrap; border: 1px solid rgba(190,170,255,.24); border-radius: 10px; padding: 8px 10px; background: rgba(255,255,255,.035); }
+.memory-settings__guide a:hover, .memory-settings__guide a:focus-visible { text-decoration: underline; }
 .memory-settings__search { display: flex; gap: 8px; align-items: end; }
 .memory-settings__search label { display: grid; gap: 6px; flex: 1; }
 .memory-settings__search label span, .memory-settings__filters label span, .memory-editor label span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted-text, #a7adbd); }
@@ -48,6 +54,8 @@
 @media (max-width: 520px) {
   .memory-settings__header { align-items: stretch; flex-direction: column; }
   .memory-settings__header button { width: 100%; }
+  .memory-settings__guide { align-items: stretch; flex-direction: column; }
+  .memory-settings__guide a { text-align: center; }
   .memory-settings__search { align-items: stretch; }
   .memory-editor__grid { grid-template-columns: 1fr; }
   .memory-editor__actions { justify-content: stretch; }

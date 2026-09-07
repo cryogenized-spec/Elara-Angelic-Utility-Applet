@@ -59,6 +59,7 @@ let unlockedApiKey: string | null = null;
 let lastActivityAt: number | null = null;
 let idleTimer: number | null = null;
 let securityMode: GeminiLockboxSecurityMode | null = null;
+let legacyMigrationPromise: Promise<void> | null = null;
 
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -173,12 +174,61 @@ async function decryptApiKeyWithLocalKey(record: EncryptedGeminiApiKey): Promise
   }
 }
 
+function readLegacyPlaintextKey(): string {
+  try {
+    return window.localStorage.getItem(LEGACY_STORAGE_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
 function removeLegacyPlaintextKey(): void {
   try {
     window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   } catch {
     // Ignore unavailable localStorage; the encrypted Lockbox remains authoritative.
   }
+}
+
+async function migrateLegacyPlaintextKey(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (legacyMigrationPromise) return legacyMigrationPromise;
+  legacyMigrationPromise = (async () => {
+    const existing = await db.secrets.get(RECORD_ID);
+    if (existing) {
+      removeLegacyPlaintextKey();
+      return;
+    }
+
+    const legacyKey = readLegacyPlaintextKey();
+    if (!legacyKey) return;
+
+    const localKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: KEY_LENGTH }, false, ['encrypt', 'decrypt']);
+    const encrypted = await encryptApiKeyWithLocalKey(legacyKey, localKey);
+    const now = Date.now();
+    await db.secrets.put({
+      id: RECORD_ID,
+      version: 2,
+      salt: '',
+      iv: encrypted.iv,
+      ciphertext: encrypted.ciphertext,
+      iterations: PBKDF2_ITERATIONS,
+      updatedAt: now,
+      security: { mode: 'off', authVersion: 1, configuredAt: now, failedAttempts: 0, lockedUntil: null },
+      localKey,
+    });
+    securityMode = 'off';
+    unlockedApiKey = legacyKey;
+    lastActivityAt = null;
+    clearIdleTimer();
+    removeLegacyPlaintextKey();
+    notifyChanged();
+  })().catch(() => {
+    // Keep the legacy value intact if migration cannot be completed; retry on the next access.
+  }).finally(() => {
+    legacyMigrationPromise = null;
+  });
+  return legacyMigrationPromise;
 }
 
 function clearIdleTimer(): void {
@@ -223,6 +273,7 @@ export function getGeminiLockboxLastActivityAt(): number | null {
 export type GeminiLockboxStatus = 'empty' | 'locked' | 'unlocked';
 
 export async function getGeminiLockboxStatus(): Promise<GeminiLockboxStatus> {
+  await migrateLegacyPlaintextKey();
   enforceGeminiApiKeyIdleTimeout();
   if (unlockedApiKey !== null) return 'unlocked';
   const record = await db.secrets.get(RECORD_ID);
@@ -274,6 +325,7 @@ async function clearPinFailures(record: EncryptedGeminiApiKey): Promise<void> {
 }
 
 export async function getGeminiApiKey(): Promise<string> {
+  await migrateLegacyPlaintextKey();
   enforceGeminiApiKeyIdleTimeout();
   if (unlockedApiKey === null) {
     const record = await db.secrets.get(RECORD_ID);
@@ -460,7 +512,6 @@ function installLifecycleController(): void {
 }
 
 installLifecycleController();
-removeLegacyPlaintextKey();
 
 export function maskGeminiApiKey(value: string): string {
   const key = value.trim();

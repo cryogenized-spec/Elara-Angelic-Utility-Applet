@@ -8,12 +8,13 @@ const arrayProperty = (description: string, items: Record<string, unknown> = { t
 
 const toolProperties: Record<string, Record<string, unknown>> = {
   'calendar.listEvents': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), timeMin: stringProperty('Optional RFC 3339 lower time bound.'), timeMax: stringProperty('Optional RFC 3339 upper time bound.') },
+  'calendar.createEvent': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), event: objectProperty('Explicit Google Calendar event resource to create.') },
   'tasks.listTaskLists': { pageToken: stringProperty('Optional pagination token.') },
   'tasks.listTasks': { taskListId: stringProperty('Task list id.'), pageToken: stringProperty('Optional pagination token.'), showCompleted: { type: 'boolean' }, showDeleted: { type: 'boolean' }, showHidden: { type: 'boolean' }, dueMin: stringProperty('Optional RFC 3339 lower due-time bound.'), dueMax: stringProperty('Optional RFC 3339 upper due-time bound.'), updatedMin: stringProperty('Optional RFC 3339 lower updated-time bound.'), completedMin: stringProperty('Optional RFC 3339 lower completed-time bound.'), completedMax: stringProperty('Optional RFC 3339 upper completed-time bound.'), maxResults: { type: 'integer', minimum: 1, maximum: 100 } },
   'tasks.getTask': { taskListId: stringProperty('Task list id.'), taskId: stringProperty('Task id.') },
   'tasks.createTask': { taskListId: stringProperty('Task list id.'), task: objectProperty('Google Tasks task resource to create.'), parent: stringProperty('Optional parent task id.'), previous: stringProperty('Optional sibling task id to insert after.') },
   'tasks.updateTask': { taskListId: stringProperty('Task list id.'), taskId: stringProperty('Task id.'), task: objectProperty('Complete task resource replacement.') },
-  'tasks.moveTask': { taskListId: stringProperty('Task list id.'), taskId: stringProperty('Task id.'), parent: stringProperty('Optional destination parent task id.'), previous: stringProperty('Optional preceding sibling task id.') },
+  'tasks.moveTask': { taskListId: stringProperty('Task list id.'), taskId: stringProperty('Task id.'), parent: stringProperty('Optional parent task id.'), previous: stringProperty('Optional sibling task id.') },
   'tasks.deleteTask': { taskListId: stringProperty('Task list id.'), taskId: stringProperty('Task id.') },
   'tasks.clearCompleted': { taskListId: stringProperty('Task list id.') },
   'docs.getDocument': { documentId: stringProperty('Google Docs document id.') },
@@ -60,6 +61,7 @@ const toolProperties: Record<string, Record<string, unknown>> = {
 };
 
 const requiredByTool: Record<string, readonly string[]> = {
+  'calendar.createEvent': ['event'],
   'tasks.listTasks': ['taskListId'], 'tasks.getTask': ['taskListId', 'taskId'], 'tasks.createTask': ['taskListId', 'task'], 'tasks.updateTask': ['taskListId', 'taskId', 'task'], 'tasks.moveTask': ['taskListId', 'taskId'], 'tasks.deleteTask': ['taskListId', 'taskId'], 'tasks.clearCompleted': ['taskListId'],
   'docs.getDocument': ['documentId'], 'docs.createDocument': ['title'], 'docs.batchUpdate': ['documentId', 'requests'],
   'chat.listMessages': ['spaceName'], 'chat.getMessage': ['messageName'], 'chat.createMessage': ['spaceName', 'message'], 'chat.updateMessage': ['messageName', 'message', 'updateMask'], 'chat.deleteMessage': ['messageName'],

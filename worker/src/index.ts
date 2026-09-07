@@ -172,7 +172,7 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
   const requestedTools = parsed.data.tools;
   const tools = selectedTools(requestedTools);
   if (requestedTools?.length && (!tools || tools.length !== new Set(requestedTools).size)) return jsonResponse(request, env, { code: 'validation', message: 'Request referenced an unregistered Gemini tool.' }, 400);
-  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, apiVersion: 'v1' });
+  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, httpOptions: { apiVersion: 'v1' } });
   const systemInstruction = parsed.data.systemInstruction.trim();
   const input = parsed.data.toolResult
     ? [{ type: 'function_result' as const, name: parsed.data.toolResult.name, call_id: parsed.data.toolResult.callId, result: [{ type: 'text' as const, text: JSON.stringify(parsed.data.toolResult.result) }] }]
@@ -269,7 +269,7 @@ async function handleTranscribe(request: Request, env: Env): Promise<Response> {
   if (bytes.byteLength < 2048) return jsonResponse(request, env, { code: 'empty', message: 'No speech was detected.' }, 422);
   if (bytes.byteLength > VTT_MAX_AUDIO_BYTES) return jsonResponse(request, env, { code: 'validation', message: 'VTT audio capture is too large.' }, 413);
 
-  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, apiVersion: 'v1' });
+  const client = new GoogleGenAI({ apiKey: env.GEMINI_API_KEY, httpOptions: { apiVersion: 'v1' } });
   let audioFile: { name?: string; uri?: string; mimeType?: string } | undefined;
   try {
     audioFile = await client.files.upload({

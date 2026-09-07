@@ -56,7 +56,10 @@ describe('Gemini provider credential preflight', () => {
     const collected: unknown[] = [];
     for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Hello.' })) collected.push(event);
 
-    expect(GoogleGenAI).toHaveBeenCalledWith(expect.objectContaining({ apiKey: 'test-gemini-key', apiVersion: 'v1' }));
+    expect(GoogleGenAI).toHaveBeenCalledWith({
+      apiKey: 'test-gemini-key',
+      httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } },
+    });
     expect(createInteraction).toHaveBeenCalledTimes(1);
     expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gemini-3.8-flash',

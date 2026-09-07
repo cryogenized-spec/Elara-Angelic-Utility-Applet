@@ -40,6 +40,8 @@ const providerSource = readFileSync(join(root, 'src/gemini/provider.ts'), 'utf8'
 if (!providerSource.includes("from '@google/genai'")) throw new Error('Reliability gate: Gemini must execute directly from the application provider.');
 if (providerSource.includes('GEMINI_WORKER_URL') || providerSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: Gemini provider must not use the Cloudflare Worker.');
 if (!providerSource.includes('getGeminiApiKey')) throw new Error('Reliability gate: Gemini provider must obtain its credential through the local app Lockbox.');
+if (!providerSource.includes("httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } }")) throw new Error('Reliability gate: Gemini Interactions must use the stable v1 API through SDK httpOptions.');
+if (providerSource.includes("apiKey, apiVersion: 'v1'")) throw new Error('Reliability gate: Gemini API version must not be configured through the obsolete top-level SDK option.');
 if (!providerSource.includes("if (systemInstruction) payload.system_instruction = systemInstruction;")) throw new Error('Reliability gate: empty Character Master must omit system_instruction entirely.');
 if (!providerSource.includes('request.results')) throw new Error('Reliability gate: Gemini tool-result continuation must support grouped results.');
 

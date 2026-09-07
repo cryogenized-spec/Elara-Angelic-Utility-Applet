@@ -18,6 +18,8 @@ export interface GoogleToolLoopOptions {
 
 const DEFAULT_MAX_TOOL_CALLS = 8;
 
+type PendingToolCall = GoogleToolCall & Pick<GeminiToolResult, 'callId' | 'name'>;
+
 function normalizeTools(tools: readonly GoogleToolName[] | undefined): readonly GoogleToolName[] {
   return tools?.length ? tools : Object.keys(googleReadToolHandlers) as GoogleToolName[];
 }
@@ -31,13 +33,13 @@ function executorOptions(options: GoogleToolLoopOptions): GoogleToolExecutorOpti
   };
 }
 
-function errorToolResult(call: GoogleToolCall, message: string): GeminiToolResult {
+function errorToolResult(call: PendingToolCall, message: string): GeminiToolResult {
   return { callId: call.callId, name: call.name, result: { ok: false, error: message } };
 }
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
-  const tools = normalizeTools(request.tools ?? options.tools);
+  const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools);
   const maxToolCalls = Math.max(1, Math.min(options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS, 20));
   for (const tool of tools) {
     if (!Object.prototype.hasOwnProperty.call(googleServiceToolHandlers, tool) && !Object.prototype.hasOwnProperty.call(roleplayWorldToolHandlers, tool) && !Object.prototype.hasOwnProperty.call(googleReadToolHandlers, tool)) throw new Error(`Tool ${tool} is not registered.`);
@@ -50,12 +52,12 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   let executedCalls = 0;
 
   while (true) {
-    const pendingCalls: GoogleToolCall[] = [];
+    const pendingCalls: PendingToolCall[] = [];
     let interactionId = '';
     for await (const event of stream) {
       yield event;
       if (event.type === 'interaction-created') interactionId = event.interactionId;
-      if (event.type === 'tool-call') pendingCalls.push({ callId: event.callId, name: event.name as GoogleToolName, arguments: event.arguments });
+      if (event.type === 'tool-call') pendingCalls.push({ callId: event.callId, name: event.name as GoogleToolName, tool: event.name as GoogleToolName, arguments: event.arguments });
       if (signal?.aborted || event.type === 'cancelled' || event.type === 'failed') return;
     }
 
@@ -63,10 +65,11 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     if (!interactionId) interactionId = pendingCalls[0].callId;
 
     const results: GeminiToolResult[] = [];
-    const allowedCalls = pendingCalls.slice(0, Math.max(0, maxToolCalls - executedCalls));
+    const allowedCount = Math.max(0, maxToolCalls - executedCalls);
+    const allowedCalls = pendingCalls.slice(0, allowedCount);
     for (const call of pendingCalls.slice(allowedCalls.length)) results.push(errorToolResult(call, 'Google tool-call limit exceeded for this turn.'));
 
-    const mutationEntries: Array<{ call: GoogleToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
+    const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
     for (const call of allowedCalls) {
       const confirmation = confirmationRequestForCall(call);
       if (confirmation) mutationEntries.push({ call, confirmation });

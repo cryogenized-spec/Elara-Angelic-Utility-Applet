@@ -37,16 +37,26 @@ function errorToolResult(call: PendingToolCall, message: string): GeminiToolResu
   return { callId: call.callId, name: call.name, result: { ok: false, error: message } };
 }
 
+function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandlers): boolean {
+  return Object.prototype.hasOwnProperty.call(handlers, tool);
+}
+
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
   const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools);
   const maxToolCalls = Math.max(1, Math.min(options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS, 20));
+  const executeOptions = executorOptions(options);
+
+  // Tool availability must not prevent the initial Gemini request. A stale or
+  // partially upgraded client may have a registry/handler mismatch; the model
+  // should still receive the prompt, and an actually-invoked unavailable tool
+  // is handled as a normal tool result below.
   for (const tool of tools) {
-    if (!Object.prototype.hasOwnProperty.call(googleServiceToolHandlers, tool) && !Object.prototype.hasOwnProperty.call(roleplayWorldToolHandlers, tool) && !Object.prototype.hasOwnProperty.call(googleReadToolHandlers, tool)) throw new Error(`Tool ${tool} is not registered.`);
-    if (readOnly && !Object.prototype.hasOwnProperty.call(googleReadToolHandlers, tool) && !tool.startsWith('roleplay_setting.')) throw new Error(`Tool ${tool} is not permitted in read-only mode.`);
+    if (readOnly && !Object.prototype.hasOwnProperty.call(googleReadToolHandlers, tool) && !tool.startsWith('roleplay_setting.')) {
+      throw new Error(`Tool ${tool} is not permitted in read-only mode.`);
+    }
   }
 
-  const executeOptions = executorOptions(options);
   const systemInstruction = withRuntimeContext(request.systemInstruction);
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
   let executedCalls = 0;
@@ -72,6 +82,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
 
     const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
     for (const call of allowedCalls) {
+      if (!isRegisteredToolHandler(call.name as GoogleToolName, executeOptions.handlers)) {
+        results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
+        continue;
+      }
       const confirmation = confirmationRequestForCall(call);
       if (confirmation) mutationEntries.push({ call, confirmation });
       else {

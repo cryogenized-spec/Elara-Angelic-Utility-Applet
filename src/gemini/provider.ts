@@ -124,5 +124,9 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
 
 export const geminiTurnPort: GeminiTurnPort = {
   streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> { return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools }, signal); },
-  streamToolResult(request: GeminiToolContinuationRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> { return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: [{ type: 'function_result', name: request.result.name, call_id: request.result.callId, result: [{ type: 'text', text: JSON.stringify(request.result.result) }] }], previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools }, signal); },
+  streamToolResult(request: GeminiToolContinuationRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
+    const results = request.results ?? (request.result ? [request.result] : []);
+    const input = results.map((result) => ({ type: 'function_result', name: result.name, call_id: result.callId, result: [{ type: 'text', text: JSON.stringify(result.result) }] }));
+    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools }, signal);
+  },
 };

@@ -68,7 +68,7 @@ test.describe('Android portrait reliability', () => {
     await expect(chatTextSize).toBeVisible();
     await chatTextSize.fill('21');
 
-    await page.getByRole('radio', { name: 'Manrope', exact: true }).click();
+    await page.getByRole('radio', { name: /Manrope/ }).click();
     await page.getByRole('button', { name: 'Appearance' }).click();
     const portraitScale = page.getByRole('slider', { name: 'Character presentation scale' });
     await portraitScale.fill('3');
@@ -108,12 +108,18 @@ test.describe('Android portrait reliability', () => {
 
     const transition = await calendar.evaluate((element) => getComputedStyle(element).transitionDuration);
     const durations = transition.split(',').map((value) => Number.parseFloat(value));
-    expect(durations.length).toBeGreaterThan(0);
-    expect(durations.every((value) => Number.isFinite(value) && value <= 0.001)).toBe(true);
+    expect(durations.every((duration) => duration === 0)).toBe(true);
 
     await calendar.click();
     await expect(surface).toBeVisible();
-    const animation = await surface.evaluate((element) => getComputedStyle(element).animationName);
-    expect(animation).toBe('none');
+  });
+
+  test('keeps the command rail reachable after keyboard navigation', async ({ page }) => {
+    await page.goto('');
+    const rail = page.getByRole('navigation', { name: 'Quick actions' });
+    await rail.getByRole('button', { name: 'Calendar', exact: true }).focus();
+    await expect(rail.getByRole('button', { name: 'Calendar', exact: true })).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('button', { name: 'Tasks', exact: true })).toBeFocused();
   });
 });

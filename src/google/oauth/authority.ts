@@ -18,7 +18,7 @@ const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
 type StoredAuthorization = {
   version: 2;
   grantedCapabilities: GoogleCapabilityKey[];
-  account?: { email?: string; displayName?: string };
+  account?: { email: string; displayName?: string };
   needsReauthorization?: boolean;
   updatedAt: string;
 };
@@ -48,10 +48,13 @@ function loadStored(): StoredAuthorization {
     const capabilities = Array.isArray(parsed.grantedCapabilities)
       ? parsed.grantedCapabilities.filter((value): value is GoogleCapabilityKey => googleCapabilityKeySchema.safeParse(value).success && Boolean(getGoogleScope(value as GoogleCapabilityKey).scope))
       : [];
+    const account = parsed.account && typeof parsed.account.email === 'string' && parsed.account.email.trim()
+      ? { email: parsed.account.email.trim(), ...(typeof parsed.account.displayName === 'string' && parsed.account.displayName.trim() ? { displayName: parsed.account.displayName.trim() } : {}) }
+      : undefined;
     stored = {
       version: 2,
       grantedCapabilities: [...new Set(capabilities)],
-      ...(parsed.account ? { account: { email: parsed.account.email, displayName: parsed.account.displayName } } : {}),
+      ...(account ? { account } : {}),
       ...(parsed.needsReauthorization ? { needsReauthorization: true } : {}),
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     };
@@ -162,7 +165,10 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
     const parsed = googleCapabilityKeySchema.parse(capability);
     const descriptor = getGoogleScope(parsed);
     if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
-    if (!hasCapability(parsed) || !tokenStillValid() || stored.needsReauthorization) await acquireToken(parsed, hasCapability(parsed) && !stored.needsReauthorization ? 'none' : '');
+    const current = loadStored();
+    if (!hasCapability(parsed) || !tokenStillValid() || current.needsReauthorization) {
+      await acquireToken(parsed, hasCapability(parsed) && !current.needsReauthorization ? 'none' : '');
+    }
     return { capability: parsed, fetch: (input, init) => authorizedFetch(parsed, input, init) } satisfies AuthorizedGoogleRequest;
   },
 

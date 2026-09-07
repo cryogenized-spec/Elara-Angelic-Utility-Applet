@@ -29,7 +29,6 @@ type AccessSession = {
   grantedCapabilities: GoogleCapabilityKey[];
 };
 
-let loaded = false;
 let stored: StoredAuthorization = { version: 2, grantedCapabilities: [], updatedAt: new Date(0).toISOString() };
 let session: AccessSession | null = null;
 
@@ -37,13 +36,21 @@ function configuredClientId(): string {
   return (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 }
 
+function emptyStored(): StoredAuthorization {
+  return { version: 2, grantedCapabilities: [], updatedAt: new Date().toISOString() };
+}
+
 function loadStored(): StoredAuthorization {
-  if (loaded) return stored;
-  loaded = true;
   if (typeof localStorage === 'undefined') return stored;
+
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return stored;
+    if (!raw) {
+      stored = emptyStored();
+      session = null;
+      return stored;
+    }
+
     const parsed = JSON.parse(raw) as Partial<StoredAuthorization>;
     const capabilities = Array.isArray(parsed.grantedCapabilities)
       ? parsed.grantedCapabilities.filter((value): value is GoogleCapabilityKey => googleCapabilityKeySchema.safeParse(value).success && Boolean(getGoogleScope(value as GoogleCapabilityKey).scope))
@@ -51,15 +58,18 @@ function loadStored(): StoredAuthorization {
     const account = parsed.account && typeof parsed.account.email === 'string' && parsed.account.email.trim()
       ? { email: parsed.account.email.trim(), ...(typeof parsed.account.displayName === 'string' && parsed.account.displayName.trim() ? { displayName: parsed.account.displayName.trim() } : {}) }
       : undefined;
-    stored = {
+    const nextStored: StoredAuthorization = {
       version: 2,
       grantedCapabilities: [...new Set(capabilities)],
       ...(account ? { account } : {}),
       ...(parsed.needsReauthorization ? { needsReauthorization: true } : {}),
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     };
+    if (!nextStored.grantedCapabilities.length || nextStored.needsReauthorization) session = null;
+    stored = nextStored;
   } catch {
-    stored = { version: 2, grantedCapabilities: [], updatedAt: new Date().toISOString() };
+    stored = emptyStored();
+    session = null;
   }
   return stored;
 }
@@ -74,10 +84,6 @@ function ensureClientId(): string {
   const clientId = configuredClientId();
   if (!clientId) throw new Error('Google Workspace is not configured: VITE_GOOGLE_CLIENT_ID is missing.');
   return clientId;
-}
-
-function hasCapability(capability: GoogleCapabilityKey): boolean {
-  return loadStored().grantedCapabilities.includes(capability);
 }
 
 function authorizationState(): GoogleOAuthStatusContract['state'] {
@@ -102,8 +108,9 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   try {
     const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: descriptor.scope, prompt });
+    if (!response.access_token) throw new Error('Google authorization did not return an access token.');
     session = {
-      accessToken: response.access_token!,
+      accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
       grantedCapabilities: [...new Set([...(loadStored().grantedCapabilities), capability])],
     };
@@ -114,6 +121,7 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
     const raw = error instanceof Error ? error.message : undefined;
     if (prompt === 'none') {
       stored.needsReauthorization = true;
+      session = null;
       saveStored();
     }
     throw new Error(raw || 'Google authorization failed.');
@@ -121,14 +129,16 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
 }
 
 async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = false): Promise<string> {
-  if (!hasCapability(capability) || !tokenStillValid()) await acquireToken(capability, allowInteraction ? '' : 'none');
+  if (!loadStored().grantedCapabilities.includes(capability) || !tokenStillValid()) {
+    await acquireToken(capability, allowInteraction ? '' : 'none');
+  }
   if (!tokenStillValid() || !session) throw new Error('Google authorization did not return a usable access token.');
   return session.accessToken;
 }
 
 async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const target = assertGoogleApiTarget(input);
-  let token = await ensureToken(capability, false);
+  const token = await ensureToken(capability, false);
   const request = new Request(target, init);
   const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
   const requestOptions = (accessToken: string): RequestInit => {
@@ -144,16 +154,17 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
   session = null;
   try {
     await acquireToken(capability, 'none');
-    token = await ensureToken(capability, false);
   } catch {
     stored.needsReauthorization = true;
     saveStored();
     throw new Error('Google authorization has expired or was revoked. Reauthorize this Google capability in Settings.');
   }
 
-  response = await fetch(new Request(target, requestOptions(token)));
+  if (!session) throw new Error('Google authorization did not return a refreshed access token.');
+  response = await fetch(new Request(target, requestOptions(session.accessToken)));
   if (response.status === 401) {
     stored.needsReauthorization = true;
+    session = null;
     saveStored();
     throw new Error('Google rejected the refreshed authorization. Reauthorize this capability in Settings.');
   }
@@ -164,10 +175,10 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
   async authorize(capability) {
     const parsed = googleCapabilityKeySchema.parse(capability);
     const descriptor = getGoogleScope(parsed);
-    if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
     const current = loadStored();
-    if (!hasCapability(parsed) || !tokenStillValid() || current.needsReauthorization) {
-      await acquireToken(parsed, hasCapability(parsed) && !current.needsReauthorization ? 'none' : '');
+    if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
+    if (!current.grantedCapabilities.includes(parsed) || !tokenStillValid() || current.needsReauthorization) {
+      await acquireToken(parsed, current.grantedCapabilities.includes(parsed) && !current.needsReauthorization ? 'none' : '');
     }
     return { capability: parsed, fetch: (input, init) => authorizedFetch(parsed, input, init) } satisfies AuthorizedGoogleRequest;
   },
@@ -183,10 +194,15 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
 
   async disconnect() {
     const token = session?.accessToken;
-    if (token) await revokeGoogleAccessToken(token).catch(() => undefined);
+    if (token) {
+      try {
+        await revokeGoogleAccessToken(token);
+      } catch {
+        // Provider revocation is best-effort; local disconnect must still complete.
+      }
+    }
     session = null;
-    stored = { version: 2, grantedCapabilities: [], updatedAt: new Date().toISOString() };
-    loaded = true;
+    stored = emptyStored();
     if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
   },
 };

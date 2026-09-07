@@ -16,11 +16,13 @@ function token(accessToken: string, expiresIn = 3600) {
 }
 
 describe('direct Google OAuth authority', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client.apps.googleusercontent.com');
     localStorage.clear();
     tokenMock.mockReset();
     revokeMock.mockReset();
     vi.restoreAllMocks();
+    await googleOAuthAuthority.disconnect();
   });
 
   it('starts disconnected without local authorization metadata', async () => {
@@ -32,7 +34,7 @@ describe('direct Google OAuth authority', () => {
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
 
     expect(tokenMock).toHaveBeenCalledWith({
-      clientId: expect.any(String),
+      clientId: 'test-client.apps.googleusercontent.com',
       scope: 'https://www.googleapis.com/auth/calendar.events.readonly',
       prompt: '',
     });
@@ -74,7 +76,7 @@ describe('direct Google OAuth authority', () => {
 
     expect(response.status).toBe(200);
     expect(tokenMock).toHaveBeenLastCalledWith({
-      clientId: expect.any(String),
+      clientId: 'test-client.apps.googleusercontent.com',
       scope: 'https://www.googleapis.com/auth/calendar.events.readonly',
       prompt: 'none',
     });

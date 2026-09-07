@@ -152,6 +152,7 @@ export function App() {
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
+    let turnId: string | null = null;
     try {
       const userMessage = makeMessage('user', text, conversationId); const withUser = await appendMessage(userMessage, conversationId); if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       let titled = withUser;
@@ -159,9 +160,10 @@ export function App() {
       if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       setConversation((current) => activeConversationIdRef.current === conversationId ? titled : current); await refreshThreads();
       if (activeConversationIdRef.current !== conversationId) return;
-      await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, responseGroupId: userMessage.id, responseVariant: 1 });
+      turnId = await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, responseGroupId: userMessage.id, responseVariant: 1 });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
+      if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed'); setError(cause instanceof Error ? cause.message : 'The response failed.');
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
@@ -192,10 +194,12 @@ export function App() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
+    let turnId: string | null = null;
     try {
-      await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, previousInteractionId, responseGroupId: groupId, responseVariant: nextVariant, supersedesGenerationId: target.providerTurn?.generationId });
+      turnId = await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, previousInteractionId, responseGroupId: groupId, responseVariant: nextVariant, supersedesGenerationId: target.providerTurn?.generationId });
     } catch (cause) {
       if (activeConversationIdRef.current !== workingConversation.id) return;
+      if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed'); setError(cause instanceof Error ? cause.message : 'The regenerated response failed.');
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
@@ -211,23 +215,25 @@ export function App() {
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
     const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut.`;
+    let turnId: string | null = null;
     try {
-      await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
+      turnId = await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
+      if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed'); setError(cause instanceof Error ? cause.message : `The ${shortcut.label} shortcut failed.`);
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
-  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }) {
-    if (activeConversationIdRef.current !== conversationId || controller.signal.aborted) return;
+  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }): Promise<string | null> {
+    if (activeConversationIdRef.current !== conversationId || controller.signal.aborted) return null;
     const previousInteractionId = options.previousInteractionId ?? [...baseConversation.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
     const assistantMessage = { ...makeMessage('assistant', '', conversationId), responseGroupId: options.responseGroupId, responseVariant: options.responseVariant } satisfies ChatMessage;
     const wallStartedAt = Date.now();
     const base = { ...baseConversation, updatedAt: wallStartedAt };
     const isCurrentConversation = () => activeConversationIdRef.current === conversationId;
-    if (!isCurrentConversation()) return;
+    if (!isCurrentConversation()) return null;
 
     // One stable turn identity across every tool continuation in this request.
     // A new interaction-created never resets transcript or trace state.
@@ -246,6 +252,7 @@ export function App() {
     const idleStallMs = options.watchdog?.idleStallMs ?? DEFAULT_IDLE_STALL_TIMEOUT_MS;
     const absoluteMs = options.watchdog?.absoluteMs ?? DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS;
     const streamFailed = { value: false };
+    let terminalWhileActive = false;
     let current = createGenerationState(generationId, { supersedesGenerationId: options.supersedesGenerationId, startedAt: performance.now() });
     setGeneration(current);
     setStructuredError(null);
@@ -254,10 +261,15 @@ export function App() {
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
       current = dispatchGenerationEvent(current, { generationId, event, receivedAt: performance.now() }, syncContext);
-      setGeneration(current);
+      // The trace panel is application state too: a superseded runner must
+      // not swap it to stale content mid-stream.
+      if (generationArbiterRef.current.isActive(generationId)) setGeneration(current);
       if (isTerminalPhase(current.phase)) {
         watchdog.dispose();
-        generationArbiterRef.current.release(generationId);
+        if (generationArbiterRef.current.isActive(generationId)) {
+          terminalWhileActive = true;
+          generationArbiterRef.current.release(generationId);
+        }
       }
     };
     const failTurn = (error: NormalizedProviderError) => {
@@ -284,7 +296,7 @@ export function App() {
         : geminiTurnPort.streamReply(request, controller.signal);
       for await (const event of stream) {
         dispatch(event);
-        if (event.type === 'cancelled') return;
+        if (event.type === 'cancelled') break;
       }
       // An exhausted iterator is never success: synthesize the missing
       // terminal outcome (cancellation when aborted, protocol failure else).
@@ -297,8 +309,9 @@ export function App() {
       }
     } finally {
       watchdog.dispose();
-      if (isCurrentConversation() && !controller.signal.aborted && current.phase === 'completed') setStatus('idle');
+      if (terminalWhileActive && current.phase === 'completed') setStatus('idle');
     }
+    return generationId;
   }
 
   async function retryLastTurn() {
@@ -313,10 +326,12 @@ export function App() {
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
+    let turnId: string | null = null;
     try {
-      await streamAssistantTurn(attempt.input, attempt.base, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, responseGroupId: attempt.responseGroupId, responseVariant: attempt.responseVariant, supersedesGenerationId: attempt.generationId });
+      turnId = await streamAssistantTurn(attempt.input, attempt.base, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, responseGroupId: attempt.responseGroupId, responseVariant: attempt.responseVariant, supersedesGenerationId: attempt.generationId });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
+      if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
       setStatus('failed'); setError(cause instanceof Error ? cause.message : 'The response failed.');
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }

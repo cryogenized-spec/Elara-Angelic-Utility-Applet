@@ -51,7 +51,11 @@ describe('streamGoogleToolLoop', () => {
       model: 'gemini-3.8-flash',
       previousInteractionId: 'interaction-1',
       systemInstruction: expect.stringContaining(systemInstruction),
-      result: expect.objectContaining({ callId: 'call-1', name: 'calendar.listEvents', result: { events: [{ summary: 'Design review', calendarId: 'primary' }] } }),
+      results: [expect.objectContaining({
+        callId: 'call-1',
+        name: 'calendar.listEvents',
+        result: { events: [{ summary: 'Design review', calendarId: 'primary' }] },
+      })],
       tools: ['calendar.listEvents'],
     }), undefined);
     expect(collected).toHaveLength(4);

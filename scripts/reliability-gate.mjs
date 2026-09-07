@@ -10,7 +10,7 @@ const requiredFiles = [
   'src/app/components/MarkdownText.tsx', 'src/app/components/MarkdownText.test.tsx', 'src/app/components/RoleplaySettings.tsx',
   'src/character/system-instruction.ts', 'src/persistence/character.ts', 'src/persistence/character.test.ts', 'src/persistence/gemini-api-key.ts', 'src/persistence/gemini-api-key.test.ts', 'src/persistence/preferences.ts', 'src/persistence/roleplay-world.ts',
   'src/domain/roleplay-world.ts', 'src/domain/roleplay-world.test.ts',
-  'src/gemini/runtime-context.ts', 'src/google/confirmation/roleplay-broker.ts', 'src/google/tools/roleplay-world-schemas.ts', 'src/google/tools/roleplay-world-handlers.ts', 'src/google/tools/gemini-declarations.test.ts',
+  'src/gemini/runtime-context.ts', 'src/google/confirmation/broker.ts', 'src/google/confirmation/roleplay-broker.ts', 'src/google/tools/roleplay-world-schemas.ts', 'src/google/tools/roleplay-world-handlers.ts', 'src/google/tools/gemini-declarations.test.ts',
   'e2e/roleplay-world.spec.ts',
 ];
 
@@ -67,7 +67,14 @@ const roleplayWorldSource = readFileSync(join(root, 'src/google/tools/roleplay-w
 if (!roleplayWorldSource.includes('loadRoleplayPreferences')) throw new Error('Reliability gate: Roleplay world tools must respect Roleplay Mode state.');
 if (!roleplayWorldSource.includes('crypto.subtle.digest')) throw new Error('Reliability gate: Roleplay entity refs must use cryptographic digest material.');
 const roleplayBrokerSource = readFileSync(join(root, 'src/google/confirmation/roleplay-broker.ts'), 'utf8');
-if (!roleplayBrokerSource.includes('data-decision="accept"') || !roleplayBrokerSource.includes('data-decision="decline"')) throw new Error('Reliability gate: Roleplay mutations must expose explicit user confirmation controls.');
+if (!roleplayBrokerSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Roleplay mutations must use the shared Google confirmation broker.');
+const googleBrokerSource = readFileSync(join(root, 'src/google/confirmation/broker.ts'), 'utf8');
+if (!googleBrokerSource.includes('data-decision="accept"') || !googleBrokerSource.includes('data-decision="decline"')) throw new Error('Reliability gate: Google mutations must expose explicit user confirmation controls.');
+if (!googleBrokerSource.includes('aria-label', )) throw new Error('Reliability gate: Google confirmation controls must be accessible.');
+const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
+if (!toolLoopSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Google tool loop must route writes through the shared confirmation broker.');
+const executorSource = readFileSync(join(root, 'src/google/tools/executor.ts'), 'utf8');
+if (!executorSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: direct Google tool execution must retain the shared confirmation broker.');
 const worldSource = readFileSync(join(root, 'src/domain/roleplay-world.ts'), 'utf8');
 if (!worldSource.includes('serializeRoleplayWorldYaml')) throw new Error('Reliability gate: Roleplay World must have a deterministic YAML view.');
 if (worldSource.includes('ref: ${yamlScalar(entity.ref)}')) throw new Error('Reliability gate: opaque Roleplay refs must remain hidden from visible YAML.');
@@ -105,4 +112,4 @@ if (!characterPersistence.includes("record.systemInstruction = '';")) throw new 
 
 if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24') throw new Error('Reliability gate: Node baseline must remain 24.');
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, explicit mutation confirmation, deterministic YAML view, and encrypted credential persistence contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog, deterministic YAML view, and encrypted credential persistence contract.`);

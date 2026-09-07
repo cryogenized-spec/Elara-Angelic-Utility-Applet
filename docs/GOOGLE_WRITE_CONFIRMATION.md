@@ -1,21 +1,15 @@
-# Google Write Confirmation
+# Google Workspace Write Confirmation
 
-Prompt 47 establishes the mutation gate used by the future Google orchestration layer.
+Google Workspace reads execute without an extra confirmation. Mutations, destructive operations, and sends require explicit user confirmation at the application boundary before the handler can run.
 
-## Policy
+The browser watchdog presents the registered tool name plus a safe human-readable resource summary. A multi-action proposal presents every mutation as an independently selectable item, with controls to **Approve selected**, **Approve all**, or **Decline** the entire proposal. A single proposed mutation uses the same watchdog with one selection.
 
-Read-only operations do not require a confirmation step. Write operations, destructive operations, and outbound sends are explicitly risk-classified and require confirmation before execution.
+Confirmation is separate from OAuth authorization. OAuth grants the application capability; the confirmation gate grants permission for this particular action. The model and Character Master cannot satisfy either boundary.
 
-The confirmation request contains the tool name, risk class, a human-readable resource summary, and an issued timestamp. Confirmation freshness is bounded to five minutes by default so an old approval cannot silently authorize a later unrelated action.
+Confirmation requests are intentionally ephemeral. They are not persisted as authorization state. A request is time-bounded by the existing five-minute freshness policy, and aborted or dismissed requests resolve as declined.
 
-## Important separation
+Reads in the same Gemini tool turn continue through the normal read path. When Gemini proposes multiple mutations in one interaction, the application gathers the function calls into one confirmation round, executes only the approved items, and sends one grouped function-result continuation back to Gemini. Unselected mutations are represented as declined results and are never passed to their mutation handlers.
 
-The model may propose an action and explain why it wants to perform it. The character instruction may influence phrasing and roleplay. Neither the model nor the character can self-authorize an external mutation.
+The grouping layer sits above the existing executor. The executor remains the final validation, OAuth, confirmation, and handler boundary, and approved browser actions are only executed with an already-granted capability.
 
-OAuth capability grants answer **whether the application is allowed to attempt the API call**. Write confirmation answers **whether this particular consequential action is approved**. These are separate controls.
-
-## Orchestration/Kanban
-
-The future Kanban layer should display pending confirmations and completed mutations as explicit operation records. It must not bypass this policy by calling feature services directly.
-
-Bulk, destructive, or externally visible actions can later receive stricter policy without changing the underlying Google services.
+Future Kanban/watchdog surfaces can project the same pending/completed mutation state without weakening this execution boundary.

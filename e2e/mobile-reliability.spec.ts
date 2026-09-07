@@ -59,6 +59,34 @@ test.describe('Android portrait reliability', () => {
     await expect(composer).toBeVisible();
   });
 
+  test('persists presentation and chat typography settings across reload', async ({ page }) => {
+    await page.goto('');
+    await openSettings(page);
+
+    await page.getByRole('button', { name: 'Typography' }).click();
+    const chatTextSize = page.getByRole('slider', { name: 'Chat text size' });
+    await expect(chatTextSize).toBeVisible();
+    await chatTextSize.fill('21');
+
+    await page.getByRole('button', { name: 'Manrope', exact: true }).click();
+    await page.getByRole('button', { name: 'Appearance' }).click();
+    const portraitScale = page.getByRole('slider', { name: 'Character presentation scale' });
+    await portraitScale.fill('3');
+    await page.getByRole('button', { name: 'Rose', exact: true }).click();
+
+    await page.getByRole('button', { name: 'Back to chat' }).click();
+    await expect(page.locator('.app-shell')).toHaveCSS('font-family', /Manrope/);
+
+    await page.reload();
+    await expect(page.locator('.app-shell')).toHaveCSS('font-family', /Manrope/);
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Typography' }).click();
+    await expect(page.getByRole('slider', { name: 'Chat text size' })).toHaveValue('21');
+    await page.getByRole('button', { name: 'Appearance' }).click();
+    await expect(page.getByRole('slider', { name: 'Character presentation scale' })).toHaveValue('3');
+    await expect(page.getByRole('button', { name: 'Rose', exact: true })).toHaveAttribute('aria-checked', 'true');
+  });
+
   test('keeps Settings navigation recoverable on a narrow portrait viewport', async ({ page }) => {
     await page.goto('');
     await openSettings(page);

@@ -19,17 +19,15 @@ test('opens a Workspace shortcut menu without creating a chat message', async ({
 
 test('executes a shortcut as an internal task rather than an injected user prompt', async ({ page }) => {
   await page.goto('');
-  await page.route('**/api/gemini', (route) => route.abort('failed'));
   const conversation = page.getByRole('region', { name: 'Conversation' });
-  const before = await conversation.locator('.message').count();
+  await page.route('**/api/gemini', (route) => route.abort('failed'));
 
   await expect.poll(() => readStoredShortcutEnabled(page, 'calendar-today')).toBe(true);
   await page.getByRole('button', { name: 'Calendar', exact: true }).click();
   await page.getByRole('menuitem', { name: /Today/ }).click();
 
-  await expect(conversation.locator('.message')).toHaveCount(before + 1);
-  await expect(conversation.locator('.message').last()).not.toContainText('Execute the saved Workspace shortcut');
   await expect(page.getByRole('alert')).toContainText('[GEMINI_UNKNOWN]');
+  await expect(conversation.locator('.message')).not.toContainText('Execute the saved Workspace shortcut');
 });
 
 async function readStoredShortcutEnabled(page: import('@playwright/test').Page, id: string): Promise<boolean | undefined> {

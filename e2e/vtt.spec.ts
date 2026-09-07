@@ -63,7 +63,7 @@ async function installVttBrowserMocks(page: Page, interactionMode: 'default' | '
     });
   });
 
-  await page.route('**/v1beta/interactions*', async (route) => {
+  await page.route('**/v1/interactions*', async (route) => {
     const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     if (body.model === 'gemini-3.5-transcribe') {
       await route.fulfill({
@@ -174,8 +174,8 @@ test.describe('VTT composer flow', () => {
   test('falls back to the raw transcript when transformation fails', async ({ page }) => {
     test.setTimeout(15_000);
     await installVttBrowserMocks(page);
-    await page.unroute('**/v1beta/interactions*');
-    await page.route('**/v1beta/interactions*', async (route) => {
+    await page.unroute('**/v1/interactions*');
+    await page.route('**/v1/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       if (body.model === 'gemini-3.5-transcribe') {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: 'voice inserted' }) });
@@ -205,8 +205,8 @@ test.describe('VTT composer flow', () => {
 
   test('reports an empty transcript without altering the draft', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.unroute('**/v1beta/interactions*');
-    await page.route('**/v1beta/interactions*', async (route) => {
+    await page.unroute('**/v1/interactions*');
+    await page.route('**/v1/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       if (body.model === 'gemini-3.5-transcribe') {
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'transcription-int-1', status: 'completed', output_text: '   ' }) });
@@ -224,8 +224,8 @@ test.describe('VTT composer flow', () => {
 
   test('cancels an in-flight transcription and leaves the draft unchanged', async ({ page }) => {
     await installVttBrowserMocks(page);
-    await page.unroute('**/v1beta/interactions*');
-    await page.route('**/v1beta/interactions*', async (route) => {
+    await page.unroute('**/v1/interactions*');
+    await page.route('**/v1/interactions*', async (route) => {
       const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       if (body.model === 'gemini-3.5-transcribe') await new Promise((resolve) => setTimeout(resolve, 2_000));
       else await route.fulfill({ status: 200, contentType: 'text/event-stream', body: transformationSse('voice inserted') });

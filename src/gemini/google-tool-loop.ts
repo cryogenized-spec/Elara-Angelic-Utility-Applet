@@ -58,7 +58,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       yield event;
       if (event.type === 'interaction-created') interactionId = event.interactionId;
       if (event.type === 'tool-call') pendingCalls.push({ callId: event.callId, name: event.name as GoogleToolName, tool: event.name as GoogleToolName, arguments: event.arguments });
-      if (signal?.aborted || event.type === 'cancelled' || event.type === 'failed') return;
+      if (signal?.aborted || event.type === 'cancelled') return;
+      if (event.type === 'failed') throw new Error(`[${event.error.code}] ${event.error.message}`);
     }
 
     if (pendingCalls.length === 0) return;

@@ -182,7 +182,7 @@ test('normalizes a direct Gemini network failure without fabricating a response'
   test.setTimeout(15_000);
   await page.goto('');
   await unlockTestGemini(page);
-  await page.route('**/v1beta/interactions*', async (route) => {
+  await page.route('**/v1/interactions*', async (route) => {
     await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Provider unavailable.' }) });
   });
   const composer = page.getByRole('textbox', { name: 'Message Elara' });

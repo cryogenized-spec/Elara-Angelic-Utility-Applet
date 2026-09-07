@@ -3,10 +3,10 @@ import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
-import { ensureWorkspaceShortcuts, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
+import { ensureWorkspaceShortcuts, storedShortcutFromDefinition, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
 import { completeOnboarding, hasCompletedOnboarding, loadAppUiPreferences, loadChatAppearance, loadRoleplayPreferences, saveAppUiPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
-import { demoThreadTitlePort } from '../chat/thread-title-port';
+import { localThreadTitlePort } from '../chat/thread-title-port';
 import { geminiTurnPort } from '../gemini/provider';
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent } from '../gemini/contracts';
@@ -136,7 +136,7 @@ export function App() {
     try {
       const userMessage = makeMessage('user', text, conversationId); const withUser = await appendMessage(userMessage, conversationId); if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       let titled = withUser;
-      if (withUser.title === DEFAULT_TITLE) { try { const generatedTitle = await demoThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch {} }
+      if (withUser.title === DEFAULT_TITLE) { try { const generatedTitle = await localThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch {} }
       if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       setConversation((current) => activeConversationIdRef.current === conversationId ? titled : current); await refreshThreads();
       if (activeConversationIdRef.current !== conversationId) return;
@@ -205,34 +205,45 @@ export function App() {
     if (activeConversationIdRef.current !== conversationId || controller.signal.aborted) return;
     const previousInteractionId = options.previousInteractionId ?? [...baseConversation.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
     const assistantMessage = { ...makeMessage('assistant', '', conversationId), responseGroupId: options.responseGroupId, responseVariant: options.responseVariant } satisfies ChatMessage;
-    const liveText = { value: '' }; const startedAt = Date.now();
-    const base = { ...baseConversation, messages: [...baseConversation.messages, assistantMessage], updatedAt: startedAt };
-    if (activeConversationIdRef.current !== conversationId) return;
-    setConversation((current) => activeConversationIdRef.current === conversationId ? base : current);
+    const liveText = { value: '' };
+    const streamFailed = { value: false };
+    const startedAt = Date.now();
+    const base = { ...baseConversation, updatedAt: startedAt };
     const isCurrentConversation = () => activeConversationIdRef.current === conversationId;
+    let assistantInserted = false;
+    const ensureAssistant = () => {
+      if (assistantInserted || !isCurrentConversation() || controller.signal.aborted) return;
+      assistantInserted = true;
+      setConversation((current) => current.id === base.id ? { ...base, messages: [...base.messages, assistantMessage] } : current);
+    };
+    if (!isCurrentConversation()) return;
+    const context = { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText, isCurrentConversation, ensureAssistant, streamFailed };
     if (options.tools?.length) {
       const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
       for await (const event of streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)) {
-        handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText, isCurrentConversation });
+        handleStreamEvent(event, context);
         if (event.type === 'interaction-created') liveText.value = '';
         if (event.type === 'cancelled') return;
       }
     } else {
       const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
       for await (const event of geminiTurnPort.streamReply(request, controller.signal)) {
-        handleStreamEvent(event, { assistantMessage, base, setConversation, setStatus, setError, save: saveConversation, refreshThreads, startedAt, model: geminiModel, liveText, isCurrentConversation });
+        handleStreamEvent(event, context);
         if (event.type === 'interaction-created') liveText.value = '';
         if (event.type === 'cancelled') return;
       }
     }
-    if (!controller.signal.aborted && isCurrentConversation()) setStatus('idle');
+    if (!controller.signal.aborted && isCurrentConversation() && !streamFailed.value) setStatus('idle');
   }
 
   function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); }
   async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
   async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
   async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } } }
-  async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) { const record = workspaceShortcuts.find((item) => item.id === shortcut.id); if (!record) { setError('That Workspace shortcut is not available.'); return; } await runWorkspaceShortcut(record); }
+  async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) {
+    const record = workspaceShortcuts.find((item) => item.id === shortcut.id) ?? storedShortcutFromDefinition(shortcut, workspaceShortcuts.length);
+    await runWorkspaceShortcut(record);
+  }
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }
   async function handleResetGeminiSettings() { await handleGeminiSettingsChange(defaultsForModel(geminiModel)); }
@@ -257,7 +268,7 @@ export function App() {
     <div className="app-shell__background" aria-hidden="true" />
     <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button></div>
     <PortraitBanner collapsed={sidebarOpen} scale={uiSettings.portraitScale} background={uiSettings.portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
-    <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
+    <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} systemInstruction={character.systemInstruction} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
     <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={uiSettings.chatTextSize} onRegenerate={(messageId) => void regenerate(messageId)} />
     {error && <div className="error" role="alert">{error}</div>}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
@@ -266,31 +277,36 @@ export function App() {
   </main>;
 }
 
-type StreamContext = { assistantMessage: ChatMessage; base: ConversationState; setConversation: Dispatch<SetStateAction<ConversationState>>; setStatus: (status: ProviderStatus) => void; setError: (error: string | null) => void; save: (conversation: ConversationState) => Promise<void>; refreshThreads: () => Promise<void>; startedAt: number; model: string; liveText: { value: string }; isCurrentConversation: () => boolean };
+type StreamContext = { assistantMessage: ChatMessage; base: ConversationState; setConversation: Dispatch<SetStateAction<ConversationState>>; setStatus: (status: ProviderStatus) => void; setError: (error: string | null) => void; save: (conversation: ConversationState) => Promise<void>; refreshThreads: () => Promise<void>; startedAt: number; model: string; liveText: { value: string }; isCurrentConversation: () => boolean; ensureAssistant: () => void; streamFailed: { value: boolean } };
 
 function handleStreamEvent(event: GeminiStreamEvent, context: StreamContext) {
   const { assistantMessage, base, isCurrentConversation } = context;
   if (event.type === 'text-delta') {
+    context.ensureAssistant();
     context.liveText.value += event.text;
     const liveText = context.liveText.value;
     if (!isCurrentConversation()) return;
-    context.setConversation((current) => current.id === base.id ? { ...base, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: liveText } : message) } : current);
+    context.setConversation((current) => current.id === base.id ? { ...base, messages: [...base.messages, { ...assistantMessage, text: liveText }] } : current);
   }
   else if (event.type === 'completed') {
+    context.ensureAssistant();
     const completedAt = Date.now();
     const live = context.liveText.value;
-    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: base.messages.map((message) => message.id === assistantMessage.id ? { ...message, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt, ...(message.providerTurn ? { ...message.providerTurn } : {}) } } : message) };
+    const completedMessage: ChatMessage = { ...assistantMessage, text: live, providerTurn: { provider: 'gemini' as const, model: context.model, interactionId: event.interactionId, startedAt: context.startedAt, completedAt } };
+    const completed: ConversationState = { ...base, updatedAt: completedAt, messages: [...base.messages, completedMessage] };
     if (isCurrentConversation()) {
       context.setConversation(completed);
       void context.save(completed).then(context.refreshThreads).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the response.'));
     }
   }
   else if (event.type === 'failed') {
+    context.streamFailed.value = true;
     if (!isCurrentConversation()) return;
     context.setStatus('failed');
     context.setError(`[${event.error.code}] ${event.error.message}`);
   }
   else if (event.type === 'error') {
+    context.streamFailed.value = true;
     if (!isCurrentConversation()) return;
     context.setStatus('failed'); context.setError(event.message);
   }

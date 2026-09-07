@@ -13,10 +13,12 @@ export function TopToolRail({
   tools = DEFAULT_QUICK_ACTIONS,
   onAction,
   activeId = null,
+  systemInstruction,
 }: {
   tools?: readonly QuickTool[];
   onAction: (shortcut: WorkspaceShortcutDefinition) => void;
   activeId?: QuickActionId | null;
+  systemInstruction: string;
 }) {
   const [openId, setOpenId] = useState<QuickActionId | null>(null);
 
@@ -56,7 +58,7 @@ export function TopToolRail({
           })}
         </div>
       </nav>
-      <MasterPromptWarning />
+      <MasterPromptWarning systemInstruction={systemInstruction} />
     </>
   );
 }

@@ -5,6 +5,13 @@ async function openSettings(page: import('@playwright/test').Page): Promise<void
   await page.getByRole('button', { name: 'Open settings' }).click();
 }
 
+async function unlockTestGemini(page: import('@playwright/test').Page): Promise<void> {
+  await page.evaluate(async () => {
+    const lockbox = await import('/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts');
+    await lockbox.saveGeminiApiKey('e2e-test-api-key', 'e2e-test-password');
+  });
+}
+
 test('opens a Workspace shortcut menu without creating a chat message', async ({ page }) => {
   await page.goto('');
   const conversation = page.getByRole('region', { name: 'Conversation' });
@@ -19,7 +26,13 @@ test('opens a Workspace shortcut menu without creating a chat message', async ({
 
 test('executes a shortcut as an internal task rather than an injected user prompt', async ({ page }) => {
   await page.goto('');
-  await page.route('**/api/gemini', (route) => route.abort('failed'));
+  await unlockTestGemini(page);
+  let requestInput = '';
+  await page.route('**/v1/interactions*', async (route) => {
+    const payload = JSON.parse(route.request().postData() ?? '{}') as { input?: unknown };
+    requestInput = typeof payload.input === 'string' ? payload.input : '';
+    await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ message: 'Provider unavailable.' }) });
+  });
   const conversation = page.getByRole('region', { name: 'Conversation' });
   const before = await conversation.locator('.message').count();
 
@@ -27,9 +40,9 @@ test('executes a shortcut as an internal task rather than an injected user promp
   await page.getByRole('button', { name: 'Calendar', exact: true }).click();
   await page.getByRole('menuitem', { name: /Today/ }).click();
 
-  await expect(conversation.locator('.message')).toHaveCount(before + 1);
-  await expect(conversation.locator('.message').last()).not.toContainText('Execute the saved Workspace shortcut');
-  await expect(page.getByRole('alert')).toContainText('[GEMINI_UNKNOWN]');
+  await expect.poll(() => requestInput).toContain('Execute the saved Workspace shortcut');
+  await expect(conversation.locator('.message')).toHaveCount(before);
+  expect(requestInput).toContain('Use only the registered tools supplied for this shortcut.');
 });
 
 async function readStoredShortcutEnabled(page: import('@playwright/test').Page, id: string): Promise<boolean | undefined> {

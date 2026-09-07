@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiToolContinuationRequest, type GeminiTurnPort, type GeminiTurnRequest, type GeminiUsage } from './contracts';
 import { normalizeGeminiError } from './errors';
-import { getGeminiApiKey } from '../persistence/gemini-api-key';
+import { getGeminiApiKey, getGeminiLockboxStatus } from '../persistence/gemini-api-key';
 import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
 import { composeSystemInstruction } from './memory-context';
 
@@ -69,10 +69,29 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   const thoughtSummaryParts = new Map<number, string>();
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
   try {
+    const lockboxStatus = await getGeminiLockboxStatus();
+    if (lockboxStatus === 'empty') {
+      yield {
+        type: 'failed',
+        error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }),
+      };
+      return;
+    }
+    if (lockboxStatus === 'locked') {
+      const error = normalizeGeminiError(new Error('Gemini API key is locked in the app Lockbox. Unlock the Lockbox before sending.'), { requestId, category: 'configuration' });
+      yield { type: 'failed', error: { ...error, code: 'GEMINI_LOCKBOX_LOCKED' } };
+      return;
+    }
     const apiKey = await getGeminiApiKey();
-    if (!apiKey) { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId }) }; return; }
+    if (!apiKey) {
+      yield {
+        type: 'failed',
+        error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }),
+      };
+      return;
+    }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
-    const client = new GoogleGenAI({ apiKey, apiVersion: 'v1', httpOptions: { retryOptions: { attempts: 1 } } });
+    const client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
     const contextualInstruction = await composeSystemInstruction(request.systemInstruction, query);
     const stream = await client.interactions.create(buildInteractionPayload({ ...request, systemInstruction: contextualInstruction }) as never);

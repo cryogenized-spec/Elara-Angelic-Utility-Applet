@@ -45,10 +45,11 @@ export function defaultStoredWorkspaceShortcuts(): StoredWorkspaceShortcut[] {
 
 export async function ensureWorkspaceShortcuts(): Promise<StoredWorkspaceShortcut[]> {
   const current = await loadWorkspaceShortcuts();
-  if (current.length > 0) return current;
-  const defaults = defaultStoredWorkspaceShortcuts();
-  for (const shortcut of defaults) await saveWorkspaceShortcut(shortcut);
-  return defaults;
+  const currentIds = new Set(current.map((shortcut) => shortcut.id));
+  const missingDefaults = defaultStoredWorkspaceShortcuts().filter((shortcut) => !currentIds.has(shortcut.id));
+  if (missingDefaults.length === 0) return current;
+  await Promise.all(missingDefaults.map((shortcut) => saveWorkspaceShortcut(shortcut)));
+  return loadWorkspaceShortcuts();
 }
 
 export const workspaceShortcutStore = {

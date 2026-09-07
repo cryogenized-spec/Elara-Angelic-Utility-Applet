@@ -47,7 +47,7 @@ export function GoogleOAuthSettings() {
     try {
       setStatus(await googleOAuthAuthority.getStatus());
     } catch {
-      setError('The Google OAuth authority could not be reached.');
+      setError('The Google authorization state could not be read.');
     } finally {
       setLoading(false);
     }
@@ -62,8 +62,9 @@ export function GoogleOAuthSettings() {
     setError(null);
     try {
       await googleOAuthAuthority.authorize(capability);
+      await refresh();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Google authorization could not be started.');
+      setError(cause instanceof Error ? cause.message : 'Google authorization could not be completed.');
       setBusyCapability(null);
     }
   }
@@ -91,7 +92,7 @@ export function GoogleOAuthSettings() {
         <div>
           <span className="panel-kicker">GOOGLE</span>
           <strong>Google Workspace</strong>
-          <span>One OAuth authority for Calendar, Tasks, Gmail, Drive, Docs, and Sheets.</span>
+          <span>Connect Google directly from Elara. Access is granted one capability at a time.</span>
         </div>
         <div className="google-oauth-settings__state" data-state={status.state}>
           <span className="google-oauth-settings__dot" aria-hidden="true" />
@@ -130,13 +131,13 @@ export function GoogleOAuthSettings() {
               </div>
               {activeCapability ? (
                 <button className="google-oauth-settings__button" type="button" onClick={() => void connect(activeCapability)} disabled={loading || !!busyCapability}>
-                  {busyCapability === activeCapability ? 'Opening Google…' : actionLabel}
+                  {busyCapability === activeCapability ? 'Authorizing…' : actionLabel}
                 </button>
               ) : (
                 <span className="google-oauth-service__authorized" aria-label={`${service.name} base access authorized`}>Ready</span>
               )}
               {service.extraCapabilities?.map((extra) => !hasCapability(status.grantedCapabilities, extra.capability)
-                ? <button className="google-oauth-settings__button google-oauth-settings__button--secondary" key={extra.capability} type="button" onClick={() => void connect(extra.capability)} disabled={loading || !!busyCapability}>{busyCapability === extra.capability ? 'Opening Google…' : extra.label}</button>
+                ? <button className="google-oauth-settings__button google-oauth-settings__button--secondary" key={extra.capability} type="button" onClick={() => void connect(extra.capability)} disabled={loading || !!busyCapability}>{busyCapability === extra.capability ? 'Authorizing…' : extra.label}</button>
                 : null)}
             </article>
           );
@@ -144,8 +145,8 @@ export function GoogleOAuthSettings() {
       </div>
 
       <div className="setting-card google-oauth-settings__note">
-        <strong>Incremental authorization</strong>
-        <span>Elara asks Google for a capability only when that feature needs it. Existing authorization is preserved, and opening the app does not trigger a blanket consent screen.</span>
+        <strong>Stay connected</strong>
+        <span>Elara stores only non-secret authorization metadata. Google access tokens stay in memory and are reacquired without a new consent screen whenever Google still has the grant.</span>
       </div>
     </div>
   );

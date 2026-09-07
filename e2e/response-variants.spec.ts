@@ -23,7 +23,7 @@ async function unlockTestGemini(page: import('@playwright/test').Page): Promise<
 test('regeneration creates navigable response variants for the same prompt', async ({ page }) => {
   const requests: Array<Record<string, unknown>> = [];
   let generation = 0;
-  await page.route('**/v1beta/interactions*', async (route) => {
+  await page.route('**/v1/interactions*', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     requests.push(payload);
     generation += 1;

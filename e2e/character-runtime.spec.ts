@@ -14,7 +14,7 @@ async function unlockTestGemini(page: import('@playwright/test').Page): Promise<
 
 test('transmits the saved master persona protocol as the active runtime instruction', async ({ page }) => {
   const requests: Array<Record<string, unknown>> = [];
-  await page.route('**/v1beta/interactions*', async (route) => {
+  await page.route('**/v1/interactions*', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     requests.push(payload);
     await route.fulfill({

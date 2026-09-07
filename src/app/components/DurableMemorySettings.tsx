@@ -7,6 +7,7 @@ import { useFolders } from '../folders/FolderProvider';
 import { MarkdownText } from './MarkdownText';
 import './durable-memory-settings.css';
 
+const MEMORY_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/docs/MEMORY_README.md';
 const MEMORY_KINDS: MemoryKind[] = ['CORE', 'CONTEXTUAL', 'EPISODIC', 'MICRO_OBSERVATION'];
 const MEMORY_LIFECYCLES = ['active', 'dormant', 'archived'] as const;
 
@@ -88,6 +89,11 @@ export function DurableMemorySettings() {
     <div className="memory-settings__header">
       <div><strong>Memory Bank</strong><span>One human-facing view over the canonical durable-memory store. Search and inspection do not create a second memory database.</span></div>
       <button type="button" onClick={() => { resetDraft(); setCreating(true); }}>New memory</button>
+    </div>
+
+    <div className="memory-settings__guide">
+      <div><strong>New to memory?</strong><span>Read the user guide for how memories are stored, retrieved, scoped, and protected.</span></div>
+      <a href={MEMORY_GUIDE_URL} target="_blank" rel="noreferrer">Read the Memory Guide <span aria-hidden="true">↗</span></a>
     </div>
 
     <div className="memory-settings__search">

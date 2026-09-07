@@ -41,6 +41,10 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
         entries.push({ message, variants: [message] });
         continue;
       }
+      // Do not render an assistant bubble that has no response at all. The
+      // app-level error surface is the source of truth when a turn fails before
+      // the provider produces output.
+      if (!message.text.trim()) continue;
       const key = responseGroupFor(message);
       const variants = groups.get(key);
       if (variants) {
@@ -123,7 +127,7 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
             <button type="button" className="response-variants__button" aria-label="Next response" disabled={selectedIndex === variants.length - 1} onClick={() => setSelectedVariants((current) => ({ ...current, [groupId]: Math.min(variants.length - 1, selectedIndex + 1) }))}>›</button>
           </div>}
           <div className="message-body" style={{ fontSize: `${fontSize}px` }}>
-            {selected.text ? <MarkdownText text={selected.text} /> : <span className="message-empty" aria-label="No response text received">No response received.</span>}
+            <MarkdownText text={selected.text} />
           </div>
           <div className="message-actions" aria-label="Message actions">
             <button type="button" className="message-action" aria-label="Regenerate response" title="Regenerate response" onClick={() => onRegenerate(selected.id)}><Icon name="refresh" size={15} /></button>

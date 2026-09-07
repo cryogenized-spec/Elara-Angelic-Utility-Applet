@@ -37,7 +37,8 @@ export interface GeminiTurnRequest {
 export interface GeminiToolContinuationRequest {
   model: string;
   previousInteractionId: string;
-  result: GeminiToolResult;
+  result?: GeminiToolResult;
+  results?: readonly GeminiToolResult[];
   systemInstruction?: string;
   generationConfig?: EffectiveGeminiSettings;
   tools?: readonly string[];

@@ -14,7 +14,36 @@ Implementation follows it; later features must not reopen it.
 
 A **provider scope is not an application capability**. A capability may be satisfied by one or more provider grants. One provider grant may satisfy multiple application capabilities. Application policy remains authoritative even when Google already considers the underlying scope granted.
 
+Authorization state must represent this chain, in this order:
+
+```
+application capability
+        ↓
+required provider scope(s)
+        ↓
+actual provider scopes granted
+        ↓
+effective capabilities
+```
+
+The provider grant establishes technical possibility. The Elara capability grant establishes application authority.
+
 **Never infer an application write capability merely because the provider scope is sufficient.**
+
+Example: Google scope `drive.file` is technically sufficient for Docs/Sheets/Drive app-file reads *and* writes. Elara still requires an explicit write capability:
+
+```
+Google scope:
+  drive.file
+
+Elara capabilities:
+  docs.read         ✓  (inferred sibling read, if a drive.file capability is already enabled)
+  sheets.read       ✓
+  drive.files.app.read ✓
+  docs.write        ✗  (never inferred)
+  sheets.write      ✗
+  drive.files.app.write ✗
+```
 
 ## Credential transports
 

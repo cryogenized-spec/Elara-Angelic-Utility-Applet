@@ -60,9 +60,14 @@ describe('Google capability policy', () => {
 
   it('never treats a write as effective unless the user enabled it', () => {
     const effective = computeEffectiveCapabilities(['docs.read'], [DRIVE_APP_FILE_SCOPE]);
-    expect(effective).toContain('docs.read');
+    expect(effective).toEqual(expect.arrayContaining(['docs.read', 'sheets.read', 'drive.files.app.read']));
     expect(effective).not.toContain('docs.write');
     expect(effective).not.toContain('sheets.write');
+    expect(effective).not.toContain('drive.files.app.write');
+  });
+
+  it('does not treat a Google drive.file grant as Elara authority by itself', () => {
+    expect(computeEffectiveCapabilities([], [DRIVE_APP_FILE_SCOPE])).toEqual([]);
   });
 
   it('authorizes Docs/Sheets/Drive app reads through an effective library grant', () => {

@@ -1,6 +1,13 @@
 import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleOAuthState } from './contracts';
 import { getGoogleScope, googleScopeRegistry } from './scope-registry';
 
+/**
+ * A provider scope is not an application capability.
+ *
+ * Chain: application capability → required provider scope(s) → granted scopes → effective capabilities.
+ * Reads that share an already-enabled provider grant may be inferred. Writes/sends never are.
+ */
+
 export const DRIVE_APP_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
 export const DRIVE_LIBRARY_SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
 

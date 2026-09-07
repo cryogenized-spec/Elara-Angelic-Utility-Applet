@@ -441,6 +441,90 @@ describe('cross-generation arbitration', () => {
     expect(error).toBeNull();
   });
 
+  it('treats a thread switch as deauthorization even while the arbiter still elects the old turn', async () => {
+    const thread1: ConversationState = {
+      id: 'thread-1',
+      title: 'Thread 1',
+      createdAt: BASE_TIME,
+      updatedAt: BASE_TIME,
+      messages: [{ id: 'user-1', role: 'user', text: 'Hello.', createdAt: BASE_TIME, conversationId: 'thread-1' }],
+    };
+    let conversation = thread1;
+    let status: ProviderStatus = 'streaming';
+    let error: string | null = null;
+    const saved: ConversationState[] = [];
+    const attempts: FailedTurnAttempt[] = [];
+    const arbiter = createGenerationArbiter();
+    let activeThread = 'thread-1';
+    const texts = () => conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text);
+
+    // Composite runner predicate: elected generation AND current conversation.
+    const context: GenerationSyncContext = {
+      assistantMessage: makeMessage('assistant', ''),
+      base: thread1,
+      input: 'Hello.',
+      model: 'gemini-3.8-flash',
+      wallStartedAt: BASE_TIME,
+      setConversation: (updater) => {
+        conversation = typeof updater === 'function' ? updater(conversation) : updater;
+      },
+      setStatus: (next) => {
+        status = next;
+      },
+      setError: (next) => {
+        error = next;
+      },
+      setStructuredError: () => undefined,
+      save: async (next) => {
+        saved.push(next);
+      },
+      refreshThreads: async () => undefined,
+      isActiveGeneration: () => activeThread === 'thread-1' && arbiter.isActive('gen-A'),
+      ensureAssistant: () => undefined,
+      streamFailed: { value: false },
+      onFailedAttempt: (attempt) => {
+        attempts.push(attempt);
+      },
+    };
+
+    arbiter.activate('gen-A');
+    let gen = createGenerationState('gen-A', { startedAt: 0 });
+    gen = dispatchGenerationEvent(gen, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'old' }, receivedAt: 10 }, context);
+    expect(texts()).toEqual(['old']);
+
+    // Switch threads: the UI clears, but the arbiter is untouched — the old
+    // turn is still "elected" yet no longer authorized to mutate anything.
+    activeThread = 'thread-2';
+    expect(arbiter.isActive('gen-A')).toBe(true);
+
+    const snapshot = JSON.stringify({ conversation, status, error });
+    gen = dispatchGenerationEvent(gen, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'STALE' }, receivedAt: 20 }, context);
+    gen = dispatchGenerationEvent(
+      gen,
+      {
+        generationId: 'gen-A',
+        event: {
+          type: 'failed',
+          error: { category: 'provider', code: 'GEMINI_PROVIDER', message: 'Stale failure.', retryable: true, cancelled: false, debug: {} },
+        },
+        receivedAt: 30,
+      },
+      context,
+    );
+    gen = dispatchGenerationEvent(gen, { generationId: 'gen-A', event: COMPLETED('i-A-late'), receivedAt: 40 }, context);
+    expect(gen.phase).toBe('failed');
+    await Promise.resolve();
+
+    expect(JSON.stringify({ conversation, status, error })).toBe(snapshot);
+    expect(texts()).toEqual(['old']);
+    expect(saved).toHaveLength(0);
+    expect(attempts).toHaveLength(0);
+    expect(error).toBeNull();
+    // The stale election survives until some future turn activates — the
+    // inertness above came from the composite predicate, not the arbiter.
+    expect(arbiter.isActive('gen-A')).toBe(true);
+  });
+
   it('skips application sync for events the reducer ignores (post-terminal)', () => {
     const harness = createHarness();
     let generation = createGenerationState('gen-1', { startedAt: 0 });

@@ -261,12 +261,12 @@ export function App() {
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
       current = dispatchGenerationEvent(current, { generationId, event, receivedAt: performance.now() }, syncContext);
-      // The trace panel is application state too: a superseded runner must
-      // not swap it to stale content mid-stream.
-      if (generationArbiterRef.current.isActive(generationId)) setGeneration(current);
+      // The trace panel is application state too: reflect it only while this
+      // turn is both elected AND on the current conversation.
+      if (isActiveGeneration()) setGeneration(current);
       if (isTerminalPhase(current.phase)) {
         watchdog.dispose();
-        if (generationArbiterRef.current.isActive(generationId)) {
+        if (isActiveGeneration()) {
           terminalWhileActive = true;
           generationArbiterRef.current.release(generationId);
         }

@@ -8,7 +8,7 @@ Pass 5 turns the sidebar from a static visual shell into an application-owned co
 
 The sidebar now provides a New chat action, title search, thread selection, rename, archive, and delete affordances. The presentation layer receives typed `ConversationThread` records and callbacks; it does not import Dexie or provider code. The existing glass/frosted slide-in behavior and portrait-collapse relationship remain intact.
 
-A newly created conversation starts with the metadata title `New conversation`. Its first meaningful user message invokes the `ThreadTitlePort` contract. The current executable slice uses a deterministic local demo implementation because the production Gemini provider is intentionally not yet wired into the runtime. The contract itself is deliberately narrow so the future canonical provider can replace only the title-generation adapter. Generated titles are constrained to 3–10 words in the normal path and are metadata rather than injected chat content.
+A newly created conversation starts with the metadata title `New conversation`. Its first meaningful user message invokes the `ThreadTitlePort` contract and the single deterministic local title adapter. The title procedure is metadata-only and never starts a provider request or a second chat execution path. Generated titles are constrained to 3–10 words in the normal path.
 
 Dexie now has a version-2 schema with a `threads` table and a `conversationId` message index. Existing version-1 messages are migrated into the primary thread. Thread mutations are transactional with their message ownership changes where applicable.
 

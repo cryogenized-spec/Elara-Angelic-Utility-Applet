@@ -70,11 +70,11 @@ function retryableFor(category: ProviderErrorCategory, status?: number): boolean
   return category === 'rate_limit' || category === 'timeout' || category === 'provider' || category === 'network' || status === 408 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504;
 }
 
-export function normalizeGeminiError(cause: unknown, context: { requestId?: string; interactionId?: string; durationMs?: number } = {}): NormalizedProviderError {
+export function normalizeGeminiError(cause: unknown, context: { requestId?: string; interactionId?: string; durationMs?: number; category?: ProviderErrorCategory } = {}): NormalizedProviderError {
   const status = statusFrom(cause);
   const message = messageFrom(cause);
   const aborted = cause instanceof DOMException && cause.name === 'AbortError';
-  const category = aborted ? 'cancelled' : categoryFor(status);
+  const category = aborted ? 'cancelled' : context.category ?? categoryFor(status);
 
   return {
     category,

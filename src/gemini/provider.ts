@@ -70,7 +70,13 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
   try {
     const apiKey = await getGeminiApiKey();
-    if (!apiKey) { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId }) }; return; }
+    if (!apiKey) {
+      yield {
+        type: 'failed',
+        error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }),
+      };
+      return;
+    }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const client = new GoogleGenAI({ apiKey, apiVersion: 'v1', httpOptions: { retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);

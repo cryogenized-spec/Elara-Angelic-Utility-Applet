@@ -9,7 +9,7 @@ Implemented on 2026-09-03 as the current UI milestone. Physical-device validatio
 - Added `Composer.tsx` as the dedicated presentation/input boundary.
 - Added bounded textarea auto-growth to 132px, then internal scrolling.
 - Enter submits a non-empty draft; Shift+Enter inserts a newline.
-- Added explicit response cancellation with `AbortController` plumbing through the temporary demo transport.
+- Added explicit response cancellation with `AbortController` plumbing through the canonical Gemini provider.
 - Added VisualViewport metrics via `src/ui/useVisualViewport.ts`.
 - The app shell now sizes to the current visual viewport instead of assuming a fixed keyboard height.
 - VirtualKeyboard `geometrychange` notifications are consumed progressively when the API exists; the app does not require that limited-availability API.
@@ -30,7 +30,7 @@ The implementation retains the existing `viewport-fit=cover` mobile viewport dec
 - `src/app/mobile-viewport.css`
 - `src/app/App.tsx`
 - `src/app/components/ConversationSurface.tsx`
-- `src/chat/demo-turn-port.ts`
+- `src/gemini/provider.ts`
 - `e2e/smoke.spec.ts`
 - `README.md`
 - `docs/UI_IMPLEMENTATION_PLAN.md`

@@ -57,6 +57,8 @@ if (!appSource.includes('tools: DEFAULT_GEMINI_TOOLS')) throw new Error('Reliabi
 if (!appSource.includes('readOnly: false')) throw new Error('Reliability gate: character tool loop must not force normal turns into read-only mode.');
 if (appSource.includes('Configure it before sending a message')) throw new Error('Reliability gate: an empty Character Master must not block normal chat.');
 if (appSource.includes('Configure it before regenerating')) throw new Error('Reliability gate: an empty Character Master must not block regeneration.');
+const promptWarningSource = readFileSync(join(root, 'src/app/components/MasterPromptWarning.tsx'), 'utf8');
+if (promptWarningSource.includes('setInterval') || promptWarningSource.includes('loadCharacterProfile')) throw new Error('Reliability gate: Master Prompt warning must derive from App state without a hidden polling loop.');
 
 const geminiDeclarationSource = readFileSync(join(root, 'src/google/tools/gemini-declarations.ts'), 'utf8');
 if (geminiDeclarationSource.includes('Application tool risk:')) throw new Error('Reliability gate: tool risk policy must not be presented as competing model persona guidance.');

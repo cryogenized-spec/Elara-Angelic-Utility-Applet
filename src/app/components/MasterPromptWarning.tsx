@@ -1,32 +1,8 @@
-import { useEffect, useState } from 'react';
-import { loadCharacterProfile } from '../../persistence/character';
 import { hasMasterCharacterInstruction } from '../../character/system-instruction';
 import './master-prompt-warning.css';
 
-export function MasterPromptWarning() {
-  const [isEmpty, setIsEmpty] = useState(false);
-
-  useEffect(() => {
-    let active = true;
-    let refreshTimer: number | null = null;
-
-    const refresh = () => {
-      void loadCharacterProfile().then((profile) => {
-        if (active) setIsEmpty(!hasMasterCharacterInstruction(profile.systemInstruction));
-      }).catch(() => {
-        if (active) setIsEmpty(false);
-      });
-    };
-
-    refresh();
-    refreshTimer = window.setInterval(refresh, 1500);
-    return () => {
-      active = false;
-      if (refreshTimer !== null) window.clearInterval(refreshTimer);
-    };
-  }, []);
-
-  if (!isEmpty) return null;
+export function MasterPromptWarning({ systemInstruction }: { systemInstruction: string }) {
+  if (hasMasterCharacterInstruction(systemInstruction)) return null;
 
   return (
     <div className="master-prompt-warning" aria-live="polite">

@@ -178,6 +178,49 @@ test('exposes the local API Lockbox rather than the retired Worker boundary', as
   await expect(page.getByText(/The API key is encrypted locally in Dexie/)).toBeVisible();
 });
 
+test('does not create an empty assistant response when the Lockbox has no key', async ({ page }) => {
+  test.setTimeout(15_000);
+  let interactionRequests = 0;
+  await page.route('**/v1/interactions*', async (route) => {
+    interactionRequests += 1;
+    await route.fulfill({ status: 500, contentType: 'application/json', body: JSON.stringify({ message: 'This request should not be reached.' }) });
+  });
+  await page.goto('');
+  const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  await composer.fill('Verify the Lockbox preflight');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.getByRole('alert')).toContainText('[GEMINI_CONFIGURATION]', { timeout: 12_000 });
+  await expect(page.getByText('No response received.')).toHaveCount(0);
+  expect(interactionRequests).toBe(0);
+});
+
+test('migrates a legacy Gemini key before making the first interaction request', async ({ page }) => {
+  test.setTimeout(15_000);
+  await page.addInitScript(() => {
+    window.localStorage.setItem('elara.gemini.api-key', 'e2e-legacy-api-key');
+  });
+  let interactionRequests = 0;
+  await page.route('**/v1/interactions*', async (route) => {
+    interactionRequests += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: 'legacy-migration-test', status: 'in_progress', model: 'gemini-3.8-flash' } })}\n\n`,
+        `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: 'legacy-migration-test', index: 0, delta: { type: 'text', text: 'Legacy key migrated.' } })}\n\n`,
+        `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: 'legacy-migration-test', status: 'completed' } })}\n\n`,
+      ].join(''),
+    });
+  });
+  await page.goto('');
+  const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  await composer.fill('Verify legacy migration');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.getByText('Legacy key migrated.')).toBeVisible();
+  expect(interactionRequests).toBe(1);
+  await expect.poll(() => page.evaluate(() => window.localStorage.getItem('elara.gemini.api-key'))).toBeNull();
+});
+
 test('normalizes a direct Gemini network failure without fabricating a response', async ({ page }) => {
   test.setTimeout(15_000);
   await page.goto('');

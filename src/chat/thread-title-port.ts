@@ -26,7 +26,7 @@ function fallbackTitle(input: string): string {
   return fallback ? `Chat about ${fallback}` : 'New conversation';
 }
 
-export const demoThreadTitlePort: ThreadTitlePort = {
+export const localThreadTitlePort: ThreadTitlePort = {
   async generateTitle(input: string) {
     return fallbackTitle(input).split(/\s+/).slice(0, 10).join(' ');
   },

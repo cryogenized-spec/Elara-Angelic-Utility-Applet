@@ -17,37 +17,40 @@ Pass 3 audited the first-class Workspace scope design against current Google doc
 - Sheets uses `drive.file` where the intended per-file workflow is sufficient.
 - Gmail reads use `gmail.readonly`.
 - Gmail message/thread mutation uses `gmail.modify`.
-- Gmail label administration now has its own `gmail.labels` capability.
+- Gmail label administration remains independently authorized with `gmail.labels`.
 - Gmail sending remains separately authorized with `gmail.send`.
-- Existing Chat mappings remain explicitly marked for method-specific revalidation before Chat production work.
+- Chat reads use `chat.messages.readonly`.
+- Chat writes use `chat.messages` because the current Chat adapter performs user-authenticated message create/update/delete operations, not space administration.
 
 ### Code changes
 
-- Added `gmail.labels` to the central Google capability contract.
-- Mapped `gmail.createLabel`, `gmail.updateLabel`, and `gmail.deleteLabel` to `gmail.labels` instead of the broader `gmail.modify` capability.
-- Hardened `getGoogleScope()` to validate capability keys with the central Zod enum before lookup.
-- Expanded scope-registry tests to assert exact provider-scope mappings and Gmail capability separation.
-- Expanded Google Settings so Gmail can independently authorize base read access, mailbox modification, label administration, and sending.
-- Added the scope-audit documentation to `docs/GOOGLE_SCOPE_REGISTRY.md`.
+- Replaced the provisional `chat.write` mapping from `chat.spaces` to `chat.messages`.
+- Expanded scope-registry tests to lock the complete first-class capability set and exact provider scopes.
+- Added method-level scope notes to `docs/GOOGLE_SCOPE_REGISTRY.md`.
+- Retained Calendar list/settings as independent capabilities because they correspond to distinct provider operations and should not be silently bundled into event access.
 
 ## Official documentation basis checked during this pass
 
-Google's current OAuth scope catalogue recommends the least sensitive scope that satisfies the operation and lists distinct Gmail read/modify/labels/send scopes plus `drive.file`. citeturn905264view0turn229576search0
+Google's current Calendar authorization guide recommends the narrowest practical scope and lists event-specific read/write, calendar-list, and settings scopes. The current `events.insert` reference accepts `calendar.events`. citeturn348059search0turn560705search5
 
-Google's current Calendar authorization guide exposes event-specific, calendar-list, and settings scopes and recommends narrow scopes. citeturn968614search1
+Google's current Tasks documentation distinguishes `tasks.readonly` from the full-management `tasks` scope. citeturn560705search9turn560705search0
 
-Google's current Docs API references confirm that `documents.get` and `documents.create` accept `drive.file`. citeturn285584search4turn285584search12
+Google's current Docs documentation confirms `documents.get`, `documents.create`, and `documents.batchUpdate` accept `drive.file`. citeturn348059search1turn348059search9turn364903search2
 
-Google's current Drive documentation supports file search/list/get/update flows and selected response fields; `drive.file` is the intended least-privilege direction for Elara's selected/app-created files. citeturn968614search6turn285584search0
+Google's current Drive documentation confirms `drive.file` is accepted by file listing and file retrieval, and file-content downloads require a scope that permits content reads. citeturn364903search0turn364903search9turn348059search3
 
-Google's current Tasks documentation distinguishes `tasks.readonly` from the full-management `tasks` scope. citeturn285584search11
+Google's current Sheets documentation confirms `drive.file` is accepted for spreadsheet retrieval and value updates, making it a viable least-privilege choice for Elara's selected/app-created file workflow. citeturn364903search1turn364903search3
 
-Google's current Sheets scope catalogue exposes `drive.file`, `spreadsheets.readonly`, and `spreadsheets`; Elara should remain on `drive.file` where the per-file workflow is sufficient. citeturn285584search7
+Google's current Gmail message-list documentation accepts `gmail.readonly`; the adapter's mutation and send boundaries remain separate. citeturn560705search1
+
+Google's current Chat documentation shows user-authenticated message reads use `chat.messages.readonly`/`chat.messages`, while message creation, update, and delete use `chat.messages.create`/`chat.messages`. citeturn141205search0turn141205search1turn204511search2
 
 ## Important production note
 
-The scope registry is now deliberately stricter, but scope registration does not make Google authorization operational. The protected Cloudflare OAuth authority is still required to translate these application capabilities into a real authorization-code flow, maintain refresh credentials securely, and return normalized grant state.
+The scope registry defines least-privilege application capabilities; it does not itself authorize access. Pass 2 supplies the current browser-side Google Identity Services authority, which requests these registered scopes incrementally and keeps access tokens transient.
+
+Sensitive/restricted scopes still require Google production-readiness review as applicable. The final consent configuration must match the exact scope set actually used. citeturn687686search8
 
 ## Next exact action
 
-Pass 4 — implement the real Drive, Docs, and Sheets service adapters behind the existing OAuth/capability boundary. Do not bypass the OAuth authority or expose provider endpoints/tokens to the model.
+**Pass 4 — Google service adapter hardening:** validate provider request construction, pagination, response/request bounds, error normalization, and capability usage across every Workspace adapter before expanding the model-visible Google tool surface.

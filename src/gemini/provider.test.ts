@@ -99,3 +99,95 @@ describe('Gemini provider credential preflight', () => {
     ]));
   });
 });
+
+describe('Gemini provider stream fidelity', () => {
+  beforeEach(() => {
+    createInteraction.mockReset();
+    getGeminiApiKey.mockReset();
+    getGeminiLockboxStatus.mockReset();
+    GoogleGenAI.mockReset();
+    GoogleGenAI.mockImplementation(function MockGoogleGenAI(this: { interactions: { create: typeof createInteraction } }) {
+      this.interactions = { create: createInteraction };
+    });
+    getGeminiLockboxStatus.mockResolvedValue('unlocked');
+    getGeminiApiKey.mockResolvedValue('test-gemini-key');
+  });
+
+  async function collect(items: unknown[]): Promise<unknown[]> {
+    createInteraction.mockResolvedValue(events(...items));
+    const collected: unknown[] = [];
+    for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Hello.' })) collected.push(event);
+    return collected;
+  }
+
+  it('preserves provider status and code from streamed SSE error events', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },
+      { event_type: 'error', interaction_id: 'interaction-1', error: { message: 'Slow down.', status: 429, code: 'RESOURCE_EXHAUSTED' } },
+    ]);
+
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: {
+        category: 'rate_limit',
+        code: 'GEMINI_RATE_LIMIT',
+        message: 'Slow down.',
+        retryable: true,
+        providerStatus: 429,
+        providerCode: 'RESOURCE_EXHAUSTED',
+        interactionId: 'interaction-1',
+      },
+    });
+  });
+
+  it('classifies a streamed 503 error event as a retryable provider failure', async () => {
+    const collected = await collect([
+      { event_type: 'error', error: { message: 'Service unavailable.', code: 503 } },
+    ]);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { category: 'provider', code: 'GEMINI_PROVIDER', providerStatus: 503, retryable: true },
+    });
+  });
+
+  it('treats requires_action completion as a status update, not a terminal event', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-1', status: 'requires_action' } },
+    ]);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'interaction-status',
+      interactionId: 'interaction-1',
+      status: 'requires_action',
+    });
+    expect(collected.some((event) => (event as { type: string }).type === 'completed')).toBe(false);
+  });
+
+  it('fails explicitly when the stream ends without interaction.completed', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'text', text: 'Partial…' } },
+    ]);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { message: 'Gemini stream ended without an explicit interaction.completed event.' },
+    });
+  });
+
+  it('streams thought-summary deltas and reports them on completion usage', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'thought' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'thought_summary', text: 'First thought. ' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'thought_summary', text: 'Second thought.' } },
+      { event_type: 'step.stop', index: 0 },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-1', status: 'completed', usage: { input_tokens: 12, output_tokens: 4 } } },
+    ]);
+    const deltas = collected.filter((event) => (event as { type: string }).type === 'thought-summary-delta');
+    expect(deltas).toHaveLength(2);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'completed',
+      usage: { inputTokens: 12, outputTokens: 4, thoughtSummary: 'First thought. Second thought.' },
+    });
+  });
+});

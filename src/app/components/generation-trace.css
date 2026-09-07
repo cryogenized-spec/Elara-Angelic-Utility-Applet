@@ -1,0 +1,40 @@
+.generation-trace { margin: 6px 0 10px; border-left: 1px solid rgba(110,168,255,.32); background: linear-gradient(90deg, rgba(110,168,255,.06), transparent 65%); padding: 8px 10px 9px 11px; }
+.generation-trace.is-failed { border-left-color: rgba(240,123,220,.5); background: linear-gradient(90deg, rgba(240,123,220,.07), transparent 65%); }
+.generation-trace.is-cancelled { border-left-color: rgba(255,255,255,.22); background: linear-gradient(90deg, rgba(255,255,255,.03), transparent 65%); }
+.generation-trace__sr-status { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.generation-trace__header { display: flex; align-items: center; gap: 8px; color: rgba(255,255,255,.62); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.generation-trace__dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--blue); box-shadow: 0 0 9px rgba(110,168,255,.55); }
+.generation-trace.is-thinking .generation-trace__dot { background: var(--pink); box-shadow: 0 0 10px rgba(240,123,220,.62); }
+.generation-trace.is-tool-working .generation-trace__dot { background: #ffd479; box-shadow: 0 0 10px rgba(255,212,121,.55); }
+.generation-trace.is-failed .generation-trace__dot { background: #ff7d9c; box-shadow: 0 0 10px rgba(255,125,156,.6); }
+.generation-trace.is-cancelled .generation-trace__dot { background: rgba(255,255,255,.4); box-shadow: none; }
+.generation-trace.is-thinking .generation-trace__dot,
+.generation-trace.is-tool-working .generation-trace__dot,
+.generation-trace.is-generating .generation-trace__dot,
+.generation-trace.is-connecting .generation-trace__dot { animation: generation-trace-pulse 1.4s ease-in-out infinite; }
+@keyframes generation-trace-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+.generation-trace__phase { flex: none; }
+.generation-trace__time { margin-left: auto; color: rgba(255,255,255,.4); font-variant-numeric: tabular-nums; }
+.generation-trace__first-event { margin-top: 3px; color: rgba(255,255,255,.3); font-size: 9px; font-variant-numeric: tabular-nums; }
+.generation-trace__thought { margin-top: 7px; border-top: 1px dotted rgba(110,168,255,.22); padding-top: 6px; }
+.generation-trace__thought-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 2px 4px; border: 0; background: transparent; color: rgba(255,255,255,.55); font-size: 9px; letter-spacing: .08em; text-transform: uppercase; cursor: pointer; }
+.generation-trace__thought-toggle:hover { color: rgba(255,255,255,.85); }
+.generation-trace__thought-toggle svg { transition: transform .18s ease; }
+.generation-trace__thought-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+.generation-trace__thought-body { max-height: 180px; overflow: auto; margin-top: 5px; padding-right: 6px; color: rgba(255,255,255,.68); font-size: 11px; line-height: 1.55; white-space: pre-wrap; }
+.generation-trace__steps { position: relative; display: grid; margin: 7px 0 0; padding: 0; list-style: none; }
+.generation-trace__steps::before { content: ""; position: absolute; left: 10px; top: 8px; bottom: 8px; border-left: 1px dotted rgba(110,168,255,.3); }
+.generation-trace__step { position: relative; display: grid; grid-template-columns: 21px minmax(0,1fr) auto auto; gap: 8px; align-items: center; padding: 4px 0; color: rgba(255,255,255,.6); font-size: 10px; line-height: 1.4; }
+.generation-trace__step-icon { z-index: 1; display: grid; place-items: center; width: 21px; height: 21px; border: 1px solid rgba(110,168,255,.22); border-radius: 50%; background: #0b0c12; color: rgba(110,168,255,.85); }
+.generation-trace__step.is-failed .generation-trace__step-icon { border-color: rgba(255,125,156,.4); color: rgba(255,125,156,.9); }
+.generation-trace__step-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.generation-trace__step-error { padding: 1px 6px; border-radius: 8px; background: rgba(255,125,156,.12); color: rgba(255,170,190,.9); font-size: 8px; letter-spacing: .04em; }
+.generation-trace__step-time { color: rgba(255,255,255,.38); font-variant-numeric: tabular-nums; }
+
+@media (prefers-reduced-motion: reduce) {
+  .generation-trace.is-thinking .generation-trace__dot,
+  .generation-trace.is-tool-working .generation-trace__dot,
+  .generation-trace.is-generating .generation-trace__dot,
+  .generation-trace.is-connecting .generation-trace__dot { animation: none; }
+  .generation-trace__thought-toggle svg { transition: none; }
+}

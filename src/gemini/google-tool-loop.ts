@@ -17,6 +17,19 @@ export interface GoogleToolLoopOptions {
 }
 
 const DEFAULT_MAX_TOOL_CALLS = 8;
+/**
+ * Heartbeat while a mutation approval is parked on the user. The turn runner
+ * treats every yielded event as stream activity, so this keeps a healthy
+ * user-deliberation gap from tripping the idle-stall watchdog.
+ */
+const TOOL_CONFIRMATION_HEARTBEAT_MS = 20_000;
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    (timer as unknown as { unref?: () => void }).unref?.();
+  });
+}
 
 type PendingToolCall = GoogleToolCall & Pick<GeminiToolResult, 'callId' | 'name'>;
 
@@ -60,6 +73,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   const systemInstruction = withRuntimeContext(request.systemInstruction);
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
   let executedCalls = 0;
+  let toolBudgetExhausted = false;
 
   while (true) {
     const pendingCalls: PendingToolCall[] = [];
@@ -67,9 +81,12 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     for await (const event of stream) {
       yield event;
       if (event.type === 'interaction-created') interactionId = event.interactionId;
-      if (event.type === 'tool-call') pendingCalls.push({ callId: event.callId, name: event.name as GoogleToolName, tool: event.name as GoogleToolName, arguments: event.arguments });
+      // The loop is a transparent event producer: pass everything through and
+      // never flatten a structured failure into a string. The turn runner owns
+      // the terminal outcome.
+      if (event.type === 'tool-call' && !toolBudgetExhausted) pendingCalls.push({ callId: event.callId, name: event.name as GoogleToolName, tool: event.name as GoogleToolName, arguments: event.arguments });
       if (signal?.aborted || event.type === 'cancelled') return;
-      if (event.type === 'failed') throw new Error(`[${event.error.code}] ${event.error.message}`);
+      if (event.type === 'failed') return;
     }
 
     if (pendingCalls.length === 0) return;
@@ -81,6 +98,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     for (const call of pendingCalls.slice(allowedCalls.length)) results.push(errorToolResult(call, 'Google tool-call limit exceeded for this turn.'));
 
     const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
+    const immediateCalls: PendingToolCall[] = [];
     for (const call of allowedCalls) {
       if (!isRegisteredToolHandler(call.name as GoogleToolName, executeOptions.handlers)) {
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
@@ -88,7 +106,12 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       }
       const confirmation = confirmationRequestForCall(call);
       if (confirmation) mutationEntries.push({ call, confirmation });
-      else {
+      else immediateCalls.push(call);
+    }
+
+    if (immediateCalls.length > 0) {
+      yield { type: 'interaction-status', interactionId, status: 'executing_tools' };
+      for (const call of immediateCalls) {
         const result = await executeGoogleTool(call, executeOptions);
         results.push(result.ok ? { callId: call.callId, name: call.name, result: result.result } : errorToolResult(call, result.code));
       }
@@ -99,7 +122,19 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       if (executeOptions.confirm) {
         decisions = await Promise.all(mutationEntries.map((entry) => executeOptions.confirm!(entry.confirmation)));
       } else {
-        decisions = await requestGoogleToolConfirmations(mutationEntries.map((entry) => entry.confirmation), signal);
+        yield { type: 'interaction-status', interactionId, status: 'awaiting_tool_confirmation' };
+        const pending = requestGoogleToolConfirmations(mutationEntries.map((entry) => entry.confirmation), signal);
+        for (;;) {
+          const outcome = await Promise.race([
+            pending.then((value) => ({ settled: true as const, value })),
+            delay(TOOL_CONFIRMATION_HEARTBEAT_MS).then(() => ({ settled: false as const })),
+          ]);
+          if (outcome.settled) {
+            decisions = outcome.value;
+            break;
+          }
+          yield { type: 'interaction-status', interactionId, status: 'awaiting_tool_confirmation' };
+        }
       }
     }
 
@@ -116,6 +151,9 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const continuation: GeminiToolContinuationRequest = { model: request.model, previousInteractionId: interactionId, results, systemInstruction, generationConfig: request.generationConfig, tools };
     stream = geminiTurnPort.streamToolResult(continuation, signal);
     executedCalls += allowedCalls.length;
-    if (executedCalls >= maxToolCalls) return;
+    // Never drop the final continuation stream on the floor: when the budget
+    // is spent, keep consuming (so the closing answer and terminal event still
+    // flow through) but stop collecting further tool calls.
+    if (executedCalls >= maxToolCalls) toolBudgetExhausted = true;
   }
 }

@@ -36,7 +36,7 @@ const settingsSections = [
   { id: 'security', label: 'Lockbox', icon: 'lock-keyhole' as const },
 ] as const;
 
-type SettingsSection = typeof settingsSections[number]['id'];
+export type SettingsSection = typeof settingsSections[number]['id'];
 
 const css2UrlSchema = z.string().url().refine((value) => {
   try {
@@ -84,6 +84,7 @@ export function SettingsScreen({
   onChatAppearanceChange,
   roleplay,
   onRoleplayChange,
+  initialSection,
   onBack,
 }: {
   font: FontSelection;
@@ -105,9 +106,10 @@ export function SettingsScreen({
   onChatAppearanceChange: (value: ChatAppearancePreferences) => void;
   roleplay: RoleplayPreferences;
   onRoleplayChange: (value: RoleplayPreferences) => void;
+  initialSection?: SettingsSection;
   onBack: () => void;
 }) {
-  const [section, setSection] = useState<SettingsSection>('appearance');
+  const [section, setSection] = useState<SettingsSection>(initialSection ?? 'appearance');
   const [customUrl, setCustomUrl] = useState('');
   const [customError, setCustomError] = useState<string | null>(null);
   const model = getGeminiModel(selectedModel);

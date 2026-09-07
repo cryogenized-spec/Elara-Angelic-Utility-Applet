@@ -95,4 +95,38 @@ describe('streamGoogleToolLoop', () => {
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ tool: 'tasks.createTask', risk: 'write' }));
     expect(handler).toHaveBeenCalledOnce();
   });
+
+  it('groups multiple mutations into one approval round and executes only approved items', async () => {
+    const calendarHandler = vi.fn(async () => ({ id: 'event-1', htmlLink: 'https://calendar.google.com/event-1' }));
+    const taskHandler = vi.fn(async () => ({ id: 'task-1' }));
+    const confirm = vi.fn()
+      .mockResolvedValueOnce(true)
+      .mockResolvedValueOnce(false);
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-batch-1', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction-batch-1', index: 0, callId: 'call-event-1', name: 'calendar.createEvent', arguments: { calendarId: 'primary', event: { summary: 'Design review', start: { dateTime: '2026-09-08T10:00:00Z' }, end: { dateTime: '2026-09-08T11:00:00Z' } } } },
+      { type: 'tool-call', interactionId: 'interaction-batch-1', index: 1, callId: 'call-task-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', task: { title: 'Send recap' } } },
+    ));
+    streamToolResult.mockReturnValueOnce(events({ type: 'completed', interactionId: 'interaction-batch-2', status: 'completed', durationMs: 12 }));
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Schedule the review and add the follow-up task.', systemInstruction },
+      { tools: ['calendar.createEvent', 'tasks.createTask'], readOnly: false, executor: { oauth, handlers: { 'calendar.createEvent': calendarHandler, 'tasks.createTask': taskHandler }, confirm } },
+    )) {
+      // Consume the complete interaction.
+    }
+
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(confirm.mock.calls[0][0]).toMatchObject({ tool: 'calendar.createEvent' });
+    expect(confirm.mock.calls[1][0]).toMatchObject({ tool: 'tasks.createTask' });
+    expect(calendarHandler).toHaveBeenCalledOnce();
+    expect(taskHandler).not.toHaveBeenCalled();
+    expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      previousInteractionId: 'interaction-batch-1',
+      results: expect.arrayContaining([
+        expect.objectContaining({ callId: 'call-event-1', result: { id: 'event-1', htmlLink: 'https://calendar.google.com/event-1' } }),
+        expect.objectContaining({ callId: 'call-task-1', result: { ok: false, error: 'USER_DECLINED' } }),
+      ]),
+    }), undefined);
+  });
 });

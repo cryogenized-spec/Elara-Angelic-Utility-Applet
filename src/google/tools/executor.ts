@@ -79,6 +79,16 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
   }
 }
 
+export function confirmationRequestForCall(call: GoogleToolCall, now = new Date()): WriteConfirmationRequest | null {
+  const parsed = googleToolCallSchema.safeParse(call);
+  if (!parsed.success) return null;
+  const descriptor = findDescriptor(parsed.data.tool);
+  if (!descriptor || !evaluateWriteConfirmation(descriptor.risk).requiresConfirmation) return null;
+  let args: Readonly<Record<string, unknown>>;
+  try { args = validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
+  return { tool: descriptor.name, risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>, resourceSummary: confirmationSummary(parsed.data.tool, args, descriptor.description), requestedAt: now.toISOString() };
+}
+
 export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToolExecutorOptions): Promise<GoogleToolExecutionResult> {
   const id = correlationId();
   const parsed = googleToolCallSchema.safeParse(call);

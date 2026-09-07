@@ -19,25 +19,6 @@ interface CodeClient {
   requestCode(): void;
 }
 
-interface OAuth2Api {
-  initCodeClient(config: {
-    client_id: string;
-    scope: string;
-    include_granted_scopes?: boolean;
-    ux_mode?: 'popup' | 'redirect';
-    redirect_uri?: string;
-    callback?: (response: CodeResponse) => void;
-    error_callback?: (error: { type?: string }) => void;
-    state?: string;
-    login_hint?: string;
-    hd?: string;
-  }): CodeClient;
-}
-
-function oauth2(): OAuth2Api {
-  return (window.google as { accounts: { oauth2: OAuth2Api } }).accounts.oauth2;
-}
-
 export async function requestGoogleAuthorizationCode(config: {
   clientId: string;
   scope: string;
@@ -60,14 +41,14 @@ export async function requestGoogleAuthorizationCode(config: {
       ...(config.state ? { state: config.state } : {}),
       ...(config.loginHint ? { login_hint: config.loginHint } : {}),
       ...(config.hostedDomain ? { hd: config.hostedDomain } : {}),
-      callback: (response) => {
+      callback: (response: CodeResponse) => {
         if (response.error || !response.code) {
           reject(new Error(response.error_description || response.error || 'Google authorization-code flow failed.'));
           return;
         }
         resolve({ code: response.code, ...(response.scope ? { scope: response.scope } : {}), ...(response.state ? { state: response.state } : {}) });
       },
-      error_callback: (error) => {
+      error_callback: (error: { type?: string }) => {
         reject(new Error(error.type === 'popup_closed' ? 'Google authorization was cancelled.' : 'Google authorization could not be completed.'));
       },
     });

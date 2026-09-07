@@ -114,7 +114,7 @@ export function ConversationSurface({ messages, fontSize, generation, onRegenera
   const showTrace = generation !== null && generation.phase !== 'completed';
   if (visibleMessages.length === 0 && !showTrace) return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p style={{ fontSize: `${fontSize}px` }}>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
 
-  return <section ref={conversationRef} className="conversation" aria-label="Conversation" aria-live="polite" onScroll={rememberScrollPosition}>
+  return <section ref={conversationRef} className="conversation" aria-label="Conversation" onScroll={rememberScrollPosition}>
     <div className="conversation__stream">
       {grouped.map(({ message, variants }) => {
         if (message.role !== 'assistant') {

@@ -140,6 +140,42 @@ describe('Gemini provider stream fidelity', () => {
     });
   });
 
+  it('normalizes the documented ErrorEvent shape (code/message/event_id, no HTTP status)', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },
+      { event_type: 'error', event_id: 'evt-1', interaction_id: 'interaction-1', error: { code: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded for quota metric.' } },
+    ]);
+
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: {
+        category: 'rate_limit',
+        code: 'GEMINI_RATE_LIMIT',
+        message: 'Quota exceeded for quota metric.',
+        retryable: true,
+        providerStatus: undefined,
+        providerCode: 'RESOURCE_EXHAUSTED',
+        interactionId: 'interaction-1',
+      },
+    });
+  });
+
+  it('keeps unrecognized streamed error codes on an honest unknown failure', async () => {
+    const collected = await collect([
+      { event_type: 'error', event_id: 'evt-9', error: { code: 'SOME_FUTURE_CODE', message: 'Something new broke.' } },
+    ]);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: {
+        category: 'unknown',
+        code: 'GEMINI_UNKNOWN',
+        message: 'Something new broke.',
+        providerCode: 'SOME_FUTURE_CODE',
+        retryable: false,
+      },
+    });
+  });
+
   it('classifies a streamed 503 error event as a retryable provider failure', async () => {
     const collected = await collect([
       { event_type: 'error', error: { message: 'Service unavailable.', code: 503 } },

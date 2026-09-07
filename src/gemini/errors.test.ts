@@ -100,6 +100,46 @@ describe('normalizeGeminiError', () => {
     expect(error).toMatchObject({ category: 'timeout', code: 'GEMINI_TIMEOUT', retryable: true });
   });
 
+  it('maps documented provider string codes when no HTTP status is available', () => {
+    expect(normalizeGeminiError({ code: 'RESOURCE_EXHAUSTED', message: 'Quota exceeded.' })).toMatchObject({
+      category: 'rate_limit',
+      code: 'GEMINI_RATE_LIMIT',
+      providerCode: 'RESOURCE_EXHAUSTED',
+      retryable: true,
+    });
+    expect(normalizeGeminiError({ code: 'unavailable', message: 'Try again.' })).toMatchObject({
+      category: 'provider',
+      retryable: true,
+    });
+    expect(normalizeGeminiError({ code: 'DEADLINE_EXCEEDED', message: 'Slow.' })).toMatchObject({
+      category: 'timeout',
+      retryable: true,
+    });
+    expect(normalizeGeminiError({ code: 'UNAUTHENTICATED', message: 'Bad key.' })).toMatchObject({
+      category: 'authentication',
+      retryable: false,
+    });
+  });
+
+  it('lets a numeric status win over any string code', () => {
+    expect(normalizeGeminiError({ status: 503, code: 'INVALID_ARGUMENT' })).toMatchObject({
+      category: 'provider',
+      providerStatus: 503,
+      providerCode: 'INVALID_ARGUMENT',
+    });
+  });
+
+  it('preserves unrecognized provider codes on an honest unknown failure', () => {
+    const error = normalizeGeminiError({ code: 'SOME_FUTURE_CODE', message: 'Something new broke.' });
+    expect(error).toMatchObject({
+      category: 'unknown',
+      code: 'GEMINI_UNKNOWN',
+      message: 'Something new broke.',
+      providerCode: 'SOME_FUTURE_CODE',
+      retryable: false,
+    });
+  });
+
   it('falls back to non-retryable unknown for opaque failures', () => {
     expect(normalizeGeminiError(new Error('Something odd happened.'))).toMatchObject({
       category: 'unknown',

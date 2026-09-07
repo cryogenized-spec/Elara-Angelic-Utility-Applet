@@ -100,10 +100,10 @@ export function GenerationTrace({ generation }: { generation: GenerationState })
       <header className="generation-trace__header">
         <span className="generation-trace__dot" aria-hidden="true" />
         <span className="generation-trace__phase">{PHASE_LABELS[generation.phase]}</span>
-        <span className="generation-trace__time">{formatMs(turnDurationMs(generation, now))}</span>
+        <span className="generation-trace__time" aria-hidden="true">{formatMs(turnDurationMs(generation, now))}</span>
       </header>
       {generation.timeToFirstEventMs !== undefined && (
-        <div className="generation-trace__first-event">first event in {formatMs(generation.timeToFirstEventMs)}</div>
+        <div className="generation-trace__first-event" aria-hidden="true">first event in {formatMs(generation.timeToFirstEventMs)}</div>
       )}
       {summary && (
         <div className="generation-trace__thought">
@@ -130,7 +130,7 @@ export function GenerationTrace({ generation }: { generation: GenerationState })
               {step.state === 'failed' && step.errorCode && (
                 <span className="generation-trace__step-error">{step.errorCode}</span>
               )}
-              <span className="generation-trace__step-time">{formatMs(stepElapsedMs(step, now))}</span>
+              <span className="generation-trace__step-time" aria-hidden="true">{formatMs(stepElapsedMs(step, now))}</span>
             </li>
           ))}
         </ol>

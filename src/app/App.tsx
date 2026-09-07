@@ -22,7 +22,7 @@ import {
   type GenerationPhase,
   type GenerationState,
 } from '../chat/generation-state';
-import { syncGenerationEvent, type GenerationSyncContext } from '../chat/generation-sync';
+import { canRetryFailedTurn, syncGenerationEvent, type FailedTurnAttempt, type GenerationSyncContext } from '../chat/generation-sync';
 import { createTurnWatchdog } from '../chat/turn-watchdog';
 import type { GoogleToolName } from '../google/tools/contracts';
 import { googleGeminiFunctionNames } from '../google/tools/gemini-declarations';
@@ -80,6 +80,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [structuredError, setStructuredError] = useState<NormalizedProviderError | null>(null);
   const [generation, setGeneration] = useState<GenerationState | null>(null);
+  const [failedAttempt, setFailedAttempt] = useState<FailedTurnAttempt | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance');
@@ -123,7 +124,7 @@ export function App() {
   async function switchThread(id: string) {
     cancel();
     activeConversationIdRef.current = id;
-    setError(null); setDraft(''); setGeneration(null);
+    setError(null); setDraft(''); setGeneration(null); setFailedAttempt(null);
     try {
       const nextConversation = await loadConversation(id);
       if (activeConversationIdRef.current !== id) return;
@@ -134,7 +135,7 @@ export function App() {
     cancel();
     const pendingConversation: ConversationState = { id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     activeConversationIdRef.current = pendingConversation.id;
-    setError(null); setDraft(''); setGeneration(null);
+    setError(null); setDraft(''); setGeneration(null); setFailedAttempt(null);
     setConversation(pendingConversation);
     try {
       const nextConversation = await createThread();
@@ -147,7 +148,7 @@ export function App() {
     const text = draft.trim();
     if (!text || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
     const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
-    setDraft(''); setError(null); setStructuredError(null); setStatus('streaming');
+    setDraft(''); setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
@@ -190,7 +191,7 @@ export function App() {
     const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    setError(null); setStructuredError(null); setStatus('streaming');
+    setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
     try {
       await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, previousInteractionId, responseGroupId: groupId, responseVariant: nextVariant, supersedesGenerationId: target.providerTurn?.generationId });
     } catch (cause) {
@@ -204,7 +205,7 @@ export function App() {
     if (status === 'streaming') return;
     const shortcut = workspaceShortcutDefinition(shortcutRecord);
     if (!shortcutRecord.enabled) return;
-    setError(null); setStructuredError(null); setStatus('streaming');
+    setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
@@ -243,7 +244,7 @@ export function App() {
     let current = createGenerationState(generationId, { supersedesGenerationId: options.supersedesGenerationId, startedAt: performance.now() });
     setGeneration(current);
     setStructuredError(null);
-    const syncContext: GenerationSyncContext = { assistantMessage, base, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isCurrentConversation, ensureAssistant, streamFailed };
+    const syncContext: GenerationSyncContext = { assistantMessage, base, input, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isCurrentConversation, ensureAssistant, streamFailed, onFailedAttempt: setFailedAttempt };
 
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
@@ -295,15 +296,18 @@ export function App() {
 
   async function retryLastTurn() {
     if (status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
-    const lastUser = [...conversation.messages].reverse().find((message) => message.role === 'user');
-    if (!lastUser || conversation.messages.at(-1)?.id !== lastUser.id) return;
+    // Replace the failed attempt: stream from its exact pre-generation base so
+    // a partial assistant can never survive next to the retried answer.
+    const attempt = failedAttempt;
+    if (!attempt || attempt.base.id !== conversation.id || !attempt.input.trim()) return;
     const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
-    setError(null); setStructuredError(null); setStatus('streaming');
+    setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
+    setConversation((current) => current.id === attempt.base.id ? attempt.base : current);
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     try {
-      await streamAssistantTurn(lastUser.text, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, supersedesGenerationId: generation?.generationId });
+      await streamAssistantTurn(attempt.input, attempt.base, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, responseGroupId: attempt.responseGroupId, responseVariant: attempt.responseVariant, supersedesGenerationId: attempt.generationId });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
@@ -340,7 +344,7 @@ export function App() {
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
   const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity, '--body-font-size': `${uiSettings.chatTextSize}px` } as React.CSSProperties), [chatAppearance, uiSettings.chatTextSize]);
   const visibleMessages = conversation.messages.filter((message) => message.conversationId === conversation.id);
-  const canRetry = status === 'failed' && visibleMessages.at(-1)?.role === 'user';
+  const canRetry = canRetryFailedTurn(status, failedAttempt, conversation.id);
   const showLockboxAction = structuredError !== null && (structuredError.category === 'configuration' || structuredError.category === 'authentication' || structuredError.category === 'authorization' || structuredError.code === 'GEMINI_LOCKBOX_LOCKED');
   if (settingsOpen) return <SettingsScreen initialSection={settingsSection} font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value: ChatAppearancePreferences) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} onBack={() => setSettingsOpen(false)} />;
   return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}>

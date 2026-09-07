@@ -99,6 +99,41 @@ describe('generation-state reducer', () => {
     expect(state.activeTool).toBeUndefined();
   });
 
+  it('holds tool work open across status heartbeats until the continuation lands', () => {
+    let state = createGenerationState('gen-status-gap', { startedAt: 0 });
+    const send = (event: GeminiStreamEvent, receivedAt: number) => {
+      state = applyGenerationEvent(state, { generationId: 'gen-status-gap', event, receivedAt });
+    };
+    send({ type: 'interaction-created', interactionId: 'i-1', model: 'm' }, 10);
+    send({ type: 'text-delta', index: 0, text: 'Working on it. ' }, 20);
+    send({ type: 'step-start', index: 1, stepType: 'function_call' }, 30);
+    send({ type: 'tool-call', interactionId: 'i-1', index: 1, callId: 'c-1', name: 'tasks.createTask', arguments: {} }, 40);
+    send({ type: 'step-stop', index: 1 }, 50);
+    // Tool-loop status vocabulary during the execution/confirmation gap.
+    send({ type: 'interaction-status', interactionId: 'i-1', status: 'executing_tools' }, 60);
+    expect(state.phase).toBe('tool-working');
+    send({ type: 'interaction-status', interactionId: 'i-1', status: 'awaiting_tool_confirmation' }, 70);
+    send({ type: 'interaction-status', interactionId: 'i-1', status: 'awaiting_tool_confirmation' }, 80);
+    expect(state.phase).toBe('tool-working');
+    expect(state.statusMessage).toBe('awaiting_tool_confirmation');
+    expect(state.steps.find((step) => step.kind === 'tool')?.state).toBe('running');
+
+    // The continuation closes the round trip without touching the transcript.
+    send({ type: 'interaction-created', interactionId: 'i-2', model: 'm' }, 100);
+    const toolStep = state.steps.find((step) => step.kind === 'tool');
+    if (!toolStep) throw new Error('expected a tool step in the trace');
+    expect(toolStep.state).toBe('done');
+    expect(stepElapsedMs(toolStep, 100)).toBe(70);
+    expect(state.activeTool).toBeUndefined();
+    expect(state.transcript).toBe('Working on it. ');
+
+    send({ type: 'text-delta', index: 0, text: 'Task created.' }, 110);
+    send({ type: 'completed', interactionId: 'i-2', status: 'completed', durationMs: 5 }, 120);
+    expect(state.phase).toBe('completed');
+    expect(state.interactionIds).toEqual(['i-1', 'i-2']);
+    expect(state.transcript).toBe('Working on it. Task created.');
+  });
+
   it('ignores stale events from superseded generations by reference', () => {
     const state = drive([{ type: 'text-delta', index: 0, text: 'abc' }], 'gen-active');
     const stale = applyGenerationEvent(state, {

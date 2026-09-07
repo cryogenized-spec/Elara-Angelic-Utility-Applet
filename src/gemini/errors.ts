@@ -98,6 +98,28 @@ function isTimeoutLike(message: string, code: string | undefined): boolean {
   return TIMEOUT_MESSAGE_PATTERN.test(message);
 }
 
+/**
+ * Conservative mapping for provider string codes (Google RPC vocabulary) as
+ * carried by streamed ErrorEvents, which document code/message/event_id and
+ * no HTTP status. Only consulted when no numeric status is available; a
+ * numeric status always wins. Unknown codes stay unknown — but preserved.
+ */
+const PROVIDER_CODE_CATEGORIES: Record<string, ProviderErrorCategory> = {
+  RESOURCE_EXHAUSTED: 'rate_limit',
+  UNAUTHENTICATED: 'authentication',
+  PERMISSION_DENIED: 'authorization',
+  DEADLINE_EXCEEDED: 'timeout',
+  ABORTED: 'provider',
+  INTERNAL: 'provider',
+  UNAVAILABLE: 'provider',
+  UNIMPLEMENTED: 'unsupported',
+};
+
+function categoryForCode(code: string | undefined): ProviderErrorCategory | undefined {
+  if (!code) return undefined;
+  return PROVIDER_CODE_CATEGORIES[code.trim().toUpperCase()];
+}
+
 function categoryFor(status: number | undefined): ProviderErrorCategory {
   if (status === 0) return 'network';
   if (status === 401) return 'authentication';
@@ -121,7 +143,10 @@ export function normalizeGeminiError(cause: unknown, context: { requestId?: stri
   const aborted = (cause instanceof DOMException && cause.name === 'AbortError') || status === 499;
   const networkLike = !aborted && (status === 0 || isNetworkLike(cause, message, providerCode));
   const timeoutLike = !aborted && !networkLike && isTimeoutLike(message, providerCode);
-  const category = aborted ? 'cancelled' : context.category ?? (networkLike ? 'network' : timeoutLike ? 'timeout' : categoryFor(status));
+  const fromStatus = status !== undefined ? categoryFor(status) : undefined;
+  const fromCode = fromStatus === undefined ? categoryForCode(providerCode) : undefined;
+  const heuristic = networkLike ? 'network' : timeoutLike ? 'timeout' : ('unknown' as const);
+  const category = aborted ? 'cancelled' : context.category ?? fromStatus ?? fromCode ?? heuristic;
   const retryable = !aborted && retryableFor(category, status);
 
   return {

@@ -15,6 +15,8 @@ import { buildExecutionSummary, thoughtSummaryOf, type GenerationState } from '.
 export interface GenerationSyncContext {
   assistantMessage: ChatMessage;
   base: ConversationState;
+  /** Exact turn input, so a retry re-runs the failed prompt (not latest history). */
+  input: string;
   model: string;
   wallStartedAt: number;
   supersedesGenerationId?: string;
@@ -27,6 +29,34 @@ export interface GenerationSyncContext {
   isCurrentConversation: () => boolean;
   ensureAssistant: () => void;
   streamFailed: { value: boolean };
+  /** Reported on terminal failure so a later retry can replace the attempt. */
+  onFailedAttempt?: (attempt: FailedTurnAttempt) => void;
+}
+
+/**
+ * Everything a user-initiated retry needs to replace (not append to) a
+ * failed turn: the pre-generation conversation, the exact failed input, and
+ * the response-variant identity for regeneration-style turns.
+ */
+export interface FailedTurnAttempt {
+  generationId: string;
+  base: ConversationState;
+  input: string;
+  responseGroupId?: string;
+  responseVariant?: number;
+}
+
+export function canRetryFailedTurn(
+  status: ProviderStatus,
+  attempt: FailedTurnAttempt | null,
+  conversationId: string,
+): boolean {
+  return (
+    status === 'failed' &&
+    attempt !== null &&
+    attempt.base.id === conversationId &&
+    attempt.input.trim().length > 0
+  );
 }
 
 function buildUsage(usage: GeminiUsage | undefined, thoughtSummary: string | undefined): ProviderUsage | undefined {
@@ -94,6 +124,13 @@ export function syncGenerationEvent(
     context.setStatus('failed');
     context.setStructuredError(event.error);
     context.setError(`[${event.error.code}] ${event.error.message}`);
+    context.onFailedAttempt?.({
+      generationId: generation.generationId,
+      base,
+      input: context.input,
+      responseGroupId: assistantMessage.responseGroupId,
+      responseVariant: assistantMessage.responseVariant,
+    });
     return;
   }
 
@@ -108,6 +145,13 @@ export function syncGenerationEvent(
       context.setStructuredError(null);
       context.setError(event.message);
     }
+    context.onFailedAttempt?.({
+      generationId: generation.generationId,
+      base,
+      input: context.input,
+      responseGroupId: assistantMessage.responseGroupId,
+      responseVariant: assistantMessage.responseVariant,
+    });
     return;
   }
 

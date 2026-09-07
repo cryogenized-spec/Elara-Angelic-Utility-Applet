@@ -3,7 +3,7 @@ import type { ChatMessage, ConversationState, ProviderStatus } from '../domain/c
 import type { GeminiStreamEvent } from '../gemini/contracts';
 import type { NormalizedProviderError } from '../gemini/errors';
 import { applyGenerationEvent, createGenerationState, type GenerationState } from './generation-state';
-import { syncGenerationEvent, type GenerationSyncContext } from './generation-sync';
+import { canRetryFailedTurn, syncGenerationEvent, type FailedTurnAttempt, type GenerationSyncContext } from './generation-sync';
 
 const BASE_TIME = 1_000_000;
 
@@ -11,16 +11,25 @@ function makeMessage(role: ChatMessage['role'], text: string): ChatMessage {
   return { id: `${role}-1`, role, text, createdAt: BASE_TIME, conversationId: 'thread-1' };
 }
 
-function createHarness(options: { current?: boolean; supersedesGenerationId?: string } = {}) {
+function createHarness(
+  options: {
+    current?: boolean;
+    supersedesGenerationId?: string;
+    input?: string;
+    base?: ConversationState;
+    assistantMessage?: ChatMessage;
+    onFailedAttempt?: (attempt: FailedTurnAttempt) => void;
+  } = {},
+) {
   const userMessage = makeMessage('user', 'What is on my calendar?');
-  const base: ConversationState = {
+  const base: ConversationState = options.base ?? {
     id: 'thread-1',
     title: 'Calendar',
     createdAt: BASE_TIME,
     updatedAt: BASE_TIME,
     messages: [userMessage],
   };
-  const assistantMessage = makeMessage('assistant', '');
+  const assistantMessage = options.assistantMessage ?? makeMessage('assistant', '');
   let conversation = base;
   let status: ProviderStatus = 'streaming';
   let error: string | null = null;
@@ -30,6 +39,7 @@ function createHarness(options: { current?: boolean; supersedesGenerationId?: st
   const context: GenerationSyncContext = {
     assistantMessage,
     base,
+    input: options.input ?? 'What is on my calendar?',
     model: 'gemini-3.8-flash',
     wallStartedAt: BASE_TIME,
     supersedesGenerationId: options.supersedesGenerationId,
@@ -52,6 +62,7 @@ function createHarness(options: { current?: boolean; supersedesGenerationId?: st
     isCurrentConversation: () => options.current ?? true,
     ensureAssistant: () => undefined,
     streamFailed,
+    onFailedAttempt: options.onFailedAttempt,
   };
   return { context, base, read: () => ({ conversation, status, error, structured, saved, streamFailed: streamFailed.value }) };
 }
@@ -195,6 +206,94 @@ describe('generation sync: one-assistant-message invariant', () => {
     expect(streamFailed).toBe(true);
   });
 
+  it('captures the failed attempt so a retry can replace it', () => {
+    const box: { attempt: FailedTurnAttempt | null } = { attempt: null };
+    const assistantMessage: ChatMessage = { ...makeMessage('assistant', ''), responseGroupId: 'group-1', responseVariant: 2 };
+    const harness = createHarness({ input: 'Original prompt.', assistantMessage, onFailedAttempt: (attempt) => { box.attempt = attempt; } });
+    runTurn(
+      harness.context,
+      [
+        { type: 'text-delta', index: 0, text: 'abc' },
+        {
+          type: 'failed',
+          error: {
+            category: 'provider',
+            code: 'GEMINI_PROVIDER',
+            message: 'Boom.',
+            retryable: true,
+            cancelled: false,
+            debug: {},
+          },
+        },
+      ],
+      'gen-failed',
+    );
+
+    const captured = box.attempt;
+    if (!captured) throw new Error('expected the failed attempt to be captured');
+    expect(captured.generationId).toBe('gen-failed');
+    expect(captured.base).toBe(harness.base);
+    expect(captured.base.messages.some((message) => message.role === 'assistant')).toBe(false);
+    expect(captured.input).toBe('Original prompt.');
+    expect(captured.responseGroupId).toBe('group-1');
+    expect(captured.responseVariant).toBe(2);
+  });
+
+  it('retries a partially streamed failure as one replaced answer, not two', async () => {
+    const box: { attempt: FailedTurnAttempt | null } = { attempt: null };
+    const firstTurn = createHarness({ input: 'Tell me a story.', onFailedAttempt: (attempt) => { box.attempt = attempt; } });
+    runTurn(
+      firstTurn.context,
+      [
+        { type: 'interaction-created', interactionId: 'i-1', model: 'gemini-3.8-flash' },
+        { type: 'text-delta', index: 0, text: 'abc' },
+        {
+          type: 'failed',
+          error: {
+            category: 'provider',
+            code: 'GEMINI_PROVIDER',
+            message: 'Mid-stream failure.',
+            retryable: true,
+            cancelled: false,
+            debug: {},
+          },
+        },
+      ],
+      'gen-1',
+    );
+    expect(firstTurn.read().conversation.messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    const captured = box.attempt;
+    if (!captured) throw new Error('expected the failed attempt to be captured');
+
+    // Retry streams from the failed attempt's pre-generation base.
+    const retryTurn = createHarness({
+      base: captured.base,
+      supersedesGenerationId: captured.generationId,
+      input: captured.input,
+    });
+    runTurn(
+      retryTurn.context,
+      [
+        { type: 'interaction-created', interactionId: 'i-2', model: 'gemini-3.8-flash' },
+        { type: 'text-delta', index: 0, text: 'def' },
+        COMPLETED('i-2'),
+      ],
+      'gen-2',
+    );
+    await Promise.resolve();
+
+    const { conversation, saved } = retryTurn.read();
+    const assistants = conversation.messages.filter((message) => message.role === 'assistant');
+    expect(assistants).toHaveLength(1);
+    expect(assistants[0].text).toBe('def');
+    expect(saved).toHaveLength(1);
+    expect(saved[0].messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(saved[0].messages.find((message) => message.role === 'assistant')?.providerTurn).toMatchObject({
+      generationId: 'gen-2',
+      supersedesGenerationId: 'gen-1',
+    });
+  });
+
   it('ignores terminal outcomes for conversations the user already left', () => {
     const harness = createHarness({ current: false });
     runTurn(harness.context, [
@@ -213,5 +312,31 @@ describe('generation sync: one-assistant-message invariant', () => {
     const { status, error } = harness.read();
     expect(status).toBe('streaming');
     expect(error).toBeNull();
+  });
+});
+
+describe('canRetryFailedTurn', () => {
+  const base: ConversationState = {
+    id: 'thread-1',
+    title: 'Retry',
+    createdAt: BASE_TIME,
+    updatedAt: BASE_TIME,
+    messages: [{ id: 'user-1', role: 'user', text: 'Hello.', createdAt: BASE_TIME, conversationId: 'thread-1' }],
+  };
+  const attempt: FailedTurnAttempt = { generationId: 'gen-1', base, input: 'Hello.' };
+
+  it('allows retry for a failed turn on the current thread', () => {
+    expect(canRetryFailedTurn('failed', attempt, 'thread-1')).toBe(true);
+  });
+
+  it('refuses retry while streaming, when idle, without an attempt, or on another thread', () => {
+    expect(canRetryFailedTurn('streaming', attempt, 'thread-1')).toBe(false);
+    expect(canRetryFailedTurn('idle', attempt, 'thread-1')).toBe(false);
+    expect(canRetryFailedTurn('failed', null, 'thread-1')).toBe(false);
+    expect(canRetryFailedTurn('failed', attempt, 'thread-2')).toBe(false);
+  });
+
+  it('refuses retry when the failed turn had no input to re-run', () => {
+    expect(canRetryFailedTurn('failed', { ...attempt, input: '   ' }, 'thread-1')).toBe(false);
   });
 });

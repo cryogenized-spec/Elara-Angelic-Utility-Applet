@@ -2,7 +2,13 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { ChatMessage, ConversationState, ProviderStatus, ProviderUsage } from '../domain/chat';
 import type { GeminiStreamEvent, GeminiUsage } from '../gemini/contracts';
 import type { NormalizedProviderError } from '../gemini/errors';
-import { buildExecutionSummary, thoughtSummaryOf, type GenerationState } from './generation-state';
+import {
+  applyGenerationEvent,
+  buildExecutionSummary,
+  thoughtSummaryOf,
+  type GenerationEventEnvelope,
+  type GenerationState,
+} from './generation-state';
 
 // ---------------------------------------------------------------------------
 // Generation sync: fold canonical stream events + reducer state into the
@@ -10,7 +16,33 @@ import { buildExecutionSummary, thoughtSummaryOf, type GenerationState } from '.
 // one-assistant-message invariant (every text delta rewrites the SAME record)
 // and terminal persistence. Trace-only events (thinking/tool/steps) are
 // intentionally ignored here: they belong to the ephemeral live trace.
+//
+// Cross-turn arbitration: each turn owns an independent reducer, so reducer
+// identity alone cannot stop an obsolete runner from mutating the app. The
+// runner holds ONE shared arbiter; sync mutates application state only for
+// the currently active generation.
 // ---------------------------------------------------------------------------
+
+export interface GenerationArbiter {
+  activate(generationId: string): void;
+  release(generationId: string): void;
+  isActive(generationId: string): boolean;
+}
+
+export function createGenerationArbiter(): GenerationArbiter {
+  let activeGenerationId: string | null = null;
+  return {
+    activate(generationId: string): void {
+      activeGenerationId = generationId;
+    },
+    release(generationId: string): void {
+      if (activeGenerationId === generationId) activeGenerationId = null;
+    },
+    isActive(generationId: string): boolean {
+      return activeGenerationId === generationId;
+    },
+  };
+}
 
 export interface GenerationSyncContext {
   assistantMessage: ChatMessage;
@@ -26,7 +58,8 @@ export interface GenerationSyncContext {
   setStructuredError: (error: NormalizedProviderError | null) => void;
   save: (conversation: ConversationState) => Promise<void>;
   refreshThreads: () => Promise<void>;
-  isCurrentConversation: () => boolean;
+  /** Runner predicate: this turn's conversation is current AND its generation is still active. */
+  isActiveGeneration: () => boolean;
   ensureAssistant: () => void;
   streamFailed: { value: boolean };
   /** Reported on terminal failure so a later retry can replace the attempt. */
@@ -76,11 +109,11 @@ export function syncGenerationEvent(
   generation: GenerationState,
   context: GenerationSyncContext,
 ): void {
-  const { assistantMessage, base, isCurrentConversation } = context;
+  const { assistantMessage, base, isActiveGeneration } = context;
 
   if (event.type === 'text-delta') {
     context.ensureAssistant();
-    if (!isCurrentConversation()) return;
+    if (!isActiveGeneration()) return;
     const text = generation.transcript;
     context.setConversation((current) =>
       current.id === base.id ? { ...base, messages: [...base.messages, { ...assistantMessage, text }] } : current,
@@ -108,7 +141,7 @@ export function syncGenerationEvent(
       },
     };
     const completed: ConversationState = { ...base, updatedAt: completedAt, messages: [...base.messages, completedMessage] };
-    if (isCurrentConversation()) {
+    if (isActiveGeneration()) {
       context.setConversation(completed);
       void context
         .save(completed)
@@ -120,7 +153,7 @@ export function syncGenerationEvent(
 
   if (event.type === 'failed') {
     context.streamFailed.value = true;
-    if (!isCurrentConversation()) return;
+    if (!isActiveGeneration()) return;
     context.setStatus('failed');
     context.setStructuredError(event.error);
     context.setError(`[${event.error.code}] ${event.error.message}`);
@@ -136,7 +169,7 @@ export function syncGenerationEvent(
 
   if (event.type === 'error') {
     context.streamFailed.value = true;
-    if (!isCurrentConversation()) return;
+    if (!isActiveGeneration()) return;
     context.setStatus('failed');
     if (event.error) {
       context.setStructuredError(event.error);
@@ -157,11 +190,29 @@ export function syncGenerationEvent(
 
   if (event.type === 'cancelled') {
     // Restore the exact pre-turn state: no pseudo-answer, no persistence.
-    if (!isCurrentConversation()) return;
+    if (!isActiveGeneration()) return;
     context.setConversation((current) => (current.id === base.id ? base : current));
     context.setStatus('idle');
     context.setError(null);
     context.setStructuredError(null);
     return;
   }
+}
+
+/**
+ * Runner dispatch: reduce first, then sync — but only when the reducer
+ * actually accepted the envelope. Stale-generation and post-terminal events
+ * return the identical state reference and must not touch application state
+ * (this is what stops a late abort-induced `cancelled` from wiping a
+ * failure the watchdog already reported).
+ */
+export function dispatchGenerationEvent(
+  current: GenerationState,
+  envelope: GenerationEventEnvelope,
+  context: GenerationSyncContext,
+): GenerationState {
+  const next = applyGenerationEvent(current, envelope);
+  if (next === current) return current;
+  syncGenerationEvent(envelope.event, next, context);
+  return next;
 }

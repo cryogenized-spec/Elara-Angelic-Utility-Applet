@@ -14,7 +14,6 @@ import type { NormalizedProviderError } from '../gemini/errors';
 import {
   DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS,
   DEFAULT_IDLE_STALL_TIMEOUT_MS,
-  applyGenerationEvent,
   createGenerationState,
   generationProtocolError,
   generationTimeoutError,
@@ -22,7 +21,7 @@ import {
   type GenerationPhase,
   type GenerationState,
 } from '../chat/generation-state';
-import { canRetryFailedTurn, syncGenerationEvent, type FailedTurnAttempt, type GenerationSyncContext } from '../chat/generation-sync';
+import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
 import { createTurnWatchdog } from '../chat/turn-watchdog';
 import type { GoogleToolName } from '../google/tools/contracts';
 import { googleGeminiFunctionNames } from '../google/tools/gemini-declarations';
@@ -94,6 +93,7 @@ export function App() {
   const [roleplay, setRoleplay] = useState<RoleplayPreferences>(DEFAULT_ROLEPLAY);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeConversationIdRef = useRef('primary');
+  const generationArbiterRef = useRef(createGenerationArbiter());
   const uiSaveQueueRef = useRef(Promise.resolve());
 
   useVisualViewport();
@@ -227,31 +227,38 @@ export function App() {
     const wallStartedAt = Date.now();
     const base = { ...baseConversation, updatedAt: wallStartedAt };
     const isCurrentConversation = () => activeConversationIdRef.current === conversationId;
-    let assistantInserted = false;
-    const ensureAssistant = () => {
-      if (assistantInserted || !isCurrentConversation() || controller.signal.aborted) return;
-      assistantInserted = true;
-      setConversation((current) => current.id === base.id ? { ...base, messages: [...base.messages, assistantMessage] } : current);
-    };
     if (!isCurrentConversation()) return;
 
     // One stable turn identity across every tool continuation in this request.
     // A new interaction-created never resets transcript or trace state.
+    // Activating here supersedes any still-in-flight older generation: its
+    // late events will fail the shared arbitration check below.
     const generationId = crypto.randomUUID();
+    generationArbiterRef.current.activate(generationId);
+    const isActiveGeneration = () =>
+      activeConversationIdRef.current === conversationId && generationArbiterRef.current.isActive(generationId);
+    let assistantInserted = false;
+    const ensureAssistant = () => {
+      if (assistantInserted || !isActiveGeneration() || controller.signal.aborted) return;
+      assistantInserted = true;
+      setConversation((current) => current.id === base.id ? { ...base, messages: [...base.messages, assistantMessage] } : current);
+    };
     const idleStallMs = options.watchdog?.idleStallMs ?? DEFAULT_IDLE_STALL_TIMEOUT_MS;
     const absoluteMs = options.watchdog?.absoluteMs ?? DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS;
     const streamFailed = { value: false };
     let current = createGenerationState(generationId, { supersedesGenerationId: options.supersedesGenerationId, startedAt: performance.now() });
     setGeneration(current);
     setStructuredError(null);
-    const syncContext: GenerationSyncContext = { assistantMessage, base, input, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isCurrentConversation, ensureAssistant, streamFailed, onFailedAttempt: setFailedAttempt };
+    const syncContext: GenerationSyncContext = { assistantMessage, base, input, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isActiveGeneration, ensureAssistant, streamFailed, onFailedAttempt: setFailedAttempt };
 
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
-      current = applyGenerationEvent(current, { generationId, event, receivedAt: performance.now() });
+      current = dispatchGenerationEvent(current, { generationId, event, receivedAt: performance.now() }, syncContext);
       setGeneration(current);
-      if (isTerminalPhase(current.phase)) watchdog.dispose();
-      syncGenerationEvent(event, current, syncContext);
+      if (isTerminalPhase(current.phase)) {
+        watchdog.dispose();
+        generationArbiterRef.current.release(generationId);
+      }
     };
     const failTurn = (error: NormalizedProviderError) => {
       if (isTerminalPhase(current.phase)) return;

@@ -3,7 +3,14 @@ import type { ChatMessage, ConversationState, ProviderStatus } from '../domain/c
 import type { GeminiStreamEvent } from '../gemini/contracts';
 import type { NormalizedProviderError } from '../gemini/errors';
 import { applyGenerationEvent, createGenerationState, type GenerationState } from './generation-state';
-import { canRetryFailedTurn, syncGenerationEvent, type FailedTurnAttempt, type GenerationSyncContext } from './generation-sync';
+import {
+  canRetryFailedTurn,
+  createGenerationArbiter,
+  dispatchGenerationEvent,
+  syncGenerationEvent,
+  type FailedTurnAttempt,
+  type GenerationSyncContext,
+} from './generation-sync';
 
 const BASE_TIME = 1_000_000;
 
@@ -13,7 +20,7 @@ function makeMessage(role: ChatMessage['role'], text: string): ChatMessage {
 
 function createHarness(
   options: {
-    current?: boolean;
+    active?: boolean;
     supersedesGenerationId?: string;
     input?: string;
     base?: ConversationState;
@@ -59,7 +66,7 @@ function createHarness(
       saved.push(next);
     },
     refreshThreads: async () => undefined,
-    isCurrentConversation: () => options.current ?? true,
+    isActiveGeneration: () => options.active ?? true,
     ensureAssistant: () => undefined,
     streamFailed,
     onFailedAttempt: options.onFailedAttempt,
@@ -295,7 +302,7 @@ describe('generation sync: one-assistant-message invariant', () => {
   });
 
   it('ignores terminal outcomes for conversations the user already left', () => {
-    const harness = createHarness({ current: false });
+    const harness = createHarness({ active: false });
     runTurn(harness.context, [
       {
         type: 'failed',
@@ -338,5 +345,113 @@ describe('canRetryFailedTurn', () => {
 
   it('refuses retry when the failed turn had no input to re-run', () => {
     expect(canRetryFailedTurn('failed', { ...attempt, input: '   ' }, 'thread-1')).toBe(false);
+  });
+});
+
+describe('cross-generation arbitration', () => {
+  it('rejects late events from a superseded runner: conversation, error, retry, and persistence stay untouched', async () => {
+    // One shared application store, two independent turn runners.
+    const base: ConversationState = {
+      id: 'thread-1',
+      title: 'Arbitration',
+      createdAt: BASE_TIME,
+      updatedAt: BASE_TIME,
+      messages: [{ id: 'user-1', role: 'user', text: 'Hello.', createdAt: BASE_TIME, conversationId: 'thread-1' }],
+    };
+    let conversation = base;
+    let status: ProviderStatus = 'streaming';
+    let error: string | null = null;
+    const saved: ConversationState[] = [];
+    const attempts: FailedTurnAttempt[] = [];
+    const arbiter = createGenerationArbiter();
+
+    const makeContext = (generationId: string, assistantMessage: ChatMessage): GenerationSyncContext => ({
+      assistantMessage,
+      base,
+      input: 'Hello.',
+      model: 'gemini-3.8-flash',
+      wallStartedAt: BASE_TIME,
+      setConversation: (updater) => {
+        conversation = typeof updater === 'function' ? updater(conversation) : updater;
+      },
+      setStatus: (next) => {
+        status = next;
+      },
+      setError: (next) => {
+        error = next;
+      },
+      setStructuredError: () => undefined,
+      save: async (next) => {
+        saved.push(next);
+      },
+      refreshThreads: async () => undefined,
+      isActiveGeneration: () => arbiter.isActive(generationId),
+      ensureAssistant: () => undefined,
+      streamFailed: { value: false },
+      onFailedAttempt: (attempt) => {
+        attempts.push(attempt);
+      },
+    });
+    const contextA = makeContext('gen-A', makeMessage('assistant', ''));
+    const contextB = makeContext('gen-B', makeMessage('assistant', ''));
+
+    // Generation A starts and streams partial text.
+    arbiter.activate('gen-A');
+    let genA = createGenerationState('gen-A', { startedAt: 0 });
+    genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'old' }, receivedAt: 10 }, contextA);
+    expect(conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text)).toEqual(['old']);
+
+    // Generation B supersedes A: restores the pre-turn base, streams, completes.
+    arbiter.activate('gen-B');
+    conversation = base;
+    let genB = createGenerationState('gen-B', { startedAt: 0 });
+    genB = dispatchGenerationEvent(genB, { generationId: 'gen-B', event: { type: 'text-delta', index: 0, text: 'new' }, receivedAt: 20 }, contextB);
+    genB = dispatchGenerationEvent(genB, { generationId: 'gen-B', event: COMPLETED('i-B'), receivedAt: 30 }, contextB);
+    expect(genB.phase).toBe('completed');
+    await Promise.resolve();
+    expect(conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text)).toEqual(['new']);
+    expect(saved).toHaveLength(1);
+
+    // Late events from the obsolete runner change nothing: not the visible
+    // transcript, not status/error, not retry state, not persistence.
+    const snapshot = JSON.stringify({ conversation, status, error });
+    genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'STALE' }, receivedAt: 30 }, contextA);
+    expect(genA.transcript).toBe('oldSTALE');
+    genA = dispatchGenerationEvent(
+      genA,
+      {
+        generationId: 'gen-A',
+        event: {
+          type: 'failed',
+          error: { category: 'provider', code: 'GEMINI_PROVIDER', message: 'Stale failure.', retryable: true, cancelled: false, debug: {} },
+        },
+        receivedAt: 40,
+      },
+      contextA,
+    );
+    genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: COMPLETED('i-A-late'), receivedAt: 50 }, contextA);
+    genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: { type: 'cancelled' }, receivedAt: 60 }, contextA);
+    expect(genA.phase).toBe('failed');
+    await Promise.resolve();
+
+    expect(JSON.stringify({ conversation, status, error })).toBe(snapshot);
+    expect(conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text)).toEqual(['new']);
+    expect(saved).toHaveLength(1);
+    expect(attempts).toHaveLength(0);
+    expect(error).toBeNull();
+  });
+
+  it('skips application sync for events the reducer ignores (post-terminal)', () => {
+    const harness = createHarness();
+    let generation = createGenerationState('gen-1', { startedAt: 0 });
+    generation = dispatchGenerationEvent(generation, { generationId: 'gen-1', event: { type: 'text-delta', index: 0, text: 'Hi.' }, receivedAt: 10 }, harness.context);
+    generation = dispatchGenerationEvent(generation, { generationId: 'gen-1', event: COMPLETED('i-1'), receivedAt: 20 }, harness.context);
+    expect(generation.phase).toBe('completed');
+
+    // A late abort-induced cancelled must not revert the completed turn.
+    const before = JSON.stringify(harness.read().conversation);
+    const after = dispatchGenerationEvent(generation, { generationId: 'gen-1', event: { type: 'cancelled' }, receivedAt: 30 }, harness.context);
+    expect(after).toBe(generation);
+    expect(JSON.stringify(harness.read().conversation)).toBe(before);
   });
 });

@@ -2,6 +2,7 @@ import type { GoogleToolDescriptor } from './contracts';
 
 export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'calendar.listEvents', risk: 'read', capability: 'calendar.events.read', description: 'List calendar events with explicit filters and pagination.' },
+  { name: 'calendar.createEvent', risk: 'write', capability: 'calendar.events.write', description: 'Create a Calendar event from an explicit event resource.' },
   { name: 'tasks.listTaskLists', risk: 'read', capability: 'tasks.read', description: 'List task lists with pagination.' },
   { name: 'tasks.listTasks', risk: 'read', capability: 'tasks.read', description: 'List tasks with filtering and pagination.' },
   { name: 'tasks.getTask', risk: 'read', capability: 'tasks.read', description: 'Retrieve one task.' },

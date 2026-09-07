@@ -43,6 +43,26 @@ export class GoogleDocsService {
     return this.readJson(response);
   }
 
+  async inspectDocument(documentId: string): Promise<{ documentId: string; title: string; endIndex: number; blocks: readonly Record<string, unknown>[] }> {
+    const document = await this.getDocument(documentId);
+    return inspectGoogleDocument(document);
+  }
+
+  async insertText(documentId: string, index: number, text: string): Promise<unknown> {
+    return this.batchUpdate(documentId, [{ insertText: { location: { index }, text } }]);
+  }
+
+  async appendParagraph(documentId: string, text: string): Promise<unknown> {
+    const inspected = await this.inspectDocument(documentId);
+    const index = Math.max(1, inspected.endIndex - 1);
+    const content = text.endsWith('\n') ? text : `${text}\n`;
+    return this.insertText(documentId, index, content);
+  }
+
+  async replaceText(documentId: string, findText: string, replaceText: string, matchCase = false): Promise<unknown> {
+    return this.batchUpdate(documentId, [{ replaceAllText: { containsText: { text: findText, matchCase }, replaceText } }]);
+  }
+
   async createDocument(title: string): Promise<GoogleDocumentSummary> {
     const safeTitle = bounded(title, 'document title', MAX_TITLE_LENGTH);
     const access = await this.oauth.authorize('docs.write');
@@ -74,4 +94,49 @@ export class GoogleDocsService {
     if (!response.ok) throw new Error(`Google Docs request failed (${response.status}).`);
     return (await response.json()) as DocumentPayload;
   }
+}
+
+export function inspectGoogleDocument(document: DocumentPayload): { documentId: string; title: string; endIndex: number; blocks: readonly Record<string, unknown>[] } {
+  const content = document.body && typeof document.body === 'object' && !Array.isArray(document.body)
+    ? (document.body as { content?: unknown }).content
+    : undefined;
+  const blocks: Record<string, unknown>[] = [];
+  let endIndex = 1;
+  if (Array.isArray(content)) {
+    for (const raw of content) {
+      if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+      const item = raw as Record<string, unknown>;
+      const startIndex = typeof item.startIndex === 'number' ? item.startIndex : undefined;
+      const itemEnd = typeof item.endIndex === 'number' ? item.endIndex : undefined;
+      if (typeof itemEnd === 'number') endIndex = Math.max(endIndex, itemEnd);
+      if (item.paragraph && typeof item.paragraph === 'object' && !Array.isArray(item.paragraph)) {
+        const paragraph = item.paragraph as Record<string, unknown>;
+        const style = paragraph.paragraphStyle && typeof paragraph.paragraphStyle === 'object' && !Array.isArray(paragraph.paragraphStyle)
+          ? paragraph.paragraphStyle as Record<string, unknown>
+          : {};
+        const elements = Array.isArray(paragraph.elements) ? paragraph.elements : [];
+        const text = elements.map((element) => {
+          if (!element || typeof element !== 'object' || Array.isArray(element)) return '';
+          const textRun = (element as Record<string, unknown>).textRun;
+          if (!textRun || typeof textRun !== 'object' || Array.isArray(textRun)) return '';
+          return typeof (textRun as Record<string, unknown>).content === 'string' ? (textRun as Record<string, unknown>).content as string : '';
+        }).join('');
+        blocks.push({
+          kind: typeof style.namedStyleType === 'string' && String(style.namedStyleType).startsWith('HEADING') ? 'heading' : 'paragraph',
+          namedStyleType: typeof style.namedStyleType === 'string' ? style.namedStyleType : 'NORMAL_TEXT',
+          startIndex,
+          endIndex: itemEnd,
+          text: text.replace(/\n$/, ''),
+        });
+      } else if (item.table) {
+        blocks.push({ kind: 'table', startIndex, endIndex: itemEnd });
+      }
+    }
+  }
+  return {
+    documentId: document.documentId ?? '',
+    title: document.title ?? 'Untitled',
+    endIndex,
+    blocks,
+  };
 }

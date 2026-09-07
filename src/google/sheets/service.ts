@@ -39,7 +39,7 @@ export class GoogleSheetsService {
   async getSpreadsheet(spreadsheetIdValue: string): Promise<SpreadsheetResponse> {
     const access = await this.oauth.authorize('sheets.read');
     const id = encodeURIComponent(spreadsheetId(spreadsheetIdValue));
-    const fields = encodeURIComponent('spreadsheetId,properties(spreadsheetId,title,locale,timeZone)');
+    const fields = encodeURIComponent('spreadsheetId,properties(title,locale,timeZone),sheets(properties(sheetId,title,index,gridProperties(rowCount,columnCount)))');
     const response = await access.fetch(`${SHEETS_API}/${id}?fields=${fields}`);
     return this.readJson<SpreadsheetResponse>(response);
   }
@@ -92,6 +92,19 @@ export class GoogleSheetsService {
       ...(typeof payload.updates?.updatedRange === 'string' ? { range: payload.updates.updatedRange } : {}),
       values,
     };
+  }
+
+  async updateCell(spreadsheetIdValue: string, rangeValue: string, value: unknown): Promise<GoogleSheetValuesResult> {
+    return this.writeRange(spreadsheetIdValue, rangeValue, [[value]]);
+  }
+
+  async insertRows(spreadsheetIdValue: string, sheetId: number, startIndex: number, count: number): Promise<unknown> {
+    return this.batchUpdate(spreadsheetIdValue, [{
+      insertDimension: {
+        range: { sheetId, dimension: 'ROWS', startIndex, endIndex: startIndex + count },
+        inheritFromBefore: startIndex > 0,
+      },
+    }]);
   }
 
   async batchUpdate(spreadsheetIdValue: string, requests: readonly Record<string, unknown>[]): Promise<unknown> {

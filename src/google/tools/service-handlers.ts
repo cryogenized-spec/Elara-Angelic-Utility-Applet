@@ -74,7 +74,16 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
 
   'calendar.createEvent': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return calendar.createEvent({ calendarId: stringArg(args, 'calendarId', false), event: recordArg(args, 'event')! });
+    const attendees = stringArrayArg(args, 'attendees');
+    return calendar.createSemanticEvent({
+      calendarId: stringArg(args, 'calendarId', false),
+      summary: stringArg(args, 'summary')!,
+      start: stringArg(args, 'start')!,
+      end: stringArg(args, 'end')!,
+      location: stringArg(args, 'location', false),
+      description: stringArg(args, 'description', false),
+      ...(attendees ? { attendees } : {}),
+    });
   },
 
   'tasks.createTask': async ({ arguments: raw }) => {
@@ -96,7 +105,20 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   'tasks.clearCompleted': async ({ arguments: raw }) => tasks.clearCompleted(stringArg(objectArgs(raw), 'taskListId')!),
 
   'docs.getDocument': async ({ arguments: raw }) => docs.getDocument(stringArg(objectArgs(raw), 'documentId')!),
+  'docs.inspectDocument': async ({ arguments: raw }) => docs.inspectDocument(stringArg(objectArgs(raw), 'documentId')!),
   'docs.createDocument': async ({ arguments: raw }) => docs.createDocument(stringArg(objectArgs(raw), 'title')!),
+  'docs.insertText': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return docs.insertText(stringArg(args, 'documentId')!, optionalNumber(args, 'index') ?? 1, stringArg(args, 'text')!);
+  },
+  'docs.appendParagraph': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return docs.appendParagraph(stringArg(args, 'documentId')!, stringArg(args, 'text')!);
+  },
+  'docs.replaceText': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return docs.replaceText(stringArg(args, 'documentId')!, stringArg(args, 'findText')!, stringArg(args, 'replaceText')!, optionalBoolean(args, 'matchCase') ?? false);
+  },
   'docs.batchUpdate': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
     return docs.batchUpdate(stringArg(args, 'documentId')!, recordArrayArg(args, 'requests'), recordArg(args, 'writeControl', false));
@@ -135,11 +157,24 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     return gmail.updateLabel(stringArg(args, 'labelId')!, recordArg(args, 'label')!);
   },
   'gmail.deleteLabel': async ({ arguments: raw }) => gmail.deleteLabel(stringArg(objectArgs(raw), 'labelId')!),
-  'gmail.sendMessage': async ({ arguments: raw }) => gmail.sendMessage(stringArg(objectArgs(raw), 'rawRfc822')!),
+  'gmail.sendMessage': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return gmail.sendComposedMessage({
+      to: stringArrayArg(args, 'to') ?? [],
+      cc: stringArrayArg(args, 'cc'),
+      subject: stringArg(args, 'subject')!,
+      body: stringArg(args, 'body')!,
+      threadId: stringArg(args, 'threadId', false),
+    });
+  },
 
   'drive.searchFiles': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
     return drive.listFiles({ query: stringArg(args, 'query', false), pageToken: stringArg(args, 'pageToken', false), pageSize: optionalNumber(args, 'pageSize') });
+  },
+  'drive.searchLibrary': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return drive.searchLibrary({ query: stringArg(args, 'query', false), pageToken: stringArg(args, 'pageToken', false), pageSize: optionalNumber(args, 'pageSize') });
   },
   'drive.getFile': async ({ arguments: raw }) => drive.getFile(stringArg(objectArgs(raw), 'fileId')!),
   'drive.downloadFile': async ({ arguments: raw }) => {

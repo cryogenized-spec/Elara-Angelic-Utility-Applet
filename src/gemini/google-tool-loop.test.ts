@@ -17,7 +17,7 @@ async function* events(...items: unknown[]) {
 
 const oauth = {
   authorize: async (capability: string) => ({ capability: capability as never, fetch: async () => new Response('{}', { status: 200 }) }),
-  getStatus: async () => ({ state: 'connected' as const, grantedCapabilities: ['calendar.events.read' as const, 'calendar.events.write' as const, 'tasks.write' as const] }),
+  getStatus: async () => ({ state: 'connected' as const, grantedCapabilities: ['calendar.events.read' as const, 'calendar.events.write' as const, 'tasks.write' as const], enabledCapabilities: ['calendar.events.read' as const, 'calendar.events.write' as const, 'tasks.write' as const], grantedProviderScopes: [] }),
   disconnect: async () => undefined,
 };
 
@@ -127,7 +127,7 @@ describe('streamGoogleToolLoop', () => {
       .mockResolvedValueOnce(false);
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-batch-1', model: 'gemini-3.8-flash' },
-      { type: 'tool-call', interactionId: 'interaction-batch-1', index: 0, callId: 'call-event-1', name: 'calendar.createEvent', arguments: { calendarId: 'primary', event: { summary: 'Design review', start: { dateTime: '2026-09-08T10:00:00Z' }, end: { dateTime: '2026-09-08T11:00:00Z' } } } },
+      { type: 'tool-call', interactionId: 'interaction-batch-1', index: 0, callId: 'call-event-1', name: 'calendar.createEvent', arguments: { calendarId: 'primary', summary: 'Design review', start: '2026-09-08T10:00:00Z', end: '2026-09-08T11:00:00Z' } },
       { type: 'tool-call', interactionId: 'interaction-batch-1', index: 1, callId: 'call-task-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', task: { title: 'Send recap' } } },
     ));
     streamToolResult.mockReturnValueOnce(events({ type: 'completed', interactionId: 'interaction-batch-2', status: 'completed', durationMs: 12 }));

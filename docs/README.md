@@ -29,6 +29,7 @@ This directory is the authoritative documentation tree for Elara.
 
 ## Google Workspace architecture
 
+- [`GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md`](./GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md) — frozen capability, risk, Drive composition, and tool-visibility contract.
 - [`GOOGLE_OAUTH_ARCHITECTURE.md`](./GOOGLE_OAUTH_ARCHITECTURE.md) — single server-side OAuth authority.
 - [`GOOGLE_OAUTH_WORKER_IMPLEMENTATION.md`](./GOOGLE_OAUTH_WORKER_IMPLEMENTATION.md) — protected Worker source, session storage, token encryption, proxy boundaries, and production configuration.
 - [`INCREMENTAL_AUTHORIZATION.md`](./INCREMENTAL_AUTHORIZATION.md) — demand-driven incremental consent.

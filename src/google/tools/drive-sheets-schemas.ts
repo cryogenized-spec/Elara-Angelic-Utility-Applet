@@ -13,6 +13,11 @@ export const driveSheetsToolArgumentSchemas = {
     pageToken: pageTokenSchema.optional(),
     pageSize: z.number().int().min(1).max(100).optional(),
   }).strict(),
+  'drive.searchLibrary': z.object({
+    query: z.string().trim().max(2000).optional(),
+    pageToken: pageTokenSchema.optional(),
+    pageSize: z.number().int().min(1).max(100).optional(),
+  }).strict(),
   'drive.getFile': z.object({ fileId: fileIdSchema }).strict(),
   'drive.downloadFile': z.object({ fileId: fileIdSchema }).strict(),
   'drive.createFile': z.object({
@@ -38,6 +43,17 @@ export const driveSheetsToolArgumentSchemas = {
   'sheets.readRange': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema }).strict(),
   'sheets.writeRange': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema, values: valuesSchema }).strict(),
   'sheets.appendRows': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema, values: valuesSchema }).strict(),
+  'sheets.updateCell': z.object({
+    spreadsheetId: fileIdSchema,
+    range: a1RangeSchema,
+    value: z.unknown(),
+  }).strict(),
+  'sheets.insertRows': z.object({
+    spreadsheetId: fileIdSchema,
+    sheetId: z.number().int().min(0),
+    startIndex: z.number().int().min(0).max(100_000),
+    count: z.number().int().min(1).max(100),
+  }).strict(),
   'sheets.batchUpdate': z.object({ spreadsheetId: fileIdSchema, requests: z.array(updateRequestSchema).min(1).max(100) }).strict(),
 } as const;
 

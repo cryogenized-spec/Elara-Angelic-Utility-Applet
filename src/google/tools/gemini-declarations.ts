@@ -8,7 +8,7 @@ const arrayProperty = (description: string, items: Record<string, unknown> = { t
 
 const toolProperties: Record<string, Record<string, unknown>> = {
   'calendar.listEvents': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), timeMin: stringProperty('Optional RFC 3339 lower time bound.'), timeMax: stringProperty('Optional RFC 3339 upper time bound.') },
-  'calendar.createEvent': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), event: objectProperty('Explicit Google Calendar event resource to create.') },
+  'calendar.createEvent': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), summary: stringProperty('Event title.'), start: stringProperty('Start as RFC 3339 date-time or all-day date.'), end: stringProperty('End as RFC 3339 date-time or all-day date.'), location: stringProperty('Optional location.'), description: stringProperty('Optional description.'), attendees: arrayProperty('Optional attendee email addresses.') },
   'tasks.listTaskLists': { pageToken: stringProperty('Optional pagination token.') },
   'tasks.listTasks': { taskListId: stringProperty('Task list id.'), pageToken: stringProperty('Optional pagination token.'), showCompleted: { type: 'boolean' }, showDeleted: { type: 'boolean' }, showHidden: { type: 'boolean' }, dueMin: stringProperty('Optional RFC 3339 lower due-time bound.'), dueMax: stringProperty('Optional RFC 3339 upper due-time bound.'), updatedMin: stringProperty('Optional RFC 3339 lower updated-time bound.'), completedMin: stringProperty('Optional RFC 3339 lower completed-time bound.'), completedMax: stringProperty('Optional RFC 3339 upper completed-time bound.'), maxResults: { type: 'integer', minimum: 1, maximum: 100 } },
   'tasks.getTask': { taskListId: stringProperty('Task list id.'), taskId: stringProperty('Task id.') },
@@ -18,7 +18,11 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'tasks.deleteTask': { taskListId: stringProperty('Task list id.'), taskId: stringProperty('Task id.') },
   'tasks.clearCompleted': { taskListId: stringProperty('Task list id.') },
   'docs.getDocument': { documentId: stringProperty('Google Docs document id.') },
+  'docs.inspectDocument': { documentId: stringProperty('Google Docs document id.') },
   'docs.createDocument': { title: stringProperty('New document title.') },
+  'docs.insertText': { documentId: stringProperty('Google Docs document id.'), index: { type: 'integer', minimum: 1, description: 'Insert index from a prior inspect.' }, text: stringProperty('Text to insert.') },
+  'docs.appendParagraph': { documentId: stringProperty('Google Docs document id.'), text: stringProperty('Paragraph text to append.') },
+  'docs.replaceText': { documentId: stringProperty('Google Docs document id.'), findText: stringProperty('Text to find.'), replaceText: stringProperty('Replacement text.'), matchCase: { type: 'boolean' } },
   'docs.batchUpdate': { documentId: stringProperty('Google Docs document id.'), requests: arrayProperty('Explicit Google Docs batch update request objects.', objectProperty('A Google Docs batch update request.')), writeControl: objectProperty('Optional Google Docs write control.') },
   'chat.listMessages': { spaceName: stringProperty('Google Chat space resource name.'), pageSize: { type: 'integer', minimum: 1, maximum: 100 }, pageToken: stringProperty('Optional pagination token.'), filter: stringProperty('Optional Google Chat message filter.') },
   'chat.getMessage': { messageName: stringProperty('Google Chat message resource name.') },
@@ -26,7 +30,7 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'chat.updateMessage': { messageName: stringProperty('Google Chat message resource name.'), message: objectProperty('Message fields to update.'), updateMask: stringProperty('Field mask identifying updated message fields.') },
   'chat.deleteMessage': { messageName: stringProperty('Google Chat message resource name.') },
   'gmail.listMessages': { query: stringProperty('Optional Gmail search query.'), pageToken: stringProperty('Optional pagination token.'), maxResults: { type: 'integer', minimum: 1, maximum: 100 }, includeSpamTrash: { type: 'boolean' } },
-  'gmail.getMessage': { messageId: stringProperty('Gmail message id.'), format: { type: 'string', enum: ['minimal', 'full', 'raw', 'metadata'] }, metadataHeaders: arrayProperty('Optional metadata headers to include.') },
+  'gmail.getMessage': { messageId: stringProperty('Gmail message id.'), format: { type: 'string', enum: ['minimal', 'full', 'metadata'] }, metadataHeaders: arrayProperty('Optional metadata headers to include.') },
   'gmail.listThreads': { query: stringProperty('Optional Gmail search query.'), pageToken: stringProperty('Optional pagination token.'), maxResults: { type: 'integer', minimum: 1, maximum: 100 }, includeSpamTrash: { type: 'boolean' } },
   'gmail.getThread': { threadId: stringProperty('Gmail thread id.'), format: { type: 'string', enum: ['minimal', 'full', 'metadata'] }, metadataHeaders: arrayProperty('Optional metadata headers to include.') },
   'gmail.listLabels': {},
@@ -40,8 +44,9 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'gmail.createLabel': { label: objectProperty('Gmail label resource.') },
   'gmail.updateLabel': { labelId: stringProperty('Gmail label id.'), label: objectProperty('Updated Gmail label resource.') },
   'gmail.deleteLabel': { labelId: stringProperty('Gmail label id.') },
-  'gmail.sendMessage': { rawRfc822: stringProperty('RFC 822 message content.') },
+  'gmail.sendMessage': { to: arrayProperty('Recipient email addresses.'), cc: arrayProperty('Optional CC email addresses.'), subject: stringProperty('Email subject.'), body: stringProperty('Plain-text email body.'), threadId: stringProperty('Optional Gmail thread id for replies.') },
   'drive.searchFiles': { query: stringProperty('Optional Drive query expression.'), pageToken: stringProperty('Optional pagination token.'), pageSize: { type: 'integer', minimum: 1, maximum: 100 } },
+  'drive.searchLibrary': { query: stringProperty('Optional Drive query expression for the broader library.'), pageToken: stringProperty('Optional pagination token.'), pageSize: { type: 'integer', minimum: 1, maximum: 100 } },
   'drive.getFile': { fileId: stringProperty('Drive file id.') },
   'drive.downloadFile': { fileId: stringProperty('Drive file id.') },
   'drive.createFile': { name: stringProperty('New file name.'), mimeType: stringProperty('Optional MIME type.'), parents: arrayProperty('Optional parent folder ids.') },
@@ -51,6 +56,8 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'sheets.readRange': { spreadsheetId: stringProperty('Spreadsheet id.'), range: stringProperty('A1 range to read.') },
   'sheets.writeRange': { spreadsheetId: stringProperty('Spreadsheet id.'), range: stringProperty('A1 range to write.'), values: arrayProperty('Rows of cell values.', { type: 'array' }) },
   'sheets.appendRows': { spreadsheetId: stringProperty('Spreadsheet id.'), range: stringProperty('A1 range used for append.'), values: arrayProperty('Rows of cell values.', { type: 'array' }) },
+  'sheets.updateCell': { spreadsheetId: stringProperty('Spreadsheet id.'), range: stringProperty('A1 cell to write.'), value: { description: 'Cell value to write.' } },
+  'sheets.insertRows': { spreadsheetId: stringProperty('Spreadsheet id.'), sheetId: { type: 'integer', minimum: 0, description: 'Numeric sheet id from getSpreadsheet.' }, startIndex: { type: 'integer', minimum: 0 }, count: { type: 'integer', minimum: 1, maximum: 100 } },
   'sheets.batchUpdate': { spreadsheetId: stringProperty('Spreadsheet id.'), requests: arrayProperty('Explicit Sheets batch update requests.', objectProperty('A Sheets batch update request.')) },
   'roleplay_setting.list': { parentId: stringProperty('Optional parent entity id.') },
   'roleplay_setting.inspect': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.') },
@@ -61,17 +68,19 @@ const toolProperties: Record<string, Record<string, unknown>> = {
 };
 
 const requiredByTool: Record<string, readonly string[]> = {
-  'calendar.createEvent': ['event'],
+  'calendar.createEvent': ['summary', 'start', 'end'],
   'tasks.listTasks': ['taskListId'], 'tasks.getTask': ['taskListId', 'taskId'], 'tasks.createTask': ['taskListId', 'task'], 'tasks.updateTask': ['taskListId', 'taskId', 'task'], 'tasks.moveTask': ['taskListId', 'taskId'], 'tasks.deleteTask': ['taskListId', 'taskId'], 'tasks.clearCompleted': ['taskListId'],
-  'docs.getDocument': ['documentId'], 'docs.createDocument': ['title'], 'docs.batchUpdate': ['documentId', 'requests'],
+  'docs.getDocument': ['documentId'], 'docs.inspectDocument': ['documentId'], 'docs.createDocument': ['title'], 'docs.insertText': ['documentId', 'index', 'text'], 'docs.appendParagraph': ['documentId', 'text'], 'docs.replaceText': ['documentId', 'findText', 'replaceText'], 'docs.batchUpdate': ['documentId', 'requests'],
   'chat.listMessages': ['spaceName'], 'chat.getMessage': ['messageName'], 'chat.createMessage': ['spaceName', 'message'], 'chat.updateMessage': ['messageName', 'message', 'updateMask'], 'chat.deleteMessage': ['messageName'],
-  'gmail.getMessage': ['messageId'], 'gmail.getThread': ['threadId'], 'gmail.getLabel': ['labelId'], 'gmail.modifyMessage': ['messageId'], 'gmail.modifyThread': ['threadId'], 'gmail.trashMessage': ['messageId'], 'gmail.untrashMessage': ['messageId'], 'gmail.trashThread': ['threadId'], 'gmail.untrashThread': ['threadId'], 'gmail.createLabel': ['label'], 'gmail.updateLabel': ['labelId', 'label'], 'gmail.deleteLabel': ['labelId'], 'gmail.sendMessage': ['rawRfc822'],
+  'gmail.getMessage': ['messageId'], 'gmail.getThread': ['threadId'], 'gmail.getLabel': ['labelId'], 'gmail.modifyMessage': ['messageId'], 'gmail.modifyThread': ['threadId'], 'gmail.trashMessage': ['messageId'], 'gmail.untrashMessage': ['messageId'], 'gmail.trashThread': ['threadId'], 'gmail.untrashThread': ['threadId'], 'gmail.createLabel': ['label'], 'gmail.updateLabel': ['labelId', 'label'], 'gmail.deleteLabel': ['labelId'], 'gmail.sendMessage': ['to', 'subject', 'body'],
   'drive.getFile': ['fileId'], 'drive.downloadFile': ['fileId'], 'drive.createFile': ['name'], 'drive.updateFile': ['fileId', 'patch'], 'drive.moveFile': ['fileId', 'parentId'],
-  'sheets.getSpreadsheet': ['spreadsheetId'], 'sheets.readRange': ['spreadsheetId', 'range'], 'sheets.writeRange': ['spreadsheetId', 'range', 'values'], 'sheets.appendRows': ['spreadsheetId', 'range', 'values'], 'sheets.batchUpdate': ['spreadsheetId', 'requests'],
+  'sheets.getSpreadsheet': ['spreadsheetId'], 'sheets.readRange': ['spreadsheetId', 'range'], 'sheets.writeRange': ['spreadsheetId', 'range', 'values'], 'sheets.appendRows': ['spreadsheetId', 'range', 'values'], 'sheets.updateCell': ['spreadsheetId', 'range'], 'sheets.insertRows': ['spreadsheetId', 'sheetId', 'startIndex', 'count'], 'sheets.batchUpdate': ['spreadsheetId', 'requests'],
   'roleplay_setting.create': ['type', 'name'],
 };
 
-export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaration[] = googleToolRegistry.map((descriptor) => {
+const geminiVisibleTools = googleToolRegistry.filter((descriptor) => descriptor.exposure === 'gemini');
+
+export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaration[] = geminiVisibleTools.map((descriptor) => {
   const properties = toolProperties[descriptor.name] ?? {};
   const required = requiredByTool[descriptor.name];
   return {
@@ -88,5 +97,5 @@ export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaratio
 });
 
 export function googleGeminiFunctionNames(): readonly string[] {
-  return googleToolRegistry.map((tool) => tool.name);
+  return geminiVisibleTools.map((tool) => tool.name);
 }

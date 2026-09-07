@@ -20,7 +20,7 @@ function makeOAuth(calls: string[]): GoogleOAuthAuthority {
         return new Response(JSON.stringify({ updatedData: { range: 'Sheet1!A1:B2', majorDimension: 'ROWS', values: [['a', 'b'], ['c', 'd']] } }), { status: 200 });
       },
     }),
-    getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+    getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
     disconnect: async () => undefined,
   };
 }

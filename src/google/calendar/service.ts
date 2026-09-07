@@ -18,6 +18,20 @@ export interface CalendarEventCreateInput {
   readonly event: Readonly<Record<string, unknown>>;
 }
 
+export interface CalendarEventSemanticInput {
+  readonly calendarId?: string;
+  readonly summary: string;
+  readonly start: string;
+  readonly end: string;
+  readonly location?: string;
+  readonly description?: string;
+  readonly attendees?: readonly string[];
+}
+
+function eventDateTime(value: string): Record<string, string> {
+  return value.includes('T') ? { dateTime: value } : { date: value };
+}
+
 interface CalendarEventsResponse {
   items?: Array<{
     id?: string;
@@ -69,6 +83,18 @@ export class GoogleCalendarService {
         start: event.start?.dateTime ?? event.start?.date ?? '',
         end: event.end?.dateTime ?? event.end?.date ?? '',
       }));
+  }
+
+  async createSemanticEvent(input: CalendarEventSemanticInput): Promise<unknown> {
+    const event: Record<string, unknown> = {
+      summary: input.summary,
+      start: eventDateTime(input.start),
+      end: eventDateTime(input.end),
+    };
+    if (input.location) event.location = input.location;
+    if (input.description) event.description = input.description;
+    if (input.attendees?.length) event.attendees = input.attendees.map((email) => ({ email }));
+    return this.createEvent({ calendarId: input.calendarId, event });
   }
 
   async createEvent({ calendarId = 'primary', event }: CalendarEventCreateInput): Promise<unknown> {

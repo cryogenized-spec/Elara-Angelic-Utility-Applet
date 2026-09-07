@@ -13,7 +13,7 @@ describe('GoogleDocsService', () => {
           return new Response(JSON.stringify({ documentId: 'doc-1', title: 'Plan', revisionId: 'rev-1' }), { status: 200 });
         },
       }),
-      getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
       disconnect: async () => undefined,
     };
 
@@ -30,7 +30,7 @@ describe('GoogleDocsService', () => {
         authorizeCalls += 1;
         return { capability, fetch: async () => new Response('{}', { status: 200 }) };
       },
-      getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
       disconnect: async () => undefined,
     };
     const service = new GoogleDocsService(oauth);
@@ -48,7 +48,7 @@ describe('GoogleDocsService', () => {
         authorizeCalls += 1;
         return { capability, fetch: async () => new Response('{}', { status: 200 }) };
       },
-      getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
       disconnect: async () => undefined,
     };
     const service = new GoogleDocsService(oauth);

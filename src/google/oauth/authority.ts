@@ -103,6 +103,10 @@ function tokenStillValid(): boolean {
   return Boolean(session && session.expiresAt > Date.now() + ACCESS_TOKEN_REFRESH_SKEW_MS);
 }
 
+function currentAccessToken(): string | undefined {
+  return session?.accessToken;
+}
+
 async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'): Promise<void> {
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
@@ -159,7 +163,7 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
     throw new Error('Google authorization has expired or was revoked. Reauthorize this Google capability in Settings.');
   }
 
-  const refreshedToken = session?.accessToken;
+  const refreshedToken = currentAccessToken();
   if (!refreshedToken) throw new Error('Google authorization did not return a refreshed access token.');
   response = await fetch(new Request(target, requestOptions(refreshedToken)));
   if (response.status === 401) {

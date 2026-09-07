@@ -100,9 +100,7 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
 }
 
 async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = false): Promise<string> {
-  if (!hasCapability(capability) || !tokenStillValid()) {
-    await acquireToken(capability, allowInteraction ? '' : 'none');
-  }
+  if (!hasCapability(capability) || !tokenStillValid()) await acquireToken(capability, allowInteraction ? '' : 'none');
   if (!tokenStillValid() || !session) throw new Error('Google authorization did not return a usable access token.');
   return session.accessToken;
 }
@@ -111,11 +109,15 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
   const target = assertGoogleApiTarget(input);
   let token = await ensureToken(capability, false);
   const request = new Request(target, init);
-  const headers = new Headers(request.headers);
-  headers.set('Authorization', `Bearer ${token}`);
-  headers.set('Accept', headers.get('Accept') ?? 'application/json');
+  const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
+  const requestOptions = (accessToken: string): RequestInit => {
+    const headers = new Headers(request.headers);
+    headers.set('Authorization', `Bearer ${accessToken}`);
+    headers.set('Accept', headers.get('Accept') ?? 'application/json');
+    return { method: request.method, headers, body };
+  };
 
-  let response = await fetch(new Request(target, { method: request.method, headers, body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer() }));
+  let response = await fetch(new Request(target, requestOptions(token)));
   if (response.status !== 401) return response;
 
   session = null;
@@ -126,10 +128,7 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
     throw new Error('Google authorization has expired or was revoked. Reauthorize this Google capability in Settings.');
   }
 
-  const retryHeaders = new Headers(request.headers);
-  retryHeaders.set('Authorization', `Bearer ${token}`);
-  retryHeaders.set('Accept', retryHeaders.get('Accept') ?? 'application/json');
-  response = await fetch(new Request(target, { method: request.method, headers: retryHeaders, body: request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer() }));
+  response = await fetch(new Request(target, requestOptions(token)));
   if (response.status === 401) throw new Error('Google rejected the refreshed authorization. Reauthorize this capability in Settings.');
   return response;
 }
@@ -156,6 +155,7 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
     if (token) await revokeGoogleAccessToken(token).catch(() => undefined);
     session = null;
     stored = { version: 2, grantedCapabilities: [], updatedAt: new Date().toISOString() };
+    loaded = true;
     if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
   },
 };

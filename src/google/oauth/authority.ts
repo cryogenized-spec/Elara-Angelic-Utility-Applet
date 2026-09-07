@@ -13,7 +13,6 @@ const GOOGLE_API_HOSTS = new Set([
 ]);
 const STORAGE_KEY = 'elara.google.authorization.v2';
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
-const CLIENT_ID = (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 
 type StoredAuthorization = {
   version: 2;
@@ -31,6 +30,10 @@ type AccessSession = {
 let loaded = false;
 let stored: StoredAuthorization = { version: 2, grantedCapabilities: [], updatedAt: new Date(0).toISOString() };
 let session: AccessSession | null = null;
+
+function configuredClientId(): string {
+  return (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
+}
 
 function loadStored(): StoredAuthorization {
   if (loaded) return stored;
@@ -62,8 +65,9 @@ function saveStored(): void {
 }
 
 function ensureClientId(): string {
-  if (!CLIENT_ID) throw new Error('Google Workspace is not configured: VITE_GOOGLE_CLIENT_ID is missing.');
-  return CLIENT_ID;
+  const clientId = configuredClientId();
+  if (!clientId) throw new Error('Google Workspace is not configured: VITE_GOOGLE_CLIENT_ID is missing.');
+  return clientId;
 }
 
 function hasCapability(capability: GoogleCapabilityKey): boolean {

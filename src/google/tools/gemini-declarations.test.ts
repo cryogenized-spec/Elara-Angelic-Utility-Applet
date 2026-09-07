@@ -8,6 +8,7 @@ describe('Gemini capability declarations', () => {
     expect(googleGeminiFunctionNames()).toContain('tasks.createTask');
     expect(googleGeminiFunctionNames()).toContain('gmail.sendMessage');
     expect(googleGeminiFunctionNames()).toContain('sheets.writeRange');
+    expect(googleGeminiFunctionNames()).toContain('calendar.createEvent');
   });
 
   it('derives model-visible descriptions from the application registry', () => {
@@ -19,6 +20,11 @@ describe('Gemini capability declarations', () => {
     const createTask = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'tasks.createTask');
     expect(createTask?.parameters.required).toEqual(['taskListId', 'task']);
     expect(createTask?.parameters.properties).toHaveProperty('task');
+
+    const createEvent = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.createEvent');
+    expect(createEvent?.parameters.required).toEqual(['event']);
+    expect(createEvent?.parameters.properties).toHaveProperty('calendarId');
+    expect(createEvent?.parameters.properties).toHaveProperty('event');
 
     const sendMail = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'gmail.sendMessage');
     expect(sendMail?.parameters.required).toEqual(['rawRfc822']);

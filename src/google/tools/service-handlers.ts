@@ -36,8 +36,9 @@ function optionalNumber(args: Record<string, unknown>, key: string): number | un
   if (typeof value !== 'number') throw new Error(`Google tool argument ${key} must be a number.`);
   return value;
 }
-function recordArg(args: Record<string, unknown>, key: string): Record<string, unknown> {
+function recordArg(args: Record<string, unknown>, key: string, required = true): Record<string, unknown> | undefined {
   const value = args[key];
+  if (value === undefined && !required) return undefined;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`Google tool argument ${key} must be an object.`);
   return { ...(value as Record<string, unknown>) };
 }
@@ -71,11 +72,11 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
 
   'tasks.createTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return tasks.createTask(stringArg(args, 'taskListId')!, recordArg(args, 'task'), stringArg(args, 'parent', false), stringArg(args, 'previous', false));
+    return tasks.createTask(stringArg(args, 'taskListId')!, recordArg(args, 'task')!, stringArg(args, 'parent', false), stringArg(args, 'previous', false));
   },
   'tasks.updateTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return tasks.updateTask(stringArg(args, 'taskListId')!, stringArg(args, 'taskId')!, recordArg(args, 'task'));
+    return tasks.updateTask(stringArg(args, 'taskListId')!, stringArg(args, 'taskId')!, recordArg(args, 'task')!);
   },
   'tasks.moveTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
@@ -91,7 +92,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   'docs.createDocument': async ({ arguments: raw }) => docs.createDocument(stringArg(objectArgs(raw), 'title')!),
   'docs.batchUpdate': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return docs.batchUpdate(stringArg(args, 'documentId')!, recordArrayArg(args, 'requests'), recordArg(args, 'writeControl'));
+    return docs.batchUpdate(stringArg(args, 'documentId')!, recordArrayArg(args, 'requests'), recordArg(args, 'writeControl', false));
   },
 
   'chat.listMessages': async ({ arguments: raw }) => {
@@ -101,11 +102,11 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   'chat.getMessage': async ({ arguments: raw }) => chat.getMessage(stringArg(objectArgs(raw), 'messageName')!),
   'chat.createMessage': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return chat.createMessage(stringArg(args, 'spaceName')!, recordArg(args, 'message'), stringArg(args, 'requestId', false));
+    return chat.createMessage(stringArg(args, 'spaceName')!, recordArg(args, 'message')!, stringArg(args, 'requestId', false));
   },
   'chat.updateMessage': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return chat.updateMessage(stringArg(args, 'messageName')!, recordArg(args, 'message'), stringArg(args, 'updateMask')!);
+    return chat.updateMessage(stringArg(args, 'messageName')!, recordArg(args, 'message')!, stringArg(args, 'updateMask')!);
   },
   'chat.deleteMessage': async ({ arguments: raw }) => chat.deleteMessage(stringArg(objectArgs(raw), 'messageName')!),
 
@@ -121,10 +122,10 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   'gmail.untrashMessage': async ({ arguments: raw }) => gmail.untrashMessage(stringArg(objectArgs(raw), 'messageId')!),
   'gmail.trashThread': async ({ arguments: raw }) => gmail.trashThread(stringArg(objectArgs(raw), 'threadId')!),
   'gmail.untrashThread': async ({ arguments: raw }) => gmail.untrashThread(stringArg(objectArgs(raw), 'threadId')!),
-  'gmail.createLabel': async ({ arguments: raw }) => gmail.createLabel(recordArg(objectArgs(raw), 'label')),
+  'gmail.createLabel': async ({ arguments: raw }) => gmail.createLabel(recordArg(objectArgs(raw), 'label')!),
   'gmail.updateLabel': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return gmail.updateLabel(stringArg(args, 'labelId')!, recordArg(args, 'label'));
+    return gmail.updateLabel(stringArg(args, 'labelId')!, recordArg(args, 'label')!);
   },
   'gmail.deleteLabel': async ({ arguments: raw }) => gmail.deleteLabel(stringArg(objectArgs(raw), 'labelId')!),
   'gmail.sendMessage': async ({ arguments: raw }) => gmail.sendMessage(stringArg(objectArgs(raw), 'rawRfc822')!),
@@ -142,15 +143,20 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   'drive.createFile': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
     const parents = stringArrayArg(args, 'parents');
-    return drive.createFile({ name: stringArg(args, 'name')!, ...(stringArg(args, 'mimeType', false) ? { mimeType: stringArg(args, 'mimeType', false) } : {}), ...(parents ? { parents } : {}) });
+    const mimeType = stringArg(args, 'mimeType', false);
+    return drive.createFile({ name: stringArg(args, 'name')!, ...(mimeType !== undefined ? { mimeType } : {}), ...(parents ? { parents } : {}) });
   },
   'drive.updateFile': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
+    const name = stringArg(args, 'name', false);
+    const description = stringArg(args, 'description', false);
+    const starred = optionalBoolean(args, 'starred');
+    const trashed = optionalBoolean(args, 'trashed');
     return drive.updateFile(stringArg(args, 'fileId')!, {
-      ...(stringArg(args, 'name', false) !== undefined ? { name: stringArg(args, 'name', false) } : {}),
-      ...(stringArg(args, 'description', false) !== undefined ? { description: stringArg(args, 'description', false) } : {}),
-      ...(optionalBoolean(args, 'starred') !== undefined ? { starred: optionalBoolean(args, 'starred') } : {}),
-      ...(optionalBoolean(args, 'trashed') !== undefined ? { trashed: optionalBoolean(args, 'trashed') } : {}),
+      ...(name !== undefined ? { name } : {}),
+      ...(description !== undefined ? { description } : {}),
+      ...(starred !== undefined ? { starred } : {}),
+      ...(trashed !== undefined ? { trashed } : {}),
     });
   },
   'drive.moveFile': async ({ arguments: raw }) => {

@@ -1,22 +1,23 @@
 import { expect, test } from '@playwright/test';
 
+const GOOGLE_STORAGE_KEY = 'elara.google.authorization.v2';
+
+async function seedGoogleAuthorization(page: import('@playwright/test').Page, capabilities: string[], email = 'test@example.com'): Promise<void> {
+  await page.addInitScript(({ key, value }) => {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  }, {
+    key: GOOGLE_STORAGE_KEY,
+    value: { version: 2, grantedCapabilities: capabilities, account: { email }, updatedAt: new Date().toISOString() },
+  });
+}
+
 async function openSettings(page: import('@playwright/test').Page): Promise<void> {
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
 }
 
 test('Google settings render independent Workspace authorization states', async ({ page }) => {
-  await page.route('**/api/google/oauth/status', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        state: 'partially-authorized',
-        grantedCapabilities: ['calendar.events.read', 'tasks.read', 'drive.files.read'],
-        account: { email: 'test@example.com' },
-      }),
-    });
-  });
+  await seedGoogleAuthorization(page, ['calendar.events.read', 'tasks.read', 'drive.files.read']);
 
   await page.goto('/');
   await openSettings(page);
@@ -38,25 +39,12 @@ test('Google settings render independent Workspace authorization states', async 
 });
 
 test('Google settings can disconnect and refresh normalized status', async ({ page }) => {
-  let disconnected = false;
-  await page.route('**/api/google/oauth/status', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify(disconnected
-        ? { state: 'disconnected', grantedCapabilities: [] }
-        : { state: 'connected', grantedCapabilities: ['calendar.events.read'], account: { email: 'test@example.com' } }),
-    });
-  });
-  await page.route('**/api/google/oauth/disconnect', async (route) => {
-    disconnected = true;
-    await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ disconnected: true }) });
-  });
+  await seedGoogleAuthorization(page, ['calendar.events.read']);
 
   await page.goto('/');
   await openSettings(page);
   await page.getByRole('button', { name: 'Google' }).click();
-  await expect(page.getByText('Connected · test@example.com')).toBeVisible();
+  await expect(page.getByText('Partially authorized · test@example.com')).toBeVisible();
 
   await page.getByRole('button', { name: 'Disconnect Google' }).click();
   await expect(page.getByText('Not connected')).toBeVisible();

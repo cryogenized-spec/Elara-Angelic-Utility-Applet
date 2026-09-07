@@ -31,6 +31,42 @@ describe('GoogleCalendarService', () => {
     expect(requestedCapability).toBe('calendar.events.read');
   });
 
+  it('creates an event only through the registered calendar write capability', async () => {
+    let requestedCapability: string | undefined;
+    let capturedUrl = '';
+    let capturedInit: RequestInit | undefined;
+    const service = new GoogleCalendarService({
+      ...oauth,
+      authorize: async (capability) => ({
+        capability,
+        fetch: async (input, init) => {
+          requestedCapability = capability;
+          capturedUrl = String(input);
+          capturedInit = init;
+          return new Response(JSON.stringify({ id: 'event-created' }), { status: 200, headers: { 'content-type': 'application/json' } });
+        },
+      }),
+    });
+
+    await expect(service.createEvent({
+      calendarId: 'primary',
+      event: {
+        summary: 'Ship the pass',
+        start: { dateTime: '2026-09-08T09:00:00Z' },
+        end: { dateTime: '2026-09-08T09:30:00Z' },
+      },
+    })).resolves.toEqual({ id: 'event-created' });
+    expect(requestedCapability).toBe('calendar.events.write');
+    expect(capturedUrl).toContain('/calendar/v3/calendars/primary/events');
+    expect(capturedInit?.method).toBe('POST');
+    expect(capturedInit?.headers).toEqual({ 'content-type': 'application/json' });
+    expect(JSON.parse(String(capturedInit?.body))).toEqual({
+      summary: 'Ship the pass',
+      start: { dateTime: '2026-09-08T09:00:00Z' },
+      end: { dateTime: '2026-09-08T09:30:00Z' },
+    });
+  });
+
   it('rejects oversized Calendar inputs before authorization', async () => {
     let authorizeCalls = 0;
     const service = new GoogleCalendarService({
@@ -43,6 +79,8 @@ describe('GoogleCalendarService', () => {
 
     await expect(service.listEvents('x'.repeat(501))).rejects.toThrow('calendar ID is too long');
     await expect(service.listEvents('primary', 'x'.repeat(101))).rejects.toThrow('timeMin is too long');
+    await expect(service.createEvent({ calendarId: 'x'.repeat(501), event: { summary: 'test' } })).rejects.toThrow('calendar ID is too long');
+    await expect(service.createEvent({ event: { summary: 'x'.repeat(1001) } })).rejects.toThrow('event summary is too long');
     expect(authorizeCalls).toBe(0);
   });
 });

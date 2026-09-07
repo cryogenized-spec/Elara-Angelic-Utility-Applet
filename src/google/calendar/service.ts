@@ -2,12 +2,20 @@ import type { AuthorizedGoogleRequest, GoogleOAuthAuthority } from '../oauth/con
 
 const MAX_CALENDAR_ID_LENGTH = 500;
 const MAX_TIME_PARAMETER_LENGTH = 100;
+const MAX_EVENT_ID_LENGTH = 500;
+const MAX_EVENT_SUMMARY_LENGTH = 1000;
+const MAX_EVENT_BODY_BYTES = 1_000_000;
 
 export interface CalendarEventSummary {
   id: string;
   summary: string;
   start: string;
   end: string;
+}
+
+export interface CalendarEventCreateInput {
+  readonly calendarId?: string;
+  readonly event: Readonly<Record<string, unknown>>;
 }
 
 interface CalendarEventsResponse {
@@ -24,6 +32,19 @@ function boundedText(value: string | undefined, field: string, maxLength: number
   const normalized = value.trim();
   if (normalized.length > maxLength) throw new Error(`Google Calendar ${field} is too long.`);
   return normalized || undefined;
+}
+
+function boundedEvent(event: Readonly<Record<string, unknown>>): Readonly<Record<string, unknown>> {
+  const id = typeof event.id === 'string' ? boundedText(event.id, 'event ID', MAX_EVENT_ID_LENGTH) : undefined;
+  const summary = typeof event.summary === 'string' ? boundedText(event.summary, 'event summary', MAX_EVENT_SUMMARY_LENGTH) : undefined;
+  const normalized = {
+    ...event,
+    ...(id !== undefined ? { id } : {}),
+    ...(summary !== undefined ? { summary } : {}),
+  };
+  const body = JSON.stringify(normalized);
+  if (new TextEncoder().encode(body).byteLength > MAX_EVENT_BODY_BYTES) throw new Error('Google Calendar event body is too large.');
+  return normalized;
 }
 
 export class GoogleCalendarService {
@@ -48,6 +69,21 @@ export class GoogleCalendarService {
         start: event.start?.dateTime ?? event.start?.date ?? '',
         end: event.end?.dateTime ?? event.end?.date ?? '',
       }));
+  }
+
+  async createEvent({ calendarId = 'primary', event }: CalendarEventCreateInput): Promise<unknown> {
+    const safeCalendarId = boundedText(calendarId, 'calendar ID', MAX_CALENDAR_ID_LENGTH) ?? 'primary';
+    const safeEvent = boundedEvent(event);
+    const access = await this.oauth.authorize('calendar.events.write');
+    const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(safeCalendarId)}/events`);
+    const response = await access.fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(safeEvent),
+    });
+
+    if (!response.ok) throw new Error(`Google Calendar create request failed (${response.status}).`);
+    return response.json();
   }
 
   private buildEventsRequest(

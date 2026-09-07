@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { requestGoogleToolConfirmations } from './broker';
 
 const request = {
@@ -10,6 +10,11 @@ const request = {
 
 describe('Google confirmation broker', () => {
   it('fails closed outside the browser for every requested mutation', async () => {
-    await expect(requestGoogleToolConfirmations([request, { ...request, tool: 'tasks.createTask' as const }])).resolves.toEqual([false, false]);
+    vi.stubGlobal('document', undefined);
+    try {
+      await expect(requestGoogleToolConfirmations([request, { ...request, tool: 'tasks.createTask' as const }])).resolves.toEqual([false, false]);
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

@@ -3,7 +3,7 @@ import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
-import { ensureWorkspaceShortcuts, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
+import { ensureWorkspaceShortcuts, storedShortcutFromDefinition, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
 import { completeOnboarding, hasCompletedOnboarding, loadAppUiPreferences, loadChatAppearance, loadRoleplayPreferences, saveAppUiPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
 import { localThreadTitlePort } from '../chat/thread-title-port';
@@ -240,7 +240,10 @@ export function App() {
   async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
   async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
   async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } } }
-  async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) { const record = workspaceShortcuts.find((item) => item.id === shortcut.id); if (!record) { setError('That Workspace shortcut is not available.'); return; } await runWorkspaceShortcut(record); }
+  async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) {
+    const record = workspaceShortcuts.find((item) => item.id === shortcut.id) ?? storedShortcutFromDefinition(shortcut, workspaceShortcuts.length);
+    await runWorkspaceShortcut(record);
+  }
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }
   async function handleResetGeminiSettings() { await handleGeminiSettingsChange(defaultsForModel(geminiModel)); }

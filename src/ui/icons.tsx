@@ -5,6 +5,8 @@ import {
   CalendarDays,
   ChevronDown,
   FileCode2,
+  FileText,
+  Folder,
   ListTodo,
   Loader2,
   LockKeyhole,
@@ -26,9 +28,11 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  Table,
   Trash2,
   Type,
   WandSparkles,
+  Wrench,
   X,
 } from 'lucide-react';
 
@@ -61,6 +65,10 @@ export type IconName =
   | 'stop'
   | 'refresh'
   | 'trash'
+  | 'drive'
+  | 'docs'
+  | 'sheets'
+  | 'tool'
   | 'loader';
 
 const icons: Record<IconName, LucideIcon> = {
@@ -92,6 +100,10 @@ const icons: Record<IconName, LucideIcon> = {
   stop: Square,
   refresh: RefreshCw,
   trash: Trash2,
+  drive: Folder,
+  docs: FileText,
+  sheets: Table,
+  tool: Wrench,
   loader: Loader2,
 };
 

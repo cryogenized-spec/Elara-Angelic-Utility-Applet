@@ -18,6 +18,10 @@ export interface ProviderTurnMetadata {
   completedAt: number;
   durationMs?: number;
   usage?: ProviderUsage;
+  /** Chat-layer turn identity; one generation may span many interactions. */
+  generationId?: string;
+  /** Previous generation this turn supersedes (regeneration / retry). */
+  supersedesGenerationId?: string;
 }
 
 export interface ExecutionSummary {

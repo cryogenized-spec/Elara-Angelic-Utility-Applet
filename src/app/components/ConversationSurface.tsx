@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '../../domain/chat';
+import type { GenerationState } from '../../chat/generation-state';
 import { deleteMessage } from '../../persistence/conversation';
 import { ExecutionSummary } from './ExecutionSummary';
+import { GenerationTrace } from './GenerationTrace';
 import { Icon } from '../../ui/icons';
 import { MarkdownText } from './MarkdownText';
 import './conversation-surface.css';
@@ -12,9 +14,10 @@ function responseGroupFor(message: ChatMessage): string {
   return message.responseGroupId || message.id;
 }
 
-export function ConversationSurface({ messages, fontSize, onRegenerate }: { messages: ChatMessage[]; fontSize: number; onRegenerate: (messageId: string) => void }) {
+export function ConversationSurface({ messages, fontSize, generation, onRegenerate }: { messages: ChatMessage[]; fontSize: number; generation: GenerationState | null; onRegenerate: (messageId: string) => void }) {
   const conversationRef = useRef<HTMLElement>(null);
   const shouldStickToEndRef = useRef(true);
+  const [pinned, setPinned] = useState(true);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
   const seenCountsRef = useRef<Record<string, number>>({});
@@ -22,13 +25,21 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
   function rememberScrollPosition() {
     const element = conversationRef.current;
     if (!element) return;
-    shouldStickToEndRef.current = element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_STICK_THRESHOLD_PX;
+    const atEnd = element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_STICK_THRESHOLD_PX;
+    shouldStickToEndRef.current = atEnd;
+    setPinned(atEnd);
   }
 
   function scrollToEnd(behavior: ScrollBehavior = 'smooth') {
     const element = conversationRef.current;
     if (!element || !shouldStickToEndRef.current) return;
     element.scrollTo({ top: Math.max(0, element.scrollHeight - element.clientHeight), behavior });
+  }
+
+  function jumpToLatest() {
+    shouldStickToEndRef.current = true;
+    setPinned(true);
+    scrollToEnd();
   }
 
   const visibleMessages = useMemo(() => messages.filter((message) => !deletedIds.has(message.id)), [messages, deletedIds]);
@@ -100,9 +111,10 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
     }
   }
 
-  if (visibleMessages.length === 0) return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p style={{ fontSize: `${fontSize}px` }}>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
+  const showTrace = generation !== null && generation.phase !== 'completed';
+  if (visibleMessages.length === 0 && !showTrace) return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p style={{ fontSize: `${fontSize}px` }}>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
 
-  return <section ref={conversationRef} className="conversation" aria-label="Conversation" aria-live="polite" onScroll={rememberScrollPosition}>
+  return <section ref={conversationRef} className="conversation" aria-label="Conversation" onScroll={rememberScrollPosition}>
     <div className="conversation__stream">
       {grouped.map(({ message, variants }) => {
         if (message.role !== 'assistant') {
@@ -135,6 +147,8 @@ export function ConversationSurface({ messages, fontSize, onRegenerate }: { mess
           </div>
         </article>;
       })}
+      {showTrace && generation && <GenerationTrace key={generation.generationId} generation={generation} />}
     </div>
+    {!pinned && <button type="button" className="conversation__jump" aria-label="Jump to latest messages" onClick={jumpToLatest}>↓ Newest</button>}
   </section>;
 }

@@ -60,6 +60,10 @@
   .message-assistant .message-body { max-width: 88%; }
 }
 
+.conversation { position: relative; }
+.conversation__jump { position: sticky; bottom: 12px; display: block; margin: -30px auto 0; padding: 6px 14px; border-radius: 999px; border: 1px solid rgba(110,168,255,.4); background: rgba(11,12,18,.92); color: rgba(231,240,255,.9); font-size: 11px; letter-spacing: .04em; cursor: pointer; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+.conversation__jump:hover { background: rgba(28,32,48,.95); }
+
 @media (prefers-reduced-motion: reduce) {
   .execution-summary__toggle svg { transition: none; }
 }

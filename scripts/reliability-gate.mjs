@@ -60,8 +60,9 @@ if (appSource.includes('Configure it before regenerating')) throw new Error('Rel
 const geminiDeclarationSource = readFileSync(join(root, 'src/google/tools/gemini-declarations.ts'), 'utf8');
 if (geminiDeclarationSource.includes('Application tool risk:')) throw new Error('Reliability gate: tool risk policy must not be presented as competing model persona guidance.');
 if (!geminiDeclarationSource.includes('description: descriptor.description')) throw new Error('Reliability gate: Gemini tool descriptions must come directly from the registered capability descriptions.');
-if (!geminiDeclarationSource.includes("descriptor.risk === 'read'")) throw new Error('Reliability gate: default conversational tool surface must retain executable read capabilities.');
-if (!geminiDeclarationSource.includes("descriptor.name.startsWith('roleplay_setting.')")) throw new Error('Reliability gate: conversational tool surface must expose Roleplay World capabilities.');
+if (!geminiDeclarationSource.includes('googleToolRegistry.map')) throw new Error('Reliability gate: Gemini declarations must derive from the canonical executable tool registry.');
+if (!geminiDeclarationSource.includes("additionalProperties: false")) throw new Error('Reliability gate: Gemini tool arguments must reject undeclared properties.');
+if (!geminiDeclarationSource.includes("'calendar.createEvent'")) throw new Error('Reliability gate: Calendar write capability must remain model-executable.');
 
 const roleplayWorldSource = readFileSync(join(root, 'src/google/tools/roleplay-world-handlers.ts'), 'utf8');
 if (!roleplayWorldSource.includes('loadRoleplayPreferences')) throw new Error('Reliability gate: Roleplay world tools must respect Roleplay Mode state.');
@@ -70,11 +71,15 @@ const roleplayBrokerSource = readFileSync(join(root, 'src/google/confirmation/ro
 if (!roleplayBrokerSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Roleplay mutations must use the shared Google confirmation broker.');
 const googleBrokerSource = readFileSync(join(root, 'src/google/confirmation/broker.ts'), 'utf8');
 if (!googleBrokerSource.includes('data-decision="accept"') || !googleBrokerSource.includes('data-decision="decline"')) throw new Error('Reliability gate: Google mutations must expose explicit user confirmation controls.');
-if (!googleBrokerSource.includes('aria-label', )) throw new Error('Reliability gate: Google confirmation controls must be accessible.');
+if (!googleBrokerSource.includes('aria-label')) throw new Error('Reliability gate: Google confirmation controls must be accessible.');
 const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
 if (!toolLoopSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Google tool loop must route writes through the shared confirmation broker.');
 const executorSource = readFileSync(join(root, 'src/google/tools/executor.ts'), 'utf8');
 if (!executorSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: direct Google tool execution must retain the shared confirmation broker.');
+const calendarServiceSource = readFileSync(join(root, 'src/google/calendar/service.ts'), 'utf8');
+if (!calendarServiceSource.includes("authorize('calendar.events.write')")) throw new Error('Reliability gate: Calendar writes must use the dedicated write capability.');
+const calendarHandlerSource = readFileSync(join(root, 'src/google/tools/service-handlers.ts'), 'utf8');
+if (!calendarHandlerSource.includes("'calendar.createEvent'")) throw new Error('Reliability gate: Calendar write handler must be registered.');
 const worldSource = readFileSync(join(root, 'src/domain/roleplay-world.ts'), 'utf8');
 if (!worldSource.includes('serializeRoleplayWorldYaml')) throw new Error('Reliability gate: Roleplay World must have a deterministic YAML view.');
 if (worldSource.includes('ref: ${yamlScalar(entity.ref)}')) throw new Error('Reliability gate: opaque Roleplay refs must remain hidden from visible YAML.');
@@ -112,4 +117,4 @@ if (!characterPersistence.includes("record.systemInstruction = '';")) throw new 
 
 if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24') throw new Error('Reliability gate: Node baseline must remain 24.');
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog, deterministic YAML view, and encrypted credential persistence contract.`);
+console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract.`);

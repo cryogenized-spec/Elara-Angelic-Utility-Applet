@@ -16,8 +16,8 @@ const SERVICES: readonly ServiceDefinition[] = [
   { id: 'calendar', name: 'Google Calendar', description: 'Events, scheduling, and calendar context.', readCapability: 'calendar.events.read', writeCapability: 'calendar.events.write' },
   { id: 'tasks', name: 'Google Tasks', description: 'Task lists, tasks, ordering, and completion.', readCapability: 'tasks.read', writeCapability: 'tasks.write' },
   { id: 'gmail', name: 'Gmail', description: 'Mailbox reading, organization, labels, and sending.', readCapability: 'gmail.read', writeCapability: 'gmail.modify', extraCapabilities: [{ capability: 'gmail.labels', label: 'Enable labels', readyLabel: 'Labels ready' }, { capability: 'gmail.send', label: 'Enable sending', readyLabel: 'Sending ready' }] },
-  { id: 'drive', name: 'Google Drive', description: 'Files the app creates or the user explicitly selects.', readCapability: 'drive.files.read', writeCapability: 'drive.files.write' },
-  { id: 'docs', name: 'Google Docs', description: 'Documents created or selected for Elara to work with.', readCapability: 'docs.read', writeCapability: 'docs.write' },
+  { id: 'drive', name: 'Google Drive', description: 'App-created or admitted files, plus optional library search across your Drive.', readCapability: 'drive.files.app.read', writeCapability: 'drive.files.app.write', extraCapabilities: [{ capability: 'drive.library.read', label: 'Enable library search', readyLabel: 'Library search ready' }] },
+  { id: 'docs', name: 'Google Docs', description: 'Documents created or admitted for Elara to work with.', readCapability: 'docs.read', writeCapability: 'docs.write' },
   { id: 'sheets', name: 'Google Sheets', description: 'Selected spreadsheets, ranges, rows, and updates.', readCapability: 'sheets.read', writeCapability: 'sheets.write' },
 ];
 
@@ -35,8 +35,10 @@ function hasCapability(granted: readonly GoogleCapabilityKey[], capability?: Goo
   return !!capability && granted.includes(capability);
 }
 
+const emptyStatus = (): GoogleOAuthStatus => ({ state: 'disconnected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] });
+
 export function GoogleOAuthSettings() {
-  const [status, setStatus] = useState<GoogleOAuthStatus>({ state: 'disconnected', grantedCapabilities: [] });
+  const [status, setStatus] = useState<GoogleOAuthStatus>(emptyStatus());
   const [loading, setLoading] = useState(true);
   const [busyCapability, setBusyCapability] = useState<GoogleCapabilityKey | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -92,7 +94,7 @@ export function GoogleOAuthSettings() {
         <div>
           <span className="panel-kicker">GOOGLE</span>
           <strong>Google Workspace</strong>
-          <span>Connect Google directly from Elara. Access is granted one capability at a time.</span>
+          <span>Connect Google directly from Elara. Access is granted one capability at a time. Google Chat is not part of this Workspace surface.</span>
         </div>
         <div className="google-oauth-settings__state" data-state={status.state}>
           <span className="google-oauth-settings__dot" aria-hidden="true" />
@@ -146,7 +148,7 @@ export function GoogleOAuthSettings() {
 
       <div className="setting-card google-oauth-settings__note">
         <strong>Stay connected</strong>
-        <span>Elara stores only non-secret authorization metadata. Google access tokens stay in memory and are reacquired without a new consent screen whenever Google still has the grant.</span>
+        <span>Elara stores only non-secret authorization metadata, including which Google scopes were actually granted. Access tokens stay in memory. Enabling Docs, Drive, or Sheets read can satisfy the others’ reads because they share app-file access — writes still require an explicit Enable writes action. Library search is a separate, more sensitive consent.</span>
       </div>
     </div>
   );

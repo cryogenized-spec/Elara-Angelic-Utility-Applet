@@ -7,12 +7,13 @@ vi.mock('./gis', () => ({
 
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 import { googleOAuthAuthority } from './authority';
+import { DRIVE_APP_FILE_SCOPE } from './capability-policy';
 
 const tokenMock = vi.mocked(requestGoogleAccessToken);
 const revokeMock = vi.mocked(revokeGoogleAccessToken);
 
-function token(accessToken: string, expiresIn = 3600) {
-  return { access_token: accessToken, expires_in: expiresIn, scope: 'https://www.googleapis.com/auth/calendar.events.readonly' };
+function token(accessToken: string, scope: string, expiresIn = 3600) {
+  return { access_token: accessToken, expires_in: expiresIn, scope };
 }
 
 describe('direct Google OAuth authority', () => {
@@ -26,11 +27,16 @@ describe('direct Google OAuth authority', () => {
   });
 
   it('starts disconnected without local authorization metadata', async () => {
-    await expect(googleOAuthAuthority.getStatus()).resolves.toEqual({ state: 'disconnected', grantedCapabilities: [] });
+    await expect(googleOAuthAuthority.getStatus()).resolves.toEqual({
+      state: 'disconnected',
+      grantedCapabilities: [],
+      enabledCapabilities: [],
+      grantedProviderScopes: [],
+    });
   });
 
-  it('requests only the capability scope and persists metadata without persisting the access token', async () => {
-    tokenMock.mockResolvedValueOnce(token('secret-access-token'));
+  it('records GIS scopes and persists metadata without persisting the access token', async () => {
+    tokenMock.mockResolvedValueOnce(token('secret-access-token', 'https://www.googleapis.com/auth/calendar.events.readonly'));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
 
     expect(tokenMock).toHaveBeenCalledWith({
@@ -40,13 +46,41 @@ describe('direct Google OAuth authority', () => {
     });
     const stored = localStorage.getItem('elara.google.authorization.v2') ?? '';
     expect(stored).toContain('calendar.events.read');
+    expect(stored).toContain('calendar.events.readonly');
     expect(stored).not.toContain('secret-access-token');
-    expect((await googleOAuthAuthority.getStatus()).grantedCapabilities).toContain('calendar.events.read');
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.enabledCapabilities).toContain('calendar.events.read');
+    expect(status.grantedCapabilities).toContain('calendar.events.read');
+    expect(status.grantedProviderScopes).toContain('https://www.googleapis.com/auth/calendar.events.readonly');
     expect(authorized.capability).toBe('calendar.events.read');
   });
 
+  it('infers sibling Drive/Docs/Sheets reads from drive.file without inferring writes', async () => {
+    tokenMock.mockResolvedValueOnce(token('access-drive', DRIVE_APP_FILE_SCOPE));
+    await googleOAuthAuthority.authorize('docs.read');
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.enabledCapabilities).toEqual(['docs.read']);
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['docs.read', 'sheets.read', 'drive.files.app.read']));
+    expect(status.grantedCapabilities).not.toContain('docs.write');
+    expect(status.grantedCapabilities).not.toContain('sheets.write');
+    expect(status.grantedCapabilities).not.toContain('drive.files.app.write');
+    expect(status.state).toBe('partially-authorized');
+  });
+
+  it('migrates legacy Drive capability names from v2 storage', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 2,
+      grantedCapabilities: ['drive.files.read', 'calendar.events.read'],
+      grantedProviderScopes: [DRIVE_APP_FILE_SCOPE, 'https://www.googleapis.com/auth/calendar.events.readonly'],
+      updatedAt: new Date().toISOString(),
+    }));
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.enabledCapabilities).toEqual(expect.arrayContaining(['drive.files.app.read', 'calendar.events.read']));
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['drive.files.app.read', 'docs.read', 'sheets.read', 'calendar.events.read']));
+  });
+
   it('attaches the short-lived access token directly to an approved Google API request', async () => {
-    tokenMock.mockResolvedValueOnce(token('access-123'));
+    tokenMock.mockResolvedValueOnce(token('access-123', 'https://www.googleapis.com/auth/calendar.events.readonly'));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('{"items":[]}', { status: 200 }));
 
@@ -61,8 +95,8 @@ describe('direct Google OAuth authority', () => {
 
   it('silently reacquires the token after a 401 and retries the same request body', async () => {
     tokenMock
-      .mockResolvedValueOnce(token('access-old'))
-      .mockResolvedValueOnce(token('access-new'));
+      .mockResolvedValueOnce(token('access-old', 'https://www.googleapis.com/auth/calendar.events.readonly'))
+      .mockResolvedValueOnce(token('access-new', 'https://www.googleapis.com/auth/calendar.events.readonly'));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce(new Response('expired', { status: 401 }))
@@ -88,7 +122,7 @@ describe('direct Google OAuth authority', () => {
   });
 
   it('rejects non-Google API targets before network access', async () => {
-    tokenMock.mockResolvedValueOnce(token('access-123'));
+    tokenMock.mockResolvedValueOnce(token('access-123', 'https://www.googleapis.com/auth/calendar.events.readonly'));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     const fetchMock = vi.spyOn(globalThis, 'fetch');
 
@@ -97,12 +131,17 @@ describe('direct Google OAuth authority', () => {
   });
 
   it('disconnects the local authorization state and revokes the active token', async () => {
-    tokenMock.mockResolvedValueOnce(token('access-123'));
+    tokenMock.mockResolvedValueOnce(token('access-123', 'https://www.googleapis.com/auth/calendar.events.readonly'));
     await googleOAuthAuthority.authorize('calendar.events.read');
     await googleOAuthAuthority.disconnect();
 
     expect(revokeMock).toHaveBeenCalledWith('access-123');
-    await expect(googleOAuthAuthority.getStatus()).resolves.toEqual({ state: 'disconnected', grantedCapabilities: [] });
+    await expect(googleOAuthAuthority.getStatus()).resolves.toEqual({
+      state: 'disconnected',
+      grantedCapabilities: [],
+      enabledCapabilities: [],
+      grantedProviderScopes: [],
+    });
     expect(localStorage.getItem('elara.google.authorization.v2')).toBeNull();
   });
 });

@@ -3,6 +3,7 @@ import { googleToolRegistry } from './registry';
 
 const PASS_5_TOOLS = [
   'drive.searchFiles',
+  'drive.searchLibrary',
   'drive.getFile',
   'drive.downloadFile',
   'drive.createFile',
@@ -12,6 +13,8 @@ const PASS_5_TOOLS = [
   'sheets.readRange',
   'sheets.writeRange',
   'sheets.appendRows',
+  'sheets.updateCell',
+  'sheets.insertRows',
   'sheets.batchUpdate',
 ] as const;
 
@@ -22,8 +25,9 @@ describe('Google tool registry', () => {
   });
 
   it('keeps Drive reads separate from Drive writes', () => {
-    expect(googleToolRegistry.find((tool) => tool.name === 'drive.searchFiles')).toMatchObject({ risk: 'read', capability: 'drive.files.read' });
-    expect(googleToolRegistry.find((tool) => tool.name === 'drive.updateFile')).toMatchObject({ risk: 'write', capability: 'drive.files.write' });
+    expect(googleToolRegistry.find((tool) => tool.name === 'drive.searchFiles')).toMatchObject({ risk: 'read', capability: 'drive.files.app.read', exposure: 'gemini' });
+    expect(googleToolRegistry.find((tool) => tool.name === 'drive.searchLibrary')).toMatchObject({ risk: 'read', capability: 'drive.library.read', exposure: 'gemini' });
+    expect(googleToolRegistry.find((tool) => tool.name === 'drive.updateFile')).toMatchObject({ risk: 'write', capability: 'drive.files.app.write' });
   });
 
   it('keeps Sheets reads separate from Sheets writes', () => {
@@ -34,5 +38,12 @@ describe('Google tool registry', () => {
   it('does not expose an arbitrary Google HTTP tool', () => {
     const registeredToolNames: readonly string[] = googleToolRegistry.map((tool) => tool.name);
     expect(registeredToolNames.includes('google.request')).toBe(false);
+  });
+
+  it('hides Chat and raw batchUpdate primitives from Gemini', () => {
+    expect(googleToolRegistry.find((tool) => tool.name === 'docs.batchUpdate')?.exposure).toBe('internal');
+    expect(googleToolRegistry.find((tool) => tool.name === 'sheets.batchUpdate')?.exposure).toBe('internal');
+    expect(googleToolRegistry.find((tool) => tool.name === 'chat.listMessages')?.exposure).toBe('internal');
+    expect(googleToolRegistry.find((tool) => tool.name === 'docs.inspectDocument')?.exposure).toBe('gemini');
   });
 });

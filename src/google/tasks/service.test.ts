@@ -10,7 +10,7 @@ const makeOAuth = (requested: string[]): GoogleOAuthAuthority => ({
       fetch: async () => new Response(JSON.stringify({ id: 'task-1', title: 'Review Kanban', status: 'needsAction', position: '0001' }), { status: 200 }),
     };
   },
-  getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+  getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
   disconnect: async () => undefined,
 });
 

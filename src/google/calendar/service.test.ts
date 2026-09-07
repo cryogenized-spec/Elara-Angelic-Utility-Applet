@@ -15,7 +15,7 @@ describe('GoogleCalendarService', () => {
         }],
       }), { status: 200, headers: { 'content-type': 'application/json' } }),
     }),
-    getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+    getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
     disconnect: async () => undefined,
   };
 

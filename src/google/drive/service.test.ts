@@ -5,7 +5,7 @@ import type { GoogleOAuthAuthority } from '../oauth/contracts';
 function makeOAuth(handler: (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>): GoogleOAuthAuthority {
   return {
     authorize: async (capability) => ({ capability, fetch: handler }),
-    getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+    getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
     disconnect: async () => undefined,
   };
 }
@@ -97,8 +97,8 @@ describe('GoogleDriveService', () => {
       capability,
       fetch: async () => new Response(JSON.stringify({ id: 'file-1', name: 'Plan', mimeType: 'text/plain' }), { status: 200 }),
     }));
-    const oauth: GoogleOAuthAuthority = { authorize, getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }), disconnect: async () => undefined };
+    const oauth: GoogleOAuthAuthority = { authorize, getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }), disconnect: async () => undefined };
     await new GoogleDriveService(oauth).getFile('file-1');
-    expect(authorize).toHaveBeenCalledWith('drive.files.read');
+    expect(authorize).toHaveBeenCalledWith('drive.files.app.read');
   });
 });

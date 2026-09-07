@@ -5,7 +5,7 @@ import type { GoogleCapabilityKey, GoogleOAuthAuthority } from '../oauth/contrac
 function oauthFor(...capabilities: GoogleCapabilityKey[]): GoogleOAuthAuthority {
   return {
     authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
-    getStatus: async () => ({ state: 'connected', grantedCapabilities: capabilities }),
+    getStatus: async () => ({ state: 'connected', grantedCapabilities: capabilities, enabledCapabilities: capabilities, grantedProviderScopes: [] }),
     disconnect: async () => undefined,
   };
 }
@@ -36,7 +36,7 @@ describe('executeGoogleTool', () => {
     const confirm = vi.fn(async () => false);
     const result = await executeGoogleTool(
       { tool: 'drive.updateFile', arguments: { fileId: 'file-1', patch: { name: 'Renamed' } } },
-      { oauth: oauthFor('drive.files.write'), handlers: { 'drive.updateFile': handler }, confirm, now: () => new Date('2026-09-04T06:00:00.000Z') },
+      { oauth: oauthFor('drive.files.app.write'), handlers: { 'drive.updateFile': handler }, confirm, now: () => new Date('2026-09-04T06:00:00.000Z') },
     );
     expect(result).toMatchObject({ ok: false, code: 'USER_DECLINED', confirmation: { tool: 'drive.updateFile', risk: 'write' } });
     expect(confirm).toHaveBeenCalledOnce();
@@ -69,9 +69,29 @@ describe('executeGoogleTool', () => {
     const handler = vi.fn(async () => { throw new Error('Bearer token ABC123 leaked'); });
     const result = await executeGoogleTool(
       { tool: 'drive.getFile', arguments: { fileId: 'file-1' } },
-      { oauth: oauthFor('drive.files.read'), handlers: { 'drive.getFile': handler } },
+      { oauth: oauthFor('drive.files.app.read'), handlers: { 'drive.getFile': handler } },
     );
     expect(result).toMatchObject({ ok: false, code: 'EXECUTION_FAILED', failure: { kind: 'provider' } });
     if (!result.ok) expect(result.failure.message).not.toContain('ABC123');
+  });
+
+  it('authorizes a Docs read when only Drive library search is effective', async () => {
+    const handler = vi.fn(async () => ({ documentId: 'doc-1', blocks: [] }));
+    const result = await executeGoogleTool(
+      { tool: 'docs.inspectDocument', arguments: { documentId: 'doc-1' } },
+      { oauth: oauthFor('drive.library.read'), handlers: { 'docs.inspectDocument': handler } },
+    );
+    expect(result.ok).toBe(true);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it('does not authorize a Docs write from a library-read grant', async () => {
+    const handler = vi.fn(async () => ({}));
+    const result = await executeGoogleTool(
+      { tool: 'docs.appendParagraph', arguments: { documentId: 'doc-1', text: 'Hello' } },
+      { oauth: oauthFor('drive.library.read'), handlers: { 'docs.appendParagraph': handler }, confirm: async () => true },
+    );
+    expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'docs.write' });
+    expect(handler).not.toHaveBeenCalled();
   });
 });

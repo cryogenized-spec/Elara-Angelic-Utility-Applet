@@ -15,8 +15,9 @@ export const googleCapabilityKeySchema = z.enum([
   'gmail.modify',
   'gmail.labels',
   'gmail.send',
-  'drive.files.read',
-  'drive.files.write',
+  'drive.files.app.read',
+  'drive.files.app.write',
+  'drive.library.read',
   'sheets.read',
   'sheets.write',
   'roleplay.world.local',
@@ -40,7 +41,12 @@ export type GoogleOAuthState =
 
 export interface GoogleOAuthStatus {
   readonly state: GoogleOAuthState;
+  /** Effective capabilities: user-enabled (plus inferred reads) that the provider grant currently satisfies. */
   readonly grantedCapabilities: readonly GoogleCapabilityKey[];
+  /** Capabilities the user explicitly enabled in Elara. Writes are never inferred into this set. */
+  readonly enabledCapabilities: readonly GoogleCapabilityKey[];
+  /** Provider scopes actually returned by Google (GIS `scope` or equivalent). */
+  readonly grantedProviderScopes: readonly string[];
   readonly account?: {
     readonly email: string;
     readonly displayName?: string;

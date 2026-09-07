@@ -46,7 +46,7 @@ export const googleReadToolArgumentSchemas = {
 
   'gmail.getMessage': z.object({
     messageId: idSchema,
-    format: z.enum(['minimal', 'full', 'raw', 'metadata']).optional(),
+    format: z.enum(['minimal', 'full', 'metadata']).optional(),
     metadataHeaders: metadataHeadersSchema,
   }).strict(),
 

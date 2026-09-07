@@ -13,7 +13,7 @@ describe('GoogleChatService', () => {
           return new Response(JSON.stringify({ name: 'spaces/1/messages/1' }), { status: 200 });
         },
       }),
-      getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
       disconnect: async () => undefined,
     };
 
@@ -30,7 +30,7 @@ describe('GoogleChatService', () => {
         authorizeCalls += 1;
         return { capability, fetch: async () => new Response('{}', { status: 200 }) };
       },
-      getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
       disconnect: async () => undefined,
     };
     const service = new GoogleChatService(oauth);

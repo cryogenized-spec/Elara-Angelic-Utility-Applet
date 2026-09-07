@@ -3,8 +3,10 @@ import { googleToolRegistry } from './registry';
 import { evaluateWriteConfirmation, isConfirmationFresh, type WriteConfirmationRequest } from '../confirmation/policy';
 import { requestGoogleToolConfirmation } from '../confirmation/broker';
 import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus } from '../oauth/contracts';
+import { isCapabilityAuthorized } from '../oauth/capability-policy';
 import { classifyGoogleToolFailure, type GoogleToolFailure } from './diagnostics';
 import { validateDriveSheetsToolArguments, driveSheetsToolArgumentSchemas, type DriveSheetsToolName } from './drive-sheets-schemas';
+import { validateSemanticToolArguments, semanticToolArgumentSchemas, type SemanticToolName } from './semantic-schemas';
 import { validateGoogleReadToolArguments, googleReadToolArgumentSchemas, type GoogleReadToolName } from './read-schemas';
 import { validateRoleplayWorldToolArguments, roleplayWorldToolArgumentSchemas, type RoleplayWorldToolName } from './roleplay-world-schemas';
 import { loadRoleplayPreferences } from '../../persistence/preferences';
@@ -15,13 +17,14 @@ export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandle
 export interface GoogleToolExecutorOptions { readonly oauth: GoogleOAuthAuthority; readonly handlers: GoogleToolHandlers; readonly confirm?: (request: WriteConfirmationRequest) => Promise<boolean>; readonly now?: () => Date; }
 export type GoogleToolExecutionResult =
   | { readonly ok: true; readonly correlationId: string; readonly tool: GoogleToolName; readonly result: unknown }
-  | { readonly ok: false; readonly correlationId: string; readonly tool?: GoogleToolName; readonly code: 'INVALID_TOOL_CALL' | 'AUTHORIZATION_REQUIRED' | 'CONFIRMATION_REQUIRED' | 'USER_DECLINED' | 'HANDLER_UNAVAILABLE' | 'EXECUTION_FAILED'; readonly failure: GoogleToolFailure; readonly confirmation?: WriteConfirmationRequest };
+  | { readonly ok: false; readonly correlationId: string; readonly tool?: GoogleToolName; readonly code: 'INVALID_TOOL_CALL' | 'AUTHORIZATION_REQUIRED' | 'CONFIRMATION_REQUIRED' | 'USER_DECLINED' | 'HANDLER_UNAVAILABLE' | 'EXECUTION_FAILED'; readonly failure: GoogleToolFailure; readonly confirmation?: WriteConfirmationRequest; readonly requiredCapability?: GoogleCapabilityKey };
 
 function correlationId(): string { return crypto.randomUUID(); }
 function findDescriptor(tool: GoogleToolName): GoogleToolDescriptor | undefined { return googleToolRegistry.find((entry) => entry.name === tool); }
 function safeCapability(value: string): GoogleCapabilityKey { return googleCapabilityKeySchema.parse(value); }
 function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Record<string, unknown>> {
   if (Object.prototype.hasOwnProperty.call(roleplayWorldToolArgumentSchemas, tool)) return validateRoleplayWorldToolArguments(tool as RoleplayWorldToolName, value) as Readonly<Record<string, unknown>>;
+  if (Object.prototype.hasOwnProperty.call(semanticToolArgumentSchemas, tool)) return validateSemanticToolArguments(tool as SemanticToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(driveSheetsToolArgumentSchemas, tool)) return validateDriveSheetsToolArguments(tool as DriveSheetsToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(googleReadToolArgumentSchemas, tool)) return validateGoogleReadToolArguments(tool as GoogleReadToolName, value) as Readonly<Record<string, unknown>>;
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Tool arguments must be an object.');
@@ -29,9 +32,8 @@ function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Recor
 }
 function authorizationNeeded(status: GoogleOAuthStatus, capability: GoogleCapabilityKey): boolean {
   if (capability === 'roleplay.world.local') return false;
-  const capabilityGranted = status.grantedCapabilities.includes(capability);
   const stateNeedsRecovery = status.state === 'disconnected' || status.state === 'needs-consent' || status.state === 'revoked' || status.state === 'reauthorization-required';
-  return !capabilityGranted || stateNeedsRecovery;
+  return !isCapabilityAuthorized(capability, status.grantedCapabilities) || stateNeedsRecovery;
 }
 function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
@@ -40,17 +42,23 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
   const id = value(args, 'id') ?? value(args, 'ref');
   switch (tool) {
     case 'calendar.createEvent': {
-      const event = args.event && typeof args.event === 'object' && !Array.isArray(args.event) ? args.event as Record<string, unknown> : undefined;
-      const summary = typeof event?.summary === 'string' && event.summary.trim() ? event.summary.trim() : 'untitled event';
-      const start = event?.start && typeof event.start === 'object' && !Array.isArray(event.start) ? (event.start as Record<string, unknown>).dateTime ?? (event.start as Record<string, unknown>).date : undefined;
-      return `Create Calendar event “${summary}”${start ? ` at ${String(start)}` : ''}.`;
+      const summary = value(args, 'summary') ?? 'untitled event';
+      const start = value(args, 'start');
+      return `Create Calendar event “${summary}”${start ? ` at ${start}` : ''}.`;
     }
-    case 'tasks.createTask': return `Create a Google Task${value(args, 'taskListId') ? ` in list ${value(args, 'taskListId')}` : ''}.`;
+    case 'tasks.createTask': {
+      const task = args.task && typeof args.task === 'object' && !Array.isArray(args.task) ? args.task as Record<string, unknown> : undefined;
+      const title = typeof task?.title === 'string' && task.title.trim() ? task.title.trim() : undefined;
+      return `Create Google Task${title ? ` “${title}”` : ''}${value(args, 'taskListId') ? ` in list ${value(args, 'taskListId')}` : ''}.`;
+    }
     case 'tasks.updateTask': return `Update Google Task ${value(args, 'taskId') ?? 'selected task'} in list ${value(args, 'taskListId') ?? 'selected list'}.`;
     case 'tasks.moveTask': return `Move Google Task ${value(args, 'taskId') ?? 'selected task'} to the requested position.`;
     case 'tasks.deleteTask': return `Delete Google Task ${value(args, 'taskId') ?? 'selected task'}.`;
     case 'tasks.clearCompleted': return `Clear completed Google Tasks from list ${value(args, 'taskListId') ?? 'selected list'}.`;
     case 'docs.createDocument': return `Create the Google Doc “${value(args, 'title') ?? 'Untitled'}”.`;
+    case 'docs.insertText': return `Insert text at index ${String(args.index ?? '?')} in Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
+    case 'docs.appendParagraph': return `Append a paragraph to Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
+    case 'docs.replaceText': return `Replace “${value(args, 'findText') ?? 'selected text'}” in Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
     case 'docs.batchUpdate': return `Apply the requested changes to Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
     case 'chat.createMessage': return `Post a Google Chat message to ${value(args, 'spaceName') ?? 'the selected space'}.`;
     case 'chat.updateMessage': return `Update Google Chat message ${value(args, 'messageName') ?? 'selected message'}.`;
@@ -64,7 +72,10 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'gmail.createLabel': return 'Create a Gmail label from the requested label definition.';
     case 'gmail.updateLabel': return `Update Gmail label ${value(args, 'labelId') ?? 'selected label'}.`;
     case 'gmail.deleteLabel': return `Delete Gmail label ${value(args, 'labelId') ?? 'selected label'}.`;
-    case 'gmail.sendMessage': return 'Send the prepared email from the authorized Gmail account.';
+    case 'gmail.sendMessage': {
+      const to = Array.isArray(args.to) ? args.to.filter((item): item is string => typeof item === 'string').join(', ') : 'recipient';
+      return `Send email to ${to} with subject “${value(args, 'subject') ?? '(no subject)'}”.`;
+    }
     case 'drive.createFile': return `Create the Drive file “${value(args, 'name') ?? 'Untitled'}”.`;
     case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the requested metadata changes.`;
     case 'drive.moveFile': return `Move Drive file ${value(args, 'fileId') ?? 'selected file'} to ${value(args, 'parentId') ?? 'the requested folder'}.`;
@@ -104,7 +115,7 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
   if (capability !== 'roleplay.world.local') {
     let status: GoogleOAuthStatus;
     try { status = await options.oauth.getStatus(); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) }; }
-    if (authorizationNeeded(status, capability)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+    if (authorizationNeeded(status, capability)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: capability };
   }
   const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {

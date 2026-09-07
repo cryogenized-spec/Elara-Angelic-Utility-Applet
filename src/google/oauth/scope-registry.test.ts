@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getGoogleScope, googleScopeRegistry } from './scope-registry';
+import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE } from './capability-policy';
 
 const REQUIRED_CAPABILITIES = [
   'calendar.events.read',
@@ -12,8 +13,9 @@ const REQUIRED_CAPABILITIES = [
   'gmail.modify',
   'gmail.labels',
   'gmail.send',
-  'drive.files.read',
-  'drive.files.write',
+  'drive.files.app.read',
+  'drive.files.app.write',
+  'drive.library.read',
   'docs.read',
   'docs.write',
   'sheets.read',
@@ -33,12 +35,13 @@ const EXPECTED_SCOPES: Record<(typeof REQUIRED_CAPABILITIES)[number], string> = 
   'gmail.modify': 'https://www.googleapis.com/auth/gmail.modify',
   'gmail.labels': 'https://www.googleapis.com/auth/gmail.labels',
   'gmail.send': 'https://www.googleapis.com/auth/gmail.send',
-  'drive.files.read': 'https://www.googleapis.com/auth/drive.file',
-  'drive.files.write': 'https://www.googleapis.com/auth/drive.file',
-  'docs.read': 'https://www.googleapis.com/auth/drive.file',
-  'docs.write': 'https://www.googleapis.com/auth/drive.file',
-  'sheets.read': 'https://www.googleapis.com/auth/drive.file',
-  'sheets.write': 'https://www.googleapis.com/auth/drive.file',
+  'drive.files.app.read': DRIVE_APP_FILE_SCOPE,
+  'drive.files.app.write': DRIVE_APP_FILE_SCOPE,
+  'drive.library.read': DRIVE_LIBRARY_SCOPE,
+  'docs.read': DRIVE_APP_FILE_SCOPE,
+  'docs.write': DRIVE_APP_FILE_SCOPE,
+  'sheets.read': DRIVE_APP_FILE_SCOPE,
+  'sheets.write': DRIVE_APP_FILE_SCOPE,
   'chat.read': 'https://www.googleapis.com/auth/chat.messages.readonly',
   'chat.write': 'https://www.googleapis.com/auth/chat.messages',
 };
@@ -82,6 +85,12 @@ describe('Google OAuth scope registry', () => {
     expect(getGoogleScope('gmail.modify').scope).not.toBe(getGoogleScope('gmail.labels').scope);
     expect(getGoogleScope('gmail.send').scope).not.toBe(getGoogleScope('gmail.modify').scope);
     expect(getGoogleScope('gmail.send').scope).not.toBe(getGoogleScope('gmail.labels').scope);
+  });
+
+  it('separates Drive app-file access from library discovery', () => {
+    expect(getGoogleScope('drive.files.app.read').scope).toBe(DRIVE_APP_FILE_SCOPE);
+    expect(getGoogleScope('drive.library.read').scope).toBe(DRIVE_LIBRARY_SCOPE);
+    expect(getGoogleScope('drive.library.read').sensitivity).toBe('sensitive');
   });
 
   it('uses message scopes for the Chat message service boundary', () => {

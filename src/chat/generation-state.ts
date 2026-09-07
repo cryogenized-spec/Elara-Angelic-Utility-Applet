@@ -86,7 +86,7 @@ export interface GenerationEventEnvelope {
 const TERMINAL_PHASES: ReadonlySet<GenerationPhase> = new Set(['completed', 'failed', 'cancelled']);
 const ACTIVE_PHASES: ReadonlySet<GenerationPhase> = new Set(['connecting', 'thinking', 'tool-working', 'generating']);
 /** Tool-loop status vocabulary that means "tool work is in flight". */
-const TOOL_ACTIVITY_STATUSES: ReadonlySet<string> = new Set(['executing_tools', 'awaiting_tool_confirmation']);
+const TOOL_ACTIVITY_STATUSES: ReadonlySet<string> = new Set(['executing_tools', 'awaiting_tool_confirmation', 'awaiting_authorization']);
 
 export function isTerminalPhase(phase: GenerationPhase): boolean {
   return TERMINAL_PHASES.has(phase);

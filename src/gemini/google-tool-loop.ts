@@ -6,7 +6,9 @@ import { googleServiceToolHandlers } from '../google/tools/service-handlers';
 import { googleReadToolHandlers } from '../google/tools/read-handlers';
 import { roleplayWorldToolHandlers } from '../google/tools/roleplay-world-handlers';
 import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
+import { requestGoogleCapabilityGrant } from '../google/oauth/request-broker';
 import { googleOAuthAuthority } from '../google/oauth/authority';
+import type { GoogleCapabilityKey } from '../google/oauth/contracts';
 import { withRuntimeContext } from './runtime-context';
 
 export interface GoogleToolLoopOptions {
@@ -53,6 +55,8 @@ function errorToolResult(call: PendingToolCall, message: string): GeminiToolResu
 function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandlers): boolean {
   return Object.prototype.hasOwnProperty.call(handlers, tool);
 }
+
+
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
@@ -112,7 +116,21 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     if (immediateCalls.length > 0) {
       yield { type: 'interaction-status', interactionId, status: 'executing_tools' };
       for (const call of immediateCalls) {
-        const result = await executeGoogleTool(call, executeOptions);
+        let result = await executeGoogleTool(call, executeOptions);
+        if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
+          yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
+          const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
+          let granted = false;
+          for (;;) {
+            const outcome = await Promise.race([
+              pendingGrant.then((value) => ({ settled: true as const, value })),
+              delay(TOOL_CONFIRMATION_HEARTBEAT_MS).then(() => ({ settled: false as const })),
+            ]);
+            if (outcome.settled) { granted = outcome.value; break; }
+            yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
+          }
+          if (granted) result = await executeGoogleTool(call, executeOptions);
+        }
         results.push(result.ok ? { callId: call.callId, name: call.name, result: result.result } : errorToolResult(call, result.code));
       }
     }
@@ -144,7 +162,21 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(entry.call, 'USER_DECLINED'));
         continue;
       }
-      const result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+      let result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+      if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
+        yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
+        const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
+        let granted = false;
+        for (;;) {
+          const outcome = await Promise.race([
+            pendingGrant.then((value) => ({ settled: true as const, value })),
+            delay(TOOL_CONFIRMATION_HEARTBEAT_MS).then(() => ({ settled: false as const })),
+          ]);
+          if (outcome.settled) { granted = outcome.value; break; }
+          yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
+        }
+        if (granted) result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+      }
       results.push(result.ok ? { callId: entry.call.callId, name: entry.call.name, result: result.result } : errorToolResult(entry.call, result.code));
     }
 

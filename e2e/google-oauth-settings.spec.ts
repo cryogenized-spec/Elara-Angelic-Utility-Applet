@@ -17,7 +17,7 @@ async function openSettings(page: import('@playwright/test').Page): Promise<void
 }
 
 test('Google settings render independent Workspace authorization states', async ({ page }) => {
-  await seedGoogleAuthorization(page, ['calendar.events.read', 'tasks.read', 'drive.files.read']);
+  await seedGoogleAuthorization(page, ['calendar.events.read', 'tasks.read', 'drive.files.app.read']);
 
   await page.goto('/');
   await openSettings(page);

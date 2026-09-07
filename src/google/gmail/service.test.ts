@@ -13,7 +13,7 @@ describe('GoogleGmailService', () => {
           return new Response(JSON.stringify({ messages: [{ id: 'msg-1', threadId: 'thread-1' }] }), { status: 200 });
         },
       }),
-      getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
       disconnect: async () => undefined,
     };
 
@@ -31,7 +31,7 @@ describe('GoogleGmailService', () => {
   it('rejects oversized Gmail search inputs before contacting the authority fetcher', async () => {
     const oauth: GoogleOAuthAuthority = {
       authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
-      getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
       disconnect: async () => undefined,
     };
     const service = new GoogleGmailService(oauth);
@@ -46,7 +46,7 @@ describe('GoogleGmailService', () => {
         authorizeCalls += 1;
         return { capability, fetch: async () => new Response('{}', { status: 200 }) };
       },
-      getStatus: async () => ({ state: 'connected', grantedCapabilities: [] }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
       disconnect: async () => undefined,
     };
     const service = new GoogleGmailService(oauth);

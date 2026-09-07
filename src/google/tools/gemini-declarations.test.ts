@@ -3,12 +3,15 @@ import { googleToolRegistry } from './registry';
 import { googleGeminiFunctionDeclarations, googleGeminiFunctionNames } from './gemini-declarations';
 
 describe('Gemini capability declarations', () => {
-  it('exposes every registered tool, including confirmation-gated writes', () => {
-    expect(googleGeminiFunctionNames()).toEqual(googleToolRegistry.map((tool) => tool.name));
+  it('exposes Gemini-visible registered tools, including confirmation-gated writes', () => {
+    expect(googleGeminiFunctionNames()).toEqual(googleToolRegistry.filter((tool) => tool.exposure === 'gemini').map((tool) => tool.name));
     expect(googleGeminiFunctionNames()).toContain('tasks.createTask');
     expect(googleGeminiFunctionNames()).toContain('gmail.sendMessage');
     expect(googleGeminiFunctionNames()).toContain('sheets.writeRange');
     expect(googleGeminiFunctionNames()).toContain('calendar.createEvent');
+    expect(googleGeminiFunctionNames()).not.toContain('docs.batchUpdate');
+    expect(googleGeminiFunctionNames()).not.toContain('sheets.batchUpdate');
+    expect(googleGeminiFunctionNames()).not.toContain('chat.listMessages');
   });
 
   it('derives model-visible descriptions from the application registry', () => {
@@ -22,13 +25,14 @@ describe('Gemini capability declarations', () => {
     expect(createTask?.parameters.properties).toHaveProperty('task');
 
     const createEvent = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.createEvent');
-    expect(createEvent?.parameters.required).toEqual(['event']);
+    expect(createEvent?.parameters.required).toEqual(['summary', 'start', 'end']);
     expect(createEvent?.parameters.properties).toHaveProperty('calendarId');
-    expect(createEvent?.parameters.properties).toHaveProperty('event');
+    expect(createEvent?.parameters.properties).toHaveProperty('summary');
 
     const sendMail = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'gmail.sendMessage');
-    expect(sendMail?.parameters.required).toEqual(['rawRfc822']);
-    expect(sendMail?.parameters.properties).toHaveProperty('rawRfc822');
+    expect(sendMail?.parameters.required).toEqual(['to', 'subject', 'body']);
+    expect(sendMail?.parameters.properties).toHaveProperty('to');
+    expect(sendMail?.parameters.properties).not.toHaveProperty('rawRfc822');
 
     const writeRange = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'sheets.writeRange');
     expect(writeRange?.parameters.required).toEqual(['spreadsheetId', 'range', 'values']);

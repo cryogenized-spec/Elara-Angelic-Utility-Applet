@@ -65,7 +65,8 @@ if (promptWarningSource.includes('setInterval') || promptWarningSource.includes(
 const geminiDeclarationSource = readFileSync(join(root, 'src/google/tools/gemini-declarations.ts'), 'utf8');
 if (geminiDeclarationSource.includes('Application tool risk:')) throw new Error('Reliability gate: tool risk policy must not be presented as competing model persona guidance.');
 if (!geminiDeclarationSource.includes('description: descriptor.description')) throw new Error('Reliability gate: Gemini tool descriptions must come directly from the registered capability descriptions.');
-if (!geminiDeclarationSource.includes('googleToolRegistry.map')) throw new Error('Reliability gate: Gemini declarations must derive from the canonical executable tool registry.');
+if (!geminiDeclarationSource.includes('googleToolRegistry')) throw new Error('Reliability gate: Gemini declarations must derive from the canonical executable tool registry.');
+if (!geminiDeclarationSource.includes("exposure === 'gemini'")) throw new Error('Reliability gate: Gemini declarations must exclude internal adapter primitives.');
 if (!geminiDeclarationSource.includes("additionalProperties: false")) throw new Error('Reliability gate: Gemini tool arguments must reject undeclared properties.');
 if (!geminiDeclarationSource.includes("'calendar.createEvent'")) throw new Error('Reliability gate: Calendar write capability must remain model-executable.');
 

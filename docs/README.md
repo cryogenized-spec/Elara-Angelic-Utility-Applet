@@ -16,6 +16,7 @@ This directory is the authoritative documentation tree for Elara.
 
 ## Memory architecture
 
+- [`MEMORY_README.md`](./MEMORY_README.md) — user-facing guide to durable memory: purpose, scope, memory kinds and lifecycles, retrieval, permissions, privacy/storage behavior, Memory Bank controls, conflict handling, and FAQ.
 - [`MEMORY_ARCHITECTURE.md`](./MEMORY_ARCHITECTURE.md) — authoritative memory store, capability, permission policy, observation/consolidation, retrieval, Gemini context, Memory Bank, and long-horizon hardening boundaries.
 - [`../documents/MEMORY_PASS_01_STATUS.md`](../documents/MEMORY_PASS_01_STATUS.md) — foundation pass and retired compatibility seams.
 - [`../documents/MEMORY_PASS_02_STATUS.md`](../documents/MEMORY_PASS_02_STATUS.md) — deliberate `memory.save` capability boundary and cleanup.

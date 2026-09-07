@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
-import { DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
+import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
 import { ensureWorkspaceShortcuts, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
-import { completeOnboarding, hasCompletedOnboarding, loadChatAppearance, loadRoleplayPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
+import { completeOnboarding, hasCompletedOnboarding, loadAppUiPreferences, loadChatAppearance, loadRoleplayPreferences, saveAppUiPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
 import { demoThreadTitlePort } from '../chat/thread-title-port';
 import { geminiTurnPort } from '../gemini/provider';
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
@@ -16,7 +16,7 @@ import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, typ
 import { getGeminiModel } from '../gemini/model-registry';
 import { resolveMasterCharacterInstruction } from '../character/system-instruction';
 import { Icon } from '../ui/icons';
-import { fontFamilyForCss, type FontSelection } from '../ui/fontRegistry';
+import { fontFamilyForCss } from '../ui/fontRegistry';
 import { useVisualViewport } from '../ui/useVisualViewport';
 import { Sidebar } from './components/Sidebar';
 import { SettingsScreen } from './components/SettingsScreen';
@@ -47,6 +47,16 @@ function backgroundValue(preferences: ChatAppearancePreferences): string {
   return preferences.chatBackgroundMode === 'image' ? `url(${preferences.chatBackgroundValue})` : preferences.chatBackgroundValue;
 }
 
+function loadCustomGoogleFont(stylesheetUrl: string): void {
+  if (typeof document === 'undefined') return;
+  if (document.querySelector(`link[data-elara-custom-font="${stylesheetUrl}"]`)) return;
+  const link = document.createElement('link');
+  link.rel = 'stylesheet';
+  link.href = stylesheetUrl;
+  link.dataset.elaraCustomFont = stylesheetUrl;
+  document.head.appendChild(link);
+}
+
 export function App() {
   const [conversation, setConversation] = useState<ConversationState>({ id: 'primary', title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] });
   const [threads, setThreads] = useState<ConversationThread[]>([]);
@@ -57,10 +67,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [firstRunWelcomeOpen, setFirstRunWelcomeOpen] = useState(false);
   const [workspaceShortcuts, setWorkspaceShortcuts] = useState<StoredWorkspaceShortcut[]>([]);
-  const [font, setFont] = useState<FontSelection>({ kind: 'built-in', family: 'Inter' });
-  const [fontSize, setFontSize] = useState(15);
-  const [portraitScale, setPortraitScale] = useState<1 | 2 | 3>(2);
-  const [portraitBackground, setPortraitBackground] = useState<'midnight' | 'blue-hour' | 'violet' | 'rose'>('midnight');
+  const [uiSettings, setUiSettings] = useState<AppUiPreferences>(DEFAULT_APP_UI);
   const [geminiModel, setGeminiModel] = useState(DEFAULT_GEMINI_MODEL);
   const [geminiPerModelSettings, setGeminiPerModelSettings] = useState<Record<string, GeminiSettings>>({ [DEFAULT_GEMINI_MODEL]: defaultsForModel(DEFAULT_GEMINI_MODEL) });
   const [character, setCharacter] = useState<CharacterProfile>(DEFAULT_CHARACTER_PROFILE);
@@ -68,6 +75,7 @@ export function App() {
   const [roleplay, setRoleplay] = useState<RoleplayPreferences>(DEFAULT_ROLEPLAY);
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeConversationIdRef = useRef('primary');
+  const uiSaveQueueRef = useRef(Promise.resolve());
 
   useVisualViewport();
 
@@ -76,13 +84,15 @@ export function App() {
     const initialActiveConversationId = activeConversationIdRef.current;
     void (async () => {
       try {
-        const [loadedThreads, savedGeminiSettings, loadedCharacter, loadedAppearance, loadedRoleplay, loadedShortcuts, onboardingComplete] = await Promise.all([loadThreads(), loadGeminiSettings(), loadCharacterProfile(), loadChatAppearance(), loadRoleplayPreferences(), ensureWorkspaceShortcuts(), hasCompletedOnboarding()]);
+        const [loadedThreads, savedGeminiSettings, loadedCharacter, loadedAppearance, loadedRoleplay, loadedShortcuts, loadedUi, onboardingComplete] = await Promise.all([loadThreads(), loadGeminiSettings(), loadCharacterProfile(), loadChatAppearance(), loadRoleplayPreferences(), ensureWorkspaceShortcuts(), loadAppUiPreferences(), hasCompletedOnboarding()]);
+        if (cancelled) return;
+        if (loadedUi.font.kind === 'custom') loadCustomGoogleFont(loadedUi.font.stylesheetUrl);
         const storedActive = window.localStorage.getItem(ACTIVE_THREAD_KEY);
         const activeId = storedActive && loadedThreads.some((thread) => thread.id === storedActive) ? storedActive : (loadedThreads[0]?.id ?? 'primary');
         const loadedConversation = await loadConversation(activeId);
         if (cancelled || activeConversationIdRef.current !== initialActiveConversationId) return;
         activeConversationIdRef.current = activeId;
-        setThreads(loadedThreads); setConversation(loadedConversation); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel); setCharacter(loadedCharacter); setChatAppearance(loadedAppearance); setRoleplay(loadedRoleplay); setWorkspaceShortcuts(loadedShortcuts);
+        setThreads(loadedThreads); setConversation(loadedConversation); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel); setCharacter(loadedCharacter); setChatAppearance(loadedAppearance); setRoleplay(loadedRoleplay); setWorkspaceShortcuts(loadedShortcuts); setUiSettings(loadedUi);
         setFirstRunWelcomeOpen(!onboardingComplete);
         window.localStorage.setItem(ACTIVE_THREAD_KEY, activeId);
       } catch { if (!cancelled) setError('Could not load the local application settings.'); }
@@ -229,17 +239,26 @@ export function App() {
   async function handleCharacterChange(next: CharacterProfile) { setCharacter(next); try { const saved = await saveCharacterProfile(next); setCharacter(saved); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save character settings.'); } }
   async function handleChatAppearanceChange(next: ChatAppearancePreferences) { const safe = { ...DEFAULT_CHAT_APPEARANCE, ...next, chatBackgroundOpacity: Math.max(0, Math.min(1, next.chatBackgroundOpacity)), chatBackgroundOverlay: Math.max(0, Math.min(.9, next.chatBackgroundOverlay)), chatBackgroundBlur: Math.max(0, Math.min(24, next.chatBackgroundBlur)), userSurfaceOpacity: Math.max(.2, Math.min(1, next.userSurfaceOpacity)) }; setChatAppearance(safe); try { setChatAppearance(await saveChatAppearance(safe)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save chat appearance.'); } }
   async function handleRoleplayChange(next: RoleplayPreferences) { setRoleplay(next); try { setRoleplay(await saveRoleplayPreferences(next)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save roleplay settings.'); } }
+  function handleUiSettingsChange(patch: Partial<AppUiPreferences>): void {
+    const next = { ...uiSettings, ...patch };
+    if (next.font.kind === 'custom') loadCustomGoogleFont(next.font.stylesheetUrl);
+    setUiSettings(next);
+    uiSaveQueueRef.current = uiSaveQueueRef.current.catch(() => undefined).then(async () => {
+      try { const saved = await saveAppUiPreferences(next); setUiSettings(saved); }
+      catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save application settings.'); }
+    });
+  }
   async function finishFirstRun(): Promise<void> { await completeOnboarding(); setFirstRunWelcomeOpen(false); }
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
-  const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity } as React.CSSProperties), [chatAppearance]);
+  const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity, '--body-font-size': `${uiSettings.chatTextSize}px` } as React.CSSProperties), [chatAppearance, uiSettings.chatTextSize]);
   const visibleMessages = conversation.messages.filter((message) => message.conversationId === conversation.id);
-  if (settingsOpen) return <SettingsScreen font={font} onFontChange={setFont} fontSize={fontSize} onFontSizeChange={setFontSize} portraitScale={portraitScale} onPortraitScaleChange={setPortraitScale} portraitBackground={portraitBackground} onPortraitBackgroundChange={setPortraitBackground} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} onBack={() => setSettingsOpen(false)} />;
-  return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(font), '--body-font-size': `${fontSize}px` } as React.CSSProperties}>
+  if (settingsOpen) return <SettingsScreen font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} onBack={() => setSettingsOpen(false)} />;
+  return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}>
     <div className="app-shell__background" aria-hidden="true" />
     <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button></div>
-    <PortraitBanner collapsed={sidebarOpen} scale={portraitScale} background={portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
+    <PortraitBanner collapsed={sidebarOpen} scale={uiSettings.portraitScale} background={uiSettings.portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
     <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
-    <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={fontSize} onRegenerate={(messageId) => void regenerate(messageId)} />
+    <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={uiSettings.chatTextSize} onRegenerate={(messageId) => void regenerate(messageId)} />
     {error && <div className="error" role="alert">{error}</div>}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
     <Sidebar open={sidebarOpen} threads={threads} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => void switchThread(id)} onNewChat={() => void startNewChat()} onRename={(id, title) => void handleRename(id, title)} onArchive={(id) => void handleArchive(id)} onDelete={(id) => void handleDelete(id)} onSettings={() => { setSidebarOpen(false); setSettingsOpen(true); }} />

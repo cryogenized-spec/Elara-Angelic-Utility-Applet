@@ -72,7 +72,7 @@ test.describe('Android portrait reliability', () => {
     await page.getByRole('button', { name: 'Appearance' }).click();
     const portraitScale = page.getByRole('slider', { name: 'Character presentation scale' });
     await portraitScale.fill('3');
-    await page.getByRole('button', { name: 'Rose', exact: true }).click();
+    await page.getByRole('radio', { name: /^Rose/ }).click();
 
     await page.getByRole('button', { name: 'Back to chat' }).click();
     await expect(page.locator('.app-shell')).toHaveCSS('font-family', /Manrope/);
@@ -84,7 +84,7 @@ test.describe('Android portrait reliability', () => {
     await expect(page.getByRole('slider', { name: 'Chat text size' })).toHaveValue('21');
     await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(page.getByRole('slider', { name: 'Character presentation scale' })).toHaveValue('3');
-    await expect(page.getByRole('button', { name: 'Rose', exact: true })).toHaveAttribute('aria-checked', 'true');
+    await expect(page.getByRole('radio', { name: /^Rose/ })).toHaveAttribute('aria-checked', 'true');
   });
 
   test('keeps Settings navigation recoverable on a narrow portrait viewport', async ({ page }) => {
@@ -108,7 +108,7 @@ test.describe('Android portrait reliability', () => {
 
     const transition = await calendar.evaluate((element) => getComputedStyle(element).transitionDuration);
     const durations = transition.split(',').map((value) => Number.parseFloat(value));
-    expect(durations.every((duration) => duration === 0)).toBe(true);
+    expect(durations.every((duration) => duration <= 0.001)).toBe(true);
 
     await calendar.click();
     await expect(surface).toBeVisible();

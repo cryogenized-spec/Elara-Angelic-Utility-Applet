@@ -39,6 +39,12 @@ function value(args: Readonly<Record<string, unknown>>, key: string): string | u
 function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, fallback: string): string {
   const id = value(args, 'id') ?? value(args, 'ref');
   switch (tool) {
+    case 'calendar.createEvent': {
+      const event = args.event && typeof args.event === 'object' && !Array.isArray(args.event) ? args.event as Record<string, unknown> : undefined;
+      const summary = typeof event?.summary === 'string' && event.summary.trim() ? event.summary.trim() : 'untitled event';
+      const start = event?.start && typeof event.start === 'object' && !Array.isArray(event.start) ? (event.start as Record<string, unknown>).dateTime ?? (event.start as Record<string, unknown>).date : undefined;
+      return `Create Calendar event “${summary}”${start ? ` at ${String(start)}` : ''}.`;
+    }
     case 'tasks.createTask': return `Create a Google Task${value(args, 'taskListId') ? ` in list ${value(args, 'taskListId')}` : ''}.`;
     case 'tasks.updateTask': return `Update Google Task ${value(args, 'taskId') ?? 'selected task'} in list ${value(args, 'taskListId') ?? 'selected list'}.`;
     case 'tasks.moveTask': return `Move Google Task ${value(args, 'taskId') ?? 'selected task'} to the requested position.`;
@@ -55,7 +61,7 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'gmail.untrashMessage': return `Restore Gmail message ${value(args, 'messageId') ?? 'selected message'} from Trash.`;
     case 'gmail.trashThread': return `Move Gmail thread ${value(args, 'threadId') ?? 'selected thread'} to Trash.`;
     case 'gmail.untrashThread': return `Restore Gmail thread ${value(args, 'threadId') ?? 'selected thread'} from Trash.`;
-    case 'gmail.createLabel': return `Create a Gmail label from the requested label definition.`;
+    case 'gmail.createLabel': return 'Create a Gmail label from the requested label definition.';
     case 'gmail.updateLabel': return `Update Gmail label ${value(args, 'labelId') ?? 'selected label'}.`;
     case 'gmail.deleteLabel': return `Delete Gmail label ${value(args, 'labelId') ?? 'selected label'}.`;
     case 'gmail.sendMessage': return 'Send the prepared email from the authorized Gmail account.';
@@ -96,8 +102,9 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
     const confirmation: WriteConfirmationRequest = { tool: descriptor.name, risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>, resourceSummary: confirmationSummary(validCall.tool, args, descriptor.description), requestedAt };
     const confirm = options.confirm ?? requestGoogleToolConfirmation;
     let approved = false;
-    try { approved = await confirm(confirmation) && isConfirmationFresh(requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
-    if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: options.confirm || descriptor.name.startsWith('roleplay_setting.') ? 'USER_DECLINED' : 'CONFIRMATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
+    let confirmationInvoked = false;
+    try { confirmationInvoked = true; approved = await confirm(confirmation) && isConfirmationFresh(requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
+    if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: confirmationInvoked ? 'USER_DECLINED' : 'CONFIRMATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
   }
   const handler = options.handlers[descriptor.name];
   if (!handler) return { ok: false, correlationId: id, tool: validCall.tool, code: 'HANDLER_UNAVAILABLE', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };

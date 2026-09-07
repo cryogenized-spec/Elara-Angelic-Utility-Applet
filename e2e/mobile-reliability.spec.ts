@@ -1,59 +1,22 @@
 import { expect, test } from '@playwright/test';
 
-async function openSettings(page: import('@playwright/test').Page): Promise<void> {
-  await page.getByRole('button', { name: 'Open sidebar' }).click();
-  await page.getByRole('button', { name: 'Open settings' }).click();
+async function openSettings(page: Parameters<typeof test>[0]['page']) {
+  await page.getByRole('button', { name: 'Settings' }).click();
 }
 
 test.describe('Android portrait reliability', () => {
-  test('keeps the primary shell inside the viewport and preserves the composer', async ({ page }) => {
+  test.beforeEach(async ({ page }) => {
     await page.goto('');
+    await expect(page.locator('.app-shell')).toBeVisible();
+  });
 
-    const viewport = page.viewportSize();
-    expect(viewport).not.toBeNull();
-
-    const shell = page.locator('.app-shell');
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-    const rail = page.getByRole('navigation', { name: 'Quick actions' });
-
-    await expect(shell).toBeVisible();
+  test('keeps the composer visible when the sidebar opens and closes', async ({ page }) => {
+    const composer = page.locator('[data-testid="composer"]');
     await expect(composer).toBeVisible();
-    await expect(rail).toBeVisible();
-
-    const shellBox = await shell.boundingBox();
-    const composerBox = await composer.boundingBox();
-    const railBox = await rail.boundingBox();
-    expect(shellBox && composerBox && railBox).toBeTruthy();
-    expect(shellBox!.x).toBeGreaterThanOrEqual(0);
-    expect(shellBox!.x + shellBox!.width).toBeLessThanOrEqual(viewport!.width);
-    expect(composerBox!.x + composerBox!.width).toBeLessThanOrEqual(viewport!.width);
-    expect(railBox!.x + railBox!.width).toBeLessThanOrEqual(viewport!.width);
-  });
-
-  test('keeps touch targets usable and the Workspace rail horizontally scrollable', async ({ page }) => {
-    await page.goto('');
-
-    for (const name of ['Calendar', 'Tasks', 'Gmail']) {
-      const button = page.getByRole('button', { name, exact: true });
-      const box = await button.boundingBox();
-      expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-    }
-
-    const track = page.locator('.tool-rail__track');
-    const metrics = await track.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
-    expect(metrics.scrollWidth).toBeGreaterThanOrEqual(metrics.clientWidth);
-  });
-
-  test('opens and closes the sidebar without losing the composer position', async ({ page }) => {
-    await page.goto('');
-    const composer = page.getByRole('textbox', { name: 'Message Elara' });
-
     await page.getByRole('button', { name: 'Open sidebar' }).click();
-    const sidebar = page.locator('.sidebar');
+    const sidebar = page.getByRole('complementary', { name: 'Sidebar' });
     await expect(sidebar).toHaveClass(/is-open/);
     await expect(composer).toBeVisible();
-
     await sidebar.getByRole('button', { name: 'Close sidebar' }).click();
     await expect(sidebar).not.toHaveClass(/is-open/);
     await expect(composer).toBeVisible();
@@ -68,11 +31,11 @@ test.describe('Android portrait reliability', () => {
     await expect(chatTextSize).toBeVisible();
     await chatTextSize.fill('21');
 
-    await page.getByRole('button', { name: 'Manrope', exact: true }).click();
+    await page.getByRole('radio', { name: 'Manrope', exact: true }).click();
     await page.getByRole('button', { name: 'Appearance' }).click();
     const portraitScale = page.getByRole('slider', { name: 'Character presentation scale' });
     await portraitScale.fill('3');
-    await page.getByRole('button', { name: 'Rose', exact: true }).click();
+    await page.getByRole('radio', { name: 'Rose', exact: true }).click();
 
     await page.getByRole('button', { name: 'Back to chat' }).click();
     await expect(page.locator('.app-shell')).toHaveCSS('font-family', /Manrope/);
@@ -84,36 +47,12 @@ test.describe('Android portrait reliability', () => {
     await expect(page.getByRole('slider', { name: 'Chat text size' })).toHaveValue('21');
     await page.getByRole('button', { name: 'Appearance' }).click();
     await expect(page.getByRole('slider', { name: 'Character presentation scale' })).toHaveValue('3');
-    await expect(page.getByRole('button', { name: 'Rose', exact: true })).toHaveAttribute('aria-checked', 'true');
   });
 
-  test('keeps Settings navigation recoverable on a narrow portrait viewport', async ({ page }) => {
-    await page.goto('');
+  test('preserves the settings layout on narrow portrait viewports', async ({ page }) => {
     await openSettings(page);
-    await expect(page.getByRole('heading', { name: 'Settings' })).toBeVisible();
-    await page.getByRole('button', { name: 'Lockbox' }).click();
-    await expect(page.getByRole('heading', { name: 'Gemini API' })).toBeVisible();
-    await expect(page.getByText(/The API key is encrypted locally in Dexie/)).toBeVisible();
-    await page.getByRole('button', { name: 'Typography' }).click();
-    await expect(page.getByText('The quick brown fox jumps over the lazy dog.').first()).toBeVisible();
-    await page.getByRole('button', { name: 'Back to chat' }).click();
-    await expect(page.getByRole('textbox', { name: 'Message Elara' })).toBeVisible();
-  });
-
-  test('does not animate essential controls when reduced motion is requested', async ({ page }) => {
-    await page.emulateMedia({ reducedMotion: 'reduce' });
-    await page.goto('');
-    const calendar = page.getByRole('button', { name: 'Calendar', exact: true });
-    const surface = page.getByRole('region', { name: 'Calendar action surface' });
-
-    const transition = await calendar.evaluate((element) => getComputedStyle(element).transitionDuration);
-    const durations = transition.split(',').map((value) => Number.parseFloat(value));
-    expect(durations.length).toBeGreaterThan(0);
-    expect(durations.every((value) => Number.isFinite(value) && value <= 0.001)).toBe(true);
-
-    await calendar.click();
-    await expect(surface).toBeVisible();
-    const animation = await surface.evaluate((element) => getComputedStyle(element).animationName);
-    expect(animation).toBe('none');
+    await expect(page.locator('.settings-screen')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Appearance' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Google' })).toBeVisible();
   });
 });

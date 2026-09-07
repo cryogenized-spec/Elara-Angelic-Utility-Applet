@@ -1,6 +1,34 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
 
+const MAX_SPACE_NAME_LENGTH = 500;
+const MAX_MESSAGE_NAME_LENGTH = 500;
+const MAX_PAGE_TOKEN_LENGTH = 5_000;
+const MAX_FILTER_LENGTH = 2_000;
+const MAX_PAGE_SIZE = 100;
+const MAX_REQUEST_ID_LENGTH = 1_024;
+const MAX_UPDATE_MASK_LENGTH = 2_000;
+
 export interface GoogleChatMessageSummary { name: string; text?: string; createTime?: string; senderName?: string; }
+
+function bounded(value: string, field: string, maxLength: number): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`Google Chat ${field} is required.`);
+  if (normalized.length > maxLength) throw new Error(`Google Chat ${field} is too long.`);
+  return normalized;
+}
+
+function optionalBounded(value: string | undefined, field: string, maxLength: number): string | undefined {
+  if (value === undefined) return undefined;
+  const normalized = value.trim();
+  if (normalized.length > maxLength) throw new Error(`Google Chat ${field} is too long.`);
+  return normalized || undefined;
+}
+
+function boundedPageSize(value: number | undefined): number | undefined {
+  if (value === undefined) return undefined;
+  if (!Number.isInteger(value) || value < 1 || value > MAX_PAGE_SIZE) throw new Error(`Google Chat pageSize must be an integer from 1 to ${MAX_PAGE_SIZE}.`);
+  return value;
+}
 
 export class GoogleChatService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
@@ -8,40 +36,44 @@ export class GoogleChatService {
   async listMessages(spaceName: string, pageSize?: number, pageToken?: string, filter?: string): Promise<unknown> {
     const access = await this.oauth.authorize('chat.read');
     const url = new URL('https://chat.googleapis.com/v1/messages');
-    url.searchParams.set('parent', spaceName);
-    if (pageSize !== undefined) url.searchParams.set('pageSize', String(pageSize));
-    if (pageToken) url.searchParams.set('pageToken', pageToken);
-    if (filter) url.searchParams.set('filter', filter);
+    url.searchParams.set('parent', bounded(spaceName, 'space name', MAX_SPACE_NAME_LENGTH));
+    const safePageSize = boundedPageSize(pageSize);
+    const safePageToken = optionalBounded(pageToken, 'page token', MAX_PAGE_TOKEN_LENGTH);
+    const safeFilter = optionalBounded(filter, 'filter', MAX_FILTER_LENGTH);
+    if (safePageSize !== undefined) url.searchParams.set('pageSize', String(safePageSize));
+    if (safePageToken) url.searchParams.set('pageToken', safePageToken);
+    if (safeFilter) url.searchParams.set('filter', safeFilter);
     const response = await access.fetch(url);
     return this.readJson(response);
   }
 
   async getMessage(messageName: string): Promise<unknown> {
     const access = await this.oauth.authorize('chat.read');
-    const response = await access.fetch(`https://chat.googleapis.com/v1/${messageName}`);
+    const response = await access.fetch(`https://chat.googleapis.com/v1/${bounded(messageName, 'message name', MAX_MESSAGE_NAME_LENGTH)}`);
     return this.readJson(response);
   }
 
   async createMessage(spaceName: string, message: Record<string, unknown>, requestId?: string): Promise<unknown> {
     const access = await this.oauth.authorize('chat.write');
     const url = new URL('https://chat.googleapis.com/v1/messages');
-    url.searchParams.set('parent', spaceName);
-    if (requestId) url.searchParams.set('requestId', requestId);
+    url.searchParams.set('parent', bounded(spaceName, 'space name', MAX_SPACE_NAME_LENGTH));
+    const safeRequestId = optionalBounded(requestId, 'request ID', MAX_REQUEST_ID_LENGTH);
+    if (safeRequestId) url.searchParams.set('requestId', safeRequestId);
     const response = await access.fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(message) });
     return this.readJson(response);
   }
 
   async updateMessage(messageName: string, message: Record<string, unknown>, updateMask: string): Promise<unknown> {
     const access = await this.oauth.authorize('chat.write');
-    const url = new URL(`https://chat.googleapis.com/v1/${messageName}`);
-    url.searchParams.set('updateMask', updateMask);
+    const url = new URL(`https://chat.googleapis.com/v1/${bounded(messageName, 'message name', MAX_MESSAGE_NAME_LENGTH)}`);
+    url.searchParams.set('updateMask', bounded(updateMask, 'update mask', MAX_UPDATE_MASK_LENGTH));
     const response = await access.fetch(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(message) });
     return this.readJson(response);
   }
 
   async deleteMessage(messageName: string): Promise<void> {
     const access = await this.oauth.authorize('chat.write');
-    const response = await access.fetch(`https://chat.googleapis.com/v1/${messageName}`, { method: 'DELETE' });
+    const response = await access.fetch(`https://chat.googleapis.com/v1/${bounded(messageName, 'message name', MAX_MESSAGE_NAME_LENGTH)}`, { method: 'DELETE' });
     if (!response.ok) throw new Error(`Google Chat request failed (${response.status}).`);
   }
 

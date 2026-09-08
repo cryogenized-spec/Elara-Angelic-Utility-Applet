@@ -200,6 +200,44 @@ describe('direct Google OAuth authority', () => {
     expect(status.grantedCapabilities).toContain('docs.read');
   });
 
+  it('honors v2-era capability records without a scope manifest as granted, without sibling inference', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 2,
+      grantedCapabilities: ['calendar.events.read', 'tasks.read', 'drive.files.app.read'],
+      account: { email: 'test@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+    const status = await googleOAuthAuthority.getStatus();
+    // The recorded capabilities render as granted (migration continuity)…
+    expect(status.enabledCapabilities).toEqual(expect.arrayContaining(['calendar.events.read', 'tasks.read', 'drive.files.app.read']));
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['calendar.events.read', 'tasks.read', 'drive.files.app.read']));
+    expect(status.state).toBe('partially-authorized');
+    // …but nothing is inferred beyond the record: without a scope manifest,
+    // drive.files.app.read does not imply Docs/Sheets readiness.
+    expect(status.grantedCapabilities).not.toContain('docs.read');
+    expect(status.grantedCapabilities).not.toContain('sheets.read');
+    expect(status.grantedProviderScopes).toEqual([]);
+  });
+
+  it('supersedes legacy capability evidence with the next token acquisition', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 2,
+      grantedCapabilities: ['calendar.events.read', 'tasks.read', 'drive.files.app.read'],
+      account: { email: 'test@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+    // Google returns a calendar-only token; legacy Tasks/Drive grants are not
+    // reasserted without scope evidence.
+    tokenMock.mockResolvedValueOnce(token('access-calendar', CALENDAR_READ_SCOPE));
+    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.grantedProviderScopes).toEqual([CALENDAR_READ_SCOPE]);
+    expect(status.grantedCapabilities).toEqual(['calendar.events.read']);
+    expect(status.grantedCapabilities).not.toContain('tasks.read');
+    expect(status.grantedCapabilities).not.toContain('drive.files.app.read');
+  });
+
   it('replacing scopes never manufactures a grant the new token does not carry', async () => {
     // Library grant then calendar grant: calendar token must not keep drive.library effective.
     tokenMock.mockResolvedValueOnce(token('access-library', DRIVE_LIBRARY_SCOPE));

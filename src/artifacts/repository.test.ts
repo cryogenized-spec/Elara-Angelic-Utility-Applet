@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { artifactRepository } from './repository';
-import { db } from '../persistence/conversation';
+import { db, deleteMessage, loadConversation } from '../persistence/conversation';
 import type { ChatMessage } from '../domain/chat';
 
 describe('artifact repository', () => {
@@ -67,6 +67,62 @@ describe('artifact repository', () => {
     await artifactRepository.detachFromMessage(artifact.id, first.id, 'thread-1');
     expect((await db.messages.get(first.id))?.attachments).toBeUndefined();
     expect((await db.messages.get(second.id))?.attachments).toEqual([artifact.id]);
+  });
+
+  it('atomically appends a message with deduplicated artifact IDs and preserves repeated prompt lineage', async () => {
+    const first = await artifactRepository.create({ artifactType: 'attachment', name: 'first.txt', mimeType: 'text/plain', kind: 'text', data: new Blob(['first']) });
+    const second = await artifactRepository.create({ artifactType: 'attachment', name: 'second.txt', mimeType: 'text/plain', kind: 'text', data: new Blob(['second']) });
+    const firstMessage: ChatMessage = { id: 'repeated-prompt-1', role: 'user', text: 'same prompt', conversationId: 'thread-1', createdAt: 10 };
+    const secondMessage: ChatMessage = { id: 'repeated-prompt-2', role: 'user', text: 'same prompt', conversationId: 'thread-1', createdAt: 11 };
+    await artifactRepository.appendMessageWithArtifacts(firstMessage, 'thread-1', [first.id, first.id]);
+    await artifactRepository.appendMessageWithArtifacts(secondMessage, 'thread-1', [second.id]);
+    expect((await db.messages.get(firstMessage.id))?.attachments).toEqual([first.id]);
+    expect((await db.messages.get(secondMessage.id))?.attachments).toEqual([second.id]);
+  });
+
+  it('rolls back the message when any attachment is missing or the transaction is interrupted', async () => {
+    const valid = await artifactRepository.create({ artifactType: 'attachment', name: 'valid.txt', mimeType: 'text/plain', kind: 'text', data: new Blob(['valid']) });
+    await expect(artifactRepository.appendMessageWithArtifacts({ id: 'missing-message', role: 'user', text: 'missing', conversationId: 'thread-1', createdAt: 1 }, 'thread-1', [valid.id, 'missing-artifact'])).rejects.toMatchObject({ code: 'ARTIFACT_NOT_FOUND' });
+    expect(await db.messages.get('missing-message')).toBeUndefined();
+    const interrupt = (_changes: unknown, primKey: string) => { if (primKey === 'thread-1') throw new Error('simulated interruption'); };
+    db.threads.hook('updating').subscribe(interrupt);
+    try {
+      await expect(artifactRepository.appendMessageWithArtifacts({ id: 'interrupted-message', role: 'user', text: 'interrupted', conversationId: 'thread-1', createdAt: 2 }, 'thread-1', [valid.id])).rejects.toMatchObject({ code: 'ARTIFACT_STORAGE_FAILED' });
+    } finally {
+      db.threads.hook('updating').unsubscribe(interrupt);
+    }
+    expect(await db.messages.get('interrupted-message')).toBeUndefined();
+  });
+
+  it('reloads an atomically associated message and keeps separately-owned artifacts after message deletion', async () => {
+    const artifact = await artifactRepository.create({ artifactType: 'attachment', name: 'reload.txt', mimeType: 'text/plain', kind: 'text', data: new Blob(['reload']) });
+    const message: ChatMessage = { id: 'reload-message', role: 'user', text: 'reload', conversationId: 'thread-1', createdAt: 1 };
+    await artifactRepository.appendMessageWithArtifacts(message, 'thread-1', [artifact.id]);
+    db.close();
+    await db.open();
+    expect((await loadConversation('thread-1')).messages.find((item) => item.id === message.id)?.attachments).toEqual([artifact.id]);
+    await deleteMessage(message.id, 'thread-1');
+    expect(await artifactRepository.get(artifact.id)).toMatchObject({ id: artifact.id });
+    expect(await db.messages.get(message.id)).toBeUndefined();
+  });
+
+  it('atomically creates and associates a derived artifact only while its parent and message exist', async () => {
+    const source = await artifactRepository.create({ artifactType: 'attachment', name: 'source.png', mimeType: 'image/png', kind: 'image', data: new Blob(['source']), status: 'ready' });
+    const message: ChatMessage = { id: 'ocr-message', role: 'assistant', text: 'response', conversationId: 'thread-1', createdAt: 1 };
+    await db.messages.put(message);
+    const derived = await artifactRepository.createAndAttach({ artifactType: 'derived', name: 'ocr.txt', mimeType: 'text/plain', sourceCode: { language: 'markdown', content: 'recognized' }, outputBlob: new Blob(['recognized'], { type: 'text/plain' }), parentArtifactIds: [source.id], transformation: 'image-to-ocr-text', sourceMessageId: message.id, status: 'ready', operationId: 'ocr-operation' }, message.id, 'thread-1');
+    expect((await db.messages.get(message.id))?.artifacts).toEqual([derived.id]);
+    await artifactRepository.delete(source.id);
+    await expect(artifactRepository.createAndAttach({ artifactType: 'derived', name: 'stale.txt', mimeType: 'text/plain', outputBlob: new Blob(['stale']), parentArtifactIds: [source.id], transformation: 'image-to-ocr-text', sourceMessageId: message.id, status: 'ready' }, message.id, 'thread-1')).rejects.toMatchObject({ code: 'ARTIFACT_NOT_FOUND' });
+  });
+
+  it('rejects stale lifecycle finalization after supersession', async () => {
+    const artifact = await artifactRepository.create({ artifactType: 'generated', name: 'race.pdf', mimeType: 'application/pdf', sourceCode: { language: 'lualatex', content: '\\documentclass{article}' }, operationId: 'operation-a' });
+    await artifactRepository.setStatus(artifact.id, 'processing', undefined, { operationId: 'operation-a', expectedStatus: 'pending' });
+    await artifactRepository.beginOperation(artifact.id, 'operation-b', 'processing');
+    await expect(artifactRepository.setStatus(artifact.id, 'ready', undefined, { operationId: 'operation-a', expectedStatus: 'processing' })).rejects.toMatchObject({ code: 'ARTIFACT_OPERATION_STALE' });
+    expect((await db.artifactMetadata.get(artifact.id))?.status).toBe('processing');
+    await artifactRepository.setStatus(artifact.id, 'failed', { code: 'DOCUMENT_COMPILATION_FAILED', message: 'superseded' }, { operationId: 'operation-b', expectedStatus: 'processing' });
   });
 
   it('deletes metadata, Blob, and all message references', async () => {

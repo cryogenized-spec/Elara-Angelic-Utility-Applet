@@ -40,12 +40,15 @@ function normalizeTools(tools: readonly GoogleToolName[] | undefined): readonly 
   return tools?.length ? tools : Object.keys(googleReadToolHandlers) as GoogleToolName[];
 }
 
-function executorOptions(options: GoogleToolLoopOptions): GoogleToolExecutorOptions {
+function executorOptions(options: GoogleToolLoopOptions, request: GeminiTurnRequest, signal?: AbortSignal): GoogleToolExecutorOptions {
   return {
     oauth: options.executor?.oauth ?? googleOAuthAuthority,
     handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...documentToolHandlers, ...options.executor?.handlers },
     confirm: options.executor?.confirm,
     now: options.executor?.now,
+    signal,
+    generationId: request.generationId,
+    isGenerationActive: request.isGenerationActive,
   };
 }
 
@@ -57,7 +60,7 @@ function artifactEvent(toolName: string, value: unknown): GeminiStreamEvent | un
   if (!value || typeof value !== 'object') return undefined;
   const result = value as Record<string, unknown>;
   if (typeof result.artifactId !== 'string' || typeof result.status !== 'string' || typeof result.mimeType !== 'string') return undefined;
-  return { type: 'artifact-created', artifactId: result.artifactId, status: result.status, mimeType: result.mimeType, toolName };
+  return { type: 'artifact-created', artifactId: result.artifactId, status: result.status, mimeType: result.mimeType, toolName, ...(typeof result.operationId === 'string' ? { operationId: result.operationId } : {}) };
 }
 
 function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandlers): boolean {
@@ -70,7 +73,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   const readOnly = options.readOnly ?? true;
   const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools);
   const maxToolCalls = Math.max(1, Math.min(options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS, 20));
-  const executeOptions = executorOptions(options);
+  const executeOptions = executorOptions(options, request, signal);
 
   // Tool availability must not prevent the initial Gemini request. A stale or
   // partially upgraded client may have a registry/handler mismatch; the model
@@ -128,7 +131,9 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           yield { type: 'interaction-status', interactionId, status: 'preparing_document' };
           yield { type: 'interaction-status', interactionId, status: 'compiling_pdf' };
         }
+        if (signal?.aborted || request.isGenerationActive?.() === false) return;
         let result = await executeGoogleTool(call, executeOptions);
+        if (signal?.aborted || request.isGenerationActive?.() === false) return;
         if (call.name === 'document.create_pdf') yield { type: 'interaction-status', interactionId, status: 'finalizing_artifact' };
         if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
@@ -142,8 +147,9 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
             if (outcome.settled) { granted = outcome.value; break; }
             yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
           }
-          if (granted) result = await executeGoogleTool(call, executeOptions);
+          if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(call, executeOptions);
         }
+        if (signal?.aborted || request.isGenerationActive?.() === false) return;
         if (result.ok) {
           results.push({ callId: call.callId, name: call.name, result: result.result });
           const created = artifactEvent(call.name, result.result);
@@ -179,7 +185,9 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(entry.call, 'USER_DECLINED'));
         continue;
       }
+      if (signal?.aborted || request.isGenerationActive?.() === false) return;
       let result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+      if (signal?.aborted || request.isGenerationActive?.() === false) return;
       if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
         yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
         const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
@@ -192,8 +200,9 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           if (outcome.settled) { granted = outcome.value; break; }
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
         }
-        if (granted) result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+        if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
       }
+      if (signal?.aborted || request.isGenerationActive?.() === false) return;
       if (result.ok) {
         results.push({ callId: entry.call.callId, name: entry.call.name, result: result.result });
         const created = artifactEvent(entry.call.name, result.result);

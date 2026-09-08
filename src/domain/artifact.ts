@@ -95,6 +95,8 @@ export interface ConversationMessageArtifactRefs {
 
 export interface StoredArtifactMetadata extends BaseMedia {
   artifactType: Artifact['artifactType'];
+  /** Durable identity for an in-flight async mutation. */
+  operationId?: string;
   kind?: AttachmentKind;
   provenance: ArtifactProvenance;
   status: ArtifactStatus;

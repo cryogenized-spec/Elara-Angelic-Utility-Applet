@@ -1,8 +1,9 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { createInteraction, getGeminiApiKey, getGeminiLockboxStatus, GoogleGenAI } = vi.hoisted(() => ({
+const { createInteraction, upload, getGeminiApiKey, getGeminiLockboxStatus, GoogleGenAI } = vi.hoisted(() => ({
   createInteraction: vi.fn(),
+  upload: vi.fn(),
   getGeminiApiKey: vi.fn(),
   getGeminiLockboxStatus: vi.fn(),
   GoogleGenAI: vi.fn(),
@@ -20,16 +21,33 @@ async function* events(...items: unknown[]) { for (const item of items) yield it
 describe('Gemini multimodal artifact adapter', () => {
   beforeEach(async () => {
     createInteraction.mockReset();
+    upload.mockReset();
     getGeminiApiKey.mockReset();
     getGeminiLockboxStatus.mockReset();
     GoogleGenAI.mockReset();
-    GoogleGenAI.mockImplementation(function MockGoogleGenAI(this: { interactions: { create: typeof createInteraction } }) {
+    GoogleGenAI.mockImplementation(function MockGoogleGenAI(this: { interactions: { create: typeof createInteraction }; files: { upload: typeof upload } }) {
       this.interactions = { create: createInteraction };
+      this.files = { upload };
     });
     getGeminiLockboxStatus.mockResolvedValue('unlocked');
     getGeminiApiKey.mockResolvedValue('test-key');
     await db.artifactMetadata.clear();
     await db.artifactBlobs.clear();
+  });
+
+  it('does not persist a stale oversized-upload result after generation supersession', async () => {
+    const artifact = await artifactRepository.create({ artifactType: 'attachment', name: 'large.bin', mimeType: 'application/octet-stream', kind: 'document', data: new Blob([new Uint8Array(4 * 1024 * 1024 + 1)], { type: 'application/octet-stream' }), status: 'ready' });
+    let releaseUpload!: (value: unknown) => void;
+    upload.mockReturnValue(new Promise((resolve) => { releaseUpload = resolve; }));
+    let active = true;
+    const isGenerationActive = vi.fn(() => active);
+    const pending = (async () => { const collected: unknown[] = []; for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Inspect this.', attachments: [artifact.id], generationId: 'generation-a', isGenerationActive }, undefined)) collected.push(event); return collected; })();
+    await vi.waitFor(() => expect(upload).toHaveBeenCalledOnce());
+    active = false;
+    releaseUpload({ uri: 'https://example.test/stale', expirationTime: new Date(Date.now() + 86_400_000).toISOString() });
+    const collected = await pending;
+    expect(collected.at(-1)).toMatchObject({ type: 'cancelled' });
+    expect((await db.artifactMetadata.get(artifact.id))?.remoteRef).toBeUndefined();
   });
 
   it('maps a local image artifact to inline multimodal input without exposing its ID', async () => {

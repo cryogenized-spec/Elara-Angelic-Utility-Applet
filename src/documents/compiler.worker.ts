@@ -15,22 +15,22 @@ interface CompilerWorkerResponse {
 self.onmessage = async (event: MessageEvent<CompilerWorkerRequest>) => {
   const request = event.data;
   const respond = (response: CompilerWorkerResponse) => self.postMessage(response);
+  let runner: { initialize: (force?: boolean) => Promise<unknown>; terminate: () => void } | undefined;
   try {
     const module = await import('texlyre-busytex');
-    const runner = new module.BusyTexRunner({
+    runner = new module.BusyTexRunner({
       busytexBasePath: request.basePath,
       engineMode: 'luahbtex',
       verbose: false,
     });
     await runner.initialize(true);
-    const compiler = new module.LuaLatex(runner);
+    const compiler = new module.LuaLatex(runner as never);
     const result = await compiler.compile({
       input: request.source,
       mainTexPath: 'main.tex',
       verbose: 'info',
       shellEscape: false,
     });
-    runner.terminate();
     if (!result.success || !result.pdf) {
       respond({ id: request.id, ok: false, compilationLog: result.log, error: 'LuaLaTeX could not compile the document.' });
       return;
@@ -38,5 +38,7 @@ self.onmessage = async (event: MessageEvent<CompilerWorkerRequest>) => {
     respond({ id: request.id, ok: true, pdf: result.pdf, compilationLog: result.log });
   } catch (cause) {
     respond({ id: request.id, ok: false, error: cause instanceof Error ? cause.message : 'LuaLaTeX failed.' });
+  } finally {
+    runner?.terminate();
   }
 };

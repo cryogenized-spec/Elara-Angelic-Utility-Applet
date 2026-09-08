@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Artifact, Attachment } from '../../../domain/artifact';
 import { artifactRepository } from '../../../artifacts/repository';
 import { artifactErrorMessage } from '../../../artifacts/errors';
@@ -16,28 +16,44 @@ export function MessageArtifacts({ attachmentIds = EMPTY_IDS, artifactIds = EMPT
   const [artifacts, setArtifacts] = useState<Artifact[]>([]);
   const [ocrBusy, setOcrBusy] = useState<string | null>(null);
   const [ocrError, setOcrError] = useState<string | null>(null);
+  const ocrOperationRef = useRef(0);
+  const ocrControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     let active = true;
     void Promise.all([...attachmentIds, ...artifactIds].map((id) => artifactRepository.get(id).catch(() => null))).then((loaded) => {
       if (active) setArtifacts(loaded.filter((artifact): artifact is Artifact => artifact !== null));
     });
-    return () => { active = false; };
+    return () => {
+      active = false;
+      ocrControllerRef.current?.abort();
+      ocrControllerRef.current = null;
+      ocrOperationRef.current += 1;
+    };
   }, [attachmentIds, artifactIds]);
 
   async function extractText(attachment: Attachment): Promise<void> {
     if (ocrBusy) return;
+    const operationNumber = ocrOperationRef.current + 1;
+    ocrOperationRef.current = operationNumber;
+    const controller = new AbortController();
+    ocrControllerRef.current = controller;
+    const isCurrent = () => ocrOperationRef.current === operationNumber && ocrControllerRef.current === controller && !controller.signal.aborted;
     setOcrBusy(attachment.id);
     setOcrError(null);
     try {
-      const result = await ocrService.recognize(attachment.data, { sourceArtifactId: attachment.id });
-      const derived = await createOcrTextArtifact({ sourceArtifactId: attachment.id, result, sourceMessageId: messageId, name: `${attachment.name.replace(/\.[^.]+$/, '')}-ocr.txt` });
-      if (messageId && conversationId) await artifactRepository.attachToMessage(derived.id, messageId, conversationId);
+      const result = await ocrService.recognize(attachment.data, { sourceArtifactId: attachment.id, signal: controller.signal });
+      if (!isCurrent()) return;
+      const derived = await createOcrTextArtifact({ sourceArtifactId: attachment.id, result, sourceMessageId: messageId, messageId, conversationId, operationId: `ocr:${operationNumber}:${attachment.id}`, name: `${attachment.name.replace(/\.[^.]+$/, '')}-ocr.txt` });
+      if (!isCurrent()) return;
       setArtifacts((current) => [...current, derived]);
     } catch (cause) {
-      setOcrError(artifactErrorMessage(cause, 'Local OCR failed.'));
+      if (isCurrent() && !(cause instanceof DOMException && cause.name === 'AbortError')) setOcrError(artifactErrorMessage(cause, 'Local OCR failed.'));
     } finally {
-      setOcrBusy(null);
+      if (ocrControllerRef.current === controller) {
+        ocrControllerRef.current = null;
+        if (ocrOperationRef.current === operationNumber) setOcrBusy(null);
+      }
     }
   }
 

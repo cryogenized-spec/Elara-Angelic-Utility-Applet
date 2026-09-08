@@ -20,7 +20,7 @@ interface CompilerWorkerResponse {
   error?: string;
 }
 
-interface CompilerWorkerLike {
+export interface CompilerWorkerLike {
   postMessage(message: CompilerWorkerRequest): void;
   terminate(): void;
   onmessage: ((event: MessageEvent<CompilerWorkerResponse>) => void) | null;
@@ -45,24 +45,32 @@ export function validateLatexSource(source: string): string {
   return normalized;
 }
 
-export async function compilePdf(source: string, options: { timeoutMs?: number; basePath?: string } = {}): Promise<CompilePdfResult> {
+export async function compilePdf(source: string, options: { timeoutMs?: number; basePath?: string; signal?: AbortSignal; workerFactory?: () => CompilerWorkerLike } = {}): Promise<CompilePdfResult> {
   const validated = validateLatexSource(source);
-  const worker = compilerWorker();
+  if (options.signal?.aborted) throw new DOMException('PDF generation was cancelled.', 'AbortError');
+  const worker = options.workerFactory?.() ?? compilerWorker();
   const id = crypto.randomUUID();
   const timeoutMs = Math.max(1_000, Math.min(options.timeoutMs ?? ARTIFACT_LIMITS.maxCompilerDurationMs, ARTIFACT_LIMITS.maxCompilerDurationMs));
   const basePath = options.basePath ?? (import.meta.env.VITE_BUSYTEX_BASE_PATH as string | undefined) ?? '/core/busytex';
   return new Promise<CompilePdfResult>((resolve, reject) => {
     let settled = false;
+    let timer: number | undefined;
+    const abort = () => finish(() => reject(new DOMException('PDF generation was cancelled.', 'AbortError')));
     const finish = (callback: () => void) => {
       if (settled) return;
       settled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+      options.signal?.removeEventListener('abort', abort);
+      worker.onmessage = null;
+      worker.onerror = null;
       worker.terminate();
       callback();
     };
-    const timer = window.setTimeout(() => finish(() => reject(new ArtifactError('DOCUMENT_COMPILATION_TIMEOUT', 'PDF generation timed out.'))), timeoutMs);
+    timer = window.setTimeout(() => finish(() => reject(new ArtifactError('DOCUMENT_COMPILATION_TIMEOUT', 'PDF generation timed out.'))), timeoutMs);
+    options.signal?.addEventListener('abort', abort, { once: true });
+    if (options.signal?.aborted) { abort(); return; }
     worker.onmessage = (event) => {
       if (event.data.id !== id) return;
-      window.clearTimeout(timer);
       if (!event.data.ok || !event.data.pdf) {
         finish(() => reject(new ArtifactError('DOCUMENT_COMPILATION_FAILED', event.data.error ?? 'PDF generation failed.')));
         return;
@@ -75,10 +83,8 @@ export async function compilePdf(source: string, options: { timeoutMs?: number; 
       }
       finish(() => resolve({ pdf, compilationLog: log }));
     };
-    worker.onerror = () => {
-      window.clearTimeout(timer);
-      finish(() => reject(new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'The document compiler could not start.')));
-    };
-    worker.postMessage({ id, source: validated, basePath });
+    worker.onerror = () => finish(() => reject(new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'The document compiler could not start.')));
+    try { worker.postMessage({ id, source: validated, basePath }); }
+    catch (cause) { finish(() => reject(new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'The document compiler could not start.', cause))); }
   });
 }

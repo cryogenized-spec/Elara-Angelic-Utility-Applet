@@ -8,7 +8,8 @@ export type ArtifactErrorCode =
   | 'DOCUMENT_COMPILATION_FAILED'
   | 'DOCUMENT_COMPILATION_TIMEOUT'
   | 'ARTIFACT_NOT_FOUND'
-  | 'ARTIFACT_STORAGE_FAILED';
+  | 'ARTIFACT_STORAGE_FAILED'
+  | 'ARTIFACT_OPERATION_STALE';
 
 export class ArtifactError extends Error {
   readonly code: ArtifactErrorCode;

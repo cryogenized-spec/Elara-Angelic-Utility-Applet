@@ -7,17 +7,23 @@ export async function createOcrTextArtifact(input: {
   result: OCRResult;
   sourceMessageId?: string;
   name?: string;
+  messageId?: string;
+  conversationId?: string;
+  operationId?: string;
 }): Promise<DerivedArtifact> {
   const text = input.result.text.trim();
-  return artifactRepository.create({
-    artifactType: 'derived',
+  const artifactInput = {
+    artifactType: 'derived' as const,
     name: input.name ?? 'ocr-result.txt',
     mimeType: 'text/plain',
-    sourceCode: { language: 'markdown', content: text },
+    sourceCode: { language: 'markdown' as const, content: text },
     outputBlob: new Blob([text], { type: 'text/plain' }),
     parentArtifactIds: [input.sourceArtifactId],
     transformation: 'image-to-ocr-text',
     sourceMessageId: input.sourceMessageId,
-    status: 'ready',
-  }) as Promise<DerivedArtifact>;
+    status: 'ready' as const,
+    operationId: input.operationId,
+  };
+  if (input.messageId && input.conversationId) return artifactRepository.createAndAttach(artifactInput, input.messageId, input.conversationId) as Promise<DerivedArtifact>;
+  return artifactRepository.create(artifactInput) as Promise<DerivedArtifact>;
 }

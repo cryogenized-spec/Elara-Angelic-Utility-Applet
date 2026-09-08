@@ -12,7 +12,7 @@ export type GeminiStreamEvent =
   | { type: 'thought-summary-delta'; index: number; text: string }
   | { type: 'thought-signature'; index: number; signature: string }
   | { type: 'step-stop'; index: number }
-  | { type: 'artifact-created'; artifactId: string; status: string; mimeType: string; toolName?: string }
+  | { type: 'artifact-created'; artifactId: string; status: string; mimeType: string; toolName?: string; operationId?: string }
   | { type: 'completed'; interactionId: string; status: string; durationMs: number; usage?: GeminiUsage }
   | { type: 'cancelled'; interactionId?: string }
   | { type: 'failed'; error: NormalizedProviderError }
@@ -35,6 +35,9 @@ export interface GeminiTurnRequest {
   generationConfig?: EffectiveGeminiSettings;
   systemInstruction?: string;
   tools?: readonly string[];
+  /** Existing app generation arbiter context for artifact-producing work. */
+  generationId?: string;
+  isGenerationActive?: () => boolean;
 }
 
 export interface GeminiToolContinuationRequest {

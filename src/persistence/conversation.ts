@@ -46,8 +46,8 @@ export class ElaraDatabase extends Dexie {
   artifactMetadata!: Table<StoredArtifactMetadata, string>;
   artifactBlobs!: Table<StoredArtifactBlob, string>;
 
-  constructor() {
-    super('elara-angelic-utility-applet');
+  constructor(name = 'elara-angelic-utility-applet') {
+    super(name);
     this.version(1).stores({ messages: 'id, createdAt, role' });
     this.version(2).stores({
       messages: 'id, conversationId, createdAt, role',

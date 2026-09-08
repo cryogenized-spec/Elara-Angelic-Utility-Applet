@@ -35,5 +35,22 @@ describe('OCR service worker boundary', () => {
     const service = createOCRService(() => stuck);
     await expect(service.recognize(new Blob(['image'], { type: 'image/png' }), { timeoutMs: 1_000 })).rejects.toMatchObject({ code: 'OCR_TIMEOUT' });
     expect(stuck.terminated).toBe(true);
+    expect(stuck.onmessage).toBeNull();
+    expect(stuck.onerror).toBeNull();
   }, 5_000);
+
+  it('cancels exactly once, removes worker listeners, and ignores a late worker result', async () => {
+    const cancelled = new FakeWorker();
+    cancelled.postMessage = () => undefined;
+    const controller = new AbortController();
+    const service = createOCRService(() => cancelled);
+    const pending = service.recognize(new Blob(['image'], { type: 'image/png' }), { signal: controller.signal });
+    await vi.waitFor(() => expect(cancelled.onmessage).not.toBeNull());
+    controller.abort();
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(cancelled.terminated).toBe(true);
+    expect(cancelled.onmessage).toBeNull();
+    expect(cancelled.onerror).toBeNull();
+    expect(() => cancelled.onmessage?.({ data: { id: 'late', ok: true, result: { text: 'late', blocks: [] } } } as unknown as MessageEvent<OCRWorkerResponse>)).not.toThrow();
+  });
 });

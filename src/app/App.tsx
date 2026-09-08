@@ -7,7 +7,7 @@ import { ArtifactError } from '../artifacts/errors';
 import { ARTIFACT_LIMITS } from '../artifacts/limits';
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
-import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
+import { archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
 import { ensureWorkspaceShortcuts, storedShortcutFromDefinition, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
 import { completeOnboarding, hasCompletedOnboarding, loadAppUiPreferences, loadChatAppearance, loadRoleplayPreferences, saveAppUiPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
@@ -196,9 +196,7 @@ export function App() {
     let turnId: string | null = null;
     try {
       const userMessage = makeMessage('user', text, conversationId);
-      let withUser = await appendMessage(userMessage, conversationId);
-      await Promise.all(attachmentIds.map((attachmentId) => artifactRepository.attachToMessage(attachmentId, userMessage.id, conversationId)));
-      if (attachmentIds.length) withUser = await loadConversation(conversationId);
+      const withUser = await artifactRepository.appendMessageWithArtifacts(userMessage, conversationId, attachmentIds);
       if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       let titled = withUser;
       if (withUser.title === DEFAULT_TITLE && text) { try { const generatedTitle = await localThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch {} }
@@ -309,7 +307,10 @@ export function App() {
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
       current = dispatchGenerationEvent(current, { generationId, event, receivedAt: performance.now() }, syncContext);
-      if (event.type === 'artifact-created') void artifactRepository.updateMetadata(event.artifactId, { sourceMessageId: assistantMessage.id }).catch(() => undefined);
+      if (event.type === 'artifact-created' && isActiveGeneration()) {
+        const expectedStatus = event.status === 'pending' || event.status === 'processing' || event.status === 'ready' || event.status === 'failed' ? event.status : undefined;
+        void artifactRepository.updateMetadata(event.artifactId, { sourceMessageId: assistantMessage.id }, event.operationId && expectedStatus ? { operationId: event.operationId, expectedStatus } : undefined).catch(() => undefined);
+      }
       // The trace panel is application state too: reflect it only while this
       // turn is both elected AND on the current conversation.
       if (isActiveGeneration()) setGeneration(current);
@@ -339,7 +340,7 @@ export function App() {
     });
 
     try {
-      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
+      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools, generationId, isGenerationActive: isActiveGeneration };
       const stream = options.tools?.length
         ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
         : geminiTurnPort.streamReply(request, controller.signal);

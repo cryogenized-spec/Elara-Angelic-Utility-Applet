@@ -28,10 +28,13 @@ function normalizeSource(source: string, title?: string): string {
 }
 
 export const documentToolHandlers: GoogleToolHandlers = {
-  'document.create_pdf': async ({ arguments: raw }) => {
+  'document.create_pdf': async ({ arguments: raw, signal, generationId, isGenerationActive }) => {
+    const isCurrent = () => !signal?.aborted && isGenerationActive?.() !== false;
+    if (!isCurrent()) throw new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'PDF generation was cancelled.');
     const source = typeof raw.source === 'string' ? raw.source : '';
     const title = typeof raw.title === 'string' ? raw.title.trim().slice(0, 180) : undefined;
     const preparedSource = normalizeSource(source, title);
+    const operationId = `${generationId ?? crypto.randomUUID()}:document:${crypto.randomUUID()}`;
     const artifact = await artifactRepository.create({
       artifactType: 'generated',
       name: `${title || 'generated-document'}.pdf`.replace(/[^a-zA-Z0-9._-]+/g, '-'),
@@ -39,17 +42,25 @@ export const documentToolHandlers: GoogleToolHandlers = {
       sourceCode: { language: 'lualatex', content: preparedSource },
       toolName: 'document.create_pdf',
       status: 'pending',
+      operationId,
     }) as GeneratedArtifact;
-    await artifactRepository.setStatus(artifact.id, 'processing');
+    await artifactRepository.setStatus(artifact.id, 'processing', undefined, { operationId, expectedStatus: 'pending' });
     try {
-      const compiled = await compilePdf(preparedSource);
-      const ready = await artifactRepository.updateMetadata(artifact.id, { outputBlob: compiled.pdf, compilationLog: compiled.compilationLog });
-      await artifactRepository.setStatus(artifact.id, 'ready');
-      return { artifactId: ready.id, status: 'ready', mimeType: 'application/pdf', compilationLog: compiled.compilationLog };
+      const compiled = await compilePdf(preparedSource, { signal });
+      if (!isCurrent()) throw new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'PDF generation was superseded.');
+      const processingGuard = { operationId, expectedStatus: 'processing' as const };
+      const ready = await artifactRepository.updateMetadata(artifact.id, { outputBlob: compiled.pdf, compilationLog: compiled.compilationLog }, processingGuard);
+      if (!isCurrent()) throw new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'PDF generation was superseded.');
+      await artifactRepository.setStatus(artifact.id, 'ready', undefined, processingGuard);
+      return { artifactId: ready.id, status: 'ready', mimeType: 'application/pdf', compilationLog: compiled.compilationLog, operationId };
     } catch (cause) {
-      const error = cause instanceof ArtifactError ? cause : new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'PDF generation failed.', cause);
-      await artifactRepository.setStatus(artifact.id, 'failed', { code: error.code, message: error.userMessage });
-      return { artifactId: artifact.id, status: 'failed', mimeType: 'application/pdf', errorCode: error.code, error: error.userMessage };
+      const error = cause instanceof ArtifactError
+        ? cause
+        : cause instanceof DOMException && cause.name === 'AbortError'
+          ? new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'PDF generation was cancelled.', cause)
+          : new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'PDF generation failed.', cause);
+      await artifactRepository.setStatus(artifact.id, 'failed', { code: error.code, message: error.userMessage }, { operationId, expectedStatus: 'processing' }).catch(() => undefined);
+      return { artifactId: artifact.id, status: 'failed', mimeType: 'application/pdf', errorCode: error.code, error: error.userMessage, operationId };
     }
   },
 };

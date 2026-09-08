@@ -13,10 +13,10 @@ import { loadRoleplayPreferences } from '../../persistence/preferences';
 
 export type LocalToolCapability = 'documents.local';
 export type ToolCapability = GoogleCapabilityKey | LocalToolCapability;
-export interface GoogleToolExecutionContext { readonly tool: GoogleToolName; readonly descriptor: GoogleToolDescriptor; readonly capability: ToolCapability; readonly risk: GoogleToolRisk; readonly arguments: Readonly<Record<string, unknown>>; }
+export interface GoogleToolExecutionContext { readonly tool: GoogleToolName; readonly descriptor: GoogleToolDescriptor; readonly capability: ToolCapability; readonly risk: GoogleToolRisk; readonly arguments: Readonly<Record<string, unknown>>; readonly signal?: AbortSignal; readonly generationId?: string; readonly isGenerationActive?: () => boolean; }
 export type GoogleToolHandler = (context: GoogleToolExecutionContext) => Promise<unknown>;
 export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandler>>;
-export interface GoogleToolExecutorOptions { readonly oauth: GoogleOAuthAuthority; readonly handlers: GoogleToolHandlers; readonly confirm?: (request: WriteConfirmationRequest) => Promise<boolean>; readonly now?: () => Date; }
+export interface GoogleToolExecutorOptions { readonly oauth: GoogleOAuthAuthority; readonly handlers: GoogleToolHandlers; readonly confirm?: (request: WriteConfirmationRequest) => Promise<boolean>; readonly now?: () => Date; readonly signal?: AbortSignal; readonly generationId?: string; readonly isGenerationActive?: () => boolean; }
 export type GoogleToolExecutionResult =
   | { readonly ok: true; readonly correlationId: string; readonly tool: GoogleToolName; readonly result: unknown }
   | { readonly ok: false; readonly correlationId: string; readonly tool?: GoogleToolName; readonly code: 'INVALID_TOOL_CALL' | 'AUTHORIZATION_REQUIRED' | 'CONFIRMATION_REQUIRED' | 'USER_DECLINED' | 'HANDLER_UNAVAILABLE' | 'EXECUTION_FAILED'; readonly failure: GoogleToolFailure; readonly confirmation?: WriteConfirmationRequest; readonly requiredCapability?: GoogleCapabilityKey };
@@ -134,6 +134,6 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
   }
   const handler = options.handlers[descriptor.name];
   if (!handler) return { ok: false, correlationId: id, tool: validCall.tool, code: 'HANDLER_UNAVAILABLE', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
-  try { const result = await handler({ tool: descriptor.name, descriptor, capability, risk: descriptor.risk, arguments: args }); return { ok: true, correlationId: id, tool: descriptor.name, result }; }
+  try { const result = await handler({ tool: descriptor.name, descriptor, capability, risk: descriptor.risk, arguments: args, signal: options.signal, generationId: options.generationId, isGenerationActive: options.isGenerationActive }); return { ok: true, correlationId: id, tool: descriptor.name, result }; }
   catch { return { ok: false, correlationId: id, tool: descriptor.name, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'provider' }) }; }
 }

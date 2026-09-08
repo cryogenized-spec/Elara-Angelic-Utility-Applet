@@ -69,7 +69,6 @@ export interface ListArtifactsOptions {
   status?: ArtifactStatus;
   provenance?: Artifact['provenance'];
   sourceMessageId?: string;
-  includeData?: boolean;
 }
 
 export interface ArtifactRepository {
@@ -197,16 +196,36 @@ async function blobToArrayBuffer(data: Blob): Promise<ArrayBuffer> {
   return new Response(data).arrayBuffer();
 }
 
+function validateStoredMetadata(metadata: StoredArtifactMetadata): void {
+  if (!metadata || typeof metadata.id !== 'string' || typeof metadata.name !== 'string' || typeof metadata.mimeType !== 'string' || !Number.isFinite(metadata.size) || metadata.size < 0) {
+    throw new ArtifactError('ARTIFACT_STORAGE_FAILED', 'Artifact metadata is corrupt.');
+  }
+  if (!['attachment', 'generated', 'derived'].includes(metadata.artifactType) || !['pending', 'processing', 'ready', 'failed'].includes(metadata.status)) {
+    throw new ArtifactError('ARTIFACT_STORAGE_FAILED', 'Artifact metadata has an invalid type or lifecycle status.');
+  }
+  if (metadata.artifactType === 'attachment' && !metadata.kind) {
+    throw new ArtifactError('ARTIFACT_STORAGE_FAILED', 'Attachment metadata is missing its kind.');
+  }
+  if (metadata.artifactType === 'derived' && (!Array.isArray(metadata.parentArtifactIds) || typeof metadata.transformation !== 'string')) {
+    throw new ArtifactError('ARTIFACT_STORAGE_FAILED', 'Derived artifact lineage metadata is corrupt.');
+  }
+}
+
 async function artifactFromStored(metadata: StoredArtifactMetadata, data: Blob | ArrayBuffer | undefined): Promise<Artifact> {
+  validateStoredMetadata(metadata);
   const hydrated = await hydrateBlob(data, metadata.mimeType);
   if (metadata.artifactType === 'attachment') {
-    if (!hydrated) throw new ArtifactError('ARTIFACT_STORAGE_FAILED', 'The attachment data is unavailable.');
-    return { ...metadata, artifactType: 'attachment', kind: metadata.kind ?? 'unknown', data: hydrated } satisfies Attachment;
+    if (!hydrated) throw new ArtifactError('ARTIFACT_STORAGE_FAILED', 'The attachment payload is missing.');
+    return { ...metadata, artifactType: 'attachment', kind: metadata.kind!, data: hydrated } satisfies Attachment;
+  }
+  const hasSourcePayload = metadata.mimeType !== 'application/pdf' && typeof metadata.sourceCode?.content === 'string';
+  if (metadata.status === 'ready' && !hydrated && !hasSourcePayload) {
+    throw new ArtifactError('ARTIFACT_STORAGE_FAILED', 'A ready artifact payload is missing.');
   }
   if (metadata.artifactType === 'generated') {
     return { ...metadata, artifactType: 'generated', provenance: 'generated_tool', outputBlob: hydrated } satisfies GeneratedArtifact;
   }
-  return { ...metadata, artifactType: 'derived', provenance: 'derived_transformation', parentArtifactIds: metadata.parentArtifactIds ?? [], transformation: metadata.transformation ?? 'unknown', outputBlob: hydrated } satisfies DerivedArtifact;
+  return { ...metadata, artifactType: 'derived', provenance: 'derived_transformation', parentArtifactIds: metadata.parentArtifactIds!, transformation: metadata.transformation!, outputBlob: hydrated } satisfies DerivedArtifact;
 }
 
 async function readStoredArtifact(id: string): Promise<Artifact> {
@@ -254,8 +273,7 @@ export const artifactRepository: ArtifactRepository = {
       (options.sourceMessageId === undefined || item.sourceMessageId === options.sourceMessageId),
     );
     return Promise.all(filtered.map(async (item) => {
-      const blob = options.includeData ? (await db.artifactBlobs.get(item.id))?.data : undefined;
-      if (item.artifactType === 'attachment' && !blob) return artifactFromStored(item, new Blob());
+      const blob = (await db.artifactBlobs.get(item.id))?.data;
       return artifactFromStored(item, blob);
     }));
   },

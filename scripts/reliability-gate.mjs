@@ -51,6 +51,7 @@ for (const entry of readdirSync(domainRoot, { withFileTypes: true })) {
 }
 const artifactRepositorySource = readFileSync(join(root, 'src/artifacts/repository.ts'), 'utf8');
 if (!artifactRepositorySource.includes('ArrayBuffer') || !artifactRepositorySource.includes('canonicalBlob')) throw new Error('Reliability gate: artifact persistence must hydrate binary storage at the repository boundary.');
+if (artifactRepositorySource.includes('artifactFromStored(item, new Blob())') || !artifactRepositorySource.includes('ARTIFACT_STORAGE_FAILED')) throw new Error('Reliability gate: artifact reads must report missing/corrupt payloads instead of silently repairing them.');
 const compilerWorkerSource = readFileSync(join(root, 'src/documents/compiler.worker.ts'), 'utf8');
 if (!compilerWorkerSource.includes('shellEscape: false')) throw new Error('Reliability gate: browser document compilation must disable shell escape.');
 const providerSource = readFileSync(join(root, 'src/gemini/provider.ts'), 'utf8');

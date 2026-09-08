@@ -31,6 +31,8 @@ The final gate verifies required architecture documents exist, the expected npm 
 
 ## Milestone rule
 
-The 50-prompt foundation is not considered complete until the latest commit on `main` has a completed green CI run covering all gates above.
+Every implementation milestone must leave main-quality code behind. At the end of each milestone, the repository must remain buildable, type-safe, and green on the relevant unit/integration/E2E tests; a milestone may not defer broken code, failing tests, or required wiring to a later milestone. The six artifact milestones are therefore reviewable checkpoints, not six phases of one giant branch that only works at the end.
+
+The milestone is not considered complete until the exact pushed commit has a completed green CI run covering all applicable gates above. If a gate is not applicable, the milestone record must state why and identify the replacement verification.
 
 This gate is intentionally additive. It does not replace unit, integration, or E2E tests; it verifies that the repository still preserves the architectural invariants that those tests cannot fully express.

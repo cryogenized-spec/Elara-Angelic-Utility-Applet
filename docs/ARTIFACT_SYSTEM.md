@@ -33,6 +33,8 @@ Object URLs are presentation-only. Components create them when rendering an imag
 
 `artifactRepository` is the application interface for creation, retrieval, listing, metadata updates, lifecycle changes, message association, disassociation, and deletion. Components and provider adapters do not access Dexie directly.
 
+Repository reads are strict integrity checks. `get` and `list` never repair missing metadata, synthesize an empty Blob, recreate a missing blob record, or otherwise silently self-heal corrupted state. They distinguish `ARTIFACT_NOT_FOUND` from `ARTIFACT_STORAGE_FAILED`; a present artifact with a missing/corrupt payload is reported as storage corruption. Silent repair, if ever introduced, must be a separate explicitly audited operation with its own tests.
+
 ## Attachment lifecycle
 
 ```text

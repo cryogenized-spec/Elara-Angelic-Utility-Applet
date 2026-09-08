@@ -38,6 +38,19 @@ type AccessSession = {
 let stored: StoredAuthorization = emptyStored();
 let session: AccessSession | null = null;
 
+/**
+ * Capability evidence carried over from v2-era records that did not persist a
+ * provider-scope manifest. The v2 format recorded the capabilities a user
+ * consented to; scope strings were not always stored alongside them.
+ *
+ * Such records are honored as granted for exactly what was recorded — no
+ * sibling inference — until the next token acquisition replaces them with
+ * fresh scope truth. This trust lives at the storage boundary only:
+ * computeEffectiveCapabilities() stays strict, and current scope-bearing
+ * (v3) records never receive it.
+ */
+let legacyGrantedCapabilities: GoogleCapabilityKey[] = [];
+
 function configuredClientId(): string {
   return (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined)?.trim() ?? '';
 }
@@ -62,13 +75,17 @@ function migrateCapabilities(values: unknown): GoogleCapabilityKey[] {
 }
 
 function loadStored(): StoredAuthorization {
-  if (typeof localStorage === 'undefined') return stored;
+  if (typeof localStorage === 'undefined') {
+    legacyGrantedCapabilities = [];
+    return stored;
+  }
 
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       stored = emptyStored();
       session = null;
+      legacyGrantedCapabilities = [];
       return stored;
     }
 
@@ -76,6 +93,13 @@ function loadStored(): StoredAuthorization {
     const enabled = migrateCapabilities(parsed.enabledCapabilities ?? parsed.grantedCapabilities);
     const scopes = Array.isArray(parsed.grantedProviderScopes)
       ? parseProviderScopes(parsed.grantedProviderScopes.filter((value): value is string => typeof value === 'string').join(' '))
+      : [];
+    // A v2-era record (grantedCapabilities field) without a scope manifest is
+    // migrated consent evidence: honor exactly the recorded capabilities until
+    // a fresh token acquisition supersedes them. Records that carry scopes go
+    // through the strict scope-based policy instead.
+    legacyGrantedCapabilities = Array.isArray(parsed.grantedCapabilities) && scopes.length === 0
+      ? [...enabled]
       : [];
     const account = parsed.account && typeof parsed.account.email === 'string' && parsed.account.email.trim()
       ? { email: parsed.account.email.trim(), ...(typeof parsed.account.displayName === 'string' && parsed.account.displayName.trim() ? { displayName: parsed.account.displayName.trim() } : {}) }
@@ -93,6 +117,7 @@ function loadStored(): StoredAuthorization {
   } catch {
     stored = emptyStored();
     session = null;
+    legacyGrantedCapabilities = [];
   }
   return stored;
 }
@@ -112,7 +137,10 @@ function ensureClientId(): string {
 
 function currentStatus(): GoogleOAuthStatusContract {
   const current = loadStored();
-  const grantedCapabilities = computeEffectiveCapabilities(current.enabledCapabilities, current.grantedProviderScopes);
+  const grantedCapabilities = [...new Set([
+    ...computeEffectiveCapabilities(current.enabledCapabilities, current.grantedProviderScopes),
+    ...legacyGrantedCapabilities,
+  ])];
   return {
     state: authorizationStateFor(current.enabledCapabilities, grantedCapabilities, Boolean(current.needsReauthorization)),
     grantedCapabilities,
@@ -142,16 +170,26 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
   try {
     const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: descriptor.scope, prompt });
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
+    const current = loadStored();
+    // Stored provider scopes describe the CURRENT Google token, never a
+    // historical union. A returned scope set therefore replaces the stored
+    // grant — otherwise a revocation, partial grant change, or account switch
+    // leaves stale scopes locally and getStatus() overstates authority.
+    // When Google omits the scope header there is no evidence of change, so
+    // retain existing grants and only add the requested scope: a successful
+    // acquisition for `descriptor.scope` proves at least that much.
     const returnedScopes = parseProviderScopes(response.scope);
-    const grantedProviderScopes = [...new Set([
-      ...loadStored().grantedProviderScopes,
-      ...(returnedScopes.length ? returnedScopes : [descriptor.scope]),
-    ])];
-    const enabledCapabilities = uniqueCapabilities([...loadStored().enabledCapabilities, capability]);
+    const grantedProviderScopes = returnedScopes.length
+      ? returnedScopes
+      : [...new Set([...current.grantedProviderScopes, descriptor.scope])];
+    const enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
     session = {
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
     };
+    // A fresh provider response is the current truth: it supersedes any
+    // scope-less legacy capability evidence.
+    legacyGrantedCapabilities = [];
     stored.enabledCapabilities = enabledCapabilities;
     stored.grantedProviderScopes = grantedProviderScopes;
     stored.needsReauthorization = false;
@@ -242,6 +280,7 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
     }
     session = null;
     stored = emptyStored();
+    legacyGrantedCapabilities = [];
     if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
   },
 };

@@ -47,7 +47,25 @@ declare global {
 const GIS_SCRIPT_ID = 'google-identity-services';
 const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';
 let loadPromise: Promise<GoogleIdentityServices> | null = null;
-let activeRequest: Promise<GoogleTokenResponse> | null = null;
+
+type TokenRequestKey = `${string}|${string}|${string}`;
+
+/**
+ * In-flight GIS token requests, keyed by request identity (client, scope, and
+ * prompt semantics). Same-identity requests single-flight onto one provider
+ * exchange; different scopes never join each other, so no caller can resolve
+ * with another request's token. `prompt: 'none'` is part of the key because a
+ * silent request must never ride an interactive popup (or vice-versa).
+ */
+const activeRequests = new Map<TokenRequestKey, Promise<GoogleTokenResponse>>();
+
+function tokenRequestKey(config: {
+  clientId: string;
+  scope: string;
+  prompt: '' | 'none' | 'consent' | 'select_account';
+}): TokenRequestKey {
+  return `${config.clientId}|${config.scope}|${config.prompt}`;
+}
 
 function currentGoogle(): GoogleIdentityServices | null {
   return typeof window !== 'undefined' ? window.google ?? null : null;
@@ -94,9 +112,11 @@ export async function requestGoogleAccessToken(config: {
   scope: string;
   prompt: '' | 'none' | 'consent' | 'select_account';
 }): Promise<GoogleTokenResponse> {
-  if (activeRequest) return activeRequest;
+  const key = tokenRequestKey(config);
+  const existing = activeRequests.get(key);
+  if (existing) return existing;
 
-  activeRequest = (async () => {
+  const request = (async () => {
     const google = await loadGoogleIdentityServices();
     return new Promise<GoogleTokenResponse>((resolve, reject) => {
       const client = google.accounts.oauth2.initTokenClient({
@@ -118,10 +138,11 @@ export async function requestGoogleAccessToken(config: {
     });
   })();
 
+  activeRequests.set(key, request);
   try {
-    return await activeRequest;
+    return await request;
   } finally {
-    activeRequest = null;
+    if (activeRequests.get(key) === request) activeRequests.delete(key);
   }
 }
 

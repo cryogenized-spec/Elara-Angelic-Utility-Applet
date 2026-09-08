@@ -155,91 +155,45 @@ function isArrayBuffer(value: unknown): value is ArrayBuffer {
   return value instanceof ArrayBuffer || Object.prototype.toString.call(value) === '[object ArrayBuffer]';
 }
 
-function isBlobLike(value: unknown): value is Blob {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<Blob>;
-  return typeof candidate.size === 'number' && typeof candidate.type === 'string' && typeof candidate.arrayBuffer === 'function';
-}
-
-function withReadableBlobStream(blob: Blob): Blob {
-  if (typeof blob.stream === 'function' || typeof ReadableStream === 'undefined') return blob;
-  Object.defineProperty(blob, 'stream', {
-    configurable: true,
-    value: () => new ReadableStream<Uint8Array>({
-      start(controller) {
-        const bytes = readBlobBytes(blob);
-        void Promise.resolve(bytes).then((value) => {
-          if (!isArrayBuffer(value)) throw new Error('The artifact stream returned an invalid payload.');
-          controller.enqueue(new Uint8Array(value));
-          controller.close();
-        }).catch((cause) => controller.error(cause));
-      },
-    }),
-  });
+function canonicalBlob(bytes: ArrayBuffer, mimeType: string): Blob {
+  const blob = new Blob([bytes], { type: mimeType }) as Blob & { stream?: () => ReadableStream<Uint8Array> };
+  // Some test/browser Blob shims expose arrayBuffer() but not stream(). Keep
+  // the domain contract Blob-shaped without allowing a cross-realm clone to
+  // escape into consumers such as Response or the Gemini adapter.
+  if (typeof blob.stream !== 'function' && typeof Response !== 'undefined') {
+    Object.defineProperty(blob, 'stream', { configurable: true, value: () => new Response(bytes).body });
+  }
   return blob;
-}
-
-async function canonicalBlob(bytes: ArrayBuffer | Blob, mimeType: string): Promise<Blob> {
-  // Some IndexedDB/Blob implementations return a Blob from arrayBuffer().
-  // Normalize through raw bytes before constructing the canonical Blob: using
-  // a cross-runtime Blob or ArrayBuffer directly as a Blob part can serialize
-  // it as the literal string "[object Blob]".
-  const normalized = isBlobLike(bytes) ? await readBlobBytes(bytes) : bytes;
-  if (!isArrayBuffer(normalized)) throw new Error('The artifact data reader returned an invalid payload.');
-  const source = new Blob([new Uint8Array(normalized)], { type: mimeType });
-  return withReadableBlobStream(source);
-}
-
-function readWithFileReader(data: Blob): Promise<ArrayBuffer> {
-  return new Promise<ArrayBuffer>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (isArrayBuffer(reader.result)) resolve(reader.result);
-      else reject(new Error('The artifact data reader returned an invalid payload.'));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error('The artifact data could not be read.'));
-    reader.readAsArrayBuffer(data);
-  });
-}
-
-async function readBlobBytes(data: Blob): Promise<ArrayBuffer> {
-  if (typeof FileReader !== 'undefined') {
-    try {
-      return await readWithFileReader(data);
-    } catch {
-      // A Node Blob can cross into a jsdom test without being a jsdom Blob.
-      // Fall through to its native reader rather than rejecting a valid value.
-    }
-  }
-  if (typeof data.arrayBuffer === 'function') {
-    const result: unknown = await data.arrayBuffer();
-    if (isArrayBuffer(result)) return result;
-    if (isBlobLike(result)) {
-      if (typeof FileReader !== 'undefined') {
-        try {
-          return await readWithFileReader(result);
-        } catch {
-          // Fall through to the provider's Blob reader below.
-        }
-      }
-      const nested: unknown = typeof result.arrayBuffer === 'function' ? await result.arrayBuffer() : undefined;
-      if (isArrayBuffer(nested)) return nested;
-    }
-  }
-  const responseBytes = await new Response(data).arrayBuffer();
-  if (!isArrayBuffer(responseBytes)) throw new Error('The artifact data reader returned an invalid payload.');
-  return responseBytes;
 }
 
 async function hydrateBlob(data: Blob | ArrayBuffer | undefined, mimeType: string): Promise<Blob | undefined> {
   if (!data) return undefined;
   if (isArrayBuffer(data)) return canonicalBlob(data, mimeType);
-  if (isBlobLike(data)) return canonicalBlob(await readBlobBytes(data), mimeType);
+  const candidate = data as Blob & { arrayBuffer?: () => Promise<ArrayBuffer> };
+  if (typeof candidate.arrayBuffer === 'function') return canonicalBlob(await candidate.arrayBuffer(), mimeType);
+  if (typeof FileReader !== 'undefined') {
+    const bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error ?? new Error('The artifact data could not be read.'));
+      reader.readAsArrayBuffer(data as Blob);
+    });
+    return canonicalBlob(bytes, mimeType);
+  }
   return canonicalBlob(await new Response(data as Blob).arrayBuffer(), mimeType);
 }
 
 async function blobToArrayBuffer(data: Blob): Promise<ArrayBuffer> {
-  return readBlobBytes(data);
+  if (typeof data.arrayBuffer === 'function') return data.arrayBuffer();
+  if (typeof FileReader !== 'undefined') {
+    return new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error ?? new Error('The artifact data could not be read.'));
+      reader.readAsArrayBuffer(data);
+    });
+  }
+  return new Response(data).arrayBuffer();
 }
 
 function validateStoredMetadata(metadata: StoredArtifactMetadata): void {

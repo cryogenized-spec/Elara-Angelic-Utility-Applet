@@ -22,7 +22,7 @@ describe('artifact repository', () => {
     if (created.artifactType !== 'attachment') throw new Error('Expected attachment');
     const loaded = await artifactRepository.get(created.id);
     expect(loaded.artifactType).toBe('attachment');
-    expect(await new Response((loaded as typeof created).data).text()).toBe('hello');
+    expect(await (loaded as typeof created).data.text()).toBe('hello');
   });
 
   it('updates lifecycle status and metadata without changing the Blob', async () => {
@@ -32,7 +32,7 @@ describe('artifact repository', () => {
     expect(updated.name).toBe('renamed.png');
     expect(updated.status).toBe('ready');
     if (updated.artifactType !== 'attachment') throw new Error('Expected attachment');
-    expect(await new Response(updated.data).text()).toBe('bytes');
+    expect(await updated.data.text()).toBe('bytes');
   });
 
   it('reports a missing attachment payload instead of fabricating an empty Blob', async () => {

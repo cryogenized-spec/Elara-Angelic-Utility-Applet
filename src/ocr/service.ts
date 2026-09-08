@@ -26,7 +26,7 @@ export function createOCRService(createWorker: () => WorkerLike = workerFactory)
   async function recognize(image: Blob, options: OCRRecognizeOptions = {}): Promise<OCRResult> {
     if (!image || !image.type.startsWith('image/')) throw new ArtifactError('OCR_FAILED', 'OCR needs an image attachment.');
     if (image.size > ARTIFACT_LIMITS.maxAttachmentBytes) throw new ArtifactError('FILE_TOO_LARGE', 'This OCR input is too large.');
-    const normalized = await preprocessImage(image, { maxLongEdge: ARTIFACT_LIMITS.maxOcrLongEdge, stripMetadata: true });
+    const normalized = await preprocessImage(image, { maxLongEdge: ARTIFACT_LIMITS.maxOcrLongEdge, stripMetadata: true }, { sourceArtifactId: options.sourceArtifactId });
     const worker = createWorker();
     const id = requestId();
     const timeoutMs = timeoutFor(options);

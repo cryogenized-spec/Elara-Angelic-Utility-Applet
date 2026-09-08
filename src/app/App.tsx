@@ -28,6 +28,7 @@ import {
 } from '../chat/generation-state';
 import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, isFailedPartialTarget, regenerateBaseFor, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
 import { createTurnWatchdog } from '../chat/turn-watchdog';
+import { attachmentsForTurn } from '../chat/turn-lineage';
 import type { GoogleToolName } from '../google/tools/contracts';
 import { googleGeminiFunctionNames } from '../google/tools/gemini-declarations';
 import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
@@ -204,7 +205,7 @@ export function App() {
       if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       setConversation((current) => activeConversationIdRef.current === conversationId ? titled : current); setDraftAttachments([]); await refreshThreads();
       if (activeConversationIdRef.current !== conversationId) return;
-      turnId = await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, attachments: attachmentIds, responseGroupId: userMessage.id, responseVariant: 1 });
+      turnId = await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, attachments: attachmentIds, inputMessageId: userMessage.id, responseGroupId: userMessage.id, responseVariant: 1 });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
@@ -244,7 +245,7 @@ export function App() {
     setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
     let turnId: string | null = null;
     try {
-      turnId = await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, previousInteractionId, responseGroupId: groupId, responseVariant: nextVariant, supersedesGenerationId: target.providerTurn?.generationId });
+      turnId = await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, previousInteractionId, attachments: prompt.attachments, inputMessageId: prompt.id, responseGroupId: groupId, responseVariant: nextVariant, supersedesGenerationId: target.providerTurn?.generationId });
     } catch (cause) {
       if (activeConversationIdRef.current !== workingConversation.id) return;
       if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
@@ -274,7 +275,7 @@ export function App() {
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
-  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; attachments?: readonly string[]; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }): Promise<string | null> {
+  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; attachments?: readonly string[]; inputMessageId?: string; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }): Promise<string | null> {
     if (activeConversationIdRef.current !== conversationId || controller.signal.aborted) return null;
     const previousInteractionId = options.previousInteractionId ?? [...baseConversation.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
     const assistantMessage = { ...makeMessage('assistant', '', conversationId), responseGroupId: options.responseGroupId, responseVariant: options.responseVariant } satisfies ChatMessage;
@@ -303,7 +304,7 @@ export function App() {
     let current = createGenerationState(generationId, { supersedesGenerationId: options.supersedesGenerationId, startedAt: performance.now() });
     setGeneration(current);
     setStructuredError(null);
-    const syncContext: GenerationSyncContext = { assistantMessage, base, input, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isActiveGeneration, ensureAssistant, onFailedAttempt: captureFailedAttempt };
+    const syncContext: GenerationSyncContext = { assistantMessage, base, input, inputMessageId: options.inputMessageId, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isActiveGeneration, ensureAssistant, onFailedAttempt: captureFailedAttempt };
 
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
@@ -338,7 +339,7 @@ export function App() {
     });
 
     try {
-      const request = { model: geminiModel, input, attachments: options.attachments ?? [...base.messages].reverse().find((message) => message.role === 'user' && message.text === input)?.attachments, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
+      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
       const stream = options.tools?.length
         ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
         : geminiTurnPort.streamReply(request, controller.signal);
@@ -376,7 +377,7 @@ export function App() {
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     let turnId: string | null = null;
     try {
-      turnId = await streamAssistantTurn(attempt.input, attempt.base, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, responseGroupId: attempt.responseGroupId, responseVariant: attempt.responseVariant, supersedesGenerationId: attempt.generationId });
+      turnId = await streamAssistantTurn(attempt.input, attempt.base, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, inputMessageId: attempt.inputMessageId, responseGroupId: attempt.responseGroupId, responseVariant: attempt.responseVariant, supersedesGenerationId: attempt.generationId });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;

@@ -25,6 +25,8 @@ export interface OCRRecognizeOptions {
   region?: OCRRegion;
   timeoutMs?: number;
   signal?: AbortSignal;
+  /** Stable identity used to isolate preprocessing cache entries. */
+  sourceArtifactId?: string;
 }
 
 export interface OCRService {

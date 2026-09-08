@@ -14,10 +14,27 @@ export interface ProcessedImage {
   derived: boolean;
 }
 
-const derivedEncodingCache = new Map<string, Blob>();
+export interface ImagePreprocessContext {
+  /** Stable artifact identity when the source is a persisted artifact. */
+  sourceArtifactId?: string;
+}
 
-function cacheKey(source: Blob, policy: ImagePreprocessPolicy): string {
-  return [source.size, source.type, policy.maxLongEdge ?? '', policy.maxBytes ?? '', policy.outputMime ?? '', policy.quality ?? '', policy.stripMetadata ?? true].join('|');
+const derivedEncodingCache = new Map<string, Blob>();
+const sourceObjectIdentities = new WeakMap<Blob, string>();
+let nextSourceObjectIdentity = 0;
+
+function sourceIdentity(source: Blob, context?: ImagePreprocessContext): string {
+  const artifactId = context?.sourceArtifactId?.trim();
+  if (artifactId) return `artifact:${artifactId}`;
+  const existing = sourceObjectIdentities.get(source);
+  if (existing) return existing;
+  const identity = `blob:${++nextSourceObjectIdentity}`;
+  sourceObjectIdentities.set(source, identity);
+  return identity;
+}
+
+function cacheKey(source: Blob, policy: ImagePreprocessPolicy, context?: ImagePreprocessContext): string {
+  return [sourceIdentity(source, context), source.size, source.type, policy.maxLongEdge ?? '', policy.maxBytes ?? '', policy.outputMime ?? '', policy.quality ?? '', policy.stripMetadata ?? true].join('|');
 }
 
 function canDecodeImage(): boolean {
@@ -41,7 +58,7 @@ function nativeFormatSupported(mimeType: string): boolean {
   return mimeType === 'image/jpeg' || mimeType === 'image/png' || mimeType === 'image/webp';
 }
 
-export async function preprocessImage(source: Blob, policy: ImagePreprocessPolicy = {}): Promise<ProcessedImage> {
+export async function preprocessImage(source: Blob, policy: ImagePreprocessPolicy = {}, context: ImagePreprocessContext = {}): Promise<ProcessedImage> {
   if (!source.type.startsWith('image/')) {
     throw new ArtifactError('IMAGE_PROCESSING_FAILED', 'Only image attachments can be preprocessed.');
   }
@@ -53,7 +70,7 @@ export async function preprocessImage(source: Blob, policy: ImagePreprocessPolic
     return { blob: source, mimeType: source.type, derived: false };
   }
 
-  const key = cacheKey(source, effectivePolicy);
+  const key = cacheKey(source, effectivePolicy, context);
   const cached = derivedEncodingCache.get(key);
   if (cached) return { blob: cached, mimeType: cached.type || source.type, derived: true };
   if (!canDecodeImage()) throw new ArtifactError('IMAGE_PROCESSING_FAILED', 'This browser cannot process the selected image.');

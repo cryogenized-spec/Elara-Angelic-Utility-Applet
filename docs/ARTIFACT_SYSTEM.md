@@ -75,9 +75,11 @@ PDFs are passed as PDFs when supported. They are not rasterized or OCR'd automat
 
 ## Local OCR
 
-OCR is optional and independent of Gemini. The browser-side OCR service runs recognition in a Web Worker and returns structured text blocks, confidence, language, and bounds. OCR is explicitly invoked from an artifact preview; ordinary image messages do not trigger OCR automatically.
+OCR is optional and independent of Gemini. The browser-side OCR service runs recognition in a Web Worker and returns structured text blocks, confidence, language, and bounds. OCR is explicitly invoked from a persisted image artifact; ordinary image messages do not trigger OCR automatically.
 
-OCR output is stored as a derived artifact with a parent artifact ID. It can subsequently be included in a Gemini request or transformed further.
+The product decision for this slice is post-send OCR: the draft Composer does not create derived artifacts before a message identity exists. When an image message is persisted, its artifact preview exposes an explicit `Extract text` action, and the Composer tells the user to send first. This keeps the draft flow free of orphan OCR outputs while preserving a reachable, user-controlled OCR action.
+
+OCR output is stored as a derived artifact with a parent artifact ID and is associated with the originating message. It can subsequently be included in a Gemini request or transformed further.
 
 The runtime dependency is `tesseract.js` (Apache-2.0) with Tesseract WASM/core and language data licenses preserved by the selected asset distribution. Runtime/model asset hosting must retain the applicable notices. The OCR implementation is lazy and does not run on the chat main thread.
 

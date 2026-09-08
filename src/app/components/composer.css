@@ -113,5 +113,7 @@
 .composer__attachment-menu button:hover,.composer__attachment-menu button:focus-visible { border-color: rgba(110,168,255,.2); background: rgba(255,255,255,.075); color: var(--text); outline: none; }
 .composer__attachments { width: min(100% - 12px, 720px); margin: 0 auto 8px; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); }
 .composer__attachments .artifact-card { min-width: 0; }
+.composer__attachment-hint { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.composer__attachment-hint strong { color: var(--blue); font-weight: 600; }
 .composer-expanded .composer__attachments { width: 100%; margin-bottom: 0; }
 @media (max-width: 390px) { .composer__attachment-menu { left: -35px; min-width: 180px; } }

@@ -34,4 +34,17 @@ describe('image preprocessing policy', () => {
     const processed = await preprocessImage(source, { outputMime: 'image/avif', stripMetadata: true });
     expect(processed.mimeType).toBe('image/png');
   });
+
+  it('does not reuse a derived encoding for different same-sized image artifacts', async () => {
+    const first = new Blob(['12345678'], { type: 'image/png' });
+    const second = new Blob(['abcdefgh'], { type: 'image/png' });
+    const decode = vi.fn(async () => ({ width: 100, height: 50, close: vi.fn() }));
+    vi.stubGlobal('createImageBitmap', decode);
+    vi.stubGlobal('OffscreenCanvas', FakeCanvas);
+
+    await preprocessImage(first, { stripMetadata: true }, { sourceArtifactId: 'artifact-one' });
+    await preprocessImage(second, { stripMetadata: true }, { sourceArtifactId: 'artifact-two' });
+
+    expect(decode).toHaveBeenCalledTimes(2);
+  });
 });

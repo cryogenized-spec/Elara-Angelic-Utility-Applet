@@ -49,6 +49,8 @@ export interface GenerationSyncContext {
   base: ConversationState;
   /** Exact turn input, so a retry re-runs the failed prompt (not latest history). */
   input: string;
+  /** Stable originating user message identity for attachment lineage. */
+  inputMessageId?: string;
   model: string;
   wallStartedAt: number;
   supersedesGenerationId?: string;
@@ -74,6 +76,7 @@ export interface FailedTurnAttempt {
   generationId: string;
   base: ConversationState;
   input: string;
+  inputMessageId?: string;
   responseGroupId?: string;
   responseVariant?: number;
 }
@@ -186,6 +189,7 @@ export function syncGenerationEvent(
       generationId: generation.generationId,
       base,
       input: context.input,
+      inputMessageId: context.inputMessageId,
       responseGroupId: assistantMessage.responseGroupId,
       responseVariant: assistantMessage.responseVariant,
     });
@@ -206,6 +210,7 @@ export function syncGenerationEvent(
       generationId: generation.generationId,
       base,
       input: context.input,
+      inputMessageId: context.inputMessageId,
       responseGroupId: assistantMessage.responseGroupId,
       responseVariant: assistantMessage.responseVariant,
     });

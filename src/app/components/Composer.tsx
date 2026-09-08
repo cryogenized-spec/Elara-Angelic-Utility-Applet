@@ -406,6 +406,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
       {attachments.map((attachment) => attachment.kind === 'image'
         ? <ImageAttachmentPreview key={attachment.id} attachment={attachment} compact onRemove={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined} />
         : <DocumentAttachmentCard key={attachment.id} attachment={attachment} onRemove={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined} />)}
+      {attachments.some((attachment) => attachment.kind === 'image') && <p className="composer__attachment-hint">Send the image first, then choose <strong>Extract text</strong> on its message artifact.</p>}
     </div>;
   }
 

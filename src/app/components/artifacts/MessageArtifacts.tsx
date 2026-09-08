@@ -30,7 +30,7 @@ export function MessageArtifacts({ attachmentIds = EMPTY_IDS, artifactIds = EMPT
     setOcrBusy(attachment.id);
     setOcrError(null);
     try {
-      const result = await ocrService.recognize(attachment.data);
+      const result = await ocrService.recognize(attachment.data, { sourceArtifactId: attachment.id });
       const derived = await createOcrTextArtifact({ sourceArtifactId: attachment.id, result, sourceMessageId: messageId, name: `${attachment.name.replace(/\.[^.]+$/, '')}-ocr.txt` });
       if (messageId && conversationId) await artifactRepository.attachToMessage(derived.id, messageId, conversationId);
       setArtifacts((current) => [...current, derived]);

@@ -1,6 +1,6 @@
 import type { DerivedArtifact } from '../domain/artifact';
 import type { OCRResult } from '../ocr/contracts';
-import { artifactRepository } from './repository';
+import { artifactRepository, type ArtifactOperationGuard } from './repository';
 
 export async function createOcrTextArtifact(input: {
   sourceArtifactId: string;
@@ -10,6 +10,7 @@ export async function createOcrTextArtifact(input: {
   messageId?: string;
   conversationId?: string;
   operationId?: string;
+  guard?: ArtifactOperationGuard;
 }): Promise<DerivedArtifact> {
   const text = input.result.text.trim();
   const artifactInput = {
@@ -24,6 +25,6 @@ export async function createOcrTextArtifact(input: {
     status: 'ready' as const,
     operationId: input.operationId,
   };
-  if (input.messageId && input.conversationId) return artifactRepository.createAndAttach(artifactInput, input.messageId, input.conversationId) as Promise<DerivedArtifact>;
+  if (input.messageId && input.conversationId) return artifactRepository.createAndAttach(artifactInput, input.messageId, input.conversationId, input.guard) as Promise<DerivedArtifact>;
   return artifactRepository.create(artifactInput) as Promise<DerivedArtifact>;
 }

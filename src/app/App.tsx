@@ -309,7 +309,7 @@ export function App() {
       current = dispatchGenerationEvent(current, { generationId, event, receivedAt: performance.now() }, syncContext);
       if (event.type === 'artifact-created' && isActiveGeneration()) {
         const expectedStatus = event.status === 'pending' || event.status === 'processing' || event.status === 'ready' || event.status === 'failed' ? event.status : undefined;
-        void artifactRepository.updateMetadata(event.artifactId, { sourceMessageId: assistantMessage.id }, event.operationId && expectedStatus ? { operationId: event.operationId, expectedStatus } : undefined).catch(() => undefined);
+        void artifactRepository.updateMetadata(event.artifactId, { sourceMessageId: assistantMessage.id }, event.operationId && expectedStatus ? { operationId: event.operationId, expectedStatus, isValid: isActiveGeneration } : undefined).catch(() => undefined);
       }
       // The trace panel is application state too: reflect it only while this
       // turn is both elected AND on the current conversation.

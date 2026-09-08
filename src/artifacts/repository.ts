@@ -56,6 +56,8 @@ export type CreateArtifactInput = CreateAttachmentInput | CreateGeneratedArtifac
 export interface ArtifactOperationGuard {
   operationId: string;
   expectedStatus?: ArtifactStatus;
+  /** Evaluated inside the transaction immediately before durable writes. */
+  isValid?: () => boolean;
 }
 
 export interface ArtifactMetadataPatch {
@@ -83,7 +85,7 @@ export interface ArtifactRepository {
   create(input: CreateArtifactInput): Promise<Artifact>;
   get(id: string): Promise<Artifact>;
   list(options?: ListArtifactsOptions): Promise<Artifact[]>;
-  createAndAttach(input: CreateArtifactInput, messageId: string, conversationId: string): Promise<Artifact>;
+  createAndAttach(input: CreateArtifactInput, messageId: string, conversationId: string, guard?: ArtifactOperationGuard): Promise<Artifact>;
   updateMetadata(id: string, patch: ArtifactMetadataPatch, guard?: ArtifactOperationGuard): Promise<Artifact>;
   beginOperation(id: string, operationId: string, expectedStatus?: ArtifactStatus): Promise<Artifact>;
   setStatus(id: string, status: ArtifactStatus, error?: { code?: string; message?: string }, guard?: ArtifactOperationGuard): Promise<Artifact>;
@@ -285,6 +287,7 @@ function assertOperation(metadata: StoredArtifactMetadata, guard?: ArtifactOpera
   if (!guard) return;
   if (metadata.operationId !== guard.operationId) throw operationError('The artifact operation is stale.');
   if (guard.expectedStatus && metadata.status !== guard.expectedStatus) throw operationError('The artifact lifecycle state is stale.');
+  if (guard.isValid && !guard.isValid()) throw operationError('The artifact operation is stale.');
 }
 
 function validStatusTransition(current: ArtifactStatus, next: ArtifactStatus): boolean {
@@ -318,7 +321,7 @@ export const artifactRepository: ArtifactRepository = {
     }
   },
 
-  async createAndAttach(input, messageId, conversationId) {
+  async createAndAttach(input, messageId, conversationId, guard) {
     const artifactId = id();
     const metadata = metadataFromInput(artifactId, input, Date.now());
     const data = input.artifactType === 'attachment' ? input.data : input.outputBlob;
@@ -333,12 +336,17 @@ export const artifactRepository: ArtifactRepository = {
         for (const parentId of uniqueIds(input.artifactType === 'attachment' ? [] : input.parentArtifactIds)) await readStoredArtifactInTransaction(parentId);
         const sourceMessageId = input.artifactType === 'attachment' ? undefined : input.sourceMessageId;
         if (sourceMessageId && sourceMessageId !== messageId) throw new ArtifactError('ARTIFACT_STORAGE_FAILED', 'The source message does not match the target message.');
+        assertOperation(metadata, guard);
         await db.artifactMetadata.add(metadata);
-        if (persistedData) await db.artifactBlobs.add({ id: artifactId, data: persistedData });
+        if (persistedData) {
+          assertOperation(metadata, guard);
+          await db.artifactBlobs.add({ id: artifactId, data: persistedData });
+        }
         const next = input.artifactType === 'attachment'
           ? { ...message, attachments: uniqueIds([...(message.attachments ?? []), artifactId]) }
           : { ...message, artifacts: uniqueIds([...(message.artifacts ?? []), artifactId]) };
         const validated = await validateMessageReferences(next);
+        assertOperation(metadata, guard);
         await db.messages.put({ ...next, attachments: validated.attachments.length ? validated.attachments : undefined, artifacts: validated.artifacts.length ? validated.artifacts : undefined });
       });
       return readStoredArtifact(artifactId);
@@ -413,8 +421,12 @@ export const artifactRepository: ArtifactRepository = {
         ...(patch.errorCode === undefined ? {} : { errorCode: patch.errorCode }),
         ...(patch.errorMessage === undefined ? {} : { errorMessage: patch.errorMessage.slice(0, 500) }),
       };
+      assertOperation(next, guard);
       await db.artifactMetadata.put(next);
-      if (persistedOutput) await db.artifactBlobs.put({ id, data: persistedOutput });
+      if (persistedOutput) {
+        assertOperation(next, guard);
+        await db.artifactBlobs.put({ id, data: persistedOutput });
+      }
     });
     return readStoredArtifact(id);
   },

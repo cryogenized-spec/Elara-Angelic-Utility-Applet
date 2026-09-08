@@ -4,6 +4,18 @@ import { artifactRepository } from './repository';
 import { db, deleteMessage, loadConversation } from '../persistence/conversation';
 import type { ChatMessage } from '../domain/chat';
 
+function deferredBlob(text: string, type: string): { blob: Blob; release: () => void } {
+  const blob = new Blob([text], { type });
+  let release!: () => void;
+  Object.defineProperty(blob, 'arrayBuffer', {
+    configurable: true,
+    value: () => new Promise<ArrayBuffer>((resolve) => {
+      release = () => resolve(new TextEncoder().encode(text).buffer);
+    }),
+  });
+  return { blob, release: () => release() };
+}
+
 describe('artifact repository', () => {
   beforeEach(async () => {
     await db.transaction('rw', db.messages, db.threads, db.artifactMetadata, db.artifactBlobs, async () => {
@@ -114,6 +126,37 @@ describe('artifact repository', () => {
     expect((await db.messages.get(message.id))?.artifacts).toEqual([derived.id]);
     await artifactRepository.delete(source.id);
     await expect(artifactRepository.createAndAttach({ artifactType: 'derived', name: 'stale.txt', mimeType: 'text/plain', outputBlob: new Blob(['stale']), parentArtifactIds: [source.id], transformation: 'image-to-ocr-text', sourceMessageId: message.id, status: 'ready' }, message.id, 'thread-1')).rejects.toMatchObject({ code: 'ARTIFACT_NOT_FOUND' });
+  });
+
+  it('rolls back an OCR association when validity flips during awaited payload preparation', async () => {
+    const source = await artifactRepository.create({ artifactType: 'attachment', name: 'source.png', mimeType: 'image/png', kind: 'image', data: new Blob(['source']), status: 'ready' });
+    const message: ChatMessage = { id: 'ocr-race-message', role: 'assistant', text: 'response', conversationId: 'thread-1', createdAt: 1 };
+    await db.messages.put(message);
+    const pending = deferredBlob('recognized late', 'text/plain');
+    let valid = true;
+    const operationId = 'ocr-race-operation';
+    const association = artifactRepository.createAndAttach({ artifactType: 'derived', name: 'ocr-race.txt', mimeType: 'text/plain', outputBlob: pending.blob, parentArtifactIds: [source.id], transformation: 'image-to-ocr-text', sourceMessageId: message.id, status: 'ready', operationId }, message.id, 'thread-1', { operationId, expectedStatus: 'ready', isValid: () => valid });
+    valid = false;
+    pending.release();
+    await expect(association).rejects.toMatchObject({ code: 'ARTIFACT_OPERATION_STALE' });
+    expect(await db.artifactMetadata.count()).toBe(1);
+    expect(await db.artifactBlobs.count()).toBe(1);
+    expect((await db.messages.get(message.id))?.artifacts).toBeUndefined();
+  });
+
+  it('does not persist stale compiler output prepared across an awaited operation or transition it to ready', async () => {
+    const artifact = await artifactRepository.create({ artifactType: 'generated', name: 'race-output.pdf', mimeType: 'application/pdf', sourceCode: { language: 'lualatex', content: '\\documentclass{article}' }, status: 'processing', operationId: 'compiler-race-operation' });
+    const pending = deferredBlob('late pdf', 'application/pdf');
+    let valid = true;
+    const guard = { operationId: 'compiler-race-operation', expectedStatus: 'processing' as const, isValid: () => valid };
+    const update = artifactRepository.updateMetadata(artifact.id, { outputBlob: pending.blob, compilationLog: 'late' }, guard);
+    valid = false;
+    pending.release();
+    await expect(update).rejects.toMatchObject({ code: 'ARTIFACT_OPERATION_STALE' });
+    expect(await db.artifactBlobs.get(artifact.id)).toBeUndefined();
+    expect(await db.artifactMetadata.get(artifact.id)).toMatchObject({ status: 'processing', compilationLog: undefined });
+    await expect(artifactRepository.setStatus(artifact.id, 'ready', undefined, guard)).rejects.toMatchObject({ code: 'ARTIFACT_OPERATION_STALE' });
+    expect((await db.artifactMetadata.get(artifact.id))?.status).toBe('processing');
   });
 
   it('rejects stale lifecycle finalization after supersession', async () => {

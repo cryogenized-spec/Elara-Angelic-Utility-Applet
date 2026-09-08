@@ -86,7 +86,7 @@ async function resolveGeminiInput(request: InteractionRequest, client: GoogleGen
     }
     const operationId = `${request.generationId ?? crypto.randomUUID()}:${artifact.id}`;
     await artifactRepository.beginOperation(artifact.id, operationId, 'ready');
-    const guard = { operationId, expectedStatus: 'ready' as const };
+    const guard = { operationId, expectedStatus: 'ready' as const, isValid: () => !request.signal?.aborted && active() };
     if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
     if (artifact.remoteRef) await artifactRepository.updateMetadata(artifact.id, { remoteRef: null }, guard);
     if (artifact.data.size <= INLINE_ATTACHMENT_LIMIT) {

@@ -44,7 +44,8 @@ export function MessageArtifacts({ attachmentIds = EMPTY_IDS, artifactIds = EMPT
     try {
       const result = await ocrService.recognize(attachment.data, { sourceArtifactId: attachment.id, signal: controller.signal });
       if (!isCurrent()) return;
-      const derived = await createOcrTextArtifact({ sourceArtifactId: attachment.id, result, sourceMessageId: messageId, messageId, conversationId, operationId: `ocr:${operationNumber}:${attachment.id}`, name: `${attachment.name.replace(/\.[^.]+$/, '')}-ocr.txt` });
+      const operationId = `ocr:${operationNumber}:${attachment.id}`;
+      const derived = await createOcrTextArtifact({ sourceArtifactId: attachment.id, result, sourceMessageId: messageId, messageId, conversationId, operationId, guard: { operationId, expectedStatus: 'ready', isValid: isCurrent }, name: `${attachment.name.replace(/\.[^.]+$/, '')}-ocr.txt` });
       if (!isCurrent()) return;
       setArtifacts((current) => [...current, derived]);
     } catch (cause) {

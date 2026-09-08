@@ -48,7 +48,7 @@ export const documentToolHandlers: GoogleToolHandlers = {
     try {
       const compiled = await compilePdf(preparedSource, { signal });
       if (!isCurrent()) throw new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'PDF generation was superseded.');
-      const processingGuard = { operationId, expectedStatus: 'processing' as const };
+      const processingGuard = { operationId, expectedStatus: 'processing' as const, isValid: isCurrent };
       const ready = await artifactRepository.updateMetadata(artifact.id, { outputBlob: compiled.pdf, compilationLog: compiled.compilationLog }, processingGuard);
       if (!isCurrent()) throw new ArtifactError('DOCUMENT_COMPILATION_FAILED', 'PDF generation was superseded.');
       await artifactRepository.setStatus(artifact.id, 'ready', undefined, processingGuard);

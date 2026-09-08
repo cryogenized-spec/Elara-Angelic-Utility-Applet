@@ -7,7 +7,9 @@ vi.mock('./gis', () => ({
 
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 import { googleOAuthAuthority } from './authority';
-import { DRIVE_APP_FILE_SCOPE } from './capability-policy';
+import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE } from './capability-policy';
+
+const CALENDAR_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
 
 const tokenMock = vi.mocked(requestGoogleAccessToken);
 const revokeMock = vi.mocked(revokeGoogleAccessToken);
@@ -131,7 +133,7 @@ describe('direct Google OAuth authority', () => {
   });
 
   it('disconnects the local authorization state and revokes the active token', async () => {
-    tokenMock.mockResolvedValueOnce(token('access-123', 'https://www.googleapis.com/auth/calendar.events.readonly'));
+    tokenMock.mockResolvedValueOnce(token('access-123', CALENDAR_READ_SCOPE));
     await googleOAuthAuthority.authorize('calendar.events.read');
     await googleOAuthAuthority.disconnect();
 
@@ -143,5 +145,71 @@ describe('direct Google OAuth authority', () => {
       grantedProviderScopes: [],
     });
     expect(localStorage.getItem('elara.google.authorization.v2')).toBeNull();
+  });
+
+  it('replaces the stored provider-scope set with the current token response instead of accumulating history', async () => {
+    // First acquisition: Drive app-file grant (also implies Docs/Sheets reads).
+    tokenMock.mockResolvedValueOnce(token('access-drive', DRIVE_APP_FILE_SCOPE));
+    await googleOAuthAuthority.authorize('drive.files.app.read');
+
+    // Second acquisition returns a Calendar-only token — a revocation, partial
+    // grant change, or account switch must not leave stale Drive/Gmail scopes
+    // in the CURRENT provider grant.
+    tokenMock.mockResolvedValueOnce(token('access-calendar', CALENDAR_READ_SCOPE));
+    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.grantedProviderScopes).toEqual([CALENDAR_READ_SCOPE]);
+    expect(status.enabledCapabilities).toEqual(expect.arrayContaining(['drive.files.app.read', 'calendar.events.read']));
+    // Drive-backed capabilities are no longer effective off a calendar-only token.
+    expect(status.grantedCapabilities).not.toContain('drive.files.app.read');
+    expect(status.grantedCapabilities).not.toContain('docs.read');
+    expect(status.grantedCapabilities).not.toContain('sheets.read');
+    expect(status.grantedCapabilities).toContain('calendar.events.read');
+  });
+
+  it('retains existing grants when Google omits the scope header, only asserting the requested scope', async () => {
+    tokenMock.mockResolvedValueOnce(token('access-drive', DRIVE_APP_FILE_SCOPE));
+    await googleOAuthAuthority.authorize('drive.files.app.read');
+
+    // GIS success without a scope header is no evidence of grant loss; the
+    // requested scope must not vanish from provider state either.
+    tokenMock.mockResolvedValueOnce({ access_token: 'access-calendar', expires_in: 3600 });
+    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.grantedProviderScopes).toEqual(expect.arrayContaining([DRIVE_APP_FILE_SCOPE, CALENDAR_READ_SCOPE]));
+    expect(status.grantedCapabilities).toContain('drive.files.app.read');
+    expect(status.grantedCapabilities).toContain('calendar.events.read');
+  });
+
+  it('clears Drive grants when a fresh consent response returns Drive scopes without the old write-side grant', async () => {
+    // Calendar + Drive app-file coexist, then the user re-consents and Google
+    // returns a token that omits drive.file.
+    tokenMock.mockResolvedValueOnce(token('access-drive', DRIVE_APP_FILE_SCOPE));
+    await googleOAuthAuthority.authorize('drive.files.app.read');
+    tokenMock.mockResolvedValueOnce(token('access-calendar', CALENDAR_READ_SCOPE));
+    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    tokenMock.mockResolvedValueOnce(token('access-drive-2', DRIVE_APP_FILE_SCOPE));
+    await googleOAuthAuthority.authorize('drive.files.app.read');
+
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.grantedProviderScopes).toEqual([DRIVE_APP_FILE_SCOPE]);
+    expect(status.grantedCapabilities).not.toContain('calendar.events.read');
+    expect(status.grantedCapabilities).toContain('docs.read');
+  });
+
+  it('replacing scopes never manufactures a grant the new token does not carry', async () => {
+    // Library grant then calendar grant: calendar token must not keep drive.library effective.
+    tokenMock.mockResolvedValueOnce(token('access-library', DRIVE_LIBRARY_SCOPE));
+    await googleOAuthAuthority.authorize('drive.library.read');
+    tokenMock.mockResolvedValueOnce(token('access-calendar', CALENDAR_READ_SCOPE));
+    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.grantedProviderScopes).toEqual([CALENDAR_READ_SCOPE]);
+    expect(status.grantedCapabilities).toEqual(['calendar.events.read']);
+    expect(status.state).toBe('partially-authorized');
   });
 });

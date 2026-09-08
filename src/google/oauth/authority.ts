@@ -142,12 +142,19 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
   try {
     const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: descriptor.scope, prompt });
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
+    const current = loadStored();
+    // Stored provider scopes describe the CURRENT Google token, never a
+    // historical union. A returned scope set therefore replaces the stored
+    // grant — otherwise a revocation, partial grant change, or account switch
+    // leaves stale scopes locally and getStatus() overstates authority.
+    // When Google omits the scope header there is no evidence of change, so
+    // retain existing grants and only add the requested scope: a successful
+    // acquisition for `descriptor.scope` proves at least that much.
     const returnedScopes = parseProviderScopes(response.scope);
-    const grantedProviderScopes = [...new Set([
-      ...loadStored().grantedProviderScopes,
-      ...(returnedScopes.length ? returnedScopes : [descriptor.scope]),
-    ])];
-    const enabledCapabilities = uniqueCapabilities([...loadStored().enabledCapabilities, capability]);
+    const grantedProviderScopes = returnedScopes.length
+      ? returnedScopes
+      : [...new Set([...current.grantedProviderScopes, descriptor.scope])];
+    const enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
     session = {
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,

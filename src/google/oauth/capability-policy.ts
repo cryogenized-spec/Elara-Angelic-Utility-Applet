@@ -107,11 +107,21 @@ export function inferEnabledReadCapabilities(
   return inferred;
 }
 
+/**
+ * Effective capabilities = user-enabled capabilities (plus sibling inferred
+ * reads) that the *current* provider-scope set actually satisfies.
+ *
+ * Invariant: a provider-backed capability is never effective unless the
+ * supplied scope set can satisfy it. An empty grant set therefore yields no
+ * provider-backed effective capabilities — an enabled capability alone (from
+ * legacy storage or corruption) never manufactures provider authority, and a
+ * raw Google grant with no enabled capability never manufactures Elara
+ * authority.
+ */
 export function computeEffectiveCapabilities(
   enabled: readonly GoogleCapabilityKey[],
   grantedScopes: readonly string[],
 ): GoogleCapabilityKey[] {
-  if (enabled.length > 0 && grantedScopes.length === 0) return [...enabled];
   const inferredReads = inferEnabledReadCapabilities(enabled, grantedScopes);
   const candidates = [...new Set([...enabled, ...inferredReads])];
   return candidates.filter((capability) => {

@@ -30,6 +30,15 @@ export interface AuthorizedGoogleRequest {
   readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 }
 
+/**
+ * GIS token-client-era reducers can only produce `disconnected`, `connected`,
+ * `partially-authorized`, and `reauthorization-required`.
+ *
+ * `needs-consent`, `token-recovery`, and `revoked` are RESERVED for the
+ * durable authorization-code + PKCE authority (a later, separate subsystem).
+ * The v1 reducer must never emit them; callers may still treat them as
+ * recovery states defensively.
+ */
 export type GoogleOAuthState =
   | 'disconnected'
   | 'connected'

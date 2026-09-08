@@ -37,6 +37,10 @@ export const semanticToolArgumentSchemas = {
     replaceText: z.string().max(20_000),
     matchCase: z.boolean().optional(),
   }).strict(),
+  'document.create_pdf': z.object({
+    source: z.string().trim().min(1).max(200_000),
+    title: z.string().trim().max(180).optional(),
+  }).strict(),
 } as const;
 
 export type SemanticToolName = keyof typeof semanticToolArgumentSchemas;

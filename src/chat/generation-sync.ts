@@ -154,6 +154,7 @@ export function syncGenerationEvent(
     const completedMessage: ChatMessage = {
       ...assistantMessage,
       text: generation.transcript,
+      artifacts: generation.artifactIds.length ? [...generation.artifactIds] : undefined,
       executionSummary: buildExecutionSummary(generation),
       providerTurn: {
         provider: 'gemini' as const,

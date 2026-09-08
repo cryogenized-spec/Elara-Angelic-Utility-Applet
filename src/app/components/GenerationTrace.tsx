@@ -71,6 +71,13 @@ function formatMs(ms: number): string {
   return `${Math.max(0, Math.round(ms)).toLocaleString('en-US')} ms`;
 }
 
+function statusLabel(status: string | undefined): string | undefined {
+  if (status === 'preparing_document') return 'Preparing document…';
+  if (status === 'compiling_pdf') return 'Compiling PDF…';
+  if (status === 'finalizing_artifact') return 'Finalizing artifact…';
+  return undefined;
+}
+
 export function GenerationTrace({ generation }: { generation: GenerationState }) {
   const [thoughtExpanded, setThoughtExpanded] = useState(true);
   const [now, setNow] = useState(() => performance.now());
@@ -91,6 +98,7 @@ export function GenerationTrace({ generation }: { generation: GenerationState })
 
   const summary = thoughtSummaryOf(generation);
   const hasSteps = generation.steps.length > 0;
+  const visibleStatus = statusLabel(generation.statusMessage);
 
   return (
     <section className={`generation-trace is-${generation.phase}`} aria-label="Generation activity">
@@ -102,7 +110,7 @@ export function GenerationTrace({ generation }: { generation: GenerationState })
         title={generation.interactionIds.length > 0 ? `interactions: ${generation.interactionIds.join(', ')}` : undefined}
       >
         <span className="generation-trace__dot" aria-hidden="true" />
-        <span className="generation-trace__phase">{PHASE_LABELS[generation.phase]}</span>
+        <span className="generation-trace__phase">{visibleStatus ?? PHASE_LABELS[generation.phase]}</span>
         <span className="generation-trace__time" aria-hidden="true">{formatMs(turnDurationMs(generation, now))}</span>
       </header>
       {generation.timeToFirstEventMs !== undefined && (

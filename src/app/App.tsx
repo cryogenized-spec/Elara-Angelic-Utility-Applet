@@ -1,5 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
+import type { Attachment } from '../domain/artifact';
+import { artifactRepository } from '../artifacts/repository';
+import { createAttachmentFromFile } from '../artifacts/intake';
+import { ArtifactError } from '../artifacts/errors';
+import { ARTIFACT_LIMITS } from '../artifacts/limits';
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 import { appendMessage, archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
@@ -75,6 +80,7 @@ export function App() {
   const [conversation, setConversation] = useState<ConversationState>({ id: 'primary', title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] });
   const [threads, setThreads] = useState<ConversationThread[]>([]);
   const [draft, setDraft] = useState('');
+  const [draftAttachments, setDraftAttachments] = useState<Attachment[]>([]);
   const [status, setStatus] = useState<ProviderStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [structuredError, setStructuredError] = useState<NormalizedProviderError | null>(null);
@@ -121,10 +127,39 @@ export function App() {
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
   async function refreshThreads() { setThreads(await loadThreads()); }
+  async function handleFilesSelected(files: FileList | null): Promise<void> {
+    if (!files?.length) return;
+    const selected = Array.from(files);
+    if (draftAttachments.length + selected.length > ARTIFACT_LIMITS.maxAttachmentsPerMessage) {
+      setError(`You can attach up to ${ARTIFACT_LIMITS.maxAttachmentsPerMessage} files to one message.`);
+      return;
+    }
+    const next: Attachment[] = [...draftAttachments];
+    let firstError: string | null = null;
+    for (const file of selected) {
+      const result = await createAttachmentFromFile(file);
+      if (result.attachment) next.push(result.attachment);
+      else if (!firstError) firstError = result.error?.userMessage ?? 'The file could not be attached.';
+    }
+    const totalBytes = next.reduce((sum, attachment) => sum + attachment.size, 0);
+    if (totalBytes > ARTIFACT_LIMITS.maxMessageAttachmentBytes) {
+      setError('The total attachment size for this message is too large.');
+      const added = next.slice(draftAttachments.length);
+      await Promise.all(added.map((attachment) => artifactRepository.delete(attachment.id).catch(() => undefined)));
+      return;
+    }
+    setDraftAttachments(next);
+    if (firstError) setError(firstError);
+    else setError(null);
+  }
+  async function removeDraftAttachment(id: string): Promise<void> {
+    setDraftAttachments((current) => current.filter((attachment) => attachment.id !== id));
+    await artifactRepository.delete(id).catch(() => undefined);
+  }
   async function switchThread(id: string) {
     cancel();
     activeConversationIdRef.current = id;
-    setError(null); setDraft(''); setGeneration(null); setFailedAttempt(null);
+    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null);
     try {
       const nextConversation = await loadConversation(id);
       if (activeConversationIdRef.current !== id) return;
@@ -135,7 +170,7 @@ export function App() {
     cancel();
     const pendingConversation: ConversationState = { id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     activeConversationIdRef.current = pendingConversation.id;
-    setError(null); setDraft(''); setGeneration(null); setFailedAttempt(null);
+    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null);
     setConversation(pendingConversation);
     try {
       const nextConversation = await createThread();
@@ -146,7 +181,12 @@ export function App() {
   }
   async function send() {
     const text = draft.trim();
-    if (!text || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
+    if ((!text && draftAttachments.length === 0) || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
+    if (draftAttachments.some((attachment) => attachment.status !== 'ready')) {
+      setError('Wait for the attachments to finish processing before sending.');
+      return;
+    }
+    const attachmentIds = draftAttachments.map((attachment) => attachment.id);
     const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
     setDraft(''); setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
@@ -154,13 +194,17 @@ export function App() {
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     let turnId: string | null = null;
     try {
-      const userMessage = makeMessage('user', text, conversationId); const withUser = await appendMessage(userMessage, conversationId); if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
-      let titled = withUser;
-      if (withUser.title === DEFAULT_TITLE) { try { const generatedTitle = await localThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch {} }
+      const userMessage = makeMessage('user', text, conversationId);
+      let withUser = await appendMessage(userMessage, conversationId);
+      await Promise.all(attachmentIds.map((attachmentId) => artifactRepository.attachToMessage(attachmentId, userMessage.id, conversationId)));
+      if (attachmentIds.length) withUser = await loadConversation(conversationId);
       if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
-      setConversation((current) => activeConversationIdRef.current === conversationId ? titled : current); await refreshThreads();
+      let titled = withUser;
+      if (withUser.title === DEFAULT_TITLE && text) { try { const generatedTitle = await localThreadTitlePort.generateTitle(text); titled = { ...withUser, title: generatedTitle, updatedAt: Date.now() }; await saveConversation(titled); } catch {} }
+      if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
+      setConversation((current) => activeConversationIdRef.current === conversationId ? titled : current); setDraftAttachments([]); await refreshThreads();
       if (activeConversationIdRef.current !== conversationId) return;
-      turnId = await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, responseGroupId: userMessage.id, responseVariant: 1 });
+      turnId = await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, attachments: attachmentIds, responseGroupId: userMessage.id, responseVariant: 1 });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
@@ -230,7 +274,7 @@ export function App() {
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
-  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }): Promise<string | null> {
+  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; attachments?: readonly string[]; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }): Promise<string | null> {
     if (activeConversationIdRef.current !== conversationId || controller.signal.aborted) return null;
     const previousInteractionId = options.previousInteractionId ?? [...baseConversation.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
     const assistantMessage = { ...makeMessage('assistant', '', conversationId), responseGroupId: options.responseGroupId, responseVariant: options.responseVariant } satisfies ChatMessage;
@@ -264,6 +308,7 @@ export function App() {
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
       current = dispatchGenerationEvent(current, { generationId, event, receivedAt: performance.now() }, syncContext);
+      if (event.type === 'artifact-created') void artifactRepository.updateMetadata(event.artifactId, { sourceMessageId: assistantMessage.id }).catch(() => undefined);
       // The trace panel is application state too: reflect it only while this
       // turn is both elected AND on the current conversation.
       if (isActiveGeneration()) setGeneration(current);
@@ -293,7 +338,7 @@ export function App() {
     });
 
     try {
-      const request = { model: geminiModel, input, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
+      const request = { model: geminiModel, input, attachments: options.attachments ?? [...base.messages].reverse().find((message) => message.role === 'user' && message.text === input)?.attachments, previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools };
       const stream = options.tools?.length
         ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
         : geminiTurnPort.streamReply(request, controller.signal);
@@ -384,7 +429,7 @@ export function App() {
     <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} systemInstruction={character.systemInstruction} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
     <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={uiSettings.chatTextSize} generation={generation} onRegenerate={(messageId) => void regenerate(messageId)} />
     {error && <GenerationError message={error} structured={structuredError} onRetry={canRetry ? () => void retryLastTurn() : null} onOpenLockbox={showLockboxAction ? () => openLockbox() : null} />}
-    <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />
+    <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} attachments={draftAttachments} onFilesSelected={(files) => void handleFilesSelected(files)} onRemoveAttachment={(id) => void removeDraftAttachment(id)} />
     <Sidebar open={sidebarOpen} threads={threads} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => void switchThread(id)} onNewChat={() => void startNewChat()} onRename={(id, title) => void handleRename(id, title)} onArchive={(id) => void handleArchive(id)} onDelete={(id) => void handleDelete(id)} onSettings={() => { setSidebarOpen(false); setSettingsSection('appearance'); setSettingsOpen(true); }} />
     {firstRunWelcomeOpen && <FirstRunWelcome character={character} onSaveCharacter={handleCharacterChange} onComplete={finishFirstRun} />}
   </main>;

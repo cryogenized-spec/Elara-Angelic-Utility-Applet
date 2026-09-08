@@ -24,8 +24,13 @@ function ensureFontTools() {
   try {
     run(['-c', 'import fontTools; import brotli']);
   } catch {
-    console.log('Fonttools/Brotli not found; installing build-time tooling...');
-    run(['-m', 'pip', 'install', '--disable-pip-version-check', '--user', 'fonttools', 'brotli']);
+    process.stdout.write('Fonttools/Brotli not found; installing build-time tooling...\n');
+    try {
+      run(['-m', 'pip', 'install', '--disable-pip-version-check', '--user', 'fonttools', 'brotli']);
+    } catch {
+      // Debian/Ubuntu images may enforce PEP 668 even for user installs.
+      run(['-m', 'pip', 'install', '--disable-pip-version-check', '--user', '--break-system-packages', 'fonttools', 'brotli']);
+    }
     run(['-c', 'import fontTools; import brotli']);
   }
 }
@@ -38,11 +43,13 @@ async function download(url, destination) {
 }
 
 async function main() {
-  mkdirSync(sourceDir, { recursive: true });
   mkdirSync(outputDir, { recursive: true });
+  const missingFonts = fonts.filter((font) => !existsSync(join(outputDir, font.output)));
+  if (missingFonts.length === 0) return;
+  mkdirSync(sourceDir, { recursive: true });
   ensureFontTools();
 
-  for (const font of fonts) {
+  for (const font of missingFonts) {
     const source = join(sourceDir, `${font.family}.ttf`);
     const output = join(outputDir, font.output);
     if (!existsSync(source)) await download(font.source, source);
@@ -61,6 +68,6 @@ async function main() {
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+  process.stderr.write(`${error instanceof Error ? error.message : error}\n`);
   process.exit(1);
 });

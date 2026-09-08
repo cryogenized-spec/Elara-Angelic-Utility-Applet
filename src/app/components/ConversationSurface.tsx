@@ -6,6 +6,7 @@ import { ExecutionSummary } from './ExecutionSummary';
 import { GenerationTrace } from './GenerationTrace';
 import { Icon } from '../../ui/icons';
 import { MarkdownText } from './MarkdownText';
+import { MessageArtifacts } from './artifacts/MessageArtifacts';
 import './conversation-surface.css';
 
 const BOTTOM_STICK_THRESHOLD_PX = 32;
@@ -121,6 +122,7 @@ export function ConversationSurface({ messages, fontSize, generation, onRegenera
           return <article className="message message-user user-surface-frosted" key={message.id}>
             <header className="message-meta"><span>YOU</span><time dateTime={new Date(message.createdAt).toISOString()}>{new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
             <div className="message-body" style={{ fontSize: `${fontSize}px` }}><MarkdownText text={message.text} /></div>
+            <MessageArtifacts attachmentIds={message.attachments} artifactIds={message.artifacts} messageId={message.id} conversationId={message.conversationId} />
             <div className="message-actions" aria-label="Message actions">
               <button type="button" className="message-action" aria-label="Delete message" title="Delete message" onClick={() => void handleDelete(message)}><Icon name="trash" size={15} /></button>
             </div>
@@ -141,6 +143,7 @@ export function ConversationSurface({ messages, fontSize, generation, onRegenera
           <div className="message-body" style={{ fontSize: `${fontSize}px` }}>
             <MarkdownText text={selected.text} />
           </div>
+          <MessageArtifacts attachmentIds={selected.attachments} artifactIds={selected.artifacts} messageId={selected.id} conversationId={selected.conversationId} />
           <div className="message-actions" aria-label="Message actions">
             <button type="button" className="message-action" aria-label="Regenerate response" title="Regenerate response" onClick={() => onRegenerate(selected.id)}><Icon name="refresh" size={15} /></button>
             <button type="button" className="message-action message-action--danger" aria-label="Delete message" title="Delete message" onClick={() => void handleDelete(selected)}><Icon name="trash" size={15} /></button>

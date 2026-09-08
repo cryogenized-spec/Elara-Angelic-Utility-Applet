@@ -68,6 +68,7 @@ export interface GenerationState {
   endedAt?: number;
   /** Full assistant transcript accumulated across all interactions. */
   transcript: string;
+  artifactIds: string[];
   steps: GenerationStep[];
   activeTool?: { name: string; callId: string; stepId: string };
   statusMessage?: string;
@@ -86,7 +87,7 @@ export interface GenerationEventEnvelope {
 const TERMINAL_PHASES: ReadonlySet<GenerationPhase> = new Set(['completed', 'failed', 'cancelled']);
 const ACTIVE_PHASES: ReadonlySet<GenerationPhase> = new Set(['connecting', 'thinking', 'tool-working', 'generating']);
 /** Tool-loop status vocabulary that means "tool work is in flight". */
-const TOOL_ACTIVITY_STATUSES: ReadonlySet<string> = new Set(['executing_tools', 'awaiting_tool_confirmation', 'awaiting_authorization']);
+const TOOL_ACTIVITY_STATUSES: ReadonlySet<string> = new Set(['executing_tools', 'awaiting_tool_confirmation', 'awaiting_authorization', 'preparing_document', 'compiling_pdf', 'finalizing_artifact']);
 
 export function isTerminalPhase(phase: GenerationPhase): boolean {
   return TERMINAL_PHASES.has(phase);
@@ -107,6 +108,7 @@ export function createGenerationState(
     interactionIds: [],
     startedAt: options.startedAt,
     transcript: '',
+    artifactIds: [],
     steps: [],
     nextStepSequence: 0,
   };
@@ -296,6 +298,9 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
       // (or by a terminal event below).
       if (next.steps[position].kind === 'tool') return next;
       return updateStepAt(next, position, { state: 'done', endedAt: receivedAt });
+    }
+    case 'artifact-created': {
+      return next.artifactIds.includes(event.artifactId) ? next : { ...next, artifactIds: [...next.artifactIds, event.artifactId] };
     }
     case 'completed': {
       const seen = next.interactionIds.includes(event.interactionId);

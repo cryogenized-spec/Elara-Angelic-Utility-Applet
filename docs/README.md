@@ -14,6 +14,14 @@ This directory is the authoritative documentation tree for Elara.
 - [`oauth/PASS_07_STATUS.md`](./oauth/PASS_07_STATUS.md) — protected Cloudflare OAuth Worker implementation, session-backed Workspace proxy, and production provisioning handoff.
 - [`future-implementation/README.md`](./future-implementation/README.md) — future infrastructure notes for Worker health, Cron, background execution, push notifications, Telegram, and controlled internet access.
 
+## Artifact architecture
+
+- [`ARTIFACT_SYSTEM.md`](./ARTIFACT_SYSTEM.md) — durable artifact model, Dexie storage, paperclip intake, Gemini adaptation, local OCR, transformations, generated PDFs, and compiler security boundaries.
+- [`ATTACHMENT_SYSTEM.md`](./ATTACHMENT_SYSTEM.md) — attachment lifecycle and ownership contract.
+- [`GEMINI_IMAGE_INPUT.md`](./GEMINI_IMAGE_INPUT.md) — provider-neutral image input boundary.
+- [`GEMINI_DOCUMENT_INPUT.md`](./GEMINI_DOCUMENT_INPUT.md) — provider-neutral PDF/document input boundary.
+- [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) — artifact-slice dependency, font, OCR, and BusyTeX licensing notes.
+
 ## Memory architecture
 
 - [`MEMORY_README.md`](./MEMORY_README.md) — user-facing guide to durable memory: purpose, scope, memory kinds and lifecycles, retrieval, permissions, privacy/storage behavior, Memory Bank controls, conflict handling, and FAQ.

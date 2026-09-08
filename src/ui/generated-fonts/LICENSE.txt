@@ -1,0 +1,13 @@
+Bundled font notices
+
+The Inter, Manrope, and Outfit WOFF2 files in this directory are distributed
+under the SIL Open Font License, version 1.1 (OFL-1.1), as published at:
+https://scripts.sil.org/OFL
+
+Font projects and upstream sources:
+- Inter — https://github.com/rsms/inter
+- Manrope — https://github.com/sharanda/manrope
+- Outfit — https://github.com/Omnibus-Type/Outfit
+
+The font files were subset to the Latin character range for this application.
+The OFL permits embedding and redistribution subject to the license terms.

@@ -10,6 +10,7 @@ import { requestGoogleCapabilityGrant } from '../google/oauth/request-broker';
 import { googleOAuthAuthority } from '../google/oauth/authority';
 import type { GoogleCapabilityKey } from '../google/oauth/contracts';
 import { withRuntimeContext } from './runtime-context';
+import { documentToolHandlers } from '../documents/tool-handler';
 
 export interface GoogleToolLoopOptions {
   readonly tools?: readonly GoogleToolName[];
@@ -42,7 +43,7 @@ function normalizeTools(tools: readonly GoogleToolName[] | undefined): readonly 
 function executorOptions(options: GoogleToolLoopOptions): GoogleToolExecutorOptions {
   return {
     oauth: options.executor?.oauth ?? googleOAuthAuthority,
-    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...options.executor?.handlers },
+    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...documentToolHandlers, ...options.executor?.handlers },
     confirm: options.executor?.confirm,
     now: options.executor?.now,
   };
@@ -50,6 +51,13 @@ function executorOptions(options: GoogleToolLoopOptions): GoogleToolExecutorOpti
 
 function errorToolResult(call: PendingToolCall, message: string): GeminiToolResult {
   return { callId: call.callId, name: call.name, result: { ok: false, error: message } };
+}
+
+function artifactEvent(toolName: string, value: unknown): GeminiStreamEvent | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const result = value as Record<string, unknown>;
+  if (typeof result.artifactId !== 'string' || typeof result.status !== 'string' || typeof result.mimeType !== 'string') return undefined;
+  return { type: 'artifact-created', artifactId: result.artifactId, status: result.status, mimeType: result.mimeType, toolName };
 }
 
 function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandlers): boolean {
@@ -116,7 +124,12 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     if (immediateCalls.length > 0) {
       yield { type: 'interaction-status', interactionId, status: 'executing_tools' };
       for (const call of immediateCalls) {
+        if (call.name === 'document.create_pdf') {
+          yield { type: 'interaction-status', interactionId, status: 'preparing_document' };
+          yield { type: 'interaction-status', interactionId, status: 'compiling_pdf' };
+        }
         let result = await executeGoogleTool(call, executeOptions);
+        if (call.name === 'document.create_pdf') yield { type: 'interaction-status', interactionId, status: 'finalizing_artifact' };
         if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
           const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
@@ -131,7 +144,11 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           }
           if (granted) result = await executeGoogleTool(call, executeOptions);
         }
-        results.push(result.ok ? { callId: call.callId, name: call.name, result: result.result } : errorToolResult(call, result.code));
+        if (result.ok) {
+          results.push({ callId: call.callId, name: call.name, result: result.result });
+          const created = artifactEvent(call.name, result.result);
+          if (created) yield created;
+        } else results.push(errorToolResult(call, result.code));
       }
     }
 
@@ -177,7 +194,11 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         }
         if (granted) result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
       }
-      results.push(result.ok ? { callId: entry.call.callId, name: entry.call.name, result: result.result } : errorToolResult(entry.call, result.code));
+      if (result.ok) {
+        results.push({ callId: entry.call.callId, name: entry.call.name, result: result.result });
+        const created = artifactEvent(entry.call.name, result.result);
+        if (created) yield created;
+      } else results.push(errorToolResult(entry.call, result.code));
     }
 
     const continuation: GeminiToolContinuationRequest = { model: request.model, previousInteractionId: interactionId, results, systemInstruction, generationConfig: request.generationConfig, tools };

@@ -18,6 +18,7 @@ export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'docs.appendParagraph', risk: 'write', capability: 'docs.write', exposure: 'gemini', description: 'Append a paragraph at the end of a Google Doc.' },
   { name: 'docs.replaceText', risk: 'write', capability: 'docs.write', exposure: 'gemini', description: 'Replace all occurrences of a text string in a Google Doc.' },
   { name: 'docs.batchUpdate', risk: 'write', capability: 'docs.write', exposure: 'internal', description: 'Apply explicit Google Docs batch updates. Adapter primitive; not Gemini-visible.' },
+  { name: 'document.create_pdf', risk: 'read', capability: 'documents.local', exposure: 'gemini', description: 'Create a PDF artifact from validated document source.' },
   { name: 'chat.listMessages', risk: 'read', capability: 'chat.read', exposure: 'internal', description: 'List messages in a Google Chat space. Deferred from Workspace v1.' },
   { name: 'chat.getMessage', risk: 'read', capability: 'chat.read', exposure: 'internal', description: 'Retrieve one Google Chat message. Deferred from Workspace v1.' },
   { name: 'chat.createMessage', risk: 'write', capability: 'chat.write', exposure: 'internal', description: 'Create a Google Chat message. Deferred from Workspace v1.' },

@@ -179,12 +179,15 @@ function withReadableBlobStream(blob: Blob): Blob {
   return blob;
 }
 
-function canonicalBlob(bytes: ArrayBuffer | Blob, mimeType: string): Blob {
+async function canonicalBlob(bytes: ArrayBuffer | Blob, mimeType: string): Promise<Blob> {
   // Some IndexedDB/Blob implementations return a Blob from arrayBuffer().
-  // Never wrap that Blob in another Blob: doing so turns its payload into the
-  // literal string "[object Blob]" in Node/jsdom and loses the artifact data.
-  const source = isBlobLike(bytes) ? bytes : new Blob([bytes], { type: mimeType });
-  return withReadableBlobStream(source.type === mimeType || !mimeType ? source : new Blob([source], { type: mimeType }));
+  // Normalize through raw bytes before constructing the canonical Blob: using
+  // a cross-runtime Blob or ArrayBuffer directly as a Blob part can serialize
+  // it as the literal string "[object Blob]".
+  const normalized = isBlobLike(bytes) ? await readBlobBytes(bytes) : bytes;
+  if (!isArrayBuffer(normalized)) throw new Error('The artifact data reader returned an invalid payload.');
+  const source = new Blob([new Uint8Array(normalized)], { type: mimeType });
+  return withReadableBlobStream(source);
 }
 
 function readWithFileReader(data: Blob): Promise<ArrayBuffer> {

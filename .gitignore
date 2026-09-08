@@ -1,5 +1,8 @@
 node_modules/
 dist/
+# BusyTeX runtime data is downloaded from the pinned texlyre-busytex release;
+# it is intentionally kept out of Git because the TeX Live payload is large.
+public/core/busytex/
 playwright-report/
 test-results/
 .wrangler/

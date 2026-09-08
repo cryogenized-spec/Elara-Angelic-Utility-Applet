@@ -29,7 +29,7 @@ Android portrait UI → conversation state → one canonical Gemini Interactions
 9. One authoritative persistence store per domain.
 10. Build vertically; later capabilities must not block proof of core chat.
 11. Direct commits to `main` are normal. Do not leave pull requests open.
-12. CI must be green before a milestone is called complete.
+12. Every milestone must leave main-quality code behind: buildable, type-safe, and green on its relevant tests. No milestone may defer broken wiring or failing checks to a later milestone; CI must be green before it is called complete.
 13. Revalidate live Node/npm/package/SDK/CLI/GitHub Action choices before use.
 14. Use `npx` for one-shot upstream CLIs with current documented `@latest` entry points.
 15. Never invent a lockfile; generate it with npm from the actual dependency graph.

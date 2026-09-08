@@ -4,6 +4,7 @@ export const googleToolNameSchema = z.enum([
   'calendar.listEvents', 'calendar.createEvent',
   'tasks.listTaskLists', 'tasks.listTasks', 'tasks.getTask', 'tasks.createTask', 'tasks.updateTask', 'tasks.moveTask', 'tasks.deleteTask', 'tasks.clearCompleted',
   'docs.getDocument', 'docs.inspectDocument', 'docs.createDocument', 'docs.insertText', 'docs.appendParagraph', 'docs.replaceText', 'docs.batchUpdate',
+  'document.create_pdf',
   'chat.listMessages', 'chat.getMessage', 'chat.createMessage', 'chat.updateMessage', 'chat.deleteMessage',
   'gmail.listMessages', 'gmail.getMessage', 'gmail.listThreads', 'gmail.getThread', 'gmail.listLabels', 'gmail.getLabel', 'gmail.modifyMessage', 'gmail.modifyThread', 'gmail.trashMessage', 'gmail.untrashMessage', 'gmail.trashThread', 'gmail.untrashThread', 'gmail.createLabel', 'gmail.updateLabel', 'gmail.deleteLabel', 'gmail.sendMessage',
   'drive.searchFiles', 'drive.searchLibrary', 'drive.getFile', 'drive.downloadFile', 'drive.createFile', 'drive.updateFile', 'drive.moveFile',

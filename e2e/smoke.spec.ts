@@ -52,6 +52,35 @@ test('composer keeps attachment, Markdown, microphone, and Send controls aligned
   expect(Math.abs(micBox!.y - sendBox!.y)).toBeLessThan(2);
 });
 
+test('paperclip opens camera, gallery, and document actions and persists an attachment preview', async ({ page }) => {
+  await page.goto('');
+  const composer = page.locator('form.composer');
+  const tiny = pngFile('receipt.png');
+  const paperclip = composer.getByRole('button', { name: 'Attach image or document' });
+
+  await paperclip.click();
+  await expect(page.getByRole('menu', { name: 'Attachment source' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Camera/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Photos \/ Gallery/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /File \/ Document/ })).toBeVisible();
+
+  await page.locator('input[type="file"][capture="environment"]').setInputFiles(tiny);
+  await expect(page.getByRole('article', { name: /Image attachment receipt\.png/ })).toBeVisible();
+  await expect(page.getByText('Ready', { exact: true })).toBeVisible();
+
+  await paperclip.click();
+  await page.locator('input[type="file"][accept="image/*"]:not([capture])').setInputFiles(pngFile('gallery.png'));
+  await expect(page.getByRole('article', { name: /Image attachment gallery\.png/ })).toBeVisible();
+
+  await paperclip.click();
+  await page.locator('input[type="file"][accept*="application/pdf"]').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') });
+  await expect(page.getByRole('article', { name: /Document attachment notes\.txt/ })).toBeVisible();
+
+  await expect(page.getByRole('button', { name: /Remove receipt\.png/ })).toBeVisible();
+  await page.getByRole('button', { name: /Remove receipt\.png/ }).click();
+  await expect(page.getByRole('article', { name: /Image attachment receipt\.png/ })).not.toBeVisible();
+});
+
 test('composer occupies its own layout space instead of overlapping the conversation', async ({ page }) => {
   await page.goto('');
   const shell = page.locator('.app-shell');

@@ -226,4 +226,54 @@ describe('Gemini provider stream fidelity', () => {
       usage: { inputTokens: 12, outputTokens: 4, thoughtSummary: 'First thought. Second thought.' },
     });
   });
+
+  it('emits an empty argument object for a zero-argument function call', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-zero', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-zero', name: 'gmail.listLabels' } },
+      { event_type: 'step.stop', index: 0 },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-zero', status: 'completed' } },
+    ]);
+
+    expect(collected).toContainEqual(expect.objectContaining({ type: 'tool-call', interactionId: 'interaction-zero', callId: 'call-zero', name: 'gmail.listLabels', arguments: {} }));
+    expect(collected.some((event) => (event as { type: string }).type === 'failed')).toBe(false);
+  });
+
+  it('preserves arguments supplied on function-call step.start', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-initial', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-initial', name: 'tasks.listTaskLists', arguments: { pageToken: 'next-page' } } },
+      { event_type: 'step.stop', index: 0 },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-initial', status: 'completed' } },
+    ]);
+
+    expect(collected).toContainEqual(expect.objectContaining({ type: 'tool-call', callId: 'call-initial', name: 'tasks.listTaskLists', arguments: { pageToken: 'next-page' } }));
+  });
+
+  it('continues to assemble incremental function-call argument deltas', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-streamed', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-streamed', name: 'calendar.listEvents' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: '{"timeMin":"2026-09-04T00:00:00Z",' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: '"timeMax":"2026-09-04T23:59:59Z"}' } },
+      { event_type: 'step.stop', index: 0 },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-streamed', status: 'completed' } },
+    ]);
+
+    expect(collected).toContainEqual(expect.objectContaining({ type: 'tool-call', callId: 'call-streamed', name: 'calendar.listEvents', arguments: { timeMin: '2026-09-04T00:00:00Z', timeMax: '2026-09-04T23:59:59Z' } }));
+  });
+
+  it('preserves structured failure for malformed function-call arguments', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-invalid', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-invalid', name: 'calendar.listEvents' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: '{"timeMin":' } },
+      { event_type: 'step.stop', index: 0 },
+    ]);
+
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { message: 'Gemini produced invalid function-call arguments.' },
+    });
+  });
 });

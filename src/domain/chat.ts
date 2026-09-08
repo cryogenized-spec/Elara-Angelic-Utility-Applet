@@ -39,6 +39,9 @@ export interface ChatMessage {
   conversationId?: string;
   responseGroupId?: string;
   responseVariant?: number;
+  /** Stable artifact IDs; binary payloads live in the artifact repository. */
+  attachments?: string[];
+  artifacts?: string[];
   executionSummary?: ExecutionSummary;
   providerTurn?: ProviderTurnMetadata;
 }

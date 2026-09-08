@@ -4,6 +4,9 @@ import { normalizeGeminiError } from './errors';
 import { getGeminiApiKey, getGeminiLockboxStatus } from '../persistence/gemini-api-key';
 import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
 import { composeSystemInstruction } from './memory-context';
+import { artifactRepository } from '../artifacts/repository';
+import { ArtifactError } from '../artifacts/errors';
+import { isAttachment } from '../domain/artifact';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
@@ -34,7 +37,89 @@ function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
 }
 
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
-type InteractionRequest = { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] };
+type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
+
+function initialFunctionArguments(step: Record<string, unknown>): string {
+  const initial = step.arguments;
+  if (initial === undefined) return '';
+  if (typeof initial === 'string') return initial;
+  return JSON.stringify(initial) ?? '';
+}
+
+type GeminiInputPart = Record<string, unknown>;
+const INLINE_ATTACHMENT_LIMIT = 4 * 1024 * 1024;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize)));
+  }
+  return btoa(binary);
+}
+
+async function blobAsBase64(blob: Blob): Promise<string> {
+  let bytes: ArrayBuffer;
+  if (typeof blob.arrayBuffer === 'function') bytes = await blob.arrayBuffer();
+  else if (typeof FileReader !== 'undefined') {
+    bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error ?? new Error('The attachment could not be read.'));
+      reader.readAsArrayBuffer(blob);
+    });
+  } else bytes = await new Response(blob).arrayBuffer();
+  return bytesToBase64(new Uint8Array(bytes));
+}
+
+function providerPartType(mimeType: string): 'image' | 'document' {
+  return mimeType.startsWith('image/') ? 'image' : 'document';
+}
+
+async function resolveGeminiInput(request: InteractionRequest, client: GoogleGenAI): Promise<unknown> {
+  if (!request.attachments?.length) return request.input;
+  const parts: GeminiInputPart[] = [];
+  if (typeof request.input === 'string' && request.input.trim()) parts.push({ type: 'text', text: request.input });
+  const active = () => !request.isGenerationActive || request.isGenerationActive();
+  for (const artifactId of request.attachments) {
+    if (!active()) throw new DOMException('The generation was superseded.', 'AbortError');
+    const artifact = await artifactRepository.get(artifactId);
+    if (!isAttachment(artifact) || artifact.status !== 'ready') throw new ArtifactError('PROVIDER_ATTACHMENT_FAILED', 'An attachment is not ready for Gemini.');
+    const type = providerPartType(artifact.mimeType);
+    const validRemoteRef = artifact.remoteRef?.provider === 'gemini' && artifact.remoteRef.expiresAt > Date.now() + 60_000;
+    if (validRemoteRef) {
+      parts.push({ type, uri: artifact.remoteRef!.fileUri, mime_type: artifact.mimeType });
+      continue;
+    }
+    const operationId = `${request.generationId ?? crypto.randomUUID()}:${artifact.id}`;
+    await artifactRepository.beginOperation(artifact.id, operationId, 'ready');
+    const guard = { operationId, expectedStatus: 'ready' as const, isValid: () => !request.signal?.aborted && active() };
+    if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+    if (artifact.remoteRef) await artifactRepository.updateMetadata(artifact.id, { remoteRef: null }, guard);
+    if (artifact.data.size <= INLINE_ATTACHMENT_LIMIT) {
+      const data = await blobAsBase64(artifact.data);
+      if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+      parts.push({ type, data, mime_type: artifact.mimeType });
+      continue;
+    }
+    try {
+      const uploaded = await client.files.upload({ file: artifact.data, config: { mimeType: artifact.mimeType } } as never) as unknown as Record<string, unknown>;
+      if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+      const fileUri = typeof uploaded.uri === 'string' ? uploaded.uri : undefined;
+      if (!fileUri) throw new Error('Gemini did not return a file URI.');
+      const expiresAt = typeof uploaded.expirationTime === 'string' ? Date.parse(uploaded.expirationTime) : Date.now() + 48 * 60 * 60 * 1000;
+      await artifactRepository.updateMetadata(artifact.id, { remoteRef: { provider: 'gemini', fileUri, expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 48 * 60 * 60 * 1000 } }, guard);
+      if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+      parts.push({ type, uri: fileUri, mime_type: artifact.mimeType });
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+      if (cause instanceof ArtifactError) throw cause;
+      throw new ArtifactError('PROVIDER_ATTACHMENT_FAILED', 'Gemini could not prepare this attachment.', cause);
+    }
+  }
+  if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+  return parts;
+}
 
 export function toGeminiGenerationConfig(value: unknown): Record<string, unknown> | undefined {
   const source = asRecord(value);
@@ -100,7 +185,8 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     const client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
     const contextualInstruction = await composeSystemInstruction(request.systemInstruction, query);
-    const stream = await client.interactions.create(buildInteractionPayload({ ...request, systemInstruction: contextualInstruction }) as never);
+    const providerInput = await resolveGeminiInput({ ...request, signal }, client);
+    const stream = await client.interactions.create(buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction }) as never);
     for await (const rawEvent of stream as unknown as AsyncIterable<unknown>) {
       if (signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }
       const raw = asRecord(rawEvent);
@@ -123,7 +209,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         }
         const signature = readString(step, 'signature');
         if (signature) yield { type: 'thought-signature', index, signature };
-        if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, { callId, name, arguments: '' }); }
+        if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, { callId, name, arguments: initialFunctionArguments(step) }); }
         continue;
       }
       if (eventType === 'step.delta') {
@@ -134,7 +220,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
         continue;
       }
-      if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && pending.arguments && interactionId) { try { const args = JSON.parse(pending.arguments) as unknown; if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.'); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args as Record<string, unknown> }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
+      if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = (pending.arguments.length === 0 ? {} : JSON.parse(pending.arguments)) as unknown; if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.'); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args as Record<string, unknown> }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
       if (eventType === 'interaction.completed') {
         const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed';
         if (status === 'requires_action') { sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
@@ -158,11 +244,18 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     }
     if (sawRequiresAction || sawTerminalEvent) return;
     yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
-  } catch (cause) { const error = normalizeGeminiError(cause, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }); if (error.cancelled || signal?.aborted) { yield { type: 'cancelled', interactionId }; return; } yield { type: 'failed', error }; }
+  } catch (cause) {
+    const normalized = normalizeGeminiError(cause, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) });
+    const error = cause instanceof ArtifactError
+      ? { ...normalized, code: cause.code, message: cause.userMessage, retryable: false, debug: { ...normalized.debug, artifactError: cause.code } }
+      : normalized;
+    if (error.cancelled || signal?.aborted || request.isGenerationActive?.() === false) { yield { type: 'cancelled', interactionId }; return; }
+    yield { type: 'failed', error };
+  }
 }
 
 export const geminiTurnPort: GeminiTurnPort = {
-  streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> { return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools }, signal); },
+  streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> { return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, attachments: request.attachments, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, generationId: request.generationId, isGenerationActive: request.isGenerationActive }, signal); },
   streamToolResult(request: GeminiToolContinuationRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
     const results = request.results ?? (request.result ? [request.result] : []);
     const input = results.map((result) => ({ type: 'function_result', name: result.name, call_id: result.callId, result: [{ type: 'text', text: JSON.stringify(result.result) }] }));

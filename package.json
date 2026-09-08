@@ -3,13 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "engines": { "node": ">=24.0.0" },
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "vite",
     "predev": "npm run fonts:prepare",
     "build": "tsc -p tsconfig.json --noEmit && vite build",
     "prebuild": "npm run fonts:prepare",
     "fonts:prepare": "node scripts/prepare-fonts.mjs",
+    "busytex:prepare": "texlyre-busytex download-assets ./public/core",
+    "verify:artifact-assets": "node scripts/verify-artifact-assets.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit",
     "typecheck:web": "tsc -p tsconfig.json --noEmit",
@@ -30,6 +34,8 @@
     "react-dom": "^19.0.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
+    "tesseract.js": "^7.0.0",
+    "texlyre-busytex": "^1.4.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

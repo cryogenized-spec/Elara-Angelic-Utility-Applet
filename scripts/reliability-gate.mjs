@@ -6,7 +6,8 @@ const requiredFiles = [
   'README.md', '.nvmrc', 'package.json',
   'docs/ARCHITECTURE_DECISION.md', 'docs/SYSTEM_BOUNDARIES.md', 'docs/GEMINI_INTEGRATION_STRATEGY.md', 'docs/GEMINI_REQUEST_CONTRACT.md', 'docs/PROVIDER_ERROR_NORMALIZATION.md',
   'docs/GOOGLE_OAUTH_ARCHITECTURE.md', 'docs/GOOGLE_SCOPE_REGISTRY.md', 'docs/GOOGLE_CALENDAR_SERVICE.md', 'docs/GOOGLE_TASKS_SERVICE.md', 'docs/GOOGLE_GMAIL_SERVICE.md', 'docs/GOOGLE_TOOL_BOUNDARY.md', 'docs/GOOGLE_WRITE_CONFIRMATION.md', 'docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md', 'docs/GEMINI_BACKGROUND_EXECUTION.md',
-  'docs/NEXT_FEATURE_PHASE_PLAN.md', 'docs/MARKDOWN_FORMAT.md', 'docs/ROLEPLAY_WORLD_CANVAS_PLAN.md',
+  'docs/NEXT_FEATURE_PHASE_PLAN.md', 'docs/MARKDOWN_FORMAT.md', 'docs/ROLEPLAY_WORLD_CANVAS_PLAN.md', 'docs/ARTIFACT_SYSTEM.md', 'public/core/README.md',
+  'src/artifacts/repository.ts', 'src/artifacts/validation.ts', 'src/artifacts/image-preprocessing.ts', 'src/artifacts/intake.ts', 'src/artifacts/transformations.ts', 'src/artifacts/repository.test.ts', 'src/gemini/multimodal.test.ts', 'src/app/components/artifacts/GeneratedTextCard.tsx', 'src/app/components/artifacts/GeneratedTextCard.test.tsx', 'src/ocr/service.ts', 'src/ocr/worker.ts', 'src/documents/compiler.ts', 'src/documents/compiler.worker.ts', 'scripts/verify-artifact-assets.mjs',
   'src/app/components/MarkdownText.tsx', 'src/app/components/MarkdownText.test.tsx', 'src/app/components/RoleplaySettings.tsx',
   'src/character/system-instruction.ts', 'src/persistence/character.ts', 'src/persistence/character.test.ts', 'src/persistence/gemini-api-key.ts', 'src/persistence/gemini-api-key.test.ts', 'src/persistence/preferences.ts', 'src/persistence/roleplay-world.ts',
   'src/domain/roleplay-world.ts', 'src/domain/roleplay-world.test.ts',
@@ -18,9 +19,13 @@ for (const relative of requiredFiles) if (!existsSync(join(root, relative))) thr
 
 const packageSource = readFileSync(join(root, 'package.json'), 'utf8');
 const packageJson = JSON.parse(packageSource);
-for (const script of ['lint', 'typecheck', 'test', 'build', 'e2e', 'reliability:check']) if (typeof packageJson.scripts?.[script] !== 'string') throw new Error(`Reliability gate: missing npm script ${script}`);
+for (const script of ['lint', 'typecheck', 'test', 'build', 'e2e', 'reliability:check', 'verify:artifact-assets']) if (typeof packageJson.scripts?.[script] !== 'string') throw new Error(`Reliability gate: missing npm script ${script}`);
 if ((packageSource.match(/\"dexie\"\s*:/g) ?? []).length !== 1) throw new Error('Reliability gate: package.json must contain exactly one dexie dependency entry.');
 if (packageSource.includes('BLOCK_NONE')) throw new Error('Reliability gate: provider safety override marker BLOCK_NONE must not be present.');
+for (const font of ['Inter-latin.woff2', 'Manrope-latin.woff2', 'Outfit-latin.woff2']) {
+  if (!existsSync(join(root, 'src', 'ui', 'generated-fonts', font))) throw new Error(`Reliability gate: missing bundled font asset ${font}.`);
+}
+if (!packageJson.dependencies?.['tesseract.js'] || !packageJson.dependencies?.['texlyre-busytex']) throw new Error('Reliability gate: local OCR and document compiler dependencies must remain explicit.');
 
 const forbiddenProviderApis = /generateContent\s*\(/g;
 const stack = [join(root, 'src')];
@@ -36,6 +41,19 @@ while (stack.length) {
   }
 }
 
+const domainRoot = join(root, 'src', 'domain');
+const forbiddenDomainDependencies = /@google\/genai|gemini|tesseract|busytex|lualatex|ocr|google\/oauth|drive/i;
+for (const entry of readdirSync(domainRoot, { withFileTypes: true })) {
+  if (!entry.isFile() || !/\.(ts|tsx)$/.test(entry.name)) continue;
+  const source = readFileSync(join(domainRoot, entry.name), 'utf8');
+  const imports = source.split('\n').filter((line) => /^\s*(?:import|export).*from\s+['"]/.test(line)).join('\n');
+  if (forbiddenDomainDependencies.test(imports)) throw new Error(`Reliability gate: domain module imports provider/compiler/OCR concerns in ${entry.name}.`);
+}
+const artifactRepositorySource = readFileSync(join(root, 'src/artifacts/repository.ts'), 'utf8');
+if (!artifactRepositorySource.includes('ArrayBuffer') || !artifactRepositorySource.includes('canonicalBlob')) throw new Error('Reliability gate: artifact persistence must hydrate binary storage at the repository boundary.');
+if (artifactRepositorySource.includes('artifactFromStored(item, new Blob())') || !artifactRepositorySource.includes('ARTIFACT_STORAGE_FAILED')) throw new Error('Reliability gate: artifact reads must report missing/corrupt payloads instead of silently repairing them.');
+const compilerWorkerSource = readFileSync(join(root, 'src/documents/compiler.worker.ts'), 'utf8');
+if (!compilerWorkerSource.includes('shellEscape: false')) throw new Error('Reliability gate: browser document compilation must disable shell escape.');
 const providerSource = readFileSync(join(root, 'src/gemini/provider.ts'), 'utf8');
 if (!providerSource.includes("from '@google/genai'")) throw new Error('Reliability gate: Gemini must execute directly from the application provider.');
 if (providerSource.includes('GEMINI_WORKER_URL') || providerSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: Gemini provider must not use the Cloudflare Worker.');
@@ -126,4 +144,4 @@ if (!characterPersistence.includes("record.systemInstruction = '';")) throw new 
 
 if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24') throw new Error('Reliability gate: Node baseline must remain 24.');
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract.`);
+process.stdout.write(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract.\n`);

@@ -1,6 +1,7 @@
 import Dexie, { type Table } from 'dexie';
 import type { ChatMessage, ConversationState, ConversationThread } from '../domain/chat';
 import type { DurableMemory } from '../domain/memory';
+import type { StoredArtifactBlob, StoredArtifactMetadata } from '../domain/artifact';
 import { DEFAULT_GEMINI_MODEL, getGeminiModel } from '../gemini/model-registry';
 import { defaultsForModel, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import type { StoredWorkspaceShortcut } from './workspace-shortcuts';
@@ -42,9 +43,11 @@ export class ElaraDatabase extends Dexie {
   folders!: Table<StoredConversationFolder, string>;
   folderAssignments!: Table<StoredFolderAssignment, string>;
   memories!: Table<DurableMemory, string>;
+  artifactMetadata!: Table<StoredArtifactMetadata, string>;
+  artifactBlobs!: Table<StoredArtifactBlob, string>;
 
-  constructor() {
-    super('elara-angelic-utility-applet');
+  constructor(name = 'elara-angelic-utility-applet') {
+    super(name);
     this.version(1).stores({ messages: 'id, createdAt, role' });
     this.version(2).stores({
       messages: 'id, conversationId, createdAt, role',
@@ -110,6 +113,17 @@ export class ElaraDatabase extends Dexie {
       folders: 'id, parentId, contextScope, updatedAt',
       folderAssignments: 'id, threadId, folderId, updatedAt',
       memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt',
+    });
+    this.version(7).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+      memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt',
+      artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
+      artifactBlobs: 'id',
     });
   }
 }

@@ -79,7 +79,7 @@ async function main() {
   if (health.status !== 200) throw new Error(`Autonomy health HTTP ${health.status}: ${healthBody}`);
   const healthJson = JSON.parse(healthBody);
   if (healthJson.autonomy?.configured !== true) throw new Error(`Autonomy is not configured on the worker: ${healthBody}`);
-  if (healthJson.autonomy.dryRun !== true) throw new Error(`Expected a dry-run scheduler (Phase B): ${healthBody}`);
+  if (healthJson.autonomy.agentExecution !== true) throw new Error(`Expected live cloud execution (Phase C1): ${healthBody}`);
   process.stdout.write(`✓ health — worker v${healthJson.autonomy.version}, cron "${healthJson.autonomy.cron}", capabilities: ${healthJson.autonomy.capabilities.join(', ')}\n`);
 
   // 2. Authenticated pairing: token possession + capability manifest.

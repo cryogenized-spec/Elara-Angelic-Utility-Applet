@@ -24,7 +24,7 @@ import {
 export const AUTONOMY_WORKER_VERSION = '1.0.0-phase-c0';
 export const AUTONOMY_SCHEMA_VERSION = 1;
 /** What this deployment supports — the app refuses to enable autonomy on mismatch. */
-export const AUTONOMY_CAPABILITIES = ['config-sync', 'context-sync', 'scheduler-dry-run', 'routine-run-workflow'] as const;
+export const AUTONOMY_CAPABILITIES = ['config-sync', 'context-sync', 'scheduler-live', 'routine-run-workflow', 'cloud-execution'] as const;
 export const AUTONOMY_CRON = '0 * * * *';
 
 export interface AutonomyEnv {
@@ -93,8 +93,8 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
         capabilities: AUTONOMY_CAPABILITIES,
         cron: AUTONOMY_CRON,
         schedulerLive: true,
-        agentExecution: false,
-        dryRun: true,
+        agentExecution: true,
+        dryRun: false,
       },
     }, 200, corsOrigin);
   }
@@ -118,8 +118,8 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
       capabilities: AUTONOMY_CAPABILITIES,
       cron: AUTONOMY_CRON,
       schedulerLive: true,
-      agentExecution: false,
-      dryRun: true,
+      agentExecution: true,
+      dryRun: false,
     }, 200, corsOrigin);
   }
 

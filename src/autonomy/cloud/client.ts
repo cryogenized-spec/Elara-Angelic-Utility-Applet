@@ -167,3 +167,8 @@ export async function fetchCloudRuns(pairing: AutonomyPairing, since: number): P
   const body = await bearerGet<{ runs: RoutineRunRecord[] }>(pairing, `/autonomy/runs?since=${Math.max(0, Math.floor(since))}`);
   return body.runs;
 }
+
+export async function fetchCloudEvents(pairing: AutonomyPairing, since: number): Promise<import('../contracts').AutonomousEvent[]> {
+  const body = await bearerGet<{ events: import('../contracts').AutonomousEvent[] }>(pairing, `/autonomy/events?since=${Math.max(0, Math.floor(since))}`);
+  return body.events;
+}

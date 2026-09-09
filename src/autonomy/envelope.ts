@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { autonomyContextRecordSchema } from './context';
 import { elaraRoutineSchema, ROUTINE_EXECUTION_MODES } from './contracts';
+import { cloudAdmitResultSchema } from './cloud-result';
 
 // ---------------------------------------------------------------------------
 // RoutineRunEnvelope — the immutable execution payload frozen at claim time.
@@ -37,6 +38,7 @@ export type RoutineRunEnvelope = z.infer<typeof routineRunEnvelopeSchema>;
 export const runCompleteRequestSchema = z.strictObject({
   runKey: z.string().min(1),
   workflowInstanceId: z.string().min(1).max(100),
+  result: cloudAdmitResultSchema.optional(),
 });
 export type RunCompleteRequest = z.infer<typeof runCompleteRequestSchema>;
 
@@ -45,6 +47,8 @@ export const RUN_COMPLETE_STATUSES = [
   'completed',
   'already-completed',
   'cancelled',
+  'suppressed',
+  'failed',
   'claim-not-found',
   'identity-mismatch',
   'missing-envelope',

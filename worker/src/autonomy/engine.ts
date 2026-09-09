@@ -28,9 +28,11 @@ import {
   type SchedulerJournalEntry,
   type SchedulerJournalKind,
 } from '../../../src/autonomy/scheduler';
-import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
-import { C0_SHELL_CODE, routineRunEnvelopeSchema, runCompleteRequestSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
-import { workflowInstanceIdForRunKey } from '../../../src/autonomy/workflow-identity';
+import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type AutonomousEvent, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+import { routineRunEnvelopeSchema, runCompleteRequestSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
+import { eventIdForRunKey, workflowInstanceIdForRunKey } from '../../../src/autonomy/workflow-identity';
+import { evaluateEventAdmission, noveltyFingerprint } from '../../../src/autonomy/policy';
+import type { CloudAdmitResult } from '../../../src/autonomy/cloud-result';
 import { AutonomyStore } from './store';
 import type { SchedulerPort } from './ports';
 
@@ -39,7 +41,7 @@ import type { SchedulerPort } from './ports';
 // installationId derived from the ELARA_INSTALLATION_TOKEN). Phase C0: the
 // scheduler still owns due-time truth. Cloud-locus dues become a durable
 // `running` claim plus a deterministic Workflow identity (hashed runKey).
-// Gemini is not called. The DO is still not an application runtime.
+// Gemini runs in the Workflow, never in this DO. The DO is still not an application runtime.
 //
 // Wake topology (design §4.1/§10.1): there is NO public wake endpoint. The
 // hourly cron reaches this DO only through the Worker→DO binding, carrying an
@@ -55,6 +57,8 @@ import type { SchedulerPort } from './ports';
 
 export interface AutonomyEnv {
   ELARA_INSTALLATION_TOKEN?: string;
+  GEMINI_API_KEY?: string;
+  C1_MODEL_STUB?: string;
   ROUTINE_RUN?: Workflow<RoutineRunEnvelope>;
 }
 
@@ -168,6 +172,12 @@ export class AutonomyEngine extends DurableObject {
         if (!auth.ok) return Response.json({ code: auth.code, message: auth.message }, { status: auth.status });
         const since = Number(url.searchParams.get('since') ?? '0');
         return this.json({ runs: this.store.listRunsSince(Number.isFinite(since) ? since : 0) });
+      }
+      if (request.method === 'GET' && path === '/autonomy/events') {
+        const auth = await this.verifyRead(request);
+        if (!auth.ok) return Response.json({ code: auth.code, message: auth.message }, { status: auth.status });
+        const since = Number(url.searchParams.get('since') ?? '0');
+        return this.json({ events: this.store.listEventsSince(Number.isFinite(since) ? since : 0) });
       }
       if (request.method === 'GET' && path === '/autonomy/context') {
         const auth = await this.verifyRead(request);
@@ -628,21 +638,108 @@ export class AutonomyEngine extends DurableObject {
     if (envelopeRow.envelope.workflowInstanceId !== workflowInstanceId) {
       return { status: 409, body: { status: 'identity-mismatch', code: 'identity-mismatch', message: 'Workflow instance id does not match the frozen envelope.' } };
     }
-    const routine = this.store.getRoutine(stored.record.routineId);
+    const result = parsed.data.result;
+    if (!result) {
+      return { status: 500, body: { status: 'retryable-error', code: 'missing-result', message: 'Active claim completion requires a structured C1 result.' } };
+    }
+    const liveRoutine = this.store.getRoutine(stored.record.routineId);
     const masterOn = this.store.getMetaBoolean('autonomyEnabled', false);
-    const cancelled = !masterOn || !routine || !routine.enabled;
+    const cancelled = !masterOn || !liveRoutine || !liveRoutine.enabled;
     const generation = this.stateGeneration();
-    this.store.updateRunRecord(runKey, {
-      ...stored.record,
+    const frozen = envelopeRow.envelope.routine;
+    if (cancelled) {
+      const record: RoutineRunRecord = {
+        ...stored.record,
+        completedAt: now,
+        state: 'failed',
+        outcome: 'error',
+        errorCode: 'cancelled-admission',
+        errorMessage: 'Live gate closed before events could be admitted.',
+      };
+      this.store.admitCompletedRun(runKey, record, generation, stored.locus, null);
+      this.journal(now, 'cancelled-admission', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
+      if (liveRoutine) this.advanceScheduleIfNeeded(runKey, liveRoutine, now, generation, stored.record.scheduledFor);
+      return { status: 200, body: { status: 'cancelled', runKey, alreadyCompleted: false, cancelled: true } };
+    }
+    const admitted = await this.admitResult(stored.record, result, frozen, now, generation, stored.locus);
+    this.journal(now, admitted.status === 'suppressed' ? 'completed' : admitted.status === 'completed' ? 'completed' : 'completed', {
+      generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey,
+    });
+    this.advanceScheduleIfNeeded(runKey, liveRoutine, now, generation, stored.record.scheduledFor);
+    return { status: 200, body: { status: admitted.status, runKey, alreadyCompleted: false, cancelled: false } };
+  }
+
+  private async admitResult(
+    stored: RoutineRunRecord,
+    result: CloudAdmitResult,
+    frozen: ElaraRoutine,
+    now: number,
+    generation: number,
+    locus: 'cloud' | 'device',
+  ): Promise<{ status: 'completed' | 'suppressed' | 'failed' }> {
+    if (result.disposition === 'error') {
+      this.store.admitCompletedRun(stored.runKey, {
+        ...stored, completedAt: now, state: 'failed', outcome: 'error', errorCode: result.errorCode, errorMessage: result.errorMessage,
+      }, generation, locus, null);
+      return { status: 'failed' };
+    }
+    if (result.disposition === 'noop' || result.disposition === 'cannot_act') {
+      this.store.admitCompletedRun(stored.runKey, {
+        ...stored,
+        completedAt: now,
+        state: 'completed',
+        outcome: 'no-op',
+        reason: result.reason,
+        itemsExamined: result.disposition === 'noop' ? result.itemsExamined : undefined,
+      }, generation, locus, null);
+      return { status: 'completed' };
+    }
+    const fingerprint = noveltyFingerprint(frozen.id, result.title, result.summary);
+    const recent = this.store.listRecentEvents(now - 7 * 24 * 3_600_000);
+    const admission = evaluateEventAdmission({
+      routineId: frozen.id,
+      fingerprint,
+      recentEvents: recent,
+      policy: frozen.policy,
+      maxEventsPerDay: this.store.getMetaNumber('maxEventsPerDay', 10),
+      now,
+    });
+    if (!admission.admitted) {
+      this.store.admitCompletedRun(stored.runKey, {
+        ...stored,
+        completedAt: now,
+        state: 'completed',
+        outcome: 'suppressed',
+        suppressedReason: admission.reason,
+        reason: admission.detail,
+      }, generation, locus, null);
+      return { status: 'suppressed' };
+    }
+    const event: AutonomousEvent = {
+      id: await eventIdForRunKey(stored.runKey),
+      routineId: frozen.id,
+      runKey: stored.runKey,
+      title: result.title,
+      summary: result.summary,
+      importance: result.importance,
+      confidence: result.confidence,
+      evidence: result.evidence ?? [],
+      noveltyFingerprint: fingerprint,
+      createdAt: now,
+      readAt: null,
+    };
+    const written = this.store.admitCompletedRun(stored.runKey, {
+      ...stored,
       completedAt: now,
-      state: cancelled ? 'failed' : 'completed',
-      outcome: cancelled ? 'error' : 'no-op',
-      errorCode: cancelled ? 'cancelled-admission' : C0_SHELL_CODE,
-      errorMessage: cancelled ? 'Live gate closed before the shell could admit events.' : 'Phase C0 shell: no model, no events.',
-    }, generation, stored.locus);
-    this.journal(now, cancelled ? 'cancelled-admission' : 'completed', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
-    if (routine) this.advanceScheduleIfNeeded(runKey, routine, now, generation, stored.record.scheduledFor);
-    return { status: 200, body: { status: cancelled ? 'cancelled' : 'completed', runKey, alreadyCompleted: false, cancelled } };
+      state: 'completed',
+      outcome: 'event',
+      eventId: event.id,
+      itemsExamined: result.itemsExamined,
+    }, generation, locus, event);
+    if (written === 'duplicate') {
+      return { status: 'completed' };
+    }
+    return { status: 'completed' };
   }
 
   /** Tombstone a crashed in-flight run: same id, freed occurrence key, terminal failed state. */
@@ -669,8 +766,8 @@ export class AutonomyEngine extends DurableObject {
     return {
       paired: true,
       schedulerLive: true,
-      agentExecution: false,
-      dryRun: true, // Compatibility: scheduler is live; agent execution is C2.
+      agentExecution: true,
+      dryRun: false,
       generation: this.store.getMetaNumber('configGeneration', 0),
       stateGeneration: this.stateGeneration(),
       autonomyEnabled: this.store.getMetaBoolean('autonomyEnabled', false),

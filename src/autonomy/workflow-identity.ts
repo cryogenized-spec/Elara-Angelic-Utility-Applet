@@ -24,3 +24,11 @@ export async function workflowInstanceIdForRunKey(runKey: string): Promise<strin
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${IDENTITY_NAMESPACE}${runKey}`));
   return `rr${toHex(new Uint8Array(digest))}`;
 }
+
+const EVENT_NAMESPACE = 'elara-autonomous-event-v1:';
+
+/** One admitted event per runKey. Deterministic so Workflow retries cannot mint a second inbox row. */
+export async function eventIdForRunKey(runKey: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`${EVENT_NAMESPACE}${runKey}`));
+  return `ev${toHex(new Uint8Array(digest)).slice(0, 32)}`;
+}

@@ -98,6 +98,7 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
         lastSyncedAt: null,
         lastSyncedContextHash: null,
         lastPulledRunsAt: 0,
+        lastPulledEventsAt: 0,
       };
       savePairing(pairing);
       setPairing(pairing);

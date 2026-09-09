@@ -3,7 +3,7 @@ import { env, reset } from 'cloudflare:test';
 import { deriveInstallationId } from '../../src/autonomy/protocol';
 import { computeNextOccurrence } from '../../src/autonomy/schedule';
 import { SCHEDULER_BUDGET_CODE, SCHEDULER_DEVICE_DUE_CODE, SCHEDULER_DRY_RUN_CODE, SCHEDULER_MISSED_CODE } from '../../src/autonomy/scheduler';
-import { C0_SHELL_CODE } from '../../src/autonomy/envelope';
+
 import type { RoutineRunRecord } from '../../src/autonomy/contracts';
 import { TOKEN, bearerRead, configPayload, internalDo, makeRoutine, signedWrite } from './helpers';
 
@@ -146,7 +146,7 @@ describe('AutonomyEngine — single-alarm multiplexer (REAL alarms)', () => {
 
     await waitForAlarmProcessing(async () => (await runs()).some((run) => run.runKey === `routine-cloud-1:scheduled:${dueAt}` && run.state === 'completed'));
     const record = (await runs()).find((run) => run.runKey === `routine-cloud-1:scheduled:${dueAt}`)!;
-    expect(record).toMatchObject({ state: 'completed', outcome: 'no-op', errorCode: C0_SHELL_CODE, scheduledFor: dueAt, executionMode: 'scheduled' });
+    expect(record).toMatchObject({ state: 'completed', outcome: 'no-op', scheduledFor: dueAt, executionMode: 'scheduled' });
 
     // After firing, the schedule advanced to the routine's next occurrence and
     // the alarm re-armed there — never left dangling on the past.
@@ -228,7 +228,7 @@ describe('AutonomyEngine — repair sweep and occurrence classification', () => 
 
     await waitForAlarmProcessing(async () => (await runs()).some((run) => run.scheduledFor === overdue && run.state === 'completed'));
     const record = (await runs()).find((run) => run.scheduledFor === overdue);
-    expect(record).toMatchObject({ state: 'completed', errorCode: C0_SHELL_CODE, executionMode: 'catch-up', runKey: `routine-cloud-1:catch-up:${overdue}`, scheduledFor: overdue });
+    expect(record).toMatchObject({ state: 'completed', outcome: 'no-op', executionMode: 'catch-up', runKey: `routine-cloud-1:catch-up:${overdue}`, scheduledFor: overdue });
     // The schedule advanced past the processed occurrence.
     expect((await state()).routines[0].nextDueAt).toBeGreaterThan(overdue);
   });

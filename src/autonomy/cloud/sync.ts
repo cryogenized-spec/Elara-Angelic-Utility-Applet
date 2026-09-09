@@ -1,6 +1,6 @@
 import { listMemories } from '../../memory/store';
 import { loadAutonomyPreferences } from '../../persistence/preferences';
-import { addRunOrExisting, listRoutines } from '../../persistence/autonomy';
+import { addEventOrExisting, addRunOrExisting, listRoutines } from '../../persistence/autonomy';
 import { buildAutonomyContext, type AutonomyContextProjection } from '../context';
 import type { ElaraRoutine, RoutineRunRecord } from '../contracts';
 import {
@@ -12,6 +12,7 @@ import {
 } from './pairing';
 import {
   clearContext,
+  fetchCloudEvents,
   fetchCloudRuns,
   fetchSchedulerState,
   replaceContext,
@@ -94,20 +95,32 @@ export async function pullCloudRuns(pairing: AutonomyPairing): Promise<RoutineRu
   return runs;
 }
 
+export async function pullCloudEvents(pairing: AutonomyPairing): Promise<number> {
+  const events = await fetchCloudEvents(pairing, pairing.lastPulledEventsAt);
+  let highest = pairing.lastPulledEventsAt;
+  for (const event of events) {
+    await addEventOrExisting(event);
+    if (event.createdAt > highest) highest = event.createdAt;
+  }
+  if (highest > pairing.lastPulledEventsAt) updatePairing({ lastPulledEventsAt: highest });
+  return events.length;
+}
+
 /**
  * The full app-open sync: configuration, context (hash-guarded against the
  * worker's own view), scheduler state, and run-history pull. Returns the
  * pulled scheduler state for the UI.
  */
-export async function fullSync(pairing: AutonomyPairing): Promise<{ state: CloudSchedulerState; pulledRuns: number; contextSynced: boolean; staleRejected: boolean }> {
+export async function fullSync(pairing: AutonomyPairing): Promise<{ state: CloudSchedulerState; pulledRuns: number; pulledEvents: number; contextSynced: boolean; staleRejected: boolean }> {
   const { staleRejected } = await syncConfiguration(pairing);
   const projection = await rebuildAutonomyContext();
   const before = await fetchSchedulerState(pairing);
   const contextSynced = await syncContextIfChanged(pairing, projection, before.context?.contentHash ?? null);
   const state = await fetchSchedulerState(pairing);
   const pulled = await pullCloudRuns(pairing);
+  const pulledEvents = await pullCloudEvents(pairing);
   updatePairing({ lastSyncedAt: Date.now() });
-  return { state, pulledRuns: pulled.length, contextSynced, staleRejected };
+  return { state, pulledRuns: pulled.length, pulledEvents, contextSynced, staleRejected };
 }
 
 /** Manual clear: wipe the worker-side pack immediately. */

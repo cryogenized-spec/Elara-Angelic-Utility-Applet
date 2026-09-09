@@ -15,7 +15,7 @@ const requiredFiles = [
   'src/autonomy/contracts.ts', 'src/autonomy/schedule.ts', 'src/autonomy/policy.ts', 'src/autonomy/outcome.ts', 'src/autonomy/authority.ts', 'src/autonomy/instruction.ts', 'src/autonomy/runner.ts', 'src/autonomy/runner.test.ts', 'src/autonomy/tool-surface.test.ts', 'src/persistence/autonomy.ts', 'src/persistence/autonomy.test.ts', 'src/app/components/AutonomySettings.tsx', 'src/gemini/google-tool-loop.readonly.test.ts',
   'src/autonomy/scheduler.ts', 'src/autonomy/scheduler.test.ts', 'src/autonomy/context.ts', 'src/autonomy/context.test.ts', 'src/autonomy/protocol.ts', 'src/autonomy/protocol.test.ts',
   'src/autonomy/cloud/pairing.ts', 'src/autonomy/cloud/pairing.test.ts', 'src/autonomy/cloud/client.ts', 'src/autonomy/cloud/sync.ts', 'src/autonomy/cloud/sync.test.tsx', 'src/app/components/AutonomyCloud.tsx',
-  'worker/src/autonomy/ports.ts', 'worker/src/autonomy/store.ts', 'worker/src/autonomy/engine.ts', 'worker/src/autonomy/routes.ts', 'worker/src/autonomy/workflow.ts', 'src/autonomy/workflow-identity.ts', 'src/autonomy/envelope.ts', 'worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts', 'worker/test/helpers.ts', 'vitest.workers.config.ts',
+  'worker/src/autonomy/ports.ts', 'worker/src/autonomy/store.ts', 'worker/src/autonomy/engine.ts', 'worker/src/autonomy/routes.ts', 'worker/src/autonomy/workflow.ts', 'worker/src/autonomy/cloud-execute.ts', 'src/autonomy/cloud-result.ts', 'src/autonomy/workflow-identity.ts', 'src/autonomy/envelope.ts', 'worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts', 'worker/test/helpers.ts', 'vitest.workers.config.ts',
   'scripts/verify-autonomy-worker.mjs', 'docs/AUTONOMOUS_ELARA.md', 'e2e/autonomy-cloud.spec.ts',
   'e2e/roleplay-world.spec.ts', 'e2e/autonomy.spec.ts',
 ];
@@ -221,6 +221,11 @@ if (wranglerSource.includes('TestAutonomyEngine')) throw new Error('Reliability 
 if (!engineSource.includes('nextOccurrenceAfterProcessed')) throw new Error('Reliability gate: schedule advance must be occurrence-anchored.');
 if (!engineSource.includes('schedulerLive') || !engineSource.includes('agentExecution')) throw new Error('Reliability gate: scheduler liveness and agent execution must not share one dryRun flag.');
 if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('pruneEnvelopes')) throw new Error('Reliability gate: envelopes must be pruned with runs.');
+if (wranglerSource.includes('C1_MODEL_STUB')) throw new Error('Reliability gate: C1_MODEL_STUB must not be declared in production wrangler.');
+if (workflowSource.includes('C0_SHELL') || engineSource.includes('C0_SHELL')) throw new Error('Reliability gate: C0 shell completion must not remain after C1.');
+if (!workflowSource.includes('executeCloudRoutine')) throw new Error('Reliability gate: the Workflow must execute the C1 model step.');
+if (!engineSource.includes('evaluateEventAdmission')) throw new Error('Reliability gate: the DO must admit events in code, not in the model.');
+if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('CREATE TABLE IF NOT EXISTS events')) throw new Error('Reliability gate: cloud events must be durable.');
 
 // The shared scheduler domain stays pure (no Cloudflare, browser, or provider imports).
 const allowedSchedulerImports = /^\s*(?:import|export)\s.*from\s+['"](?:zod|\.\/contracts|\.\/schedule|\.\.\/memory\/retrieval|\.\.\/memory\/types)['"];?\s*$/;

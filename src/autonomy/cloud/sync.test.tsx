@@ -27,6 +27,7 @@ const PAIRING: AutonomyPairing = {
   lastSyncedAt: null,
   lastSyncedContextHash: null,
   lastPulledRunsAt: 0,
+  lastPulledEventsAt: 0,
 };
 
 const CONTEXT_NOW = 1_700_000_000_000;
@@ -130,6 +131,7 @@ describe('fullSync', () => {
         return jsonResponse({ accepted: true, metadata: { recordCount: 1, byteSize: 120 } });
       },
       'GET /autonomy/runs': () => jsonResponse({ runs: [run] }),
+      'GET /autonomy/events': () => jsonResponse({ events: [] }),
     });
 
     const result = await fullSync({ ...PAIRING });

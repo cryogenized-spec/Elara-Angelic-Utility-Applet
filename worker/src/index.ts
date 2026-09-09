@@ -19,6 +19,8 @@ export interface Env {
   AUTONOMY?: DurableObjectNamespace;
   /** Phase C0 routine-run Workflow binding. */
   ROUTINE_RUN?: Workflow;
+  /** Test-only model stub. Must never appear in production wrangler.toml. */
+  C1_MODEL_STUB?: string;
 }
 
 const toolResultSchema = z.object({

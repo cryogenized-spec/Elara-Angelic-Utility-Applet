@@ -24,6 +24,7 @@ export interface AutonomyPairing {
   lastSyncedContextHash: string | null;
   /** High-water mark for pulled cloud run records. */
   lastPulledRunsAt: number;
+  lastPulledEventsAt: number;
 }
 
 function readJson(key: string): Record<string, unknown> | null {
@@ -56,6 +57,7 @@ export function loadPairing(): AutonomyPairing | null {
     lastSyncedAt: typeof value.lastSyncedAt === 'number' ? value.lastSyncedAt : null,
     lastSyncedContextHash: typeof value.lastSyncedContextHash === 'string' ? value.lastSyncedContextHash : null,
     lastPulledRunsAt: typeof value.lastPulledRunsAt === 'number' ? value.lastPulledRunsAt : 0,
+    lastPulledEventsAt: typeof value.lastPulledEventsAt === 'number' ? value.lastPulledEventsAt : 0,
   };
 }
 

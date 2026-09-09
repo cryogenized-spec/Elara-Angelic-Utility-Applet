@@ -1,10 +1,12 @@
 import {
+  CLOUD_EVENT_RETENTION_COUNT,
+  CLOUD_EVENT_RETENTION_MS,
   CLOUD_RUN_RETENTION_COUNT,
   CLOUD_RUN_RETENTION_MS,
   SCHEDULER_JOURNAL_MAX,
   type SchedulerJournalEntry,
 } from '../../../src/autonomy/scheduler';
-import { normalizeRoutine, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+import { normalizeRoutine, type AutonomousEvent, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
 import type { RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 
 // ---------------------------------------------------------------------------
@@ -17,7 +19,7 @@ import type { RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 // future schema change is an explicit, reviewable migration.
 // ---------------------------------------------------------------------------
 
-const SCHEMA_VERSION = '2';
+const SCHEMA_VERSION = '3';
 
 export interface StoredSchedule {
   routineId: string;
@@ -73,6 +75,8 @@ export class AutonomyStore {
     this.sql.exec('CREATE TABLE IF NOT EXISTS context (id INTEGER PRIMARY KEY CHECK (id = 1), contentHash TEXT NOT NULL, syncedAt INTEGER NOT NULL, generation INTEGER NOT NULL, recordCount INTEGER NOT NULL, byteSize INTEGER NOT NULL, records TEXT NOT NULL)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, seenAt INTEGER NOT NULL)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS envelopes (runKey TEXT PRIMARY KEY, workflowInstanceId TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, dispatched INTEGER NOT NULL, scheduleAdvanced INTEGER NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, runKey TEXT NOT NULL UNIQUE, routineId TEXT NOT NULL, record TEXT NOT NULL, createdAt INTEGER NOT NULL)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS events_created ON events(createdAt)');
     this.setMeta('schemaVersion', SCHEMA_VERSION);
   }
 
@@ -253,6 +257,69 @@ export class AutonomyStore {
       for (const row of evict) this.sql.exec('DELETE FROM runs WHERE id = ?', row.id);
     }
     this.pruneEnvelopes();
+    this.pruneEvents(now);
+  }
+
+  insertEvent(event: AutonomousEvent): boolean {
+    try {
+      this.sql.exec(
+        'INSERT INTO events (id, runKey, routineId, record, createdAt) VALUES (?, ?, ?, ?, ?)',
+        event.id,
+        event.runKey,
+        event.routineId,
+        JSON.stringify(event),
+        event.createdAt,
+      );
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  getEventByRunKey(runKey: string): AutonomousEvent | undefined {
+    const row = this.sql.exec<{ record: string }>('SELECT record FROM events WHERE runKey = ?', runKey).toArray()[0];
+    return row ? JSON.parse(row.record) as AutonomousEvent : undefined;
+  }
+
+  listEventsSince(since: number, limit = 200): AutonomousEvent[] {
+    return this.sql.exec<{ record: string }>('SELECT record FROM events WHERE createdAt > ? ORDER BY createdAt DESC LIMIT ?', since, limit)
+      .toArray()
+      .map((row) => JSON.parse(row.record) as AutonomousEvent);
+  }
+
+  listRecentEvents(since: number): AutonomousEvent[] {
+    return this.sql.exec<{ record: string }>('SELECT record FROM events WHERE createdAt > ? ORDER BY createdAt DESC', since)
+      .toArray()
+      .map((row) => JSON.parse(row.record) as AutonomousEvent);
+  }
+
+  admitCompletedRun(runKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device', event: AutonomousEvent | null): 'admitted' | 'duplicate' {
+    let outcome: 'admitted' | 'duplicate' = 'admitted';
+    this.transact(() => {
+      if (event) {
+        if (this.getEventByRunKey(event.runKey)) {
+          outcome = 'duplicate';
+          return;
+        }
+        if (!this.insertEvent(event)) {
+          outcome = 'duplicate';
+          return;
+        }
+      }
+      this.updateRunRecord(runKey, record, generation, locus);
+    });
+    return outcome;
+  }
+
+  pruneEvents(now: number): void {
+    const cutoff = now - CLOUD_EVENT_RETENTION_MS;
+    this.sql.exec('DELETE FROM events WHERE createdAt < ?', cutoff);
+    const remaining = this.sql.exec<{ id: string; createdAt: number }>('SELECT id, createdAt FROM events').toArray();
+    if (remaining.length > CLOUD_EVENT_RETENTION_COUNT) {
+      const excess = remaining.length - CLOUD_EVENT_RETENTION_COUNT;
+      const evict = remaining.sort((a, b) => a.createdAt - b.createdAt).slice(0, excess);
+      for (const row of evict) this.sql.exec('DELETE FROM events WHERE id = ?', row.id);
+    }
   }
 
   /**

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { env, reset } from 'cloudflare:test';
 import { deriveInstallationId } from '../../src/autonomy/protocol';
-import { C0_SHELL_CODE } from '../../src/autonomy/envelope';
+
 import { workflowInstanceIdForRunKey } from '../../src/autonomy/workflow-identity';
 import type { RoutineRunRecord } from '../../src/autonomy/contracts';
 import { TOKEN, bearerRead, configPayload, internalDo, makeRoutine, signedWrite } from './helpers';
@@ -60,7 +60,7 @@ describe('Phase C0 — durable claim and Workflow identity', () => {
 
     const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs.filter((run) => run.runKey === runKey);
     expect(runs).toHaveLength(1);
-    expect(runs[0]).toMatchObject({ state: 'completed', outcome: 'no-op', errorCode: C0_SHELL_CODE });
+    expect(runs[0]).toMatchObject({ state: 'completed', outcome: 'no-op' });
 
     const instance = await env.ROUTINE_RUN!.get(expectedId);
     expect(instance.id).toBe(expectedId);

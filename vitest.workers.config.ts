@@ -30,6 +30,7 @@ export default defineConfig({
           GEMINI_API_KEY: 'test-gemini-key',
           ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io',
           ELARA_INSTALLATION_TOKEN: 'test-installation-token-please-ignore',
+          C1_MODEL_STUB: '{"disposition":"noop","reason":"test stub"}',
         },
       },
       runInBackground: true, // alarms may fire while tests await

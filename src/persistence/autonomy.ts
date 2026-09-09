@@ -114,6 +114,12 @@ export async function recentEvents(sinceMs: number): Promise<AutonomousEvent[]> 
   return db.events.where('createdAt').aboveOrEqual(sinceMs).toArray();
 }
 
+export async function addEventOrExisting(event: AutonomousEvent): Promise<AutonomousEvent> {
+  const existing = await db.events.get(event.id);
+  if (existing) return existing;
+  return addEvent(event);
+}
+
 export async function addEvent(event: AutonomousEvent): Promise<AutonomousEvent> {
   await db.events.put(event);
   await pruneEvents(event.createdAt);

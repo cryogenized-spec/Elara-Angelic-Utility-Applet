@@ -36,6 +36,8 @@ export const CLOUD_STALE_RUN_MS = Number.MAX_SAFE_INTEGER;
 /** Bounded cloud run history — mirrors the local retention contract (30 d / 1 000). */
 export const CLOUD_RUN_RETENTION_MS = 30 * 24 * 3_600_000;
 export const CLOUD_RUN_RETENTION_COUNT = 1_000;
+export const CLOUD_EVENT_RETENTION_MS = 90 * 24 * 3_600_000;
+export const CLOUD_EVENT_RETENTION_COUNT = 500;
 
 /** The scheduler decision journal is a bounded ring, not an unbounded ledger. */
 export const SCHEDULER_JOURNAL_MAX = 200;

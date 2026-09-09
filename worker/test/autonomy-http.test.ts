@@ -37,7 +37,7 @@ describe('autonomy boundary — health and pairing', () => {
     expect(response.status).toBe(200);
     const body = await response.json() as Record<string, unknown>;
     expect(body).toMatchObject({ service: 'elara-gemini' });
-    expect((body.autonomy as Record<string, unknown>)).toMatchObject({ configured: true, dryRun: true, schedulerLive: true, agentExecution: false, cron: '0 * * * *' });
+    expect((body.autonomy as Record<string, unknown>)).toMatchObject({ configured: true, dryRun: false, schedulerLive: true, agentExecution: true, cron: '0 * * * *' });
     expect(JSON.stringify(body)).not.toContain(TOKEN);
   });
 
@@ -106,7 +106,7 @@ describe('autonomy boundary — signed writes', () => {
     expect(state.status).toBe(200);
     const body = await state.json() as Record<string, any>;
     expect(body.generation).toBe(2);
-    expect(body.dryRun).toBe(true);
+    expect(body.dryRun).toBe(false);
     expect(body.routines).toHaveLength(1);
     expect(body.routines[0].nextDueAt).toBeGreaterThan(0);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe(ORIGIN);

@@ -21,6 +21,10 @@ interface CapturedConfig {
   routines: Array<{ id: string; name: string }>;
 }
 
+// Faithful to the real engine's /autonomy/state and /autonomy/context GET
+// responses (engine contextSummary(now)): the card renders this summary.
+const staleContextSummary = { contentHash: 'h'.repeat(64), syncedAt: 1_700_000_000_000, generation: 2, recordCount: 1, byteSize: 100, stale: true };
+
 function corsJson(body: unknown, status = 200) {
   return {
     status,
@@ -48,14 +52,18 @@ async function mockWorker(page: Page, options: { contextStale?: boolean } = {}):
       return route.fulfill(corsJson({ accepted: true, metadata: { contentHash: 'h'.repeat(64), syncedAt: 1_789_000_000_000, generation: 2, recordCount: 0, byteSize: 2, stale: false } }));
     }
     if (path === '/autonomy/context') {
-      return route.fulfill(corsJson({ context: options.contextStale ? { contentHash: 'h'.repeat(64), syncedAt: 1_700_000_000_000, generation: 2, recordCount: 1, byteSize: 100, stale: true } : null }));
+      return route.fulfill(corsJson({ context: options.contextStale ? staleContextSummary : null }));
     }
     if (path === '/autonomy/state') {
       return route.fulfill(corsJson({
         paired: true, dryRun: true, generation: 1, stateGeneration: 2, autonomyEnabled: true, maxEventsPerDay: 10,
         lastHeartbeatAt: 1_788_900_000_000, lastSyncedAt: 1_788_900_000_000, nextAlarmAt: 1_789_000_000_000,
         routines: [{ id: 'routine-cloud-1', name: 'Cloud brief', enabled: true, locus: 'cloud', schedule: { kind: 'daily', time: '09:00', days: 'every' }, timezone: 'UTC', nextDueAt: 1_789_000_000_000 }],
-        context: null,
+        // The card renders the context summary from the STATE response (the
+        // real engine returns contextSummary(now) here), so the stale pack
+        // must be carried on this route — the /autonomy/context GET alone is
+        // never what the UI renders from.
+        context: options.contextStale ? staleContextSummary : null,
         journal: [
           { at: 1_788_900_000_000, kind: 'heartbeat', generation: 2 },
           { at: 1_788_900_000_000, kind: 'registered', generation: 2, routineId: 'routine-cloud-1', occurrence: 1_789_000_000_000 },

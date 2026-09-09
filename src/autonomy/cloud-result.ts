@@ -27,7 +27,7 @@ export const cloudAdmitResultSchema = z.discriminatedUnion('disposition', [
     confidence: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     itemsExamined: z.number().int().min(0).max(100_000).optional(),
     evidence: z.array(z.strictObject({
-      kind: z.enum(['memory', 'tool']),
+      kind: z.literal('memory'),
       ref: z.string().min(1).max(300),
       note: z.string().max(300).optional(),
     })).max(8).optional(),
@@ -48,7 +48,15 @@ export function cloudAdmitFromOutcome(outcome: z.infer<typeof routineOutcomeSche
   if (outcome.outcome === 'cannot_act') {
     return { disposition: 'cannot_act', reason: outcome.reason };
   }
-  const evidence = (outcome.evidence ?? []).filter((item): item is typeof item & { kind: 'memory' | 'tool' } => item.kind !== 'web');
+  const evidence = outcome.evidence ?? [];
+  if (evidence.some((item) => item.kind !== 'memory')) {
+    return {
+      disposition: 'error',
+      source: 'execution',
+      errorCode: 'OUTCOME_INVALID_CONTRACT',
+      errorMessage: 'C1 cloud events may only cite memory evidence; tool and web evidence are not available.',
+    };
+  }
   return {
     disposition: 'event',
     title: outcome.title,
@@ -56,6 +64,6 @@ export function cloudAdmitFromOutcome(outcome: z.infer<typeof routineOutcomeSche
     importance: outcome.importance,
     confidence: outcome.confidence,
     itemsExamined: outcome.itemsExamined,
-    evidence,
+    evidence: evidence.map((item) => ({ kind: 'memory' as const, ref: item.ref, note: item.note })),
   };
 }

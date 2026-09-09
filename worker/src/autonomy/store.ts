@@ -57,9 +57,14 @@ function isActiveRunState(state: RoutineRunRecord['state']): boolean {
   return state === 'pending' || state === 'running';
 }
 
-function isUniqueConstraint(error: unknown): boolean {
+/**
+ * Duplicate identity for one AutonomousEvent. SQLite names the column:
+ * `UNIQUE constraint failed: events.runKey` or `events.id`.
+ * Other SQLITE_CONSTRAINT failures (CHECK, NOT NULL, foreign keys) must throw.
+ */
+export function isEventsIdentityUniqueConflict(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error);
-  return /UNIQUE|SQLITE_CONSTRAINT/i.test(message);
+  return /UNIQUE constraint failed: events\.(runKey|id)\b/i.test(message);
 }
 
 /** Thin typed layer over DO SQL. Every statement is one exec call. */
@@ -343,7 +348,7 @@ export class AutonomyStore {
       try {
         this.insertEvent(input.event);
       } catch (error) {
-        if (isUniqueConstraint(error) && this.getEventByRunKey(input.event.runKey)) {
+        if (isEventsIdentityUniqueConflict(error) && this.getEventByRunKey(input.event.runKey)) {
           outcome = 'duplicate';
           return;
         }

@@ -287,6 +287,9 @@ export async function executeRoutineRun(
   if (parsed.outcome.outcome === 'noop') {
     return finish({ state: 'completed', outcome: 'no-op', ...(parsed.outcome.reason ? { reason: parsed.outcome.reason } : {}), ...(parsed.outcome.itemsExamined !== undefined ? { itemsExamined: parsed.outcome.itemsExamined } : {}) });
   }
+  if (parsed.outcome.outcome === 'cannot_act') {
+    return finish({ state: 'completed', outcome: 'no-op', reason: parsed.outcome.reason });
+  }
 
   // Event proposal → deterministic policy gate (code decides, not the model).
   const fingerprint = noveltyFingerprint(routine.id, parsed.outcome.title, parsed.outcome.summary);

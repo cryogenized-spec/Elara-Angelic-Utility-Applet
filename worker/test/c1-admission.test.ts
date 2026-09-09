@@ -127,4 +127,36 @@ describe('Phase C1 — Workflow to durable event', () => {
     const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
     expect(runs.find((run) => run.runKey === second.runKey)).toMatchObject({ outcome: 'suppressed', suppressedReason: 'daily-cap' });
   });
+
+  it('two racing completeClaims cannot jointly exceed maxEventsPerDay', { timeout: 20_000 }, async () => {
+    const firstRoutine = makeRoutine({
+      id: 'routine-race-a',
+      schedule: { kind: 'interval', everyMinutes: 30 },
+      policy: { cooldownHours: 1, maxToolCalls: 8, maxRunsPerDay: 8 },
+    });
+    const secondRoutine = makeRoutine({
+      id: 'routine-race-b',
+      name: 'Race brief',
+      schedule: { kind: 'interval', everyMinutes: 30 },
+      policy: { cooldownHours: 1, maxToolCalls: 8, maxRunsPerDay: 8 },
+    });
+    expect((await doFetch(await signedWrite('/autonomy/config', JSON.stringify({ generation: 1, enabled: true, maxEventsPerDay: 1, routines: [firstRoutine, secondRoutine] })))).status).toBe(200);
+    const engine = await stub();
+    const first = await engine.claimWithoutDispatch(firstRoutine.id, Date.now() - 20 * 60_000);
+    const second = await engine.claimWithoutDispatch(secondRoutine.id, Date.now() - 10 * 60_000);
+    const bodies = [
+      { runKey: first.runKey, workflowInstanceId: first.workflowInstanceId, result: { disposition: 'event', title: 'Race A', summary: 'First racer.', importance: 2, confidence: 2 } },
+      { runKey: second.runKey, workflowInstanceId: second.workflowInstanceId, result: { disposition: 'event', title: 'Race B', summary: 'Second racer.', importance: 2, confidence: 2 } },
+    ];
+    const responses = await Promise.all(bodies.map(async (body) => doFetch(await internalDo('/run/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }))));
+    expect(responses.every((response) => response.status === 200)).toBe(true);
+    const statuses = await Promise.all(responses.map(async (response) => ((await response.json()) as { status: string }).status));
+    expect(statuses.sort()).toEqual(['completed', 'suppressed']);
+    const events = ((await (await doFetch(await bearerRead('/autonomy/events?since=0'))).json()) as { events: AutonomousEvent[] }).events;
+    expect(events).toHaveLength(1);
+  });
 });

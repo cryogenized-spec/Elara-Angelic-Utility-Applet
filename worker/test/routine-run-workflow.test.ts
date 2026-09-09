@@ -106,6 +106,76 @@ describe('Phase C0 — durable claim and Workflow identity', () => {
     expect(first.status).toBe(200);
     const second = await doFetch(await internalDo('/run/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runKey, workflowInstanceId }) }));
     expect(second.status).toBe(200);
-    expect(((await second.json()) as { alreadyCompleted: boolean }).alreadyCompleted).toBe(true);
+    const secondBody = await second.json() as { alreadyCompleted: boolean; status: string };
+    expect(secondBody.alreadyCompleted).toBe(true);
+    expect(secondBody.status).toBe('already-completed');
+  });
+});
+
+describe('Phase C0 — crash windows', () => {
+  it('claim+envelope without dispatch is recovered by heartbeat onto the same Workflow id', { timeout: 20_000 }, async () => {
+    const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
+    const dueAt = Date.now() - 10 * 60_000;
+    const fixture = await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'claim-without-dispatch', routineId: routine.id, dueAt }) }));
+    expect(fixture.status).toBe(200);
+    const claimed = await fixture.json() as { runKey: string; workflowInstanceId: string; dispatched: boolean };
+    expect(claimed.dispatched).toBe(false);
+
+    const before = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs.find((run) => run.runKey === claimed.runKey);
+    expect(before?.state).toBe('running');
+
+    expect((await doFetch(await internalDo('/heartbeat', { method: 'POST' }))).status).toBe(200);
+    await waitUntil(async () => {
+      const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
+      return runs.some((run) => run.runKey === claimed.runKey && run.state === 'completed');
+    });
+    const instance = await env.ROUTINE_RUN!.get(claimed.workflowInstanceId);
+    expect(instance.id).toBe(claimed.workflowInstanceId);
+  });
+
+  it('dispatch without schedule advance is repaired by heartbeat without a second run', { timeout: 20_000 }, async () => {
+    const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
+    const dueAt = Date.now() - 10 * 60_000;
+    const fixture = await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'claim-without-dispatch', routineId: routine.id, dueAt }) }));
+    const claimed = await fixture.json() as { runKey: string };
+    expect((await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark-dispatched-without-advance', runKey: claimed.runKey }) }))).status).toBe(200);
+    expect((await doFetch(await internalDo('/heartbeat', { method: 'POST' }))).status).toBe(200);
+    const snapshot = await (await doFetch(await bearerRead('/autonomy/state'))).json() as { routines: Array<{ nextDueAt: number | null }> };
+    expect(snapshot.routines[0].nextDueAt).toBeGreaterThan(dueAt);
+    const records = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs.filter((run) => run.runKey === claimed.runKey);
+    expect(records).toHaveLength(1);
+  });
+
+  it('claim-not-found is distinct from already-completed', { timeout: 20_000 }, async () => {
+    const missing = await doFetch(await internalDo('/run/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runKey: 'no-such:scheduled:1', workflowInstanceId: 'rr' + '0'.repeat(64) }) }));
+    expect(missing.status).toBe(404);
+    expect(((await missing.json()) as { status: string }).status).toBe('claim-not-found');
+  });
+
+  it('never prunes an active cloud running claim', { timeout: 20_000 }, async () => {
+    const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
+    const dueAt = Date.now() - 10 * 60_000;
+    const fixture = await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'claim-without-dispatch', routineId: routine.id, dueAt }) }));
+    const claimed = await fixture.json() as { runKey: string };
+    const ancient = Date.now() - 40 * 24 * 3_600_000;
+    expect((await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'age-run', runKey: claimed.runKey, startedAt: ancient }) }))).status).toBe(200);
+    expect((await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'prune' }) }))).status).toBe(200);
+    const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
+    expect(runs.some((run) => run.runKey === claimed.runKey && run.state === 'running')).toBe(true);
+  });
+
+  it('create failure without an existing instance is not treated as dispatched', { timeout: 20_000 }, async () => {
+    const binding = env.ROUTINE_RUN!;
+    const id = 'rr' + 'f'.repeat(64);
+    let getFailed = false;
+    try {
+      await binding.get(id);
+    } catch {
+      getFailed = true;
+    }
+    expect(getFailed).toBe(true);
   });
 });

@@ -22,6 +22,8 @@ interface DurableObjectStorage {
   getAlarm(): Promise<number | null>;
   deleteAlarm(): Promise<boolean>;
   transaction<T>(closure: () => Promise<T>): Promise<T>;
+  /** Synchronous SQLite transaction: all exec() calls inside commit or roll back together. */
+  transactionSync<T>(closure: () => T): T;
 }
 
 interface DurableObjectState {

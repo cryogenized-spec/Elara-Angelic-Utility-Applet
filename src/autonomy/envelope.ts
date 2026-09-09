@@ -38,3 +38,14 @@ export const runCompleteRequestSchema = z.strictObject({
   workflowInstanceId: z.string().min(1).max(100),
 });
 export type RunCompleteRequest = z.infer<typeof runCompleteRequestSchema>;
+
+/** Explicit completion outcomes. The Workflow retries only `retryable-error`. */
+export const RUN_COMPLETE_STATUSES = [
+  'completed',
+  'already-completed',
+  'cancelled',
+  'claim-not-found',
+  'identity-mismatch',
+  'retryable-error',
+] as const;
+export type RunCompleteStatus = (typeof RUN_COMPLETE_STATUSES)[number];

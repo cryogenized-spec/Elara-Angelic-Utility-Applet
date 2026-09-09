@@ -50,9 +50,16 @@ export interface ContextMetadata {
 
 type MetaKey = 'schemaVersion' | 'configGeneration' | 'stateGeneration' | 'autonomyEnabled' | 'maxEventsPerDay' | 'lastHeartbeatAt' | 'lastSyncedAt';
 
+function isActiveRunState(state: RoutineRunRecord['state']): boolean {
+  return state === 'pending' || state === 'running';
+}
+
 /** Thin typed layer over DO SQL. Every statement is one exec call. */
 export class AutonomyStore {
-  constructor(private readonly sql: DurableObjectSql) {}
+  constructor(
+    private readonly sql: DurableObjectSql,
+    private readonly transact: (closure: () => void) => void = (closure) => closure(),
+  ) {}
 
   ensureSchema(): void {
     this.sql.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -131,6 +138,17 @@ export class AutonomyStore {
     this.sql.exec('INSERT INTO runs (id, runKey, routineId, record, generation, locus, startedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', record.id, record.runKey, record.routineId, JSON.stringify(record), generation, locus, record.startedAt);
   }
 
+  /**
+   * Atomic durable claim: the running row and its frozen envelope commit
+   * together or not at all. A crash cannot leave `running` without an envelope.
+   */
+  claimCloudRun(record: RoutineRunRecord, envelope: RoutineRunEnvelope, generation: number): void {
+    this.transact(() => {
+      this.insertRun(record, generation, 'cloud');
+      this.putEnvelope(envelope, false, false);
+    });
+  }
+
   /** Rewrite one run row (crash tombstoning): same id, new runKey/state. */
   replaceRun(originalRunKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device'): void {
     this.sql.exec('UPDATE runs SET runKey = ?, record = ?, generation = ?, locus = ? WHERE runKey = ?', record.runKey, JSON.stringify(record), generation, locus, originalRunKey);
@@ -199,11 +217,29 @@ export class AutonomyStore {
    * pass have committed, and never allowed to reject them.
    */
   pruneRuns(now: number): void {
-    this.sql.exec('DELETE FROM runs WHERE startedAt < ?', now - CLOUD_RUN_RETENTION_MS);
-    const count = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM runs').toArray()[0]!.n;
-    if (count > CLOUD_RUN_RETENTION_COUNT) {
-      this.sql.exec(`DELETE FROM runs WHERE id IN (SELECT id FROM runs ORDER BY startedAt ASC LIMIT ${count - CLOUD_RUN_RETENTION_COUNT})`);
+    const cutoff = now - CLOUD_RUN_RETENTION_MS;
+    const aged = this.sql.exec<{ id: string; record: string; startedAt: number }>('SELECT id, record, startedAt FROM runs').toArray();
+    for (const row of aged) {
+      if (row.startedAt < cutoff && !isActiveRunState((JSON.parse(row.record) as RoutineRunRecord).state)) {
+        this.sql.exec('DELETE FROM runs WHERE id = ?', row.id);
+      }
     }
+    const remaining = this.sql.exec<{ id: string; record: string; startedAt: number }>('SELECT id, record, startedAt FROM runs').toArray();
+    if (remaining.length > CLOUD_RUN_RETENTION_COUNT) {
+      const excess = remaining.length - CLOUD_RUN_RETENTION_COUNT;
+      const evict = remaining
+        .filter((row) => !isActiveRunState((JSON.parse(row.record) as RoutineRunRecord).state))
+        .sort((a, b) => a.startedAt - b.startedAt)
+        .slice(0, excess);
+      for (const row of evict) this.sql.exec('DELETE FROM runs WHERE id = ?', row.id);
+    }
+  }
+
+  /** Test fixture: rewrite startedAt (retention crash window). */
+  setRunStartedAt(runKey: string, startedAt: number): void {
+    const stored = this.getStoredRun(runKey);
+    if (!stored) return;
+    this.sql.exec('UPDATE runs SET record = ?, startedAt = ? WHERE runKey = ?', JSON.stringify({ ...stored.record, startedAt }), startedAt, runKey);
   }
 
   // ----- journal (bounded scheduler observability) -----

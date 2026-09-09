@@ -88,7 +88,7 @@ export class AutonomyEngine extends DurableObject {
   constructor(ctx: DurableObjectState, env: AutonomyEnv) {
     super(ctx, env as unknown as Record<string, unknown>);
     this.autonomyEnv = env;
-    this.store = new AutonomyStore(ctx.storage.sql);
+    this.store = new AutonomyStore(ctx.storage.sql, (closure) => ctx.storage.transactionSync(closure));
     this.store.ensureSchema();
   }
 
@@ -207,6 +207,12 @@ export class AutonomyEngine extends DurableObject {
       if (request.method === 'POST' && path === '/run/complete') {
         if (!(await this.verifyInternal(request))) return Response.json({ code: 'not_found', message: 'Not found.' }, { status: 404 });
         const result = await this.completeClaim(jsonSafe(await request.text()), Date.now());
+        return this.json(result.body, result.status);
+      }
+      // Binding-internal C0 crash-window fixtures (never publicly routed).
+      if (request.method === 'POST' && path === '/c0/fixture') {
+        if (!(await this.verifyInternal(request))) return Response.json({ code: 'not_found', message: 'Not found.' }, { status: 404 });
+        const result = await this.c0Fixture(jsonSafe(await request.text()), Date.now());
         return this.json(result.body, result.status);
       }
       return Response.json({ code: 'not_found', message: 'Not found.' }, { status: 404 });
@@ -434,11 +440,8 @@ export class AutonomyEngine extends DurableObject {
         this.journal(now, 'already-executed', { generation, routineId: routine.id, occurrence: entry.dueAt });
         this.advanceSchedule(routine, now, generation, entry.dueAt);
       } else if (decision.action === 'in-flight') {
-        // Same unique runKey cannot be inserted twice. Recover the Workflow.
         this.journal(now, 'overlap-prevented', { generation, routineId: routine.id, occurrence: entry.dueAt });
-        const stored = this.store.getEnvelope(runKey);
-        if (stored && locus === 'cloud') await this.dispatchWorkflow(stored.envelope, now, generation);
-        this.advanceScheduleIfNeeded(runKey, routine, now, generation, entry.dueAt);
+        await this.progressClaim(runKey, now, generation, 'recover');
       } else {
         if (decision.abandoned) {
           this.abandonRun(decision.abandoned, now, generation, locus);
@@ -473,7 +476,7 @@ export class AutonomyEngine extends DurableObject {
         } else {
           const runId = `run-${crypto.randomUUID()}`;
           const envelope = await this.freezeEnvelope({ routine, runKey, runId, executionMode, occurrence: entry.dueAt, now, generation });
-          this.store.insertRun({
+          this.store.claimCloudRun({
             id: runId,
             runKey,
             routineId: routine.id,
@@ -482,11 +485,9 @@ export class AutonomyEngine extends DurableObject {
             scheduledFor: entry.dueAt,
             startedAt: now,
             state: 'running',
-          }, generation, 'cloud');
-          this.store.putEnvelope(envelope, false, false);
-          this.journal(now, 'dispatched', { generation, routineId: routine.id, occurrence: entry.dueAt, detail: envelope.workflowInstanceId });
-          const dispatched = await this.dispatchWorkflow(envelope, now, generation);
-          if (dispatched) this.advanceScheduleIfNeeded(runKey, routine, now, generation, entry.dueAt);
+          }, envelope, generation);
+          this.journal(now, 'claimed', { generation, routineId: routine.id, occurrence: entry.dueAt, detail: envelope.workflowInstanceId });
+          await this.progressClaim(runKey, now, generation, 'fresh');
         }
       }
       processed += 1;
@@ -517,7 +518,11 @@ export class AutonomyEngine extends DurableObject {
     });
   }
 
-  /** Stage 2: create-or-get the Workflow. SQLite claim is already durable. */
+  /**
+   * Stage 2: create the Workflow. create() throwing is not success unless
+   * get(id) then proves the instance exists (duplicate id, or crash after
+   * create). Any other failure is dispatch-failed and retried by heartbeat.
+   */
   private async dispatchWorkflow(envelope: RoutineRunEnvelope, now: number, generation: number): Promise<boolean> {
     const binding = this.autonomyEnv.ROUTINE_RUN;
     if (!binding) {
@@ -527,10 +532,15 @@ export class AutonomyEngine extends DurableObject {
     try {
       try {
         await binding.create({ id: envelope.workflowInstanceId, params: envelope });
-      } catch {
-        await binding.get(envelope.workflowInstanceId);
+      } catch (error) {
+        const exists = await this.tryGetWorkflow(binding, envelope.workflowInstanceId);
+        if (!exists) {
+          this.journal(now, 'dispatch-failed', { generation, routineId: envelope.routineId, occurrence: envelope.scheduledFor, detail: error instanceof Error ? error.message : 'workflow create failed' });
+          return false;
+        }
       }
       this.store.markEnvelopeDispatched(envelope.runKey);
+      this.journal(now, 'dispatched', { generation, routineId: envelope.routineId, occurrence: envelope.scheduledFor, detail: envelope.workflowInstanceId });
       return true;
     } catch (error) {
       this.journal(now, 'dispatch-failed', { generation, routineId: envelope.routineId, occurrence: envelope.scheduledFor, detail: error instanceof Error ? error.message : 'workflow create failed' });
@@ -538,17 +548,44 @@ export class AutonomyEngine extends DurableObject {
     }
   }
 
+  private async tryGetWorkflow(binding: Workflow<RoutineRunEnvelope>, id: string): Promise<boolean> {
+    try {
+      await binding.get(id);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * CLAIMED + envelope + !dispatched → retry create
+   * DISPATCHED + !scheduleAdvanced → advance schedule
+   * DISPATCHED + advanced → wait for Workflow
+   * running without envelope → journaled error (forbidden after atomic claim)
+   */
+  private async progressClaim(runKey: string, now: number, generation: number, source: 'fresh' | 'recover'): Promise<void> {
+    const stored = this.store.getStoredRun(runKey);
+    if (!stored || (stored.record.state !== 'pending' && stored.record.state !== 'running')) return;
+    const envelopeRow = this.store.getEnvelope(runKey);
+    if (!envelopeRow) {
+      this.journal(now, 'error', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: `running claim ${runKey} has no envelope` });
+      return;
+    }
+    if (!envelopeRow.dispatched) {
+      if (source === 'recover') {
+        this.journal(now, 'recovered', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: envelopeRow.envelope.workflowInstanceId });
+      }
+      const ok = await this.dispatchWorkflow(envelopeRow.envelope, now, generation);
+      if (!ok) return;
+    }
+    const routine = this.store.getRoutine(stored.record.routineId);
+    if (routine) this.advanceScheduleIfNeeded(runKey, routine, now, generation, stored.record.scheduledFor);
+  }
+
   private async recoverInFlight(now: number): Promise<void> {
     const generation = this.stateGeneration();
     for (const stored of this.store.listRunningCloud()) {
-      const envelopeRow = this.store.getEnvelope(stored.record.runKey);
-      if (!envelopeRow) continue;
-      this.journal(now, 'recovered', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: envelopeRow.envelope.workflowInstanceId });
-      const ok = await this.dispatchWorkflow(envelopeRow.envelope, now, generation);
-      if (ok) {
-        const routine = this.store.getRoutine(stored.record.routineId);
-        if (routine) this.advanceScheduleIfNeeded(stored.record.runKey, routine, now, generation, stored.record.scheduledFor);
-      }
+      await this.progressClaim(stored.record.runKey, now, generation, 'recover');
     }
   }
 
@@ -579,13 +616,13 @@ export class AutonomyEngine extends DurableObject {
     if (!parsed.success) return { status: 400, body: { code: 'validation', message: 'Invalid run completion request.' } };
     const { runKey, workflowInstanceId } = parsed.data;
     const stored = this.store.getStoredRun(runKey);
-    if (!stored) return { status: 404, body: { code: 'not_found', message: 'No claim exists for this runKey.' } };
-    if (stored.record.state === 'completed' || stored.record.state === 'failed' || stored.record.state === 'skipped') {
-      return { status: 200, body: { alreadyCompleted: true, runKey } };
+    if (!stored) return { status: 404, body: { status: 'claim-not-found', code: 'claim-not-found', message: 'No claim exists for this runKey.' } };
+    if (stored.record.state === 'completed' || stored.record.state === 'failed' || stored.record.state === 'skipped' || stored.record.state === 'missed') {
+      return { status: 200, body: { status: 'already-completed', runKey, alreadyCompleted: true } };
     }
     const envelopeRow = this.store.getEnvelope(runKey);
     if (envelopeRow && envelopeRow.envelope.workflowInstanceId !== workflowInstanceId) {
-      return { status: 409, body: { code: 'identity-mismatch', message: 'Workflow instance id does not match the frozen envelope.' } };
+      return { status: 409, body: { status: 'identity-mismatch', code: 'identity-mismatch', message: 'Workflow instance id does not match the frozen envelope.' } };
     }
     const routine = this.store.getRoutine(stored.record.routineId);
     const masterOn = this.store.getMetaBoolean('autonomyEnabled', false);
@@ -601,7 +638,51 @@ export class AutonomyEngine extends DurableObject {
     }, generation, stored.locus);
     this.journal(now, cancelled ? 'cancelled-admission' : 'completed', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
     if (routine) this.advanceScheduleIfNeeded(runKey, routine, now, generation, stored.record.scheduledFor);
-    return { status: 200, body: { alreadyCompleted: false, runKey, cancelled } };
+    return { status: 200, body: { status: cancelled ? 'cancelled' : 'completed', runKey, alreadyCompleted: false, cancelled } };
+  }
+
+  /** Binding-internal crash-window fixtures. Never publicly routed. */
+  private async c0Fixture(raw: unknown, now: number): Promise<RouteResult> {
+    const body = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
+    const action = typeof body.action === 'string' ? body.action : '';
+    const generation = this.stateGeneration();
+    if (action === 'claim-without-dispatch') {
+      const routineId = String(body.routineId ?? '');
+      const dueAt = Number(body.dueAt);
+      const routine = this.store.getRoutine(routineId);
+      if (!routine || !Number.isFinite(dueAt)) return { status: 400, body: { code: 'validation', message: 'claim-without-dispatch needs routineId and dueAt.' } };
+      const classification = classifyDueOccurrence(routine.schedule, routine.timezone, dueAt, now);
+      const executionMode = classification.mode === 'catch-up' ? 'catch-up' : 'scheduled';
+      const runKey = routineRunKey(routine.id, executionMode, dueAt);
+      const runId = `run-${crypto.randomUUID()}`;
+      const envelope = await this.freezeEnvelope({ routine, runKey, runId, executionMode, occurrence: dueAt, now, generation });
+      this.store.claimCloudRun({
+        id: runId, runKey, routineId: routine.id, routineName: routine.name, executionMode,
+        scheduledFor: dueAt, startedAt: now, state: 'running',
+      }, envelope, generation);
+      this.store.upsertSchedule(routine.id, dueAt, now);
+      this.journal(now, 'claimed', { generation, routineId: routine.id, occurrence: dueAt, detail: envelope.workflowInstanceId });
+      return { status: 200, body: { runKey, workflowInstanceId: envelope.workflowInstanceId, dispatched: false } };
+    }
+    if (action === 'mark-dispatched-without-advance') {
+      const runKey = String(body.runKey ?? '');
+      const row = this.store.getEnvelope(runKey);
+      if (!row) return { status: 404, body: { code: 'claim-not-found' } };
+      this.store.markEnvelopeDispatched(runKey);
+      return { status: 200, body: { runKey, dispatched: true, scheduleAdvanced: false } };
+    }
+    if (action === 'age-run') {
+      const runKey = String(body.runKey ?? '');
+      const startedAt = Number(body.startedAt);
+      if (!runKey || !Number.isFinite(startedAt)) return { status: 400, body: { code: 'validation' } };
+      this.store.setRunStartedAt(runKey, startedAt);
+      return { status: 200, body: { runKey, startedAt } };
+    }
+    if (action === 'prune') {
+      this.store.pruneRuns(now);
+      return { status: 200, body: { pruned: true } };
+    }
+    return { status: 400, body: { code: 'validation', message: 'Unknown C0 fixture action.' } };
   }
 
   /** Tombstone a crashed in-flight run: same id, freed occurrence key, terminal failed state. */

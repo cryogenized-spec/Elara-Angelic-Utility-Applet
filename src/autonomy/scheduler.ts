@@ -75,6 +75,7 @@ export const SCHEDULER_JOURNAL_KINDS = [
   'config-sync',
   'context-sync',
   'context-clear',
+  'claimed',
   'dispatched',
   'dispatch-failed',
   'recovered',

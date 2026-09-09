@@ -1,19 +1,19 @@
 import { WorkflowEntrypoint } from 'cloudflare:workers';
 import { ELARA_INTERNAL_HEADER, deriveInstallationId, internalWakeMarker } from '../../../src/autonomy/protocol';
-import { routineRunEnvelopeSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
+import { routineRunEnvelopeSchema, type RoutineRunEnvelope, type RunCompleteStatus } from '../../../src/autonomy/envelope';
 import type { Env } from '../index';
 
 // ---------------------------------------------------------------------------
 // RoutineRunWorkflow — Phase C0 execution plane.
 //
 // One instance per hashed runKey. C0 does not call Gemini: a single durable
-// step asks the Durable Object to complete the claim idempotently (stub
-// no-op, or cancelled-admission if the live gate forbids it). Step retries
-// cover "Workflow finished → DO persist failed".
+// step asks the Durable Object to complete the claim. The DO returns an
+// explicit status. Only `retryable-error` (HTTP 5xx) retries the step.
+// claim-not-found is a terminal failure, never "already completed".
 // ---------------------------------------------------------------------------
 
 export class RoutineRunWorkflow extends WorkflowEntrypoint<Env, RoutineRunEnvelope> {
-  async run(event: WorkflowEvent<RoutineRunEnvelope>, step: WorkflowStep): Promise<{ runKey: string; alreadyCompleted: boolean }> {
+  async run(event: WorkflowEvent<RoutineRunEnvelope>, step: WorkflowStep): Promise<{ runKey: string; status: RunCompleteStatus }> {
     const envelope = routineRunEnvelopeSchema.parse(event.payload);
     return step.do('complete-claim', async () => {
       const token = this.env.ELARA_INSTALLATION_TOKEN;
@@ -28,11 +28,13 @@ export class RoutineRunWorkflow extends WorkflowEntrypoint<Env, RoutineRunEnvelo
         },
         body: JSON.stringify({ runKey: envelope.runKey, workflowInstanceId: envelope.workflowInstanceId }),
       });
-      if (response.status === 404) return { runKey: envelope.runKey, alreadyCompleted: true };
-      if (!response.ok && response.status < 500) throw new Error(`Run completion was rejected (HTTP ${response.status}).`);
-      if (!response.ok) throw new Error(`Run completion was not acknowledged (HTTP ${response.status}).`);
-      const body = await response.json() as { alreadyCompleted?: boolean };
-      return { runKey: envelope.runKey, alreadyCompleted: body.alreadyCompleted === true };
+      const body = await response.json().catch(() => null) as { status?: RunCompleteStatus } | null;
+      const status = body?.status;
+      if (response.status >= 500 || status === 'retryable-error') {
+        throw new Error(`Run completion is retryable (HTTP ${response.status}).`);
+      }
+      if (status) return { runKey: envelope.runKey, status };
+      throw new Error(`Run completion failed (HTTP ${response.status}).`);
     });
   }
 }

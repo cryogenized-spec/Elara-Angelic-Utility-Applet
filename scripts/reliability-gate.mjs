@@ -215,6 +215,9 @@ const workflowSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'wor
 if (!workflowSource.includes('class RoutineRunWorkflow') || !workflowSource.includes('WorkflowEntrypoint')) throw new Error('Reliability gate: RoutineRunWorkflow must be a WorkflowEntrypoint.');
 if (!engineSource.includes('completeClaim') || !engineSource.includes('dispatchWorkflow')) throw new Error('Reliability gate: the DO must claim then dispatch a Workflow.');
 if (engineSource.includes("path === '/c0/fixture'")) throw new Error('Reliability gate: production DO fetch must not expose /c0/fixture.');
+if (engineSource.includes('claimWithoutDispatch') || engineSource.includes('markDispatchedWithoutAdvance')) throw new Error('Reliability gate: crash fixtures must not be public methods on AutonomyEngine.');
+if (workerEntrySource.includes('TestAutonomyEngine')) throw new Error('Reliability gate: production worker entry must not export TestAutonomyEngine.');
+if (wranglerSource.includes('TestAutonomyEngine')) throw new Error('Reliability gate: production wrangler must not bind TestAutonomyEngine.');
 if (!engineSource.includes('nextOccurrenceAfterProcessed')) throw new Error('Reliability gate: schedule advance must be occurrence-anchored.');
 if (!engineSource.includes('schedulerLive') || !engineSource.includes('agentExecution')) throw new Error('Reliability gate: scheduler liveness and agent execution must not share one dryRun flag.');
 if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('pruneEnvelopes')) throw new Error('Reliability gate: envelopes must be pruned with runs.');

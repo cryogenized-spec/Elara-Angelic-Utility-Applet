@@ -17,11 +17,11 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      main: 'worker/src/index.ts',
+      main: 'worker/src/index.test-entry.ts',
       miniflare: {
         compatibilityDate: '2026-08-22',
         durableObjects: {
-          AUTONOMY: { className: 'AutonomyEngine', useSQLite: true },
+          AUTONOMY: { className: 'TestAutonomyEngine', useSQLite: true },
         },
         workflows: {
           ROUTINE_RUN: { name: 'elara-routine-run', className: 'RoutineRunWorkflow' },

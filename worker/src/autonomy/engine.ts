@@ -82,8 +82,8 @@ function jsonSafe(raw: string): unknown {
 }
 
 export class AutonomyEngine extends DurableObject {
-  private readonly store: AutonomyStore;
-  private readonly autonomyEnv: AutonomyEnv;
+  protected readonly store: AutonomyStore;
+  protected readonly autonomyEnv: AutonomyEnv;
 
   constructor(ctx: DurableObjectState, env: AutonomyEnv) {
     super(ctx, env as unknown as Record<string, unknown>);
@@ -367,11 +367,11 @@ export class AutonomyEngine extends DurableObject {
 
   // ---------------------------------------------------------- scheduling core
 
-  private stateGeneration(): number {
+  protected stateGeneration(): number {
     return this.store.getMetaNumber('stateGeneration', 0);
   }
 
-  private journal(at: number, kind: SchedulerJournalKind, entry: Omit<SchedulerJournalEntry, 'at' | 'kind'>): void {
+  protected journal(at: number, kind: SchedulerJournalKind, entry: Omit<SchedulerJournalEntry, 'at' | 'kind'>): void {
     this.store.appendJournal({ at, kind, ...entry });
   }
 
@@ -490,7 +490,7 @@ export class AutonomyEngine extends DurableObject {
     return processed;
   }
 
-  private async freezeEnvelope(input: { routine: ElaraRoutine; runKey: string; runId: string; executionMode: 'scheduled' | 'catch-up'; occurrence: number; now: number; generation: number }): Promise<RoutineRunEnvelope> {
+  protected async freezeEnvelope(input: { routine: ElaraRoutine; runKey: string; runId: string; executionMode: 'scheduled' | 'catch-up'; occurrence: number; now: number; generation: number }): Promise<RoutineRunEnvelope> {
     const metadata = this.store.contextMetadata();
     const rawRecords = this.store.contextRecords();
     const context = metadata && rawRecords
@@ -614,6 +614,10 @@ export class AutonomyEngine extends DurableObject {
     const { runKey, workflowInstanceId } = parsed.data;
     const stored = this.store.getStoredRun(runKey);
     if (!stored) return { status: 404, body: { status: 'claim-not-found', code: 'claim-not-found', message: 'No claim exists for this runKey.' } };
+    const expectedId = await workflowInstanceIdForRunKey(runKey);
+    if (expectedId !== workflowInstanceId) {
+      return { status: 409, body: { status: 'identity-mismatch', code: 'identity-mismatch', message: 'Workflow instance id does not match the runKey identity.' } };
+    }
     if (stored.record.state === 'completed' || stored.record.state === 'failed' || stored.record.state === 'skipped' || stored.record.state === 'missed') {
       return { status: 200, body: { status: 'already-completed', runKey, alreadyCompleted: true } };
     }
@@ -639,50 +643,6 @@ export class AutonomyEngine extends DurableObject {
     this.journal(now, cancelled ? 'cancelled-admission' : 'completed', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
     if (routine) this.advanceScheduleIfNeeded(runKey, routine, now, generation, stored.record.scheduledFor);
     return { status: 200, body: { status: cancelled ? 'cancelled' : 'completed', runKey, alreadyCompleted: false, cancelled } };
-  }
-
-  /**
-   * Test-only RPC (not HTTP). Vitest crash windows call these; production
-   * fetch() has no /c0/fixture route.
-   */
-  async claimWithoutDispatch(routineId: string, dueAt: number): Promise<{ runKey: string; workflowInstanceId: string; dispatched: boolean }> {
-    const now = Date.now();
-    const generation = this.stateGeneration();
-    const routine = this.store.getRoutine(routineId);
-    if (!routine || !Number.isFinite(dueAt)) throw new Error('claimWithoutDispatch needs routineId and dueAt.');
-    const classification = classifyDueOccurrence(routine.schedule, routine.timezone, dueAt, now);
-    const executionMode = classification.mode === 'catch-up' ? 'catch-up' : 'scheduled';
-    const runKey = routineRunKey(routine.id, executionMode, dueAt);
-    const runId = `run-${crypto.randomUUID()}`;
-    const envelope = await this.freezeEnvelope({ routine, runKey, runId, executionMode, occurrence: dueAt, now, generation });
-    this.store.claimCloudRun({
-      id: runId, runKey, routineId: routine.id, routineName: routine.name, executionMode,
-      scheduledFor: dueAt, startedAt: now, state: 'running',
-    }, envelope, generation);
-    this.store.upsertSchedule(routine.id, dueAt, now);
-    this.journal(now, 'claimed', { generation, routineId: routine.id, occurrence: dueAt, detail: envelope.workflowInstanceId });
-    return { runKey, workflowInstanceId: envelope.workflowInstanceId, dispatched: false };
-  }
-
-  async markDispatchedWithoutAdvance(runKey: string): Promise<{ runKey: string; dispatched: boolean; scheduleAdvanced: boolean }> {
-    const row = this.store.getEnvelope(runKey);
-    if (!row) throw new Error('claim-not-found');
-    this.store.markEnvelopeDispatched(runKey);
-    return { runKey, dispatched: true, scheduleAdvanced: false };
-  }
-
-  async ageRun(runKey: string, startedAt: number): Promise<{ runKey: string; startedAt: number }> {
-    this.store.setRunStartedAt(runKey, startedAt);
-    return { runKey, startedAt };
-  }
-
-  async pruneNow(): Promise<{ pruned: true; envelopeCount: number }> {
-    this.store.pruneRuns(Date.now());
-    return { pruned: true, envelopeCount: this.store.listEnvelopeRunKeys().length };
-  }
-
-  async envelopePresent(runKey: string): Promise<boolean> {
-    return Boolean(this.store.getEnvelope(runKey));
   }
 
   /** Tombstone a crashed in-flight run: same id, freed occurrence key, terminal failed state. */

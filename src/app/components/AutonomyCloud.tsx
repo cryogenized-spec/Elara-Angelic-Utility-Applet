@@ -255,7 +255,7 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
           {contextSummary?.stale && <span className="autonomy-field-warning">Context is stale (over 14 days old) — refresh it.</span>}
         </div>
         <div className="autonomy-cloud__actions">
-          <button type="button" className="autonomy-button" onClick={() => { void refreshContext(); }}>{showInspect ? 'Refresh inspection' : 'Inspect'}</button>
+          <button type="button" className="autonomy-button" onClick={() => { setShowInspect(true); void refreshContext(); }}>{showInspect ? 'Refresh inspection' : 'Inspect'}</button>
           <button type="button" className="autonomy-button" onClick={() => { void refresh(); }}>Refresh sync</button>
           <button type="button" className="autonomy-button autonomy-button--danger" onClick={() => { void clearContextPack(); }}>Clear</button>
         </div>

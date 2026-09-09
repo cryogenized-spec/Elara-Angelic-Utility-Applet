@@ -10,10 +10,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 //
 // Each was tested separately and both halves passed while their COMPOSITION
 // was broken (Drive/Docs/Sheets tools were mapped by the registry but rejected
-// by the loop's old handler-set oracle). This suite joins them: every tool
-// surface any routine can produce must be admitted by the real default engine
-// in read-only mode — the provider is the only mock, exactly as in the chat
-// tool-loop tests.
+// by the loop's old handler-set oracle). This suite joins them.
+//
+// PROOF LEVEL — what these tests prove and deliberately do not:
+// PROVEN: for every grantable capability, the mapped tools pass the read-only
+//   ADMISSION checks (declaration and call time) of the real default engine,
+//   and the provider request declares exactly those tools. This is the
+//   regression that catches mapping/admission divergence.
+// NOT PROVEN here: actual Google handler EXECUTION — the provider mock returns
+//   an immediate no-op, so no tool call is ever made. Handler execution through
+//   the real executor is proven separately in
+//   src/gemini/google-tool-loop.integration.test.ts (one real read tool,
+//   network edge mocked).
 // ---------------------------------------------------------------------------
 
 const { streamReply, streamToolResult } = vi.hoisted(() => ({
@@ -60,7 +68,7 @@ beforeEach(() => {
 });
 
 describe('routine tool surface × read-only loop composition', () => {
-  it('every capability grantable to a routine produces a tool surface the real read-only engine admits', async () => {
+  it('every capability grantable to a routine produces a tool surface the real read-only engine ADMITS and DECLARES (admission proof, not handler execution)', async () => {
     expect(ROUTINE_GOOGLE_CAPABILITIES.length).toBeGreaterThan(0);
     for (const capability of ROUTINE_GOOGLE_CAPABILITIES) {
       streamReply.mockClear();

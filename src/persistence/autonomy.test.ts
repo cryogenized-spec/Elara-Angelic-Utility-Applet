@@ -23,6 +23,7 @@ import {
   markEventRead,
   recentEvents,
   saveRoutine,
+  stampRoutineLastRun,
 } from './autonomy';
 import { MAX_ROUTINES } from '../autonomy/contracts';
 import { noveltyFingerprint } from '../autonomy/policy';
@@ -290,6 +291,32 @@ describe('claimRoutineRun — atomic run admission', () => {
     expect('eventId' in surviving).toBe(false);
   });
 
+  it('a post-commit retention-pruning failure does NOT convert a committed event run into a failure', async () => {
+    await addRun(makeRun('run-1', { state: 'running' }));
+    // Seed a stale event so the post-commit prune has something to delete…
+    await addEvent(makeEvent('e-stale', { createdAt: NOW - 91 * 24 * 3_600_000 }));
+    // …and force the prune to fail via a throwing Dexie delete hook
+    // (subscribed/unsubscribed explicitly so it cannot leak into other tests).
+    const deletingHook = autonomyDb.events.hook('deleting');
+    const throwOnDelete = () => {
+      throw new Error('simulated retention failure');
+    };
+    deletingHook.subscribe(throwOnDelete);
+    try {
+      const terminal = makeRun('run-1', { state: 'completed', outcome: 'event', eventId: 'e-1', completedAt: NOW });
+      // Must RESOLVE despite the prune failure…
+      await expect(completeRunWithEvent(terminal, makeEvent('e-1'))).resolves.toBeUndefined();
+    } finally {
+      deletingHook.unsubscribe(throwOnDelete);
+    }
+    // …because the event + terminal run were already durably committed.
+    expect((await listEvents()).map((event) => event.id)).toContain('e-1');
+    expect((await listRuns())[0]).toMatchObject({ id: 'run-1', state: 'completed', outcome: 'event', eventId: 'e-1' });
+    // And the stale event SURVIVED — proving the prune really ran and really
+    // failed (not a vacuous pass), yet the committed state was untouched.
+    expect((await listEvents()).map((event) => event.id)).toContain('e-stale');
+  });
+
   it('keeps run and event history when the originating routine is deleted', async () => {
     await saveRoutine(makeRoutine('r-1'));
     await addRun(makeRun('run-1', { state: 'completed', outcome: 'event', completedAt: NOW }));
@@ -313,5 +340,41 @@ describe('claimRoutineRun — atomic run admission', () => {
     expect(surviving[0]?.id).toBe('run-trigger');
     // 1005 bulk + 1 trigger = 1006 records; the 1000 newest survive → run-0…run-5 are pruned.
     expect(surviving.at(-1)?.id).toBe('run-6');
+  });
+});
+
+describe('stampRoutineLastRun — race-safe last-run stamping', () => {
+  it('stamps an existing routine and merges onto the CURRENT record, preserving concurrent edits', async () => {
+    await saveRoutine(makeRoutine('r-1'));
+    await saveRoutine(makeRoutine('r-1', { name: 'Renamed meanwhile', instruction: 'Updated instruction.' }));
+    const stamped = await stampRoutineLastRun('r-1', NOW, { at: NOW, state: 'completed', outcome: 'no-op' });
+    expect(stamped).toBe(true);
+    const routine = await getRoutine('r-1');
+    expect(routine).toMatchObject({ name: 'Renamed meanwhile', instruction: 'Updated instruction.', lastRunAt: NOW });
+    expect(routine?.lastResult).toEqual({ at: NOW, state: 'completed', outcome: 'no-op' });
+  });
+
+  it('returns false for an absent routine and creates nothing', async () => {
+    expect(await stampRoutineLastRun('r-missing', NOW, { at: NOW, state: 'completed', outcome: 'no-op' })).toBe(false);
+    expect(await listRoutines()).toEqual([]);
+  });
+
+  it('never resurrects a routine deleted while the stamp is in flight (the TOCTOU window)', async () => {
+    await saveRoutine(makeRoutine('r-1'));
+    // The stamp and the deletion run CONCURRENTLY: their write transactions
+    // serialize in either order, and the invariant must hold in both —
+    // stamp-then-delete leaves nothing; delete-then-stamp is a no-op read.
+    const stamp = stampRoutineLastRun('r-1', NOW, { at: NOW, state: 'completed', outcome: 'event', eventId: 'e-1' });
+    const removal = deleteRoutine('r-1');
+    await Promise.all([stamp, removal]);
+    expect(await getRoutine('r-1')).toBeUndefined();
+    expect(await listRoutines()).toEqual([]);
+  });
+
+  it('a routine deleted BEFORE stamping is not resurrected (sequential boundary)', async () => {
+    await saveRoutine(makeRoutine('r-1'));
+    await deleteRoutine('r-1');
+    expect(await stampRoutineLastRun('r-1', NOW, { at: NOW, state: 'completed', outcome: 'no-op' })).toBe(false);
+    expect(await getRoutine('r-1')).toBeUndefined();
   });
 });

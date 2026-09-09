@@ -96,6 +96,60 @@ describe('evaluateAutonomyPermission', () => {
 // Hardening: full-garbage records and tampered persisted permissions.
 // ---------------------------------------------------------------------------
 
+describe('normalizeRoutine — malformed recognized schedules fail closed', () => {
+  it('disables a daily schedule with an invalid time instead of repairing it to 09:00', () => {
+    const routine = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'daily', time: 'garbage', days: 'weekdays' } });
+    expect(routine.enabled).toBe(false);
+    expect(routine.schedule).toEqual({ kind: 'daily', time: '09:00', days: 'every' });
+  });
+
+  it('disables a daily schedule with an invalid days value instead of repairing it to every-day', () => {
+    const routine = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'daily', time: '07:30', days: 'garbage' } });
+    expect(routine.enabled).toBe(false);
+    expect(routine.schedule).toEqual({ kind: 'daily', time: '09:00', days: 'every' });
+  });
+
+  it('disables a daily schedule with an empty weekday array (no fireable day)', () => {
+    const routine = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'daily', time: '07:30', days: [] } });
+    expect(routine.enabled).toBe(false);
+  });
+
+  it('disables an interval schedule with an untrustworthy duration instead of clamping it', () => {
+    for (const everyMinutes of [0, 14, 1_441, 12.5, Number.NaN, 'fast']) {
+      const routine = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'interval', everyMinutes: everyMinutes as never } });
+      expect(routine.enabled, `everyMinutes=${String(everyMinutes)}`).toBe(false);
+      expect(routine.schedule).toEqual({ kind: 'daily', time: '09:00', days: 'every' });
+    }
+  });
+
+  it('disables an interval schedule with a malformed waking window instead of inventing one', () => {
+    const routine = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'interval', everyMinutes: 60, between: { start: '9am', end: '18:00' } } });
+    expect(routine.enabled).toBe(false);
+  });
+
+  it('treats an explicit null waking window as absent (meaning-preserving)', () => {
+    const routine = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'interval', everyMinutes: 60, between: null } });
+    expect(routine.enabled).toBe(true);
+    expect(routine.schedule).toEqual({ kind: 'interval', everyMinutes: 60 });
+  });
+
+  it('fails closed when only one field of a mixed-validity schedule is malformed', () => {
+    const badTimeGoodDays = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'daily', time: '25:99', days: 'weekdays' } });
+    expect(badTimeGoodDays.enabled).toBe(false);
+    const goodTimeBadDays = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'daily', time: '07:30', days: { mon: true } } });
+    expect(goodTimeBadDays.enabled).toBe(false);
+  });
+
+  it('still normalizes VALID schedules, canonicalizing weekday arrays without changing meaning', () => {
+    const routine = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'daily', time: '07:30', days: [5, 1, 1, 3, 3] } });
+    expect(routine.enabled).toBe(true);
+    expect(routine.schedule).toEqual({ kind: 'daily', time: '07:30', days: [1, 3, 5] });
+    const interval = normalizeRoutine({ ...baseRoutine, schedule: { kind: 'interval', everyMinutes: 90, between: { start: '09:00', end: '17:30' } } });
+    expect(interval.enabled).toBe(true);
+    expect(interval.schedule).toEqual({ kind: 'interval', everyMinutes: 90, between: { start: '09:00', end: '17:30' } });
+  });
+});
+
 describe('normalizeRoutine — malformed persisted state', () => {
   it('turns a garbage record into a disabled, fully-defaulted routine instead of crashing', () => {
     const routine = normalizeRoutine({ garbage: true });

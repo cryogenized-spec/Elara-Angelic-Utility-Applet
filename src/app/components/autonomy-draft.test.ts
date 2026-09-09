@@ -59,4 +59,10 @@ describe('routine draft mapping — custom weekday preservation', () => {
   it('a blank draft is never custom', () => {
     expect(blankDraft('UTC').days).toBe('every');
   });
+
+  it('maxRunsPerDay round-trips through the draft (stored for the scheduler; not applied to manual runs)', () => {
+    const existing = makeRoutine({ policy: { cooldownHours: 6, maxToolCalls: 4, maxRunsPerDay: 2 } });
+    const saved = draftToRoutine(draftFromRoutine(existing), existing);
+    expect(saved.policy).toEqual({ cooldownHours: 6, maxToolCalls: 4, maxRunsPerDay: 2 });
+  });
 });

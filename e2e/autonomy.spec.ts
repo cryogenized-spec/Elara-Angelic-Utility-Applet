@@ -184,10 +184,14 @@ test('granted read permissions bound the provider tool surface, and routines per
 // and the read-only admission policy (streamGoogleToolLoop) are enforced by
 // two modules. This test joins them in a real browser through the REAL
 // routine engine (no injected engine): a Drive-granted routine's Run now must
-// reach the provider with the Drive read tools declared. If the mapping and
-// the admission policy ever diverge again (the original defect: the loop
-// rejected exactly the tools the mapping produced), the declaration check
-// throws, no provider request is issued, and this test fails.
+// reach the provider with the Drive read tools declared, and the run must
+// complete. PROOF LEVEL: engine admission + provider declarations + run
+// completion with the provider route-mocked — Google handler execution is not
+// exercised here (that is covered by the integration test with the network
+// edge mocked). If the mapping and the admission policy ever diverge again
+// (the original defect: the loop rejected exactly the tools the mapping
+// produced), the declaration check throws, no provider request is issued, and
+// this test fails.
 test('a Drive-granted routine runs through the real engine with only Drive read tools declared', async ({ page }) => {
   const requests: Array<Record<string, unknown>> = [];
   await page.route('**/v1/interactions*', async (route) => {

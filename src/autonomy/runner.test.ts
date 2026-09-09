@@ -377,6 +377,50 @@ describe('executeRoutineRun — concurrent Run Now admission', () => {
   });
 });
 
+describe('executeRoutineRun — authority denial preserves occurrence identity', () => {
+  it('a scheduled occurrence denied by the master switch keeps its occurrence identity', async () => {
+    const { run } = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([])), scheduledFor: 5_000 });
+    expect(run).toMatchObject({ state: 'skipped', outcome: 'skipped', errorCode: 'AUTONOMY_DISABLED', runKey: 'r-1:scheduled:5000', scheduledFor: 5_000 });
+  });
+
+  it('redelivery of the same denied occurrence keeps the SAME identity — one durable skip per occurrence', async () => {
+    const first = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([])), scheduledFor: 5_000 });
+    const second = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([])), scheduledFor: 5_000 });
+    expect(second.run.runKey).toBe('r-1:scheduled:5000');
+    expect(second.run.scheduledFor).toBe(5_000);
+    expect(first.run.runKey).toBe(second.run.runKey);
+    const rows = await listRuns(20);
+    expect(rows.filter((row) => row.runKey === 'r-1:scheduled:5000')).toHaveLength(1);
+  });
+
+  it('a catch-up denial preserves the source occurrence identity', async () => {
+    const { run } = await executeRoutineRun(makeRoutine({ enabled: false }), settings, 'catch-up', { ...runOptions(engineFor([])), scheduledFor: 7_000 });
+    expect(run).toMatchObject({ state: 'skipped', errorCode: 'ROUTINE_DISABLED', runKey: 'r-1:catch-up:7000', scheduledFor: 7_000 });
+  });
+
+  it('manual Run Now denial keeps trigger-time identity (semantics unchanged)', async () => {
+    let clock = NOW;
+    const first = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'manual', runOptions(engineFor([]), () => clock));
+    clock += 1;
+    const second = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'manual', runOptions(engineFor([]), () => clock));
+    expect(first.run.runKey).toBe('r-1:manual:1700000000000');
+    expect(second.run.runKey).toBe('r-1:manual:1700000000001');
+    expect(await listRuns(20)).toHaveLength(2);
+  });
+});
+
+describe('executeRoutineRun — manual runs and the scheduled-run budget', () => {
+  it('manual Run now is not counted against maxRunsPerDay (scheduler-owned budget)', async () => {
+    const routine = makeRoutine({ policy: { cooldownHours: 24, maxToolCalls: 8, maxRunsPerDay: 1 } });
+    let clock = NOW;
+    const first = await executeRoutineRun(routine, settings, 'manual', runOptions(engineFor(textRun(NOOP)), () => clock));
+    clock += 1;
+    const second = await executeRoutineRun(routine, settings, 'manual', runOptions(engineFor(textRun(NOOP)), () => clock));
+    expect(first.run).toMatchObject({ state: 'completed', outcome: 'no-op' });
+    expect(second.run).toMatchObject({ state: 'completed', outcome: 'no-op' });
+  });
+});
+
 describe('executeRoutineRun — occurrence identity (scheduled / catch-up)', () => {
   it('derives run identity from the occurrence, not the start time', async () => {
     const { run } = await executeRoutineRun(makeRoutine(), settings, 'scheduled', { ...runOptions(engineFor(textRun(NOOP))), scheduledFor: 5_000 });

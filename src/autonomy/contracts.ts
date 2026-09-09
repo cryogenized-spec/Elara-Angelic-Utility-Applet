@@ -84,6 +84,7 @@ export type RoutineDelivery = z.infer<typeof routineDeliverySchema>;
 export const routinePolicySchema = z.strictObject({
   cooldownHours: z.number().int().min(1).max(168),
   maxToolCalls: z.number().int().min(1).max(20),
+  /** Scheduled-run budget: enforced by the Phase B scheduler, NOT by manual Run now. */
   maxRunsPerDay: z.number().int().min(1).max(12),
 });
 export type RoutinePolicy = z.infer<typeof routinePolicySchema>;
@@ -259,37 +260,38 @@ function safeText(value: unknown, maxLength: number): string {
   return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim().slice(0, maxLength) : '';
 }
 
-function normalizeTime(value: unknown, fallback: string): string {
-  return typeof value === 'string' && routineTimeSchema.safeParse(value).success ? value : fallback;
+function isValidTime(value: unknown): value is string {
+  return typeof value === 'string' && routineTimeSchema.safeParse(value).success;
 }
 
-function normalizeDays(value: unknown): RoutineDays {
-  if (value === 'weekdays' || value === 'weekends' || value === 'every') return value;
-  if (Array.isArray(value)) {
-    const days = [...new Set(value.filter((day): day is number => typeof day === 'number' && Number.isInteger(day) && day >= 0 && day <= 6))].sort((a, b) => a - b);
-    if (days.length) return days;
-  }
-  return 'every';
-}
-
-function normalizeBetween(value: unknown): IntervalSchedule['between'] {
-  if (!value || typeof value !== 'object') return undefined;
-  const record = value as Record<string, unknown>;
-  const start = normalizeTime(record.start, '09:00');
-  const end = normalizeTime(record.end, '18:00');
-  return { start, end };
-}
-
+/**
+ * Fail closed on malformed-but-RECOGNIZED schedules. An unknown `kind` was
+ * always disabling; a recognized kind with untrustworthy fields must disable
+ * too — "daily at garbage o'clock" must never silently become "daily at
+ * 09:00", and an unparseable interval must never become an arbitrary one.
+ * Only meaning-preserving canonicalization is allowed (deduped/sorted weekday
+ * arrays). Disabled routines keep the deterministic DEFAULT_SCHEDULE so the
+ * editor has something safe to repair from.
+ */
 function normalizeSchedule(value: unknown): { schedule: RoutineSchedule; valid: boolean } {
   if (!value || typeof value !== 'object') return { schedule: DEFAULT_SCHEDULE, valid: false };
   const record = value as Record<string, unknown>;
   if (record.kind === 'daily') {
-    return { schedule: { kind: 'daily', time: normalizeTime(record.time, '09:00'), days: normalizeDays(record.days) }, valid: true };
+    if (!isValidTime(record.time)) return { schedule: DEFAULT_SCHEDULE, valid: false };
+    const days = routineDaysSchema.safeParse(record.days);
+    if (!days.success) return { schedule: DEFAULT_SCHEDULE, valid: false };
+    const canonicalDays = Array.isArray(days.data) ? [...new Set(days.data)].sort((a, b) => a - b) : days.data;
+    return { schedule: { kind: 'daily', time: record.time, days: canonicalDays }, valid: true };
   }
   if (record.kind === 'interval') {
-    const everyMinutes = clampInt(record.everyMinutes, 15, 1_440, 180);
-    const between = normalizeBetween(record.between);
-    return { schedule: { kind: 'interval', everyMinutes, ...(between ? { between } : {}) }, valid: true };
+    const everyMinutes = record.everyMinutes;
+    if (typeof everyMinutes !== 'number' || !Number.isInteger(everyMinutes) || everyMinutes < 15 || everyMinutes > 1_440) {
+      return { schedule: DEFAULT_SCHEDULE, valid: false };
+    }
+    if (record.between == null) return { schedule: { kind: 'interval', everyMinutes }, valid: true };
+    const raw = record.between as Record<string, unknown>;
+    if (!isValidTime(raw?.start) || !isValidTime(raw?.end)) return { schedule: DEFAULT_SCHEDULE, valid: false };
+    return { schedule: { kind: 'interval', everyMinutes, between: { start: raw.start, end: raw.end } }, valid: true };
   }
   return { schedule: DEFAULT_SCHEDULE, valid: false };
 }

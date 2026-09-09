@@ -344,12 +344,13 @@ export function AutonomySettings() {
               </select>
             </label>
             <label className="autonomy-field">
-              <span>Max runs per day</span>
+              <span>Max scheduled runs per day</span>
               <select value={draft.maxRunsPerDay} onChange={(event) => setDraft({ ...draft, maxRunsPerDay: event.target.value })}>
                 {selectOptions(RUNS_PER_DAY_PRESETS, draft.maxRunsPerDay).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
             </label>
           </div>
+          <small className="autonomy-policy-note">The scheduled-run budget is applied when scheduled execution arrives (cloud scheduler, next phase). Manual “Run now” is not counted against it.</small>
 
           {draftErrors.length > 0 && (
             <ul className="autonomy-errors" role="alert">

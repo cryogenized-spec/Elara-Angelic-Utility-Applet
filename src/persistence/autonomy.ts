@@ -5,6 +5,7 @@ import {
   type AutonomousEvent,
   type ElaraRoutine,
   type RoutineRunRecord,
+  type RoutineRunSummary,
 } from '../autonomy/contracts';
 
 // ---------------------------------------------------------------------------
@@ -82,6 +83,25 @@ export async function saveRoutine(routine: ElaraRoutine): Promise<ElaraRoutine> 
 export async function deleteRoutine(id: string): Promise<void> {
   await db.routines.delete(id);
   notify();
+}
+
+/**
+ * Race-safe last-run stamping: the existence check and the write happen in ONE
+ * transaction. A routine deleted any time before this transaction commits can
+ * never be resurrected by a stale run finalization (the read and the write
+ * cannot interleave with a delete), and concurrent edits win because the stamp
+ * merges onto the CURRENT record — only lastRunAt/lastResult are written.
+ * Returns false when the routine no longer exists.
+ */
+export async function stampRoutineLastRun(routineId: string, lastRunAt: number, lastResult: RoutineRunSummary): Promise<boolean> {
+  const stamped = await db.transaction('rw', db.routines, async () => {
+    const current = await db.routines.get(routineId);
+    if (!current) return false;
+    await db.routines.put({ ...current, lastRunAt, lastResult });
+    return true;
+  });
+  if (stamped) notify();
+  return stamped;
 }
 
 // --------------------------------------------------------------------------- events
@@ -250,7 +270,16 @@ export async function completeRunWithEvent(run: RoutineRunRecord, event: Autonom
     await db.events.put(event);
     await db.runs.put(run);
   });
-  await pruneEvents(event.createdAt);
+  // Retention pruning is best-effort maintenance AFTER the commit. A cleanup
+  // failure must never reject this function: the event and the terminal run
+  // are already durably committed, and a rejection would make the caller
+  // retroactively convert a successful event run into a failure. The next
+  // write retries pruning.
+  try {
+    await pruneEvents(event.createdAt);
+  } catch {
+    // Maintenance failure is non-fatal by design.
+  }
   notify();
 }
 

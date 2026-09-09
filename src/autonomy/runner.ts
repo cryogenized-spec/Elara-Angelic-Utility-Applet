@@ -20,9 +20,8 @@ import {
   addRun,
   claimRoutineRun,
   completeRunWithEvent,
-  getRoutine,
   recentEvents,
-  saveRoutine,
+  stampRoutineLastRun,
   updateRun,
 } from '../persistence/autonomy';
 
@@ -166,16 +165,23 @@ export async function executeRoutineRun(
   const id = options.generateId ?? generateId;
   const engine = options.engine ?? routineEngine;
 
+  // Occurrence identity is derived ONCE, before any branch: a scheduled or
+  // catch-up attempt keeps its occurrence identity even when execution is
+  // denied, so a redelivered denial deduplicates on the same runKey instead of
+  // accumulating one skip record per delivery. Manual runs default to the
+  // trigger timestamp, as before.
+  const startedAt = now();
+  const scheduledFor = options.scheduledFor ?? startedAt;
+
   const permission = evaluateAutonomyPermission(settings, routine);
   if (!permission.permitted) {
-    const startedAt = now();
     const run: RoutineRunRecord = {
       id: id(),
-      runKey: routineRunKey(routine.id, executionMode, startedAt),
+      runKey: routineRunKey(routine.id, executionMode, scheduledFor),
       routineId: routine.id,
       routineName: routine.name,
       executionMode,
-      scheduledFor: startedAt,
+      scheduledFor,
       startedAt,
       completedAt: startedAt,
       state: 'skipped',
@@ -185,8 +191,6 @@ export async function executeRoutineRun(
     return { run: await recordSkippedRun(run), event: null };
   }
 
-  const startedAt = now();
-  const scheduledFor = options.scheduledFor ?? startedAt;
   const run: RoutineRunRecord = {
     id: id(),
     runKey: routineRunKey(routine.id, executionMode, scheduledFor),
@@ -221,17 +225,16 @@ export async function executeRoutineRun(
   let sawTerminal = false;
 
   /**
-   * Stamp the routine's last-run summary. Re-reads the CURRENT routine record
-   * so a user edit made while the run was executing is never clobbered by the
-   * stale copy captured at run start; a routine deleted mid-run is simply not
-   * stamped (the run record, with its denormalized name, remains the history).
-   * Best-effort: the run record is authoritative.
+   * Stamp the routine's last-run summary. Delegates to the transactional
+   * stampRoutineLastRun: existence check + write are atomic, so a routine
+   * deleted at any point before the stamp commits is never resurrected, and a
+   * user edit that lands first is preserved (the stamp merges onto the CURRENT
+   * record, never the stale copy captured at run start). Best-effort: the run
+   * record is authoritative.
    */
   const stampRoutine = async (completedAt: number, state: RoutineRunRecord['state'], outcome: RoutineRunRecord['outcome'], eventId?: string): Promise<void> => {
     try {
-      const current = await getRoutine(routine.id);
-      if (!current) return;
-      await saveRoutine({ ...current, lastRunAt: completedAt, lastResult: { at: completedAt, state, ...(outcome ? { outcome } : {}), ...(eventId ? { eventId } : {}) } });
+      await stampRoutineLastRun(routine.id, completedAt, { at: completedAt, state, ...(outcome ? { outcome } : {}), ...(eventId ? { eventId } : {}) });
     } catch {
       // Persisting the last-run summary is best-effort; the run record itself is authoritative.
     }

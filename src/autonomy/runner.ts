@@ -17,7 +17,7 @@ import {
   type RoutineRunRecord,
 } from './contracts';
 import {
-  addRun,
+  addRunOrExisting,
   claimRoutineRun,
   completeRunWithEvent,
   recentEvents,
@@ -137,16 +137,14 @@ async function loadLocalRoutineMemoryContext(routine: ElaraRoutine): Promise<str
 }
 
 /**
- * Record a skipped (never-executed) run attempt. Constraint-safe: a
- * same-millisecond duplicate skip colliding on the unique runKey index is
- * still a correct structured result even if it cannot be persisted twice.
+ * Record a skipped (never-executed) run attempt. A redelivery colliding on
+ * the unique runKey index returns the already-persisted canonical skip record
+ * (idempotent redelivery — one canonical record per occurrence); any other
+ * persistence failure propagates, because the run history is the error
+ * surface and a failed write must never masquerade as a successful skip.
  */
 async function recordSkippedRun(run: RoutineRunRecord): Promise<RoutineRunRecord> {
-  try {
-    return await addRun(run);
-  } catch {
-    return run;
-  }
+  return addRunOrExisting(run);
 }
 
 /**

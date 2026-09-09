@@ -6,6 +6,7 @@ import {
   STALE_RUN_MS,
   addEvent,
   addRun,
+  addRunOrExisting,
   autonomyDb,
   claimRoutineRun,
   clearAutonomyStore,
@@ -170,6 +171,59 @@ describe('run persistence', () => {
     expect(await findRunInFlight('r-1')).toBeUndefined();
     await addRun(makeRun('run-live', { id: 'run-live', runKey: 'r-1:scheduled:9', state: 'running' }));
     expect((await findRunInFlight('r-1'))?.id).toBe('run-live');
+  });
+
+  it('addRunOrExisting resolves a runKey collision by returning the persisted canonical record', async () => {
+    const canonical = await addRunOrExisting(makeRun('run-1', { state: 'skipped', outcome: 'skipped', startedAt: NOW, completedAt: NOW }));
+    // Redelivery of the same occurrence: same runKey, fresh id, later timestamps.
+    const attempt = makeRun('run-2', { runKey: canonical.runKey, state: 'skipped', outcome: 'skipped', startedAt: NOW + 60_000, completedAt: NOW + 60_000 });
+    const resolved = await addRunOrExisting(attempt);
+    expect(resolved.id).toBe('run-1'); // the canonical owner, never a second in-memory copy
+    expect(resolved.startedAt).toBe(NOW); // canonical timestamps, not the redelivery's
+    expect(resolved.completedAt).toBe(NOW);
+    const rows = await listRuns(20);
+    expect(rows.filter((row) => row.runKey === canonical.runKey)).toHaveLength(1);
+    expect(rows.find((row) => row.runKey === canonical.runKey)?.id).toBe('run-1');
+  });
+
+  it('addRunOrExisting rethrows a write failure when no canonical record exists', async () => {
+    // Every write to db.runs fails; the collision-recovery lookup finds nothing,
+    // so the original persistence error must propagate (explicit
+    // subscribe/unsubscribe so the hook cannot leak into other tests).
+    const creatingHook = autonomyDb.runs.hook('creating');
+    const throwOnCreate = () => {
+      throw new Error('simulated run write failure');
+    };
+    creatingHook.subscribe(throwOnCreate);
+    try {
+      await expect(addRunOrExisting(makeRun('run-x'))).rejects.toThrow('simulated run write failure');
+    } finally {
+      creatingHook.unsubscribe(throwOnCreate);
+    }
+    expect(await listRuns(20)).toHaveLength(0);
+  });
+
+  it('addRunOrExisting returns the record that actually persisted when retention pruning fails afterwards', async () => {
+    // A run older than the 30-day retention window forces pruneRuns to attempt
+    // a delete; the throwing deleting hook fails the prune AFTER the new run's
+    // put has already committed in its own transaction.
+    const ancient = NOW - 31 * 24 * 3_600_000;
+    await addRun(makeRun('stale', { startedAt: ancient, completedAt: ancient }));
+    const deletingHook = autonomyDb.runs.hook('deleting');
+    const throwOnDelete = () => {
+      throw new Error('simulated retention failure');
+    };
+    deletingHook.subscribe(throwOnDelete);
+    try {
+      const resolved = await addRunOrExisting(makeRun('run-new', { runKey: 'r-1:manual:new', startedAt: NOW, completedAt: NOW }));
+      // The write itself committed, so the caller gets the truthfully persisted
+      // record: a prune failure is neither conflated with a duplicate collision
+      // nor allowed to reject a completed write.
+      expect(resolved.id).toBe('run-new');
+      expect((await getRunByRunKey('r-1:manual:new'))?.id).toBe('run-new');
+    } finally {
+      deletingHook.unsubscribe(throwOnDelete);
+    }
   });
 });
 

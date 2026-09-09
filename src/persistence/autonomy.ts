@@ -260,6 +260,24 @@ export async function addRun(run: RoutineRunRecord): Promise<RoutineRunRecord> {
 }
 
 /**
+ * Persist a run, resolving a unique-runKey collision by returning the
+ * already-persisted canonical record (idempotent redelivery: the caller must
+ * see the record that owns the occurrence, never a second in-memory copy with
+ * a fresh id). A write failure where no canonical record exists is rethrown —
+ * a failed persistence write must never be reported as a successful
+ * in-memory result.
+ */
+export async function addRunOrExisting(run: RoutineRunRecord): Promise<RoutineRunRecord> {
+  try {
+    return await addRun(run);
+  } catch (error) {
+    const existing = await getRunByRunKey(run.runKey);
+    if (existing) return existing;
+    throw error;
+  }
+}
+
+/**
  * Commit an admitted event AND the run's terminal 'event' record in ONE
  * transaction: either both land or neither does. This closes the partial-write
  * window where a delivered event could coexist with a run that later

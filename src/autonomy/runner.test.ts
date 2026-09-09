@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeRoutineRun, routineToolSet, type RoutineEngine, type RoutineEngineRequest } from './runner';
-import { addEvent, addRun, clearAutonomyStore, deleteRoutine, getRoutine, listEvents, listRuns, saveRoutine } from '../persistence/autonomy';
+import { addEvent, addRun, autonomyDb, clearAutonomyStore, deleteRoutine, getRoutine, listEvents, listRuns, saveRoutine } from '../persistence/autonomy';
 import { noveltyFingerprint } from './policy';
 import { normalizeRoutine } from './contracts';
 import type { AutonomyPreferences } from '../domain/preferences';
@@ -383,19 +383,63 @@ describe('executeRoutineRun — authority denial preserves occurrence identity',
     expect(run).toMatchObject({ state: 'skipped', outcome: 'skipped', errorCode: 'AUTONOMY_DISABLED', runKey: 'r-1:scheduled:5000', scheduledFor: 5_000 });
   });
 
-  it('redelivery of the same denied occurrence keeps the SAME identity — one durable skip per occurrence', async () => {
-    const first = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([])), scheduledFor: 5_000 });
-    const second = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([])), scheduledFor: 5_000 });
+  it('redelivery of the same denied occurrence returns the SAME persisted canonical record — one durable skip per occurrence', async () => {
+    let clock = NOW;
+    const first = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([]), () => clock), scheduledFor: 5_000 });
+    clock += 123_456; // the redelivery arrives much later than the first attempt
+    const second = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([]), () => clock), scheduledFor: 5_000 });
     expect(second.run.runKey).toBe('r-1:scheduled:5000');
     expect(second.run.scheduledFor).toBe(5_000);
-    expect(first.run.runKey).toBe(second.run.runKey);
+    // Idempotent redelivery must return the record that OWNS the occurrence —
+    // the already-persisted canonical skip, not a second in-memory copy.
+    expect(second.run.id).toBe(first.run.id);
+    expect(second.run.startedAt).toBe(first.run.startedAt);
+    expect(second.run.completedAt).toBe(first.run.completedAt);
+    // …and the canonical timestamps are the FIRST attempt's, not the
+    // redelivery's clock.
+    expect(second.run.startedAt).toBe(NOW);
+    expect(second.run.completedAt).toBe(NOW);
     const rows = await listRuns(20);
     expect(rows.filter((row) => row.runKey === 'r-1:scheduled:5000')).toHaveLength(1);
+    expect(rows.find((row) => row.runKey === 'r-1:scheduled:5000')?.id).toBe(first.run.id);
   });
 
   it('a catch-up denial preserves the source occurrence identity', async () => {
     const { run } = await executeRoutineRun(makeRoutine({ enabled: false }), settings, 'catch-up', { ...runOptions(engineFor([])), scheduledFor: 7_000 });
     expect(run).toMatchObject({ state: 'skipped', errorCode: 'ROUTINE_DISABLED', runKey: 'r-1:catch-up:7000', scheduledFor: 7_000 });
+  });
+
+  it('redelivery of a denied catch-up occurrence returns the SAME persisted canonical record', async () => {
+    let clock = NOW;
+    const first = await executeRoutineRun(makeRoutine({ enabled: false }), settings, 'catch-up', { ...runOptions(engineFor([]), () => clock), scheduledFor: 7_000 });
+    clock += 98_765;
+    const second = await executeRoutineRun(makeRoutine({ enabled: false }), settings, 'catch-up', { ...runOptions(engineFor([]), () => clock), scheduledFor: 7_000 });
+    expect(second.run.id).toBe(first.run.id);
+    expect(second.run.startedAt).toBe(first.run.startedAt);
+    expect(second.run.completedAt).toBe(first.run.completedAt);
+    expect(second.run.startedAt).toBe(NOW); // the first attempt's clock, not the redelivery's
+    const rows = await listRuns(20);
+    expect(rows.filter((row) => row.runKey === 'r-1:catch-up:7000')).toHaveLength(1);
+  });
+
+  it('a genuine skip-persistence failure is thrown, never reported as a successful in-memory skip', async () => {
+    // The Dexie creating hook makes every write to db.runs fail; no canonical
+    // record can exist, so the collision-recovery lookup finds nothing and the
+    // original persistence error must propagate (subscribed/unsubscribed
+    // explicitly so it cannot leak into other tests).
+    const creatingHook = autonomyDb.runs.hook('creating');
+    const throwOnCreate = () => {
+      throw new Error('simulated run write failure');
+    };
+    creatingHook.subscribe(throwOnCreate);
+    try {
+      await expect(
+        executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([])), scheduledFor: 5_000 }),
+      ).rejects.toThrow('simulated run write failure');
+    } finally {
+      creatingHook.unsubscribe(throwOnCreate);
+    }
+    expect(await listRuns(20)).toHaveLength(0); // nothing was persisted
   });
 
   it('manual Run Now denial keeps trigger-time identity (semantics unchanged)', async () => {

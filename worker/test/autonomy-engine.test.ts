@@ -262,9 +262,14 @@ describe('AutonomyEngine — repair sweep and occurrence classification', () => 
   });
 
   it('a Google-backed (device-locus) occurrence is recorded as device-due — the worker never executes it', async () => {
-    const routine = makeRoutine({ id: 'routine-device', permissions: { memory: false, google: ['gmail.read'] } });
+    // Pinned interval schedule: grace is then a fixed 15 minutes regardless of
+    // wall-clock time of day. (The daily default's grace runs to the next
+    // 09:00 UTC occurrence — when the suite runs just before 09:00 UTC that
+    // leaves only minutes of slack and runner jitter flips the classification
+    // to missed, which is how this test once failed in CI at ~09:00 UTC.)
+    const routine = makeRoutine({ id: 'routine-device', schedule: { kind: 'interval', everyMinutes: 30 }, permissions: { memory: false, google: ['gmail.read'] } });
     await syncConfig(1, [routine]);
-    // 10 minutes overdue: past the on-time tolerance, within the daily grace.
+    // 10 minutes overdue: past the on-time tolerance, within the interval grace.
     const dueAt = Date.now() - 10 * 60_000;
     await ensureScheduled(routine.id, dueAt);
     await heartbeat();

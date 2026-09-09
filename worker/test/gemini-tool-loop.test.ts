@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { createInteraction } = vi.hoisted(() => ({ createInteraction: vi.fn() }));
 vi.mock('@google/genai', () => ({ GoogleGenAI: class { interactions = { create: createInteraction }; } }));
 
-import worker from './index';
+import worker from '../src/index';
 
 const env = { GEMINI_API_KEY: 'test-key', ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io' };
 const systemInstruction = 'You are Elara, an angelic synthetic cybernetic woman and consort.';

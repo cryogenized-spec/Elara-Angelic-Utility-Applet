@@ -36,6 +36,14 @@ import {
 import { loadAutonomyPreferences, saveAutonomyPreferences } from '../../persistence/preferences';
 import type { AutonomyPreferences } from '../../domain/preferences';
 import { RangeSlider } from './RangeSlider';
+import { AutonomyCloud } from './AutonomyCloud';
+import { bumpConfigGeneration } from '../../autonomy/cloud/pairing';
+import {
+  SCHEDULER_BUDGET_CODE,
+  SCHEDULER_DEVICE_DUE_CODE,
+  SCHEDULER_DRY_RUN_CODE,
+  SCHEDULER_MISSED_CODE,
+} from '../../autonomy/scheduler';
 
 // ---------------------------------------------------------------------------
 // Autonomy settings — routines, Run Now, Autonomy Inbox, and run history.
@@ -90,12 +98,19 @@ function formatNextOccurrence(routine: ElaraRoutine): string | null {
 
 function describeRunOutcome(run: RoutineRunRecord): string {
   if (run.state === 'skipped') {
+    if (run.errorCode === SCHEDULER_DRY_RUN_CODE) return 'Dry run — the cloud scheduler observed this occurrence as due. Cloud execution arrives in the next phase.';
+    if (run.errorCode === SCHEDULER_DEVICE_DUE_CODE) return 'Due on the cloud scheduler — this device runs it when catch-up execution arrives (next phases).';
+    if (run.errorCode === SCHEDULER_BUDGET_CODE) return 'Skipped — the daily scheduled-run budget for this routine is used up.';
     if (run.errorCode === 'AUTONOMY_DISABLED') return 'Skipped — autonomous routines are switched off.';
     if (run.errorCode === 'ROUTINE_DISABLED') return 'Skipped — this routine is disabled.';
     if (run.errorCode === 'RUN_IN_FLIGHT') return 'Skipped — this routine is already running.';
     return 'Skipped.';
   }
-  if (run.state === 'cancelled') return 'Cancelled.';
+  if (run.state === 'missed') {
+    if (run.errorCode === SCHEDULER_MISSED_CODE) return 'Missed — the occurrence\u2019s grace window passed before it could run.';
+    return 'Missed.';
+  }
+  if (run.state === 'cancelled') return 'Cancelled.'
   if (run.outcome === 'event') return 'Event delivered to the Autonomy Inbox.';
   if (run.outcome === 'no-op') return run.reason ? `Nothing noteworthy (${run.reason}).` : 'Nothing noteworthy.';
   if (run.outcome === 'suppressed') return `Held back by policy (${run.suppressedReason ?? 'policy'}).`;
@@ -145,23 +160,32 @@ export function AutonomySettings() {
     if (!prefs) return;
     const saved = await saveAutonomyPreferences({ ...prefs, ...next });
     setPrefs(saved);
+    markConfigChanged();
   }, [prefs]);
+
+/** Every local autonomy configuration change advances the sync generation and nudges the cloud mirror. */
+  const markConfigChanged = useCallback(() => {
+    bumpConfigGeneration();
+    window.dispatchEvent(new CustomEvent('elara-autonomy-config-changed'));
+  }, []);
 
   const toggleRoutine = useCallback(async (routine: ElaraRoutine) => {
     try {
       await saveRoutine({ ...routine, enabled: !routine.enabled });
+      markConfigChanged();
     } catch {
       setNotice('The routine could not be saved.');
     }
-  }, []);
+  }, [markConfigChanged]);
 
   const removeRoutine = useCallback(async (routine: ElaraRoutine) => {
     try {
       await deleteRoutine(routine.id);
+      markConfigChanged();
     } catch {
       setNotice('The routine could not be deleted.');
     }
-  }, []);
+  }, [markConfigChanged]);
 
   const runNow = useCallback(async (routine: ElaraRoutine) => {
     if (!prefs) return;
@@ -189,12 +213,13 @@ export function AutonomySettings() {
     }
     try {
       await saveRoutine(parsed.data);
+      markConfigChanged();
       setDraft(null);
       setDraftErrors([]);
     } catch (error) {
       setDraftErrors([error instanceof RoutineLimitError ? error.message : 'The routine could not be saved.']);
     }
-  }, [draft, routines]);
+  }, [draft, routines, markConfigChanged]);
 
   if (!prefs) {
     return <div className="autonomy-settings"><div className="autonomy-empty">{notice ?? 'Loading autonomy…'}</div></div>;
@@ -202,6 +227,11 @@ export function AutonomySettings() {
 
   return (
     <div className="autonomy-settings">
+      {notice && (
+        <button type="button" className="autonomy-routine__status autonomy-settings__notice" role="status" onClick={() => setNotice(null)}>
+          {notice} <small>(tap to dismiss)</small>
+        </button>
+      )}
       <div className="autonomy-toggle-card">
         <div className="autonomy-toggle-card__copy">
           <strong>Autonomous routines</strong>
@@ -228,6 +258,8 @@ export function AutonomySettings() {
           onChange={(value) => { void updatePrefs({ maxEventsPerDay: value }); }}
         />
       </div>
+
+      <AutonomyCloud onNotice={setNotice} />
 
       <div className="autonomy-section-heading">
         <div>
@@ -445,10 +477,10 @@ export function AutonomySettings() {
       {runs.length > 0 && (
         <div className="autonomy-runs">
           {runs.map((run) => (
-            <div key={run.id} className={`autonomy-run is-${run.state}`}>
+            <div key={run.id} className={`autonomy-run is-${run.state}${run.errorCode?.startsWith('SCHEDULER_') ? ' is-cloud' : ''}`} title={describeRunOutcome(run)}>
               <span className="autonomy-run__state">{run.state}</span>
               <span className="autonomy-run__name">{run.routineName}</span>
-              <span className="autonomy-run__detail">{run.executionMode}{run.outcome ? ` · ${run.outcome}` : ''}{run.suppressedReason ? ` (${run.suppressedReason})` : ''}{run.errorCode ? ` · ${run.errorCode}` : ''}</span>
+              <span className="autonomy-run__detail">{run.executionMode}{run.outcome ? ` · ${run.outcome}` : ''}{run.suppressedReason ? ` (${run.suppressedReason})` : ''}{run.errorCode === SCHEDULER_DRY_RUN_CODE ? ' · cloud dry run' : run.errorCode === SCHEDULER_DEVICE_DUE_CODE ? ' · device due' : run.errorCode === SCHEDULER_MISSED_CODE ? ' · missed' : run.errorCode ? ` · ${run.errorCode}` : ''}</span>
               <span className="autonomy-run__time">{formatTimestamp(run.startedAt)}</span>
             </div>
           ))}

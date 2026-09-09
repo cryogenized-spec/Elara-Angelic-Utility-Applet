@@ -31,7 +31,7 @@ export async function saveMemory(input: MemoryInput): Promise<DurableMemory> {
     lifecycle: normalized.lifecycle!, source: normalized.source!, tags: normalized.tags!, relatedMemoryIds: normalized.relatedMemoryIds!,
     supportingMemoryIds: normalized.supportingMemoryIds!, conflictingMemoryIds: normalized.conflictingMemoryIds!, supersedes: normalized.supersedes!,
     supersededBy: normalized.supersededBy!, reinforcementCount: 0, folderId: normalized.folderId ?? null, expiresAt: normalized.expiresAt ?? null,
-    lastRecalledAt: null, recallCount: 0,
+    lastRecalledAt: null, recallCount: 0, autonomyContext: normalized.autonomyContext ?? false,
   });
   await table().put(record);
   return record;
@@ -48,7 +48,7 @@ export async function updateMemory(id: string, patch: Partial<Omit<DurableMemory
     source: normalizeProvenance(candidate.source, candidate.createdAt), tags: candidate.tags,
     relatedMemoryIds: candidate.relatedMemoryIds, supportingMemoryIds: candidate.supportingMemoryIds,
     conflictingMemoryIds: candidate.conflictingMemoryIds, supersedes: candidate.supersedes, supersededBy: candidate.supersededBy,
-    folderId: candidate.folderId, expiresAt: candidate.expiresAt,
+    folderId: candidate.folderId, expiresAt: candidate.expiresAt, autonomyContext: candidate.autonomyContext,
   }, Date.now());
   return saveExisting(validate({
     ...candidate,

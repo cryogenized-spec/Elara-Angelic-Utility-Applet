@@ -65,5 +65,6 @@ export function normalizeMemoryInput(input: MemoryInput, now: number): MemoryInp
     supersededBy: normalizeIds(input.supersededBy),
     folderId: input.folderId?.trim() || null,
     expiresAt: input.expiresAt ?? null,
+    autonomyContext: input.autonomyContext === true,
   };
 }

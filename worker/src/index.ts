@@ -2,10 +2,20 @@ import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import { googleToolNameSchema } from '../../src/google/tools/contracts';
 import { googleGeminiFunctionDeclarations } from '../../src/google/tools/gemini-declarations';
+import { ELARA_INTERNAL_HEADER, deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
+import { autonomyPreflight, handleAutonomyRoute } from './autonomy/routes';
+
+// The Phase B autonomy engine Durable Object (one per installation). Re-exported
+// so the AUTONOMY binding can construct it.
+export { AutonomyEngine } from './autonomy/engine';
 
 export interface Env {
   GEMINI_API_KEY: string;
   ALLOWED_ORIGINS?: string;
+  /** Installation secret for the /autonomy/* boundary (wrangler secret). */
+  ELARA_INSTALLATION_TOKEN?: string;
+  /** The per-installation autonomy scheduler Durable Object. */
+  AUTONOMY?: DurableObjectNamespace;
 }
 
 const toolResultSchema = z.object({
@@ -296,7 +306,20 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
     if (pathname === '/health') return healthResponse(request, env);
-    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+    if (request.method === 'OPTIONS') {
+      if (pathname.startsWith('/autonomy/')) return autonomyPreflight(allowedOrigin(request, env));
+      return new Response(null, { status: 204, headers: corsHeaders(request, env) });
+    }
+    if (pathname.startsWith('/autonomy/')) {
+      // The autonomy boundary handles its own methods (GET reads, POST writes).
+      try {
+        const response = await handleAutonomyRoute(pathname, request, env, allowedOrigin(request, env));
+        if (response) return response;
+      } catch {
+        return jsonResponse(request, env, { code: 'internal', message: 'The autonomy worker could not complete the request.' }, 500);
+      }
+      return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
+    }
     if (request.method !== 'POST') return jsonResponse(request, env, { code: 'not_found', message: 'Not found.' }, 404);
     try {
       if (pathname === '/api/gemini') return await handleGemini(request, env);
@@ -305,5 +328,22 @@ export default {
     } catch {
       return jsonResponse(request, env, { code: 'provider', message: 'The Gemini Worker could not complete the request.' }, 502);
     }
+  },
+
+  // -------------------------------------------------------------------
+  // The cron heartbeat (design §7.1): the clock, nothing else. It resolves
+  // the installation, signals the Durable Object's repair sweep through the
+  // Worker→DO binding, and returns. No agent reasoning, no routine
+  // execution, no long-running work happens here — the DO owns scheduling.
+  // -------------------------------------------------------------------
+  async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+    void controller;
+    if (!env.AUTONOMY || !env.ELARA_INSTALLATION_TOKEN) return; // autonomy not configured — nothing to wake
+    const installationId = await deriveInstallationId(env.ELARA_INSTALLATION_TOKEN);
+    const stub = env.AUTONOMY.get(env.AUTONOMY.idFromName(installationId));
+    ctx.waitUntil(stub.fetch('https://autonomy-engine/heartbeat', {
+      method: 'POST',
+      headers: { [ELARA_INTERNAL_HEADER]: await internalWakeMarker(env.ELARA_INSTALLATION_TOKEN) },
+    }));
   },
 };

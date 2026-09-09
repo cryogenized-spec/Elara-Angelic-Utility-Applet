@@ -388,6 +388,8 @@ describe('executeRoutineRun — authority denial preserves occurrence identity',
     const first = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([]), () => clock), scheduledFor: 5_000 });
     clock += 123_456; // the redelivery arrives much later than the first attempt
     const second = await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'scheduled', { ...runOptions(engineFor([]), () => clock), scheduledFor: 5_000 });
+    expect(second.run.runKey).toBe(first.run.runKey);
+    expect(second.run.scheduledFor).toBe(first.run.scheduledFor);
     expect(second.run.runKey).toBe('r-1:scheduled:5000');
     expect(second.run.scheduledFor).toBe(5_000);
     // Idempotent redelivery must return the record that OWNS the occurrence —
@@ -414,6 +416,8 @@ describe('executeRoutineRun — authority denial preserves occurrence identity',
     const first = await executeRoutineRun(makeRoutine({ enabled: false }), settings, 'catch-up', { ...runOptions(engineFor([]), () => clock), scheduledFor: 7_000 });
     clock += 98_765;
     const second = await executeRoutineRun(makeRoutine({ enabled: false }), settings, 'catch-up', { ...runOptions(engineFor([]), () => clock), scheduledFor: 7_000 });
+    expect(second.run.runKey).toBe(first.run.runKey);
+    expect(second.run.scheduledFor).toBe(first.run.scheduledFor);
     expect(second.run.id).toBe(first.run.id);
     expect(second.run.startedAt).toBe(first.run.startedAt);
     expect(second.run.completedAt).toBe(first.run.completedAt);

@@ -24,7 +24,8 @@
     "worker:dev": "wrangler dev --config worker/wrangler.toml",
     "worker:types": "wrangler types --config worker/wrangler.toml worker/worker-configuration.d.ts",
     "verify:worker": "node scripts/verify-gemini-worker.mjs",
-    "reliability:check": "node scripts/reliability-gate.mjs"
+    "reliability:check": "node scripts/reliability-gate.mjs",
+    "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
     "@google/genai": "2.21.0",
@@ -39,6 +40,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.22.0",
     "@playwright/test": "1.62.1",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",

@@ -63,6 +63,9 @@ jobs:
       - name: Unit tests
         run: npm test
 
+      - name: Worker & Durable Object tests
+        run: npm run test:workers
+
       - name: Build
         run: npm run build
 

@@ -14,20 +14,33 @@ function tokenize(value: string): string[] {
   return [...new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [])];
 }
 
-function lexicalRelevance(memory: DurableMemory, query: string): number {
+/** Structural minimum the scorer reads — satisfied by DurableMemory and by the Autonomy Context source snapshot. */
+export type ScorableMemory = Pick<DurableMemory, 'kind' | 'title' | 'body' | 'tags' | 'importance' | 'confidence' | 'updatedAt' | 'lifecycle' | 'relatedMemoryIds' | 'supportingMemoryIds' | 'conflictingMemoryIds' | 'reinforcementCount'>;
+
+function lexicalRelevance(memory: ScorableMemory, query: string): number {
   const queryTokens = tokenize(query);
   if (!queryTokens.length) return 0;
   const searchable = new Set(tokenize(`${memory.title} ${memory.body} ${memory.tags.join(' ')}`));
   return queryTokens.filter((token) => searchable.has(token)).length / queryTokens.length;
 }
 
-function score(memory: DurableMemory, query: string, now: number): number {
+function score(memory: ScorableMemory, query: string, now: number): number {
   const ageDays = Math.max(0, (now - memory.updatedAt) / 86_400_000);
   const recency = Math.exp(-ageDays / 45);
   const reinforcement = Math.min(memory.reinforcementCount / 8, 1);
   const relationshipDensity = Math.min((memory.relatedMemoryIds.length + memory.supportingMemoryIds.length + memory.conflictingMemoryIds.length) / 12, 1);
   const lifecycle = memory.lifecycle === 'active' ? 0.12 : memory.lifecycle === 'dormant' ? 0.03 : -0.4;
   return lexicalRelevance(memory, query) * 0.5 + memory.importance * 0.18 + memory.confidence * 0.12 + reinforcement * 0.07 + recency * 0.06 + relationshipDensity * 0.03 + KIND_WEIGHT[memory.kind] + lifecycle;
+}
+
+/**
+ * The SAME ranking score the retrieval path uses, exposed query-less for the
+ * Autonomy Context projection (design §8.5: "rank by the existing retrieval
+ * scorer (query-less: importance/confidence/recency)"). One scorer, both
+ * callers — the projection must never grow a second, divergent ranking.
+ */
+export function scoreMemoryForRanking(memory: ScorableMemory, now: number): number {
+  return score(memory, '', now);
 }
 
 function retrievable(memory: DurableMemory, scope: MemoryRetrievalScope, now: number): boolean {

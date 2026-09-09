@@ -6,3 +6,17 @@ preview_urls = false
 
 [vars]
 ALLOWED_ORIGINS = "https://cryogenized-spec.github.io"
+
+# Phase B autonomy scheduler: one hourly cron heartbeat (the repair clock —
+# the Durable Object's single alarm is the exact per-routine appointment
+# mechanism; cron never schedules individual routines), plus the
+# per-installation AutonomyEngine Durable Object (SQLite-backed).
+[triggers]
+crons = ["0 * * * *"]
+
+[durable_objects]
+bindings = [{ name = "AUTONOMY", class_name = "AutonomyEngine" }]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["AutonomyEngine"]

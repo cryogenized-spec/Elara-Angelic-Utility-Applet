@@ -1237,6 +1237,139 @@ simultaneous local tabs can overshoot it by a small bound; it does not corrupt s
 cloud-phase serialization restores exactness). `STALE_RUN_MS` (15 min) assumes local run
 budgets and must be scoped per execution locus when cloud runs exist.
 
+#### Implementation status — Phase B as landed (2026-09-09, PR #12)
+
+Phase B (cloud scheduler, DRY RUN) is implemented as specified above, with the
+deviations and deferrals recorded below. The user-facing setup/operation guide
+is `docs/AUTONOMOUS_ELARA.md`.
+
+**What landed:**
+
+- **SchedulerPort / WakeSource seam** (`worker/src/autonomy/ports.ts`, §4.4):
+  the production wake source is the single hourly cron trigger; the
+  SchedulerPort (idempotent `ensureScheduled`/`cancel`/`dueWithin` by natural
+  key `routineId`) is implemented by the Durable Object's SQLite-backed
+  single-alarm multiplexer. Due-time truth remains the pure shared domain
+  (`src/autonomy/scheduler.ts` + `src/autonomy/schedule.ts`), importable by
+  browser, Worker, and the DO test environment.
+- **AutonomyEngine Durable Object** (`worker/src/autonomy/engine.ts`), one per
+  installation (`idFromName` of the token-derived installationId): routine
+  mirror, schedules table, single multiplexed alarm (armed at the earliest
+  due, re-armed in an alarm-handler `finally`), hourly heartbeat/repair sweep,
+  bounded run history (30 d / 1 000) + 200-entry decision journal, Autonomy
+  Context pack, config/state generations, nonce ledger.
+- **Authentication boundary** (§10): bearer reads; HMAC-SHA256 writes over
+  `method + path + timestamp + body` with a ±5 min window and a durable
+  nonce ledger (strict replay rejection); pairing returns
+  `installationId` + capability manifest + schema version; **no public wake
+  endpoint** — the cron reaches the DO only through the Worker→DO binding
+  with an internal marker, and the DO re-verifies every forwarded request
+  independently (defense in depth).
+- **Configuration generation semantics**: the app bumps a monotonic
+  generation on every autonomy configuration change; the DO rejects older
+  generations (409 `stale-config`), never last-write-wins by arrival. A
+  separate internal stateGeneration stamps every scheduler decision for
+  Phase C's between-steps checks.
+- **Occurrence identity through the scheduler**: a due occurrence is the
+  stored due instant; records key on
+  `routineRunKey(routineId, mode, occurrence)` exactly as A0–A1 established.
+  On-time processing (≤ 5 min tolerance) records `scheduled`; late-but-within-grace
+  records `catch-up` with the SOURCE occurrence identity; beyond grace records
+  the reserved `missed` representation. Grace = §7.3 (min(half interval, 6 h);
+  daily until the next scheduled occurrence).
+- **Dry-run honesty**: cloud-locus occurrences record
+  `skipped/SCHEDULER_DRY_RUN`; device-locus (Google-backed) occurrences record
+  `skipped/SCHEDULER_DEVICE_DUE` (the worker never executes them); budget
+  refusals record `skipped/SCHEDULER_BUDGET_EXCEEDED`. The run history and UI
+  label all of these as scheduler observations, never executions.
+- **Autonomy Context** (§8.5): per-memory `autonomyContext` consent flag
+  (Dexie v8, default false); pure shared `buildAutonomyContext()` (existing
+  retrieval scorer, query-less; deterministic order; ≤ 200 records /
+  ≤ 100 KB; stable SHA-256 contentHash); worker-side re-validation with the
+  SAME shared schemas (shape, kinds, count, size, hash — fail closed);
+  atomic replace-all; metadata-only reads (content never echoed); 14-day
+  staleness surfaced in the UI; manual clear. MICRO_OBSERVATION and
+  unconsented/expired/dormant memories never travel.
+- **App integration**: pairing store (client credential, local-only
+  localStorage per §10.2's explicit allowance), signed-write client, sync
+  orchestration (app open / routine save / autonomy change / manual refresh;
+  hash-guarded context sync; stale-generation adoption without re-push),
+  cloud-run mirroring into the LOCAL run history (idempotent by runKey),
+  and the Settings ▸ Autonomy cloud card (scheduler state, next dues,
+  dry-run badge, decision journal, context card with Inspect/Refresh/Clear
+  and the per-memory consent surface).
+- **Tests**: pure scheduler/context/protocol units; REAL DO contract tests
+  (`@cloudflare/vitest-pool-workers`, workerd with real alarms and SQLite
+  storage): registration idempotency, due ordering, re-arm, duplicate
+  at-least-once delivery, repair-sweep reconstruction, catch-up/missed
+  classification, budget enforcement, internal-marker isolation; worker HTTP
+  boundary tests (auth matrix, replay rejection, generation protection,
+  context validation, no-wake, cron handler, installation isolation, CORS);
+  app-side sync orchestration tests; E2E extension with the worker boundary
+  network-mocked.
+- **Tooling**: `npm run test:workers`; `scripts/verify-autonomy-worker.mjs`
+  live smoke (health, pairing, safe context round-trip, generation-guard
+  probe, scheduler observability); reliability-gate invariants for the new
+  architecture (see below); CI runs both test pools.
+
+**Deliberate deviations (documented, not silent):**
+
+1. *Interval anchoring:* the design says intervals are "anchored at routine
+   creation (and re-anchored on each run)". Implementation anchors on
+   `createdAt` ONLY. On-grid the two are equivalent (an occurrence is a grid
+   tick); a single anchor also makes alarm-driven re-arms and heartbeat
+   repairs converge on the same grid instead of oscillating between
+   re-anchored and reconstructed ones. Waking-window shifts rebase onto the
+   creation grid deterministically.
+2. *Overweight repair:* the heartbeat's reconciliation now PRESERVES
+   unprocessed overdue schedule rows instead of recomputing them — the
+   original draft would have erased exactly the deploy-gap appointments the
+   repair sweep exists to process (found by the contract tests, fixed in
+   `planScheduleReconciliation`).
+3. *policy.catchUp* (§5's `'never' | 'if-late-under-6h'`) remains unimplemented:
+   Phase B applies the §7.3 default grace semantics uniformly. The field
+   arrives with real execution semantics in Phase C/F.
+4. *Test-binary compatibility date:* the bundled workerd test binary supports
+   compatibility dates up to 2026-08-22, so the test pool runs at that date
+   while `wrangler.toml` deploys at 2026-09-03. Nothing in the worker depends
+   on newer flags.
+
+**Partially implemented:**
+
+- App-open sync runs from the app shell AND the Autonomy panel mount; the
+  panel is the status surface. Both are fire-and-forget and local-first (a
+  cloud failure never blocks the app).
+- The per-memory consent UI lives in the Autonomy Context card (Inspect);
+  Memory Bank bulk actions (§8.5's folder/tag include-exclude) are Phase G.
+- `maxEventsPerDay` is synced to the worker mirror but not enforced there —
+  no cloud events exist until Phase C; local enforcement is unchanged.
+- The DO's `routines` mirror stores full routine records (the disposable
+  mirror per §8.1) — instruction text included; by design, stated in the user
+  guide's data-movement table.
+
+**Known limitations:**
+
+- The overlap and stale-crash branches of the cloud claim decision are proven
+  at the pure level (`decideRunClaim`) — no reachable Phase B path leaves a
+  run in flight (dry-runs terminalize atomically); Phase C's executor
+  exercises them in the DO through the same decision function.
+- Platform-level alarm-retry *backoff* (workerd fault injection) is not
+  exercisable in tests; duplicate alarm DELIVERY — the semantic that matters —
+  is covered.
+- The bundled workerd test binary caps at compatibility date 2026-08-22
+  (tests) while deployment targets 2026-09-03; no worker feature depends on
+  newer flags.
+
+**Follow-up recommendations (Phase C entry criteria):**
+
+- Replace the dry-run finalizer in `AutonomyEngine.processDue` with the
+  Workflow dispatch (instance id = runKey); the claim, generation, and
+  occurrence-identity contracts are already in place and mechanically tested.
+- Enforce `maxEventsPerDay` worker-side once cloud events exist.
+- Exercise the in-flight claim branches in the DO once execution is async.
+- Scope `STALE_RUN_MS` per execution locus when cloud runs exceed local
+  budgets (the A1 note, now applied to `CLOUD_STALE_RUN_MS`).
+
 What is deliberately NOT in this slice (all Phase B+ unless noted): no Cloudflare execution, no
 Cron/DO/Workflow, no push, no server-side Google OAuth, no background execution of any kind;
 the A1-row items `autonomyContext` memory consent flag, `buildAutonomyContext()` projection

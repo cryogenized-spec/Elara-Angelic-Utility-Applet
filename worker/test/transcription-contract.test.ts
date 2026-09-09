@@ -13,7 +13,7 @@ vi.mock('@google/genai', () => ({
   },
 }));
 
-import worker from './index';
+import worker from '../src/index';
 
 describe('VTT transcription Worker contract', () => {
   const env = {

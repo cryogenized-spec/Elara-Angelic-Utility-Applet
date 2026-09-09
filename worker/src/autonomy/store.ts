@@ -1,0 +1,221 @@
+import {
+  CLOUD_RUN_RETENTION_COUNT,
+  CLOUD_RUN_RETENTION_MS,
+  SCHEDULER_JOURNAL_MAX,
+  type SchedulerJournalEntry,
+} from '../../../src/autonomy/scheduler';
+import { normalizeRoutine, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+
+// ---------------------------------------------------------------------------
+// Durable Object storage — one SQLite-backed AutonomyEngine per installation.
+//
+// The tables are the DO's private, disposable mirror: the app remains the
+// source of truth for routines; deleting the worker deployment destroys only
+// this state. Schema initialization is idempotent (CREATE IF NOT EXISTS) and
+// versioned via meta.schemaVersion so a fresh install starts cleanly and a
+// future schema change is an explicit, reviewable migration.
+// ---------------------------------------------------------------------------
+
+const SCHEMA_VERSION = '1';
+
+export interface StoredSchedule {
+  routineId: string;
+  dueAt: number;
+  updatedAt: number;
+}
+
+export interface StoredRun {
+  record: RoutineRunRecord;
+  generation: number;
+  locus: 'cloud' | 'device';
+}
+
+export interface StoredContextPack {
+  contentHash: string;
+  syncedAt: number;
+  generation: number;
+  recordCount: number;
+  byteSize: number;
+  records: string;
+}
+
+export interface ContextMetadata {
+  contentHash: string;
+  syncedAt: number;
+  generation: number;
+  recordCount: number;
+  byteSize: number;
+}
+
+type MetaKey = 'schemaVersion' | 'configGeneration' | 'stateGeneration' | 'autonomyEnabled' | 'maxEventsPerDay' | 'lastHeartbeatAt' | 'lastSyncedAt';
+
+/** Thin typed layer over DO SQL. Every statement is one exec call. */
+export class AutonomyStore {
+  constructor(private readonly sql: DurableObjectSql) {}
+
+  ensureSchema(): void {
+    this.sql.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS routines (id TEXT PRIMARY KEY, record TEXT NOT NULL, updatedAt INTEGER NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS schedules (routineId TEXT PRIMARY KEY, dueAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS schedules_due ON schedules(dueAt)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, runKey TEXT NOT NULL UNIQUE, routineId TEXT NOT NULL, record TEXT NOT NULL, generation INTEGER NOT NULL, locus TEXT NOT NULL, startedAt INTEGER NOT NULL)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS runs_started ON runs(startedAt)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS runs_routine ON runs(routineId)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS journal (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, generation INTEGER NOT NULL, routineId TEXT, occurrence INTEGER, detail TEXT)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS context (id INTEGER PRIMARY KEY CHECK (id = 1), contentHash TEXT NOT NULL, syncedAt INTEGER NOT NULL, generation INTEGER NOT NULL, recordCount INTEGER NOT NULL, byteSize INTEGER NOT NULL, records TEXT NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, seenAt INTEGER NOT NULL)');
+    if (this.getMeta('schemaVersion') === undefined) this.setMeta('schemaVersion', SCHEMA_VERSION);
+  }
+
+  // ----- meta -----
+
+  getMeta(key: MetaKey): string | undefined {
+    const row = this.sql.exec<{ value: string }>('SELECT value FROM meta WHERE key = ?', key).toArray()[0];
+    return row?.value;
+  }
+
+  getMetaNumber(key: MetaKey, fallback: number): number {
+    const value = Number(this.getMeta(key));
+    return Number.isFinite(value) ? value : fallback;
+  }
+
+  getMetaBoolean(key: MetaKey, fallback: boolean): boolean {
+    const value = this.getMeta(key);
+    return value === undefined ? fallback : value === 'true';
+  }
+
+  setMeta(key: MetaKey, value: string): void {
+    this.sql.exec('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, value);
+  }
+
+  // ----- routine mirror (disposable; the app is authoritative) -----
+
+  putRoutine(routine: ElaraRoutine): void {
+    this.sql.exec('INSERT INTO routines (id, record, updatedAt) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET record = excluded.record, updatedAt = excluded.updatedAt', routine.id, JSON.stringify(routine), routine.updatedAt);
+  }
+
+  deleteRoutine(id: string): void {
+    this.sql.exec('DELETE FROM routines WHERE id = ?', id);
+  }
+
+  listRoutines(): ElaraRoutine[] {
+    // normalizeRoutine is the shared fail-closed guard: a corrupted mirror row
+    // is normalized (disabled on unrecognized schedule), never executed as-is.
+    return this.sql.exec<{ record: string }>('SELECT record FROM routines ORDER BY id').toArray().map((row) => normalizeRoutine(JSON.parse(row.record)));
+  }
+
+  getRoutine(id: string): ElaraRoutine | undefined {
+    const row = this.sql.exec<{ record: string }>('SELECT record FROM routines WHERE id = ?', id).toArray()[0];
+    return row ? normalizeRoutine(JSON.parse(row.record)) : undefined;
+  }
+
+  // ----- schedules (the single-alarm multiplexer's table) -----
+
+  upsertSchedule(routineId: string, dueAt: number, updatedAt: number): void {
+    this.sql.exec('INSERT INTO schedules (routineId, dueAt, updatedAt) VALUES (?, ?, ?) ON CONFLICT(routineId) DO UPDATE SET dueAt = excluded.dueAt, updatedAt = excluded.updatedAt', routineId, dueAt, updatedAt);
+  }
+
+  cancelSchedule(routineId: string): void {
+    this.sql.exec('DELETE FROM schedules WHERE routineId = ?', routineId);
+  }
+
+  listSchedules(): StoredSchedule[] {
+    return this.sql.exec<StoredSchedule>('SELECT routineId, dueAt, updatedAt FROM schedules ORDER BY dueAt').toArray();
+  }
+
+  // ----- runs (scheduler observation records) -----
+
+  insertRun(record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device'): void {
+    this.sql.exec('INSERT INTO runs (id, runKey, routineId, record, generation, locus, startedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', record.id, record.runKey, record.routineId, JSON.stringify(record), generation, locus, record.startedAt);
+  }
+
+  /** Rewrite one run row (crash tombstoning): same id, new runKey/state. */
+  replaceRun(originalRunKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device'): void {
+    this.sql.exec('UPDATE runs SET runKey = ?, record = ?, generation = ?, locus = ? WHERE runKey = ?', record.runKey, JSON.stringify(record), generation, locus, originalRunKey);
+  }
+
+  runExists(runKey: string): boolean {
+    return this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM runs WHERE runKey = ?', runKey).toArray()[0]!.n > 0;
+  }
+
+  listRunsForRoutine(routineId: string): StoredRun[] {
+    return this.sql.exec<{ record: string; generation: number; locus: string }>('SELECT record, generation, locus FROM runs WHERE routineId = ? ORDER BY startedAt', routineId)
+      .toArray()
+      .map((row) => ({ record: JSON.parse(row.record) as RoutineRunRecord, generation: row.generation, locus: row.locus as 'cloud' | 'device' }));
+  }
+
+  listRunsSince(since: number, limit = 200): RoutineRunRecord[] {
+    return this.sql.exec<{ record: string }>('SELECT record FROM runs WHERE startedAt > ? ORDER BY startedAt DESC LIMIT ?', since, limit)
+      .toArray()
+      .map((row) => JSON.parse(row.record) as RoutineRunRecord);
+  }
+
+  /**
+   * Bounded retention (30 d / 1 000 — the same contract as the local store).
+   * Maintenance only: called after the authoritative writes of a processing
+   * pass have committed, and never allowed to reject them.
+   */
+  pruneRuns(now: number): void {
+    this.sql.exec('DELETE FROM runs WHERE startedAt < ?', now - CLOUD_RUN_RETENTION_MS);
+    const count = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM runs').toArray()[0]!.n;
+    if (count > CLOUD_RUN_RETENTION_COUNT) {
+      this.sql.exec(`DELETE FROM runs WHERE id IN (SELECT id FROM runs ORDER BY startedAt ASC LIMIT ${count - CLOUD_RUN_RETENTION_COUNT})`);
+    }
+  }
+
+  // ----- journal (bounded scheduler observability) -----
+
+  appendJournal(entry: SchedulerJournalEntry): void {
+    this.sql.exec('INSERT INTO journal (at, kind, generation, routineId, occurrence, detail) VALUES (?, ?, ?, ?, ?, ?)', entry.at, entry.kind, entry.generation, entry.routineId ?? null, entry.occurrence ?? null, entry.detail ?? null);
+    this.sql.exec(`DELETE FROM journal WHERE seq IN (SELECT seq FROM journal ORDER BY seq DESC LIMIT -1 OFFSET ${SCHEDULER_JOURNAL_MAX})`);
+  }
+
+  listJournal(limit = 20): SchedulerJournalEntry[] {
+    return this.sql.exec<{ at: number; kind: string; generation: number; routineId: string | null; occurrence: number | null; detail: string | null }>('SELECT at, kind, generation, routineId, occurrence, detail FROM journal ORDER BY seq DESC LIMIT ?', limit)
+      .toArray()
+      .map((row) => ({
+        at: row.at,
+        kind: row.kind as SchedulerJournalEntry['kind'],
+        generation: row.generation,
+        ...(row.routineId !== null ? { routineId: row.routineId } : {}),
+        ...(row.occurrence !== null ? { occurrence: row.occurrence } : {}),
+        ...(row.detail !== null ? { detail: row.detail } : {}),
+      }));
+  }
+
+  // ----- Autonomy Context pack (read-only input; never echoed, never logged) -----
+
+  replaceContext(pack: StoredContextPack): void {
+    this.sql.exec('INSERT INTO context (id, contentHash, syncedAt, generation, recordCount, byteSize, records) VALUES (1, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET contentHash = excluded.contentHash, syncedAt = excluded.syncedAt, generation = excluded.generation, recordCount = excluded.recordCount, byteSize = excluded.byteSize, records = excluded.records', pack.contentHash, pack.syncedAt, pack.generation, pack.recordCount, pack.byteSize, pack.records);
+  }
+
+  clearContext(): void {
+    this.sql.exec('DELETE FROM context WHERE id = 1');
+  }
+
+  contextMetadata(): ContextMetadata | null {
+    const row = this.sql.exec<ContextMetadata>('SELECT contentHash, syncedAt, generation, recordCount, byteSize FROM context WHERE id = 1').toArray()[0];
+    return row ?? null;
+  }
+
+  contextRecords(): string | null {
+    return this.sql.exec<{ records: string }>('SELECT records FROM context WHERE id = 1').toArray()[0]?.records ?? null;
+  }
+
+  // ----- nonce ledger (strict replay rejection for signed writes) -----
+
+  /**
+   * Record a nonce; returns false when it was already seen (replay). Nonces
+   * older than the signing window are pruned first — the ledger only needs to
+   * remember replays within the ±5-minute acceptance window.
+   */
+  recordNonce(nonce: string, now: number, windowMs: number): boolean {
+    this.sql.exec('DELETE FROM nonces WHERE seenAt < ?', now - windowMs);
+    try {
+      this.sql.exec('INSERT INTO nonces (nonce, seenAt) VALUES (?, ?)', nonce, now);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+}

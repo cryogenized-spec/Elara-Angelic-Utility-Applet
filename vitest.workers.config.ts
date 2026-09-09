@@ -23,6 +23,9 @@ export default defineConfig({
         durableObjects: {
           AUTONOMY: { className: 'AutonomyEngine', useSQLite: true },
         },
+        workflows: {
+          ROUTINE_RUN: { name: 'elara-routine-run', className: 'RoutineRunWorkflow' },
+        },
         bindings: {
           GEMINI_API_KEY: 'test-gemini-key',
           ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io',

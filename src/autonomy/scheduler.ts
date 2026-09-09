@@ -25,7 +25,13 @@ export const SCHEDULER_ON_TIME_TOLERANCE_MS = 5 * 60_000;
  * STALE_RUN_MS in src/persistence/autonomy.ts covers local budgets; this
  * constant covers the Durable Object's own runs table.
  */
-export const CLOUD_STALE_RUN_MS = 15 * 60_000;
+/**
+ * Phase B used a 15-minute stale window. Phase C0 forbids abandoning a cloud
+ * `running` claim on wall-clock alone — Workflow liveness is the recovery
+ * oracle. Callers that still pass a stale window (tests of decideRunClaim)
+ * may override; the DO uses Number.MAX_SAFE_INTEGER.
+ */
+export const CLOUD_STALE_RUN_MS = Number.MAX_SAFE_INTEGER;
 
 /** Bounded cloud run history — mirrors the local retention contract (30 d / 1 000). */
 export const CLOUD_RUN_RETENTION_MS = 30 * 24 * 3_600_000;
@@ -69,6 +75,11 @@ export const SCHEDULER_JOURNAL_KINDS = [
   'config-sync',
   'context-sync',
   'context-clear',
+  'dispatched',
+  'dispatch-failed',
+  'recovered',
+  'completed',
+  'cancelled-admission',
   'error',
 ] as const;
 export type SchedulerJournalKind = (typeof SCHEDULER_JOURNAL_KINDS)[number];

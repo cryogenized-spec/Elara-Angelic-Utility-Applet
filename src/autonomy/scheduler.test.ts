@@ -96,13 +96,19 @@ describe('decideRunClaim — at-least-once wake correctness', () => {
 
   it('a STALE in-flight duplicate is abandoned and the occurrence reclaimed', () => {
     const crashed = makeRun({ id: 'crashed', runKey: 'r-1:scheduled:500', state: 'running', startedAt: NOW - 16 * 60_000 });
-    expect(decideRunClaim([crashed], 'r-1:scheduled:500', 'r-1', NOW)).toEqual({ action: 'claim', abandoned: crashed });
+    const staleMs = 15 * 60_000;
+    expect(decideRunClaim([crashed], 'r-1:scheduled:500', 'r-1', NOW, staleMs)).toEqual({ action: 'claim', abandoned: crashed });
     expect(abandonedRunKey(crashed)).toBe('r-1:scheduled:500#abandoned-crashed');
   });
 
   it('a stale in-flight run for another occurrence is abandoned so it cannot block the routine', () => {
     const crashed = makeRun({ id: 'crashed', runKey: 'r-1:scheduled:100', state: 'pending', startedAt: NOW - 20 * 60_000 });
-    expect(decideRunClaim([crashed], 'r-1:scheduled:500', 'r-1', NOW)).toEqual({ action: 'claim', abandoned: crashed });
+    expect(decideRunClaim([crashed], 'r-1:scheduled:500', 'r-1', NOW, 15 * 60_000)).toEqual({ action: 'claim', abandoned: crashed });
+  });
+
+  it('cloud default stale window never abandons on wall-clock alone', () => {
+    const running = makeRun({ state: 'running', startedAt: NOW - 24 * 3_600_000 });
+    expect(decideRunClaim([running], 'r-1:scheduled:500', 'r-1', NOW)).toEqual({ action: 'in-flight', run: running });
   });
 });
 

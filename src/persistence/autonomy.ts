@@ -214,7 +214,8 @@ export async function claimRoutineRun(run: RoutineRunRecord, now = Date.now()): 
     if (duplicate) {
       const duplicateInFlight = duplicate.state === 'pending' || duplicate.state === 'running';
       if (!duplicateInFlight) return { status: 'already-executed', run: duplicate };
-      if (now - duplicate.startedAt < STALE_RUN_MS) return { status: 'in-flight', run: duplicate };
+      const mirroredCloud = duplicate.executionMode === 'scheduled' || duplicate.executionMode === 'catch-up';
+      if (mirroredCloud || now - duplicate.startedAt < STALE_RUN_MS) return { status: 'in-flight', run: duplicate };
       await db.runs.put({
         ...duplicate,
         runKey: `${duplicate.runKey}#abandoned-${duplicate.id}`,
@@ -229,8 +230,9 @@ export async function claimRoutineRun(run: RoutineRunRecord, now = Date.now()): 
       return { status: 'claimed', run };
     }
 
-    const inFlight = existing.filter((candidate) => (candidate.state === 'pending' || candidate.state === 'running') && now - candidate.startedAt < STALE_RUN_MS);
-    const stale = existing.filter((candidate) => (candidate.state === 'pending' || candidate.state === 'running') && now - candidate.startedAt >= STALE_RUN_MS);
+    const isCloudMirrored = (candidate: RoutineRunRecord) => candidate.executionMode === 'scheduled' || candidate.executionMode === 'catch-up';
+    const inFlight = existing.filter((candidate) => (candidate.state === 'pending' || candidate.state === 'running') && (isCloudMirrored(candidate) || now - candidate.startedAt < STALE_RUN_MS));
+    const stale = existing.filter((candidate) => (candidate.state === 'pending' || candidate.state === 'running') && !isCloudMirrored(candidate) && now - candidate.startedAt >= STALE_RUN_MS);
     for (const crashed of stale) {
       // Crash recovery: keep history truthful and unblock the routine. The run
       // record (with its denormalized routine name) survives as the evidence.

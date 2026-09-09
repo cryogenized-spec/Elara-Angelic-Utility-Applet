@@ -5,6 +5,7 @@ import {
   type SchedulerJournalEntry,
 } from '../../../src/autonomy/scheduler';
 import { normalizeRoutine, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+import type { RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 
 // ---------------------------------------------------------------------------
 // Durable Object storage — one SQLite-backed AutonomyEngine per installation.
@@ -16,7 +17,7 @@ import { normalizeRoutine, type ElaraRoutine, type RoutineRunRecord } from '../.
 // future schema change is an explicit, reviewable migration.
 // ---------------------------------------------------------------------------
 
-const SCHEMA_VERSION = '1';
+const SCHEMA_VERSION = '2';
 
 export interface StoredSchedule {
   routineId: string;
@@ -64,7 +65,8 @@ export class AutonomyStore {
     this.sql.exec('CREATE TABLE IF NOT EXISTS journal (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, generation INTEGER NOT NULL, routineId TEXT, occurrence INTEGER, detail TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS context (id INTEGER PRIMARY KEY CHECK (id = 1), contentHash TEXT NOT NULL, syncedAt INTEGER NOT NULL, generation INTEGER NOT NULL, recordCount INTEGER NOT NULL, byteSize INTEGER NOT NULL, records TEXT NOT NULL)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, seenAt INTEGER NOT NULL)');
-    if (this.getMeta('schemaVersion') === undefined) this.setMeta('schemaVersion', SCHEMA_VERSION);
+    this.sql.exec('CREATE TABLE IF NOT EXISTS envelopes (runKey TEXT PRIMARY KEY, workflowInstanceId TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, dispatched INTEGER NOT NULL, scheduleAdvanced INTEGER NOT NULL)');
+    this.setMeta('schemaVersion', SCHEMA_VERSION);
   }
 
   // ----- meta -----
@@ -134,8 +136,49 @@ export class AutonomyStore {
     this.sql.exec('UPDATE runs SET runKey = ?, record = ?, generation = ?, locus = ? WHERE runKey = ?', record.runKey, JSON.stringify(record), generation, locus, originalRunKey);
   }
 
+  /** Terminalize an in-flight run without changing its canonical runKey. */
+  updateRunRecord(runKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device'): void {
+    this.sql.exec('UPDATE runs SET record = ?, generation = ?, locus = ? WHERE runKey = ?', JSON.stringify(record), generation, locus, runKey);
+  }
+
   runExists(runKey: string): boolean {
     return this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM runs WHERE runKey = ?', runKey).toArray()[0]!.n > 0;
+  }
+
+  getStoredRun(runKey: string): StoredRun | undefined {
+    const row = this.sql.exec<{ record: string; generation: number; locus: string }>('SELECT record, generation, locus FROM runs WHERE runKey = ?', runKey).toArray()[0];
+    return row ? { record: JSON.parse(row.record) as RoutineRunRecord, generation: row.generation, locus: row.locus as 'cloud' | 'device' } : undefined;
+  }
+
+  listRunningCloud(): StoredRun[] {
+    return this.sql.exec<{ record: string; generation: number; locus: string }>('SELECT record, generation, locus FROM runs WHERE locus = ? ORDER BY startedAt', 'cloud')
+      .toArray()
+      .map((row) => ({ record: JSON.parse(row.record) as RoutineRunRecord, generation: row.generation, locus: row.locus as 'cloud' | 'device' }))
+      .filter((stored) => stored.record.state === 'pending' || stored.record.state === 'running');
+  }
+
+  putEnvelope(envelope: RoutineRunEnvelope, dispatched: boolean, scheduleAdvanced: boolean): void {
+    this.sql.exec(
+      'INSERT INTO envelopes (runKey, workflowInstanceId, payload, dispatched, scheduleAdvanced) VALUES (?, ?, ?, ?, ?) ON CONFLICT(runKey) DO UPDATE SET workflowInstanceId = excluded.workflowInstanceId, payload = excluded.payload, dispatched = excluded.dispatched, scheduleAdvanced = excluded.scheduleAdvanced',
+      envelope.runKey,
+      envelope.workflowInstanceId,
+      JSON.stringify(envelope),
+      dispatched ? 1 : 0,
+      scheduleAdvanced ? 1 : 0,
+    );
+  }
+
+  getEnvelope(runKey: string): { envelope: RoutineRunEnvelope; dispatched: boolean; scheduleAdvanced: boolean } | undefined {
+    const row = this.sql.exec<{ payload: string; dispatched: number; scheduleAdvanced: number }>('SELECT payload, dispatched, scheduleAdvanced FROM envelopes WHERE runKey = ?', runKey).toArray()[0];
+    return row ? { envelope: JSON.parse(row.payload) as RoutineRunEnvelope, dispatched: row.dispatched === 1, scheduleAdvanced: row.scheduleAdvanced === 1 } : undefined;
+  }
+
+  markEnvelopeDispatched(runKey: string): void {
+    this.sql.exec('UPDATE envelopes SET dispatched = 1 WHERE runKey = ?', runKey);
+  }
+
+  markEnvelopeScheduleAdvanced(runKey: string): void {
+    this.sql.exec('UPDATE envelopes SET scheduleAdvanced = 1 WHERE runKey = ?', runKey);
   }
 
   listRunsForRoutine(routineId: string): StoredRun[] {

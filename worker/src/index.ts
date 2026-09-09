@@ -8,6 +8,7 @@ import { autonomyPreflight, handleAutonomyRoute } from './autonomy/routes';
 // The Phase B autonomy engine Durable Object (one per installation). Re-exported
 // so the AUTONOMY binding can construct it.
 export { AutonomyEngine } from './autonomy/engine';
+export { RoutineRunWorkflow } from './autonomy/workflow';
 
 export interface Env {
   GEMINI_API_KEY: string;
@@ -16,6 +17,8 @@ export interface Env {
   ELARA_INSTALLATION_TOKEN?: string;
   /** The per-installation autonomy scheduler Durable Object. */
   AUTONOMY?: DurableObjectNamespace;
+  /** Phase C0 routine-run Workflow binding. */
+  ROUTINE_RUN?: Workflow;
 }
 
 const toolResultSchema = z.object({

@@ -21,10 +21,10 @@ import {
 // the DO only through the Worker→DO binding (see scheduled() in index.ts).
 // ---------------------------------------------------------------------------
 
-export const AUTONOMY_WORKER_VERSION = '1.0.0-phase-b';
+export const AUTONOMY_WORKER_VERSION = '1.0.0-phase-c0';
 export const AUTONOMY_SCHEMA_VERSION = 1;
 /** What this deployment supports — the app refuses to enable autonomy on mismatch. */
-export const AUTONOMY_CAPABILITIES = ['config-sync', 'context-sync', 'scheduler-dry-run'] as const;
+export const AUTONOMY_CAPABILITIES = ['config-sync', 'context-sync', 'scheduler-dry-run', 'routine-run-workflow'] as const;
 export const AUTONOMY_CRON = '0 * * * *';
 
 export interface AutonomyEnv {

@@ -31,7 +31,7 @@ import {
 import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type AutonomousEvent, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
 import { routineRunEnvelopeSchema, runCompleteRequestSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 import { eventIdForRunKey, workflowInstanceIdForRunKey } from '../../../src/autonomy/workflow-identity';
-import { evaluateEventAdmission, noveltyFingerprint } from '../../../src/autonomy/policy';
+import { noveltyFingerprint } from '../../../src/autonomy/policy';
 import type { CloudAdmitResult } from '../../../src/autonomy/cloud-result';
 import { AutonomyStore } from './store';
 import type { SchedulerPort } from './ports';
@@ -656,7 +656,7 @@ export class AutonomyEngine extends DurableObject {
         errorCode: 'cancelled-admission',
         errorMessage: 'Live gate closed before events could be admitted.',
       };
-      this.store.admitCompletedRun(runKey, record, generation, stored.locus, null);
+      this.store.admitCompletedRun(runKey, record, generation, stored.locus);
       this.journal(now, 'cancelled-admission', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
       if (liveRoutine) this.advanceScheduleIfNeeded(runKey, liveRoutine, now, generation, stored.record.scheduledFor);
       return { status: 200, body: { status: 'cancelled', runKey, alreadyCompleted: false, cancelled: true } };
@@ -680,7 +680,7 @@ export class AutonomyEngine extends DurableObject {
     if (result.disposition === 'error') {
       this.store.admitCompletedRun(stored.runKey, {
         ...stored, completedAt: now, state: 'failed', outcome: 'error', errorCode: result.errorCode, errorMessage: result.errorMessage,
-      }, generation, locus, null);
+      }, generation, locus);
       return { status: 'failed' };
     }
     if (result.disposition === 'noop' || result.disposition === 'cannot_act') {
@@ -691,30 +691,10 @@ export class AutonomyEngine extends DurableObject {
         outcome: 'no-op',
         reason: result.reason,
         itemsExamined: result.disposition === 'noop' ? result.itemsExamined : undefined,
-      }, generation, locus, null);
+      }, generation, locus);
       return { status: 'completed' };
     }
     const fingerprint = noveltyFingerprint(frozen.id, result.title, result.summary);
-    const recent = this.store.listRecentEvents(now - 7 * 24 * 3_600_000);
-    const admission = evaluateEventAdmission({
-      routineId: frozen.id,
-      fingerprint,
-      recentEvents: recent,
-      policy: frozen.policy,
-      maxEventsPerDay: this.store.getMetaNumber('maxEventsPerDay', 10),
-      now,
-    });
-    if (!admission.admitted) {
-      this.store.admitCompletedRun(stored.runKey, {
-        ...stored,
-        completedAt: now,
-        state: 'completed',
-        outcome: 'suppressed',
-        suppressedReason: admission.reason,
-        reason: admission.detail,
-      }, generation, locus, null);
-      return { status: 'suppressed' };
-    }
     const event: AutonomousEvent = {
       id: await eventIdForRunKey(stored.runKey),
       routineId: frozen.id,
@@ -728,17 +708,8 @@ export class AutonomyEngine extends DurableObject {
       createdAt: now,
       readAt: null,
     };
-    const written = this.store.admitCompletedRun(stored.runKey, {
-      ...stored,
-      completedAt: now,
-      state: 'completed',
-      outcome: 'event',
-      eventId: event.id,
-      itemsExamined: result.itemsExamined,
-    }, generation, locus, event);
-    if (written === 'duplicate') {
-      return { status: 'completed' };
-    }
+    const written = this.store.admitProposedEvent({ stored, frozen, event, generation, locus, now });
+    if (written === 'suppressed') return { status: 'suppressed' };
     return { status: 'completed' };
   }
 

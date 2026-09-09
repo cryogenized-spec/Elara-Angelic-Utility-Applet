@@ -224,7 +224,7 @@ if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('
 if (wranglerSource.includes('C1_MODEL_STUB')) throw new Error('Reliability gate: C1_MODEL_STUB must not be declared in production wrangler.');
 if (workflowSource.includes('C0_SHELL') || engineSource.includes('C0_SHELL')) throw new Error('Reliability gate: C0 shell completion must not remain after C1.');
 if (!workflowSource.includes('executeCloudRoutine')) throw new Error('Reliability gate: the Workflow must execute the C1 model step.');
-if (!engineSource.includes('evaluateEventAdmission')) throw new Error('Reliability gate: the DO must admit events in code, not in the model.');
+if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('admitProposedEvent')) throw new Error('Reliability gate: event admission policy must run inside the DO transaction.');
 if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('CREATE TABLE IF NOT EXISTS events')) throw new Error('Reliability gate: cloud events must be durable.');
 
 // The shared scheduler domain stays pure (no Cloudflare, browser, or provider imports).

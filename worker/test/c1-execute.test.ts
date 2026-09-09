@@ -24,7 +24,7 @@ function envelope(): RoutineRunEnvelope {
 describe('C1 executeCloudRoutine', () => {
   it('returns GEMINI_UNAVAILABLE when the key is missing', async () => {
     const result = await executeCloudRoutine(envelope(), { C1_MODEL_STUB: 'missing-key' });
-    expect(result).toMatchObject({ disposition: 'error', errorCode: 'GEMINI_UNAVAILABLE' });
+    expect(result).toMatchObject({ disposition: 'error', source: 'execution', errorCode: 'GEMINI_UNAVAILABLE' });
   });
 
   it('returns a contract error for malformed stub output', async () => {

@@ -7,6 +7,7 @@ import {
   type SchedulerJournalEntry,
 } from '../../../src/autonomy/scheduler';
 import { normalizeRoutine, type AutonomousEvent, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+import { evaluateEventAdmission } from '../../../src/autonomy/policy';
 import type { RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 
 // ---------------------------------------------------------------------------
@@ -54,6 +55,11 @@ type MetaKey = 'schemaVersion' | 'configGeneration' | 'stateGeneration' | 'auton
 
 function isActiveRunState(state: RoutineRunRecord['state']): boolean {
   return state === 'pending' || state === 'running';
+}
+
+function isUniqueConstraint(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /UNIQUE|SQLITE_CONSTRAINT/i.test(message);
 }
 
 /** Thin typed layer over DO SQL. Every statement is one exec call. */
@@ -260,20 +266,15 @@ export class AutonomyStore {
     this.pruneEvents(now);
   }
 
-  insertEvent(event: AutonomousEvent): boolean {
-    try {
-      this.sql.exec(
-        'INSERT INTO events (id, runKey, routineId, record, createdAt) VALUES (?, ?, ?, ?, ?)',
-        event.id,
-        event.runKey,
-        event.routineId,
-        JSON.stringify(event),
-        event.createdAt,
-      );
-      return true;
-    } catch {
-      return false;
-    }
+  insertEvent(event: AutonomousEvent): void {
+    this.sql.exec(
+      'INSERT INTO events (id, runKey, routineId, record, createdAt) VALUES (?, ?, ?, ?, ?)',
+      event.id,
+      event.runKey,
+      event.routineId,
+      JSON.stringify(event),
+      event.createdAt,
+    );
   }
 
   getEventByRunKey(runKey: string): AutonomousEvent | undefined {
@@ -293,20 +294,69 @@ export class AutonomyStore {
       .map((row) => JSON.parse(row.record) as AutonomousEvent);
   }
 
-  admitCompletedRun(runKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device', event: AutonomousEvent | null): 'admitted' | 'duplicate' {
-    let outcome: 'admitted' | 'duplicate' = 'admitted';
+  admitCompletedRun(runKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device'): void {
+    this.updateRunRecord(runKey, record, generation, locus);
+  }
+
+  /**
+   * Authoritative event admission: policy (cooldown / duplicate fingerprint /
+   * rolling 24h cap) is evaluated INSIDE the same SQLite transaction as the
+   * insert. Two distinct runKeys cannot jointly exceed maxEventsPerDay.
+   *
+   * UNIQUE conflicts on this runKey are duplicates. Any other SQL failure
+   * throws so the Workflow retries.
+   */
+  admitProposedEvent(input: {
+    stored: RoutineRunRecord;
+    frozen: ElaraRoutine;
+    event: AutonomousEvent;
+    generation: number;
+    locus: 'cloud' | 'device';
+    now: number;
+  }): 'event' | 'suppressed' | 'duplicate' {
+    let outcome: 'event' | 'suppressed' | 'duplicate' = 'event';
     this.transact(() => {
-      if (event) {
-        if (this.getEventByRunKey(event.runKey)) {
-          outcome = 'duplicate';
-          return;
-        }
-        if (!this.insertEvent(event)) {
-          outcome = 'duplicate';
-          return;
-        }
+      if (this.getEventByRunKey(input.event.runKey)) {
+        outcome = 'duplicate';
+        return;
       }
-      this.updateRunRecord(runKey, record, generation, locus);
+      const admission = evaluateEventAdmission({
+        routineId: input.frozen.id,
+        fingerprint: input.event.noveltyFingerprint,
+        recentEvents: this.listRecentEvents(input.now - 7 * 24 * 3_600_000),
+        policy: input.frozen.policy,
+        maxEventsPerDay: this.getMetaNumber('maxEventsPerDay', 10),
+        now: input.now,
+      });
+      if (!admission.admitted) {
+        this.updateRunRecord(input.stored.runKey, {
+          ...input.stored,
+          completedAt: input.now,
+          state: 'completed',
+          outcome: 'suppressed',
+          suppressedReason: admission.reason,
+          reason: admission.detail,
+        }, input.generation, input.locus);
+        outcome = 'suppressed';
+        return;
+      }
+      try {
+        this.insertEvent(input.event);
+      } catch (error) {
+        if (isUniqueConstraint(error) && this.getEventByRunKey(input.event.runKey)) {
+          outcome = 'duplicate';
+          return;
+        }
+        throw error;
+      }
+      this.updateRunRecord(input.stored.runKey, {
+        ...input.stored,
+        completedAt: input.now,
+        state: 'completed',
+        outcome: 'event',
+        eventId: input.event.id,
+      }, input.generation, input.locus);
+      outcome = 'event';
     });
     return outcome;
   }

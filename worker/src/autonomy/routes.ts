@@ -21,7 +21,7 @@ import {
 // the DO only through the Worker→DO binding (see scheduled() in index.ts).
 // ---------------------------------------------------------------------------
 
-export const AUTONOMY_WORKER_VERSION = '1.0.0-phase-c0';
+export const AUTONOMY_WORKER_VERSION = '1.0.0-phase-c1';
 export const AUTONOMY_SCHEMA_VERSION = 1;
 /** What this deployment supports — the app refuses to enable autonomy on mismatch. */
 export const AUTONOMY_CAPABILITIES = ['config-sync', 'context-sync', 'scheduler-live', 'routine-run-workflow', 'cloud-execution'] as const;

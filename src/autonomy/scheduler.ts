@@ -238,6 +238,15 @@ export function nextAlarmTime(entries: readonly SchedulerEntry[]): number | null
   return entries.length ? Math.min(...entries.map((entry) => entry.dueAt)) : null;
 }
 
+/**
+ * Next due instant after a processed occurrence. Recovery MUST call this with
+ * the original occurrence, never wall-clock `now`: recomputing from recovery
+ * time can skip intervening occurrences.
+ */
+export function nextOccurrenceAfterProcessed(routine: ElaraRoutine, occurrence: number): number {
+  return computeNextOccurrence(routine.schedule, routine.timezone, occurrence, { anchor: routine.createdAt });
+}
+
 // ---------------------------------------------------------------------------
 // Scheduler observation records
 // ---------------------------------------------------------------------------

@@ -18,6 +18,8 @@ export interface PairResult {
   schemaVersion: number;
   capabilities: string[];
   cron: string;
+  schedulerLive?: boolean;
+  agentExecution?: boolean;
   dryRun: boolean;
 }
 
@@ -49,6 +51,8 @@ export interface CloudSchedulerRoutineState {
 
 export interface CloudSchedulerState {
   paired: boolean;
+  schedulerLive?: boolean;
+  agentExecution?: boolean;
   dryRun: boolean;
   generation: number;
   stateGeneration: number;

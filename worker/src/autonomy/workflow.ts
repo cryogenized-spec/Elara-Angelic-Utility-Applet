@@ -10,6 +10,7 @@ import type { Env } from '../index';
 // step asks the Durable Object to complete the claim. The DO returns an
 // explicit status. Only `retryable-error` (HTTP 5xx) retries the step.
 // claim-not-found is a terminal failure, never "already completed".
+// create()/get() prove instance identity/existence, not liveness.
 // ---------------------------------------------------------------------------
 
 export class RoutineRunWorkflow extends WorkflowEntrypoint<Env, RoutineRunEnvelope> {

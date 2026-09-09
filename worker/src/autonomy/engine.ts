@@ -22,12 +22,12 @@ import {
   classifyDueOccurrence,
   decideRunClaim,
   nextAlarmTime,
+  nextOccurrenceAfterProcessed,
   planScheduleReconciliation,
   schedulerBudgetUsed,
   type SchedulerJournalEntry,
   type SchedulerJournalKind,
 } from '../../../src/autonomy/scheduler';
-import { computeNextOccurrence } from '../../../src/autonomy/schedule';
 import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
 import { C0_SHELL_CODE, routineRunEnvelopeSchema, runCompleteRequestSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 import { workflowInstanceIdForRunKey } from '../../../src/autonomy/workflow-identity';
@@ -207,12 +207,6 @@ export class AutonomyEngine extends DurableObject {
       if (request.method === 'POST' && path === '/run/complete') {
         if (!(await this.verifyInternal(request))) return Response.json({ code: 'not_found', message: 'Not found.' }, { status: 404 });
         const result = await this.completeClaim(jsonSafe(await request.text()), Date.now());
-        return this.json(result.body, result.status);
-      }
-      // Binding-internal C0 crash-window fixtures (never publicly routed).
-      if (request.method === 'POST' && path === '/c0/fixture') {
-        if (!(await this.verifyInternal(request))) return Response.json({ code: 'not_found', message: 'Not found.' }, { status: 404 });
-        const result = await this.c0Fixture(jsonSafe(await request.text()), Date.now());
         return this.json(result.body, result.status);
       }
       return Response.json({ code: 'not_found', message: 'Not found.' }, { status: 404 });
@@ -521,7 +515,11 @@ export class AutonomyEngine extends DurableObject {
   /**
    * Stage 2: create the Workflow. create() throwing is not success unless
    * get(id) then proves the instance exists (duplicate id, or crash after
-   * create). Any other failure is dispatch-failed and retried by heartbeat.
+   * create). get() proves instance identity/existence, not liveness or health.
+   * Any other failure is dispatch-failed and retried by heartbeat.
+   *
+   * Envelope generations (configGeneration, stateGeneration) are frozen
+   * snapshots of the claim. Mid-run generation checks are Phase C2.
    */
   private async dispatchWorkflow(envelope: RoutineRunEnvelope, now: number, generation: number): Promise<boolean> {
     const binding = this.autonomyEnv.ROUTINE_RUN;
@@ -592,14 +590,13 @@ export class AutonomyEngine extends DurableObject {
   private advanceScheduleIfNeeded(runKey: string, routine: ElaraRoutine, now: number, generation: number, occurrence: number): void {
     const row = this.store.getEnvelope(runKey);
     if (row?.scheduleAdvanced) return;
-    this.advanceSchedule(routine, now, generation, occurrence);
-    this.store.markEnvelopeScheduleAdvanced(runKey);
+    this.advanceSchedule(routine, now, generation, occurrence, runKey);
   }
 
-  private advanceSchedule(routine: ElaraRoutine, now: number, generation: number, occurrence: number): void {
+  private advanceSchedule(routine: ElaraRoutine, now: number, generation: number, occurrence: number, runKey: string | null = null): void {
     try {
-      const next = computeNextOccurrence(routine.schedule, routine.timezone, now, { anchor: routine.createdAt });
-      this.store.upsertSchedule(routine.id, next, now);
+      const next = nextOccurrenceAfterProcessed(routine, occurrence);
+      this.store.commitScheduleAdvance(routine.id, next, now, runKey);
     } catch (error) {
       this.store.cancelSchedule(routine.id);
       this.journal(now, 'error', { generation, routineId: routine.id, occurrence, detail: `next-occurrence computation failed: ${error instanceof Error ? error.message : 'unknown'}` });
@@ -621,7 +618,10 @@ export class AutonomyEngine extends DurableObject {
       return { status: 200, body: { status: 'already-completed', runKey, alreadyCompleted: true } };
     }
     const envelopeRow = this.store.getEnvelope(runKey);
-    if (envelopeRow && envelopeRow.envelope.workflowInstanceId !== workflowInstanceId) {
+    if (!envelopeRow) {
+      return { status: 500, body: { status: 'retryable-error', code: 'missing-envelope', message: 'Active claim is missing its frozen envelope; retry after recovery.' } };
+    }
+    if (envelopeRow.envelope.workflowInstanceId !== workflowInstanceId) {
       return { status: 409, body: { status: 'identity-mismatch', code: 'identity-mismatch', message: 'Workflow instance id does not match the frozen envelope.' } };
     }
     const routine = this.store.getRoutine(stored.record.routineId);
@@ -641,48 +641,48 @@ export class AutonomyEngine extends DurableObject {
     return { status: 200, body: { status: cancelled ? 'cancelled' : 'completed', runKey, alreadyCompleted: false, cancelled } };
   }
 
-  /** Binding-internal crash-window fixtures. Never publicly routed. */
-  private async c0Fixture(raw: unknown, now: number): Promise<RouteResult> {
-    const body = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
-    const action = typeof body.action === 'string' ? body.action : '';
+  /**
+   * Test-only RPC (not HTTP). Vitest crash windows call these; production
+   * fetch() has no /c0/fixture route.
+   */
+  async claimWithoutDispatch(routineId: string, dueAt: number): Promise<{ runKey: string; workflowInstanceId: string; dispatched: boolean }> {
+    const now = Date.now();
     const generation = this.stateGeneration();
-    if (action === 'claim-without-dispatch') {
-      const routineId = String(body.routineId ?? '');
-      const dueAt = Number(body.dueAt);
-      const routine = this.store.getRoutine(routineId);
-      if (!routine || !Number.isFinite(dueAt)) return { status: 400, body: { code: 'validation', message: 'claim-without-dispatch needs routineId and dueAt.' } };
-      const classification = classifyDueOccurrence(routine.schedule, routine.timezone, dueAt, now);
-      const executionMode = classification.mode === 'catch-up' ? 'catch-up' : 'scheduled';
-      const runKey = routineRunKey(routine.id, executionMode, dueAt);
-      const runId = `run-${crypto.randomUUID()}`;
-      const envelope = await this.freezeEnvelope({ routine, runKey, runId, executionMode, occurrence: dueAt, now, generation });
-      this.store.claimCloudRun({
-        id: runId, runKey, routineId: routine.id, routineName: routine.name, executionMode,
-        scheduledFor: dueAt, startedAt: now, state: 'running',
-      }, envelope, generation);
-      this.store.upsertSchedule(routine.id, dueAt, now);
-      this.journal(now, 'claimed', { generation, routineId: routine.id, occurrence: dueAt, detail: envelope.workflowInstanceId });
-      return { status: 200, body: { runKey, workflowInstanceId: envelope.workflowInstanceId, dispatched: false } };
-    }
-    if (action === 'mark-dispatched-without-advance') {
-      const runKey = String(body.runKey ?? '');
-      const row = this.store.getEnvelope(runKey);
-      if (!row) return { status: 404, body: { code: 'claim-not-found' } };
-      this.store.markEnvelopeDispatched(runKey);
-      return { status: 200, body: { runKey, dispatched: true, scheduleAdvanced: false } };
-    }
-    if (action === 'age-run') {
-      const runKey = String(body.runKey ?? '');
-      const startedAt = Number(body.startedAt);
-      if (!runKey || !Number.isFinite(startedAt)) return { status: 400, body: { code: 'validation' } };
-      this.store.setRunStartedAt(runKey, startedAt);
-      return { status: 200, body: { runKey, startedAt } };
-    }
-    if (action === 'prune') {
-      this.store.pruneRuns(now);
-      return { status: 200, body: { pruned: true } };
-    }
-    return { status: 400, body: { code: 'validation', message: 'Unknown C0 fixture action.' } };
+    const routine = this.store.getRoutine(routineId);
+    if (!routine || !Number.isFinite(dueAt)) throw new Error('claimWithoutDispatch needs routineId and dueAt.');
+    const classification = classifyDueOccurrence(routine.schedule, routine.timezone, dueAt, now);
+    const executionMode = classification.mode === 'catch-up' ? 'catch-up' : 'scheduled';
+    const runKey = routineRunKey(routine.id, executionMode, dueAt);
+    const runId = `run-${crypto.randomUUID()}`;
+    const envelope = await this.freezeEnvelope({ routine, runKey, runId, executionMode, occurrence: dueAt, now, generation });
+    this.store.claimCloudRun({
+      id: runId, runKey, routineId: routine.id, routineName: routine.name, executionMode,
+      scheduledFor: dueAt, startedAt: now, state: 'running',
+    }, envelope, generation);
+    this.store.upsertSchedule(routine.id, dueAt, now);
+    this.journal(now, 'claimed', { generation, routineId: routine.id, occurrence: dueAt, detail: envelope.workflowInstanceId });
+    return { runKey, workflowInstanceId: envelope.workflowInstanceId, dispatched: false };
+  }
+
+  async markDispatchedWithoutAdvance(runKey: string): Promise<{ runKey: string; dispatched: boolean; scheduleAdvanced: boolean }> {
+    const row = this.store.getEnvelope(runKey);
+    if (!row) throw new Error('claim-not-found');
+    this.store.markEnvelopeDispatched(runKey);
+    return { runKey, dispatched: true, scheduleAdvanced: false };
+  }
+
+  async ageRun(runKey: string, startedAt: number): Promise<{ runKey: string; startedAt: number }> {
+    this.store.setRunStartedAt(runKey, startedAt);
+    return { runKey, startedAt };
+  }
+
+  async pruneNow(): Promise<{ pruned: true; envelopeCount: number }> {
+    this.store.pruneRuns(Date.now());
+    return { pruned: true, envelopeCount: this.store.listEnvelopeRunKeys().length };
+  }
+
+  async envelopePresent(runKey: string): Promise<boolean> {
+    return Boolean(this.store.getEnvelope(runKey));
   }
 
   /** Tombstone a crashed in-flight run: same id, freed occurrence key, terminal failed state. */
@@ -708,7 +708,9 @@ export class AutonomyEngine extends DurableObject {
     const alarm = await this.ctx.storage.getAlarm();
     return {
       paired: true,
-      dryRun: true, // Honest until Gemini exists. C0 is a Workflow shell, not model execution.
+      schedulerLive: true,
+      agentExecution: false,
+      dryRun: true, // Compatibility: scheduler is live; agent execution is C2.
       generation: this.store.getMetaNumber('configGeneration', 0),
       stateGeneration: this.stateGeneration(),
       autonomyEnabled: this.store.getMetaBoolean('autonomyEnabled', false),

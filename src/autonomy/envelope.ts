@@ -8,6 +8,7 @@ import { elaraRoutineSchema, ROUTINE_EXECUTION_MODES } from './contracts';
 // The Workflow must not reread the live routine mirror. Instruction, permissions,
 // policy, and Autonomy Context at claim are the only inputs C2 may reason over.
 // Live disable/delete/master-off still gate *admission* at completion (C0).
+// configGeneration/stateGeneration are snapshots. Mid-run checks are C2.
 // ---------------------------------------------------------------------------
 
 export const C0_SHELL_CODE = 'C0_SHELL';
@@ -46,6 +47,7 @@ export const RUN_COMPLETE_STATUSES = [
   'cancelled',
   'claim-not-found',
   'identity-mismatch',
+  'missing-envelope',
   'retryable-error',
 ] as const;
 export type RunCompleteStatus = (typeof RUN_COMPLETE_STATUSES)[number];

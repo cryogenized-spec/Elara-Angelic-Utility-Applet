@@ -199,6 +199,25 @@ export class AutonomyStore {
     this.sql.exec('UPDATE envelopes SET scheduleAdvanced = 1 WHERE runKey = ?', runKey);
   }
 
+  /**
+   * Write the next due instant and the scheduleAdvanced marker together so a
+   * crash cannot leave the schedule moved without the marker (or vice versa).
+   */
+  commitScheduleAdvance(routineId: string, nextDueAt: number, updatedAt: number, runKey: string | null): void {
+    this.transact(() => {
+      this.upsertSchedule(routineId, nextDueAt, updatedAt);
+      if (runKey) this.markEnvelopeScheduleAdvanced(runKey);
+    });
+  }
+
+  listEnvelopeRunKeys(): string[] {
+    return this.sql.exec<{ runKey: string }>('SELECT runKey FROM envelopes').toArray().map((row) => row.runKey);
+  }
+
+  deleteEnvelope(runKey: string): void {
+    this.sql.exec('DELETE FROM envelopes WHERE runKey = ?', runKey);
+  }
+
   listRunsForRoutine(routineId: string): StoredRun[] {
     return this.sql.exec<{ record: string; generation: number; locus: string }>('SELECT record, generation, locus FROM runs WHERE routineId = ? ORDER BY startedAt', routineId)
       .toArray()
@@ -232,6 +251,20 @@ export class AutonomyStore {
         .sort((a, b) => a.startedAt - b.startedAt)
         .slice(0, excess);
       for (const row of evict) this.sql.exec('DELETE FROM runs WHERE id = ?', row.id);
+    }
+    this.pruneEnvelopes();
+  }
+
+  /**
+   * Envelopes follow execution state, not unbounded history:
+   * active pending/running claims keep their envelope; terminal or already-
+   * pruned runs drop it (Workflow recovery no longer needs the payload).
+   */
+  pruneEnvelopes(): void {
+    for (const runKey of this.listEnvelopeRunKeys()) {
+      const stored = this.getStoredRun(runKey);
+      if (stored && isActiveRunState(stored.record.state)) continue;
+      this.deleteEnvelope(runKey);
     }
   }
 

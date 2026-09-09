@@ -92,6 +92,8 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
         schemaVersion: AUTONOMY_SCHEMA_VERSION,
         capabilities: AUTONOMY_CAPABILITIES,
         cron: AUTONOMY_CRON,
+        schedulerLive: true,
+        agentExecution: false,
         dryRun: true,
       },
     }, 200, corsOrigin);
@@ -115,6 +117,8 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
       schemaVersion: AUTONOMY_SCHEMA_VERSION,
       capabilities: AUTONOMY_CAPABILITIES,
       cron: AUTONOMY_CRON,
+      schedulerLive: true,
+      agentExecution: false,
       dryRun: true,
     }, 200, corsOrigin);
   }

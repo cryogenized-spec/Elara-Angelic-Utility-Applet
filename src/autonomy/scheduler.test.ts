@@ -9,6 +9,7 @@ import {
   classifyDueOccurrence,
   decideRunClaim,
   nextAlarmTime,
+  nextOccurrenceAfterProcessed,
   occurrenceGraceUntil,
   planScheduleReconciliation,
   schedulerBudgetUsed,
@@ -168,6 +169,19 @@ describe('planScheduleReconciliation — deterministic, idempotent registration'
     const plan = planScheduleReconciliation([routine], [{ routineId: 'r-1', dueAt: NOW + 42 }], NOW, true);
     expect(plan.upserts).toHaveLength(1);
     expect(plan.upserts[0]!.dueAt).not.toBe(NOW + 42);
+  });
+});
+
+describe('nextOccurrenceAfterProcessed — crash-idempotent advancement', () => {
+  it('a Monday 09:00 daily occurrence advances to Tuesday even if recovery runs on Wednesday', () => {
+    const monday = Date.UTC(2026, 8, 7, 9, 0);
+    const wednesday = Date.UTC(2026, 8, 9, 10, 0);
+    const routine = makeRoutine({ schedule: { kind: 'daily', time: '09:00', days: 'every' }, timezone: 'UTC' });
+    const fromOccurrence = nextOccurrenceAfterProcessed(routine, monday);
+    const fromRecoveryNow = nextOccurrenceAfterProcessed(routine, wednesday);
+    expect(fromOccurrence).toBe(Date.UTC(2026, 8, 8, 9, 0)); // Tuesday — not skipped
+    expect(fromRecoveryNow).toBe(Date.UTC(2026, 8, 10, 9, 0)); // Thursday: the bug if recovery used `now`
+    expect(fromOccurrence).not.toBe(fromRecoveryNow);
   });
 });
 

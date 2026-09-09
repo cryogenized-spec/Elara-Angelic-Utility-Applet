@@ -10,9 +10,17 @@ beforeEach(async () => {
   await reset();
 });
 
-async function stub() {
+type EngineHarness = DurableObjectStub & {
+  claimWithoutDispatch(routineId: string, dueAt: number): Promise<{ runKey: string; workflowInstanceId: string; dispatched: boolean }>;
+  markDispatchedWithoutAdvance(runKey: string): Promise<{ runKey: string; dispatched: boolean; scheduleAdvanced: boolean }>;
+  ageRun(runKey: string, startedAt: number): Promise<{ runKey: string; startedAt: number }>;
+  pruneNow(): Promise<{ pruned: true; envelopeCount: number }>;
+  envelopePresent(runKey: string): Promise<boolean>;
+};
+
+async function stub(): Promise<EngineHarness> {
   const installationId = await deriveInstallationId(TOKEN);
-  return env.AUTONOMY!.get(env.AUTONOMY!.idFromName(installationId));
+  return env.AUTONOMY!.get(env.AUTONOMY!.idFromName(installationId)) as EngineHarness;
 }
 
 async function doFetch(request: Request): Promise<Response> {
@@ -117,9 +125,7 @@ describe('Phase C0 — crash windows', () => {
     const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
     expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
     const dueAt = Date.now() - 10 * 60_000;
-    const fixture = await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'claim-without-dispatch', routineId: routine.id, dueAt }) }));
-    expect(fixture.status).toBe(200);
-    const claimed = await fixture.json() as { runKey: string; workflowInstanceId: string; dispatched: boolean };
+    const claimed = await (await stub()).claimWithoutDispatch(routine.id, dueAt);
     expect(claimed.dispatched).toBe(false);
 
     const before = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs.find((run) => run.runKey === claimed.runKey);
@@ -138,9 +144,8 @@ describe('Phase C0 — crash windows', () => {
     const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
     expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
     const dueAt = Date.now() - 10 * 60_000;
-    const fixture = await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'claim-without-dispatch', routineId: routine.id, dueAt }) }));
-    const claimed = await fixture.json() as { runKey: string };
-    expect((await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'mark-dispatched-without-advance', runKey: claimed.runKey }) }))).status).toBe(200);
+    const claimed = await (await stub()).claimWithoutDispatch(routine.id, dueAt);
+    await (await stub()).markDispatchedWithoutAdvance(claimed.runKey);
     expect((await doFetch(await internalDo('/heartbeat', { method: 'POST' }))).status).toBe(200);
     const snapshot = await (await doFetch(await bearerRead('/autonomy/state'))).json() as { routines: Array<{ nextDueAt: number | null }> };
     expect(snapshot.routines[0].nextDueAt).toBeGreaterThan(dueAt);
@@ -158,13 +163,31 @@ describe('Phase C0 — crash windows', () => {
     const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
     expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
     const dueAt = Date.now() - 10 * 60_000;
-    const fixture = await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'claim-without-dispatch', routineId: routine.id, dueAt }) }));
-    const claimed = await fixture.json() as { runKey: string };
+    const engine = await stub();
+    const claimed = await engine.claimWithoutDispatch(routine.id, dueAt);
     const ancient = Date.now() - 40 * 24 * 3_600_000;
-    expect((await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'age-run', runKey: claimed.runKey, startedAt: ancient }) }))).status).toBe(200);
-    expect((await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'prune' }) }))).status).toBe(200);
+    await engine.ageRun(claimed.runKey, ancient);
+    await engine.pruneNow();
+    expect(await engine.envelopePresent(claimed.runKey)).toBe(true);
     const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
     expect(runs.some((run) => run.runKey === claimed.runKey && run.state === 'running')).toBe(true);
+  });
+
+  it('terminal envelopes are pruned and /c0/fixture is not an HTTP route', { timeout: 20_000 }, async () => {
+    const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
+    const dueAt = Date.now() - 10 * 60_000;
+    await doFetch(await internalDo('/scheduler/ensure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ routineId: routine.id, dueAt }) }));
+    await doFetch(await internalDo('/heartbeat', { method: 'POST' }));
+    const runKey = `routine-cloud-1:catch-up:${dueAt}`;
+    await waitUntil(async () => {
+      const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
+      return runs.some((run) => run.runKey === runKey && run.state === 'completed');
+    });
+    const engine = await stub();
+    await engine.pruneNow();
+    expect(await engine.envelopePresent(runKey)).toBe(false);
+    expect((await doFetch(await internalDo('/c0/fixture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }))).status).toBe(404);
   });
 
   it('create failure without an existing instance is not treated as dispatched', { timeout: 20_000 }, async () => {

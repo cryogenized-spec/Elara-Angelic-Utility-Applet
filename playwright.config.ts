@@ -3,6 +3,9 @@ import { defineConfig } from '@playwright/test';
 export default defineConfig({
   testDir: './e2e',
   globalSetup: './e2e/global-setup.ts',
+  // list for humans, github annotations (check-run summaries) for CI
+  // diagnosis, html report for the failure artifact upload.
+  reporter: [['list'], ['github'], ['html', { open: 'never' }]],
   projects: [
     {
       name: 'chromium',

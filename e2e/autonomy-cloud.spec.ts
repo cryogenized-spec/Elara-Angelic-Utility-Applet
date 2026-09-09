@@ -41,6 +41,23 @@ async function mockWorker(page: Page, options: { contextStale?: boolean } = {}):
     const url = new URL(route.request().url());
     const method = route.request().method();
     const path = url.pathname;
+    // CORS preflight, mirroring the real worker's autonomyPreflight() exactly:
+    // the app page (127.0.0.1:5173) calling https://autonomy-worker.test is a
+    // cross-origin fetch with Authorization/Content-Type/X-Elara-* headers, so
+    // real Chromium sends OPTIONS before every request — the mock must answer
+    // it or every fetch rejects before the handler logic is ever reached.
+    if (method === 'OPTIONS') {
+      return route.fulfill({
+        status: 204,
+        headers: {
+          'access-control-allow-origin': '*',
+          'access-control-allow-methods': 'GET, POST, OPTIONS',
+          'access-control-allow-headers': 'Content-Type, Authorization, X-Elara-Timestamp, X-Elara-Nonce, X-Elara-Signature',
+          'access-control-max-age': '86400',
+          vary: 'Origin',
+        },
+      });
+    }
     if (path === '/autonomy/health') return route.fulfill(corsJson({ service: 'elara-gemini', autonomy: { configured: true, version: '1.0.0-phase-b', schemaVersion: 1, capabilities: ['config-sync', 'context-sync', 'scheduler-dry-run'], cron: '0 * * * *', dryRun: true } }));
     if (path === '/autonomy/pair') return route.fulfill(corsJson({ installationId: 'a'.repeat(32), service: 'elara-gemini', version: '1.0.0-phase-b', schemaVersion: 1, capabilities: ['config-sync', 'context-sync', 'scheduler-dry-run'], cron: '0 * * * *', dryRun: true }));
     if (path === '/autonomy/config') {

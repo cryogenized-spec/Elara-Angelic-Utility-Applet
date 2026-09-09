@@ -346,6 +346,24 @@ describe('executeRoutineRun — concurrent Run Now admission', () => {
     expect(await listEvents()).toEqual([]);
   });
 
+  it('reclaims its own crashed occurrence: stale same-runKey redelivery executes instead of deduplicating', async () => {
+    // The Phase B at-least-once scenario, end to end through the runner:
+    // occurrence 500 crashed mid-run; the scheduler redelivers occurrence 500.
+    const staleStartedAt = NOW - 16 * 60_000;
+    await addRun({
+      id: 'crashed', runKey: 'r-1:scheduled:500', routineId: 'r-1', routineName: 'Morning brief',
+      executionMode: 'scheduled', scheduledFor: 500, startedAt: staleStartedAt, state: 'running',
+    });
+    const { run } = await executeRoutineRun(makeRoutine(), settings, 'scheduled', { ...runOptions(engineFor(textRun(NOOP))), scheduledFor: 500 });
+    expect(run).toMatchObject({ state: 'completed', outcome: 'no-op', runKey: 'r-1:scheduled:500', scheduledFor: 500 });
+
+    const rows = await listRuns(10);
+    expect(rows.filter((row) => row.runKey === 'r-1:scheduled:500')).toHaveLength(1);
+    const crashed = rows.find((row) => row.id === 'crashed');
+    expect(crashed).toMatchObject({ state: 'failed', errorCode: 'RUN_ABANDONED' });
+    expect(crashed?.runKey).toMatch(/#abandoned-crashed$/);
+  });
+
   it('recovers from a crashed run: a stale in-flight record is abandoned, not obeyed forever', async () => {
     const staleStartedAt = NOW - 16 * 60_000;
     await addRun({

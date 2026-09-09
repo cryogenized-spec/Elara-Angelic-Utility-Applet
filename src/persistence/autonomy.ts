@@ -67,9 +67,14 @@ export async function getRoutine(id: string): Promise<ElaraRoutine | undefined> 
 
 export async function saveRoutine(routine: ElaraRoutine): Promise<ElaraRoutine> {
   const normalized = normalizeRoutine(routine);
-  const existing = await db.routines.get(normalized.id);
-  if (!existing && await db.routines.count() >= MAX_ROUTINES) throw new RoutineLimitError();
-  await db.routines.put(normalized);
+  // The limit check and the insert share one transaction: two contexts
+  // creating routines concurrently serialize here, so MAX_ROUTINES cannot be
+  // exceeded by a count-then-insert race.
+  await db.transaction('rw', db.routines, async () => {
+    const existing = await db.routines.get(normalized.id);
+    if (!existing && await db.routines.count() >= MAX_ROUTINES) throw new RoutineLimitError();
+    await db.routines.put(normalized);
+  });
   notify();
   return normalized;
 }
@@ -159,18 +164,24 @@ export type RunClaimResult =
 
 /**
  * Atomically admit ONE run for a routine: the in-flight check, duplicate-runKey
- * check, crash recovery, and insert all happen inside a single IndexedDB
+ * check, stale-run crash recovery, and insert all happen inside a single IndexedDB
  * transaction, so two concurrent execution contexts can never both observe "no
  * run in flight" and both insert (the read/write race the previous
  * check-then-insert sequence allowed).
  *
- * Check order is deliberate:
- * 1. runKey already exists → 'already-executed' (idempotent redelivery of the
- *    same occurrence — also covers a same-millisecond duplicate manual trigger).
- *    Checked FIRST so the rejected caller can still record its skip without
- *    colliding with the active run's unique runKey.
- * 2. fresh in-flight run exists → 'in-flight' (overlap refused).
- * 3. stale in-flight runs are abandoned (crash recovery), then the run is claimed.
+ * Check order is deliberate (same-occurrence redelivery is the future
+ * scheduler's at-least-once model):
+ * 1. exact runKey exists:
+ *    - terminal → 'already-executed' (idempotent redelivery; also covers a
+ *      same-millisecond duplicate manual trigger).
+ *    - fresh in-flight → 'in-flight' (overlap refused).
+ *    - STALE in-flight → the crashed attempt is abandoned (its row is
+ *      tombstoned with a `#abandoned-<id>` runKey so the canonical occurrence
+ *      key is freed — history keeps the crash, uniqueness keeps one canonical
+ *      row per occurrence) and THIS claim takes the occurrence. A crashed run
+ *      must never permanently swallow its own occurrence.
+ * 2. otherwise: stale in-flight runs for the routine are abandoned, a fresh
+ *    in-flight run refuses the claim, and absence claims it.
  *
  * The semantics map 1:1 onto a future Durable Object: a DO serializes access
  * per key, so the same claim logic will hold without domain changes.
@@ -178,8 +189,26 @@ export type RunClaimResult =
 export async function claimRoutineRun(run: RoutineRunRecord, now = Date.now()): Promise<RunClaimResult> {
   const result = await db.transaction('rw', db.runs, async (): Promise<RunClaimResult> => {
     const existing = await db.runs.where('routineId').equals(run.routineId).toArray();
+
     const duplicate = existing.find((candidate) => candidate.runKey === run.runKey);
-    if (duplicate) return { status: 'already-executed', run: duplicate };
+    if (duplicate) {
+      const duplicateInFlight = duplicate.state === 'pending' || duplicate.state === 'running';
+      if (!duplicateInFlight) return { status: 'already-executed', run: duplicate };
+      if (now - duplicate.startedAt < STALE_RUN_MS) return { status: 'in-flight', run: duplicate };
+      await db.runs.put({
+        ...duplicate,
+        runKey: `${duplicate.runKey}#abandoned-${duplicate.id}`,
+        state: 'failed',
+        outcome: 'error',
+        errorCode: 'RUN_ABANDONED',
+        errorMessage: 'The run did not finish (the app closed before completion).',
+        completedAt: now,
+        durationMs: Math.max(0, now - duplicate.startedAt),
+      });
+      await db.runs.put(run);
+      return { status: 'claimed', run };
+    }
+
     const inFlight = existing.filter((candidate) => (candidate.state === 'pending' || candidate.state === 'running') && now - candidate.startedAt < STALE_RUN_MS);
     const stale = existing.filter((candidate) => (candidate.state === 'pending' || candidate.state === 'running') && now - candidate.startedAt >= STALE_RUN_MS);
     for (const crashed of stale) {
@@ -208,6 +237,21 @@ export async function addRun(run: RoutineRunRecord): Promise<RoutineRunRecord> {
   await pruneRuns(run.startedAt);
   notify();
   return run;
+}
+
+/**
+ * Commit an admitted event AND the run's terminal 'event' record in ONE
+ * transaction: either both land or neither does. This closes the partial-write
+ * window where a delivered event could coexist with a run that later
+ * terminalizes as failed (history must never contradict the inbox).
+ */
+export async function completeRunWithEvent(run: RoutineRunRecord, event: AutonomousEvent): Promise<void> {
+  await db.transaction('rw', [db.runs, db.events], async () => {
+    await db.events.put(event);
+    await db.runs.put(run);
+  });
+  await pruneEvents(event.createdAt);
+  notify();
 }
 
 export async function updateRun(run: RoutineRunRecord): Promise<RoutineRunRecord> {

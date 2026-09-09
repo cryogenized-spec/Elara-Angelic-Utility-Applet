@@ -17,9 +17,9 @@ import {
   type RoutineRunRecord,
 } from './contracts';
 import {
-  addEvent,
   addRun,
   claimRoutineRun,
+  completeRunWithEvent,
   getRoutine,
   recentEvents,
   saveRoutine,
@@ -318,15 +318,19 @@ export async function executeRoutineRun(
     readAt: null,
   };
   try {
-    await addEvent(event);
+    // The admitted event and the terminal 'event' run record commit in ONE
+    // transaction: no partial state where the inbox holds a delivered event
+    // while history later reports the run as failed.
     const completedAt = now();
-    const completedRun = await updateRun({ ...run, state: 'completed', outcome: 'event', eventId: event.id, completedAt, toolCalls, durationMs: Math.max(0, completedAt - startedAt), ...(interactionId ? { interactionId } : {}) });
+    const completedRun: RoutineRunRecord = { ...run, state: 'completed', outcome: 'event', eventId: event.id, completedAt, toolCalls, durationMs: Math.max(0, completedAt - startedAt), ...(interactionId ? { interactionId } : {}) };
+    await completeRunWithEvent(completedRun, event);
     await stampRoutine(completedAt, 'completed', 'event', event.id);
     return { run: completedRun, event };
   } catch (cause) {
-    // Delivery-tail persistence failure. If the event slipped through before
-    // the failure the inbox may hold one extra entry while history reports the
-    // failure — safe direction (no phantom success, no lost history).
+    // Delivery-tail persistence failure: the event+run transaction rolled
+    // back atomically — no event exists and the claimed run is recorded as
+    // failed (or abandoned as stale by the next claim). No phantom success,
+    // no delivered-event-without-run contradiction.
     return finish({ state: 'failed', outcome: 'error', errorCode: 'RUN_INTERNAL', errorMessage: cause instanceof Error ? cause.message : 'The event could not be delivered.' });
   }
 }

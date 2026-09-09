@@ -460,6 +460,14 @@ interface ElaraRoutine {
 }
 ```
 
+**A1 as-implemented schema note:** the landed `RoutinePermissions` is
+`{ memory: boolean; google: RoutineGoogleCapability[] }` — `web`, `memoryPack`
+(→ §8.5 Autonomy Context), and `conversationSummaries` are NOT implemented
+(Phase B+); `policy.quietHours` and `policy.catchUp` are not implemented
+(quiet hours arrive with delivery/Phase D, catch-up with the Phase B
+scheduler); `delivery.push` is stored but has no delivery channel yet (inbox
+only). The schema above is the design target, not the current state.
+
 **Deliberately included / excluded (with reasons):**
 
 - **Timezone:** yes, per routine (people travel; the app knows the device tz at authoring and
@@ -1030,8 +1038,12 @@ backend" was rejected: privacy, cost, and security all point the wrong way for t
 
 - **Routines read memory** via (a) the **Autonomy Context** (cloud routines): the bounded,
   explicitly consented, inspectable read-only projection specified in §8.5, synced to the DO;
-  and (b) **live local retrieval** (device routines): the existing `loadMemoryContext` path
-  unchanged. *(A1 implements (b) only, in `loadLocalRoutineMemoryContext` — local execution.
+  and (b) **live local retrieval** (device routines). *(A1 implements (b) as a DEDICATED path,
+  `loadLocalRoutineMemoryContext` — not the chat thread's folder-scoped `loadMemoryContext`:
+  routine runs retrieve global-scope durable memories only (no thread/folder scoping exists
+  for a non-interactive run), ranked against the routine name+instruction, bounded to 8 items /
+  6 000 characters, and only when the routine holds the memory permission. Retrieval also
+  updates memory recall telemetry (`recallCount`/`lastRecalledAt`) as a side effect, like chat.
   Path (a) arrives with cloud execution: the worker receives the §8.5 payload via
   `RoutineRunOptions.memoryContext` and must never import or call the local memory store.)*
 - **`memory.search`** is a read-only tool over the pack (ranked, budgeted) so the agent can
@@ -1039,7 +1051,10 @@ backend" was rejected: privacy, cost, and security all point the wrong way for t
   context block. The static block (top-ranked, ~4 KB) is also provided as grounding.
 - **Attribution:** pack entries carry their existing provenance; every memory used as evidence
   is referenced by id in the event's `evidence` array — the user can see *which memory*
-  supported an inference.
+  supported an inference. *(A1 status: `evidence` entries are **model-reported**, not
+  independently verified — the runner keeps no execution ledger to cross-check citations, so a
+  cited tool or memory may not have actually run or existed. Full provenance verification is a
+  later-phase enhancement; until then the inbox presents evidence as "reported by Elara".)*
 - **Autonomous observations:** a cloud run may propose at most a handful of `MICRO_OBSERVATION`
   records (provenance `source: 'elara'`, note: `autonomous`, linked to the runKey). They enter
   the existing observation lifecycle — **they are never auto-promoted to established memories**
@@ -1209,6 +1224,18 @@ The first implementation slice deliberately tightened the A0/A1 rows above (owne
   preferences (master switch, default OFF) in the preferences store.
 - `scheduled`/`catch-up` exist as domain execution modes with occurrence-derived run identity
   (`routineRunKey`, `RoutineRunOptions.scheduledFor`) — **no scheduler exists yet**.
+
+Hardening-pass invariants (2026-09-09, second commit): read-only tool admission is
+registry-authoritative (descriptor `risk === 'read'` AND declared — checked at declaration and
+call time; no namespace or handler-map conventions), and is composition-tested against
+`routineToolSet` for every grantable capability; run admission handles at-least-once
+redelivery (terminal duplicate → idempotent return, fresh running duplicate → refused, stale
+crashed duplicate → abandoned with a `#abandoned-<id>` tombstone key and the occurrence
+reclaimed); an admitted event and its terminal run record commit in ONE transaction. Known
+local limitation: the rolling-24h event cap is checked per execution context (two
+simultaneous local tabs can overshoot it by a small bound; it does not corrupt state and
+cloud-phase serialization restores exactness). `STALE_RUN_MS` (15 min) assumes local run
+budgets and must be scoped per execution locus when cloud runs exist.
 
 What is deliberately NOT in this slice (all Phase B+ unless noted): no Cloudflare execution, no
 Cron/DO/Workflow, no push, no server-side Google OAuth, no background execution of any kind;

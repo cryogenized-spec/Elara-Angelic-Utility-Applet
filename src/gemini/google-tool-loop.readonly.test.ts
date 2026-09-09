@@ -111,6 +111,107 @@ describe('read-only tool loop — call-time enforcement', () => {
     }), undefined);
   });
 
+  it('refuses every roleplay write/destructive tool call in read-only mode — no namespace exceptions', async () => {
+    for (const roleplayWrite of ['roleplay_setting.create', 'roleplay_setting.update', 'roleplay_setting.move', 'roleplay_setting.delete'] as const) {
+      streamReply.mockClear();
+      streamToolResult.mockClear();
+      const writeHandler = vi.fn(async () => ({ ok: true }));
+      streamReply.mockReturnValueOnce(events(
+        { type: 'interaction-created', interactionId: 'interaction-rp', model: 'gemini-3.8-flash' },
+        { type: 'tool-call', interactionId: 'interaction-rp', index: 0, callId: `call-${roleplayWrite}`, name: roleplayWrite, arguments: { name: 'Evil entity' } },
+      ));
+      streamToolResult.mockReturnValueOnce(events(
+        { type: 'completed', interactionId: 'interaction-rp-2', status: 'completed', durationMs: 4 },
+      ));
+
+      const collected: Array<unknown> = [];
+      for await (const event of streamGoogleToolLoop(
+        { model: 'gemini-3.8-flash', input: 'Run the routine.', systemInstruction: 'Routine instruction.', tools: ['tasks.listTasks'] },
+        { tools: ['tasks.listTasks'], readOnly: true, headless: true, executor: { oauth, handlers: { 'tasks.listTasks': async () => ({ tasks: [] }), [roleplayWrite]: writeHandler } as never } },
+      )) collected.push(event);
+
+      expect(writeHandler, `${roleplayWrite} handler must never run`).not.toHaveBeenCalled();
+      expect(collected.at(-1)).toMatchObject({ type: 'completed' });
+      expect(streamToolResult, `${roleplayWrite} must be refused structurally`).toHaveBeenCalledWith(expect.objectContaining({
+        results: expect.arrayContaining([expect.objectContaining({ callId: `call-${roleplayWrite}`, result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]),
+      }), undefined);
+    }
+  });
+
+  it('refuses a hallucinated read tool that was never declared (roleplay_setting.list)', async () => {
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-rp', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction-rp', index: 0, callId: 'call-rp-list', name: 'roleplay_setting.list', arguments: {} },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction-rp-2', status: 'completed', durationMs: 4 },
+    ));
+    const spyHandler = vi.fn(async () => ({ entities: [] }));
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Run the routine.', systemInstruction: 'Routine instruction.', tools: ['tasks.listTasks'] },
+      { tools: ['tasks.listTasks'], readOnly: true, headless: true, executor: { oauth, handlers: { 'tasks.listTasks': async () => ({ tasks: [] }), 'roleplay_setting.list': spyHandler } as never } },
+    )) {
+      // consume
+    }
+
+    expect(spyHandler).not.toHaveBeenCalled();
+    expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      results: expect.arrayContaining([expect.objectContaining({ callId: 'call-rp-list', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]),
+    }), undefined);
+  });
+
+  it('refuses an undeclared send-class tool (gmail.sendMessage) structurally', async () => {
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-send', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction-send', index: 0, callId: 'call-send', name: 'gmail.sendMessage', arguments: { to: ['someone@example.com'], subject: 'hi' } },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction-send-2', status: 'completed', durationMs: 4 },
+    ));
+    const sendHandler = vi.fn(async () => ({ id: 'msg-1' }));
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Run the routine.', systemInstruction: 'Routine instruction.', tools: ['gmail.listMessages'] },
+      { tools: ['gmail.listMessages'], readOnly: true, headless: true, executor: { oauth, handlers: { 'gmail.listMessages': async () => ({ messages: [] }), 'gmail.sendMessage': sendHandler } as never } },
+    )) {
+      // consume
+    }
+
+    expect(sendHandler).not.toHaveBeenCalled();
+    expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      results: expect.arrayContaining([expect.objectContaining({ callId: 'call-send', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]),
+    }), undefined);
+  });
+
+  it('terminates as cancelled when the signal aborts during tool execution', async () => {
+    const controller = new AbortController();
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-abort', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction-abort', index: 0, callId: 'call-abort', name: 'tasks.listTasks', arguments: { taskListId: 'primary' } },
+    ));
+    // Abort DURING tool execution — the loop must yield a terminal 'cancelled'
+    // event, never return silently (which the runner would misclassify as
+    // failed / NO_TERMINAL_EVENT).
+    executeGoogleTool.mockImplementationOnce(async () => {
+      controller.abort();
+      return { ok: true, result: { tasks: [] } };
+    });
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'never-reached', status: 'completed', durationMs: 1 },
+    ));
+
+    const collected: Array<unknown> = [];
+    for await (const event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Run the routine.', systemInstruction: 'Routine instruction.', tools: ['tasks.listTasks'] },
+      { tools: ['tasks.listTasks'], readOnly: true, headless: true, executor: { oauth, handlers: { 'tasks.listTasks': async () => ({ tasks: [] }) } } },
+      controller.signal,
+    )) collected.push(event);
+
+    expect(collected.at(-1)).toMatchObject({ type: 'cancelled', interactionId: 'interaction-abort' });
+    expect(streamToolResult).not.toHaveBeenCalled();
+  });
+
   it('the grant broker remains available to interactive (non-headless) callers', async () => {
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-1', model: 'gemini-3.8-flash' },

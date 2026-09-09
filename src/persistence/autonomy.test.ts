@@ -9,6 +9,7 @@ import {
   autonomyDb,
   claimRoutineRun,
   clearAutonomyStore,
+  completeRunWithEvent,
   countUnreadEvents,
   deleteRoutine,
   findRunInFlight,
@@ -100,6 +101,17 @@ describe('routine persistence', () => {
     await expect(saveRoutine(makeRoutine('r-0', { name: 'Updated' }))).resolves.toMatchObject({ id: 'r-0', name: 'Updated' });
   });
 
+  it('enforces MAX_ROUTINES atomically under concurrent creation', async () => {
+    for (let index = 0; index < MAX_ROUTINES - 1; index += 1) await saveRoutine(makeRoutine(`r-seed-${index}`));
+    const results = await Promise.allSettled([saveRoutine(makeRoutine('r-a')), saveRoutine(makeRoutine('r-b'))]);
+    const routines = await listRoutines();
+    expect(routines).toHaveLength(MAX_ROUTINES);
+    // Exactly one of the two concurrent creations was refused — never both, never neither.
+    const rejected = results.filter((result) => result.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toBeInstanceOf(RoutineLimitError);
+  });
+
   it('announces writes so UI components can refresh', async () => {
     const listener = vi.fn();
     window.addEventListener(AUTONOMY_UPDATED_EVENT, listener);
@@ -172,11 +184,18 @@ describe('claimRoutineRun — atomic run admission', () => {
     expect(allRuns.filter((run) => run.state === 'running')).toHaveLength(1);
   });
 
-  it('returns already-executed for a duplicate runKey (idempotent occurrence redelivery)', async () => {
-    const first = await claimRoutineRun(makeRun('run-1', { runKey: 'r-1:scheduled:500', state: 'running' }), NOW);
-    expect(first.status).toBe('claimed');
+  it('returns already-executed for a TERMINAL duplicate runKey (idempotent occurrence redelivery)', async () => {
+    await claimRoutineRun(makeRun('run-1', { runKey: 'r-1:scheduled:500', state: 'running' }), NOW);
+    await addRun(makeRun('run-1', { runKey: 'r-1:scheduled:500', state: 'completed', outcome: 'no-op', completedAt: NOW }));
     const duplicate = await claimRoutineRun(makeRun('run-2', { runKey: 'r-1:scheduled:500', state: 'running' }), NOW);
     expect(duplicate).toMatchObject({ status: 'already-executed', run: { id: 'run-1' } });
+    expect(await listRuns()).toHaveLength(1);
+  });
+
+  it('returns in-flight for a duplicate of a FRESH running occurrence (redelivery while executing)', async () => {
+    await claimRoutineRun(makeRun('run-1', { runKey: 'r-1:scheduled:500', state: 'running' }), NOW);
+    const duplicate = await claimRoutineRun(makeRun('run-2', { runKey: 'r-1:scheduled:500', state: 'running' }), NOW);
+    expect(duplicate).toMatchObject({ status: 'in-flight', run: { id: 'run-1' } });
     expect(await listRuns()).toHaveLength(1);
   });
 
@@ -201,6 +220,36 @@ describe('claimRoutineRun — atomic run admission', () => {
     expect(abandoned?.completedAt).toBe(NOW);
   });
 
+  it('reclaims a STALE same-runKey redelivery instead of returning it as already-executed', async () => {
+    // The at-least-once scheduler scenario: occurrence X starts, the process
+    // crashes, the record goes stale, and occurrence X is delivered AGAIN.
+    const staleStartedAt = NOW - STALE_RUN_MS - 60_000;
+    await addRun(makeRun('run-crashed', { runKey: 'r-1:scheduled:500', state: 'running', scheduledFor: 500, startedAt: staleStartedAt }));
+
+    const claim = await claimRoutineRun(makeRun('run-retry', { runKey: 'r-1:scheduled:500', state: 'running', scheduledFor: 500 }), NOW);
+    expect(claim.status).toBe('claimed');
+
+    const rows = await listRuns(10);
+    // Exactly ONE canonical record for the occurrence — the reclaimed one.
+    const canonical = rows.filter((row) => row.runKey === 'r-1:scheduled:500');
+    expect(canonical).toHaveLength(1);
+    expect(canonical[0]?.id).toBe('run-retry');
+    // The crashed attempt survives as history, tombstoned off the canonical key.
+    const abandoned = rows.find((row) => row.id === 'run-crashed');
+    expect(abandoned).toMatchObject({ state: 'failed', outcome: 'error', errorCode: 'RUN_ABANDONED' });
+    expect(abandoned?.runKey).toMatch(/^r-1:scheduled:500#abandoned-run-crashed$/);
+  });
+
+  it('a reclaimed occurrence deduplicates again once its new attempt is terminal', async () => {
+    const staleStartedAt = NOW - STALE_RUN_MS - 60_000;
+    await addRun(makeRun('run-crashed', { runKey: 'r-1:scheduled:500', state: 'running', scheduledFor: 500, startedAt: staleStartedAt }));
+    await claimRoutineRun(makeRun('run-retry', { runKey: 'r-1:scheduled:500', state: 'running', scheduledFor: 500 }), NOW);
+    await addRun(makeRun('run-retry', { runKey: 'r-1:scheduled:500', state: 'completed', outcome: 'no-op', completedAt: NOW }));
+
+    const again = await claimRoutineRun(makeRun('run-third', { runKey: 'r-1:scheduled:500', state: 'running', scheduledFor: 500 }), NOW);
+    expect(again).toMatchObject({ status: 'already-executed', run: { id: 'run-retry' } });
+  });
+
   it('does not treat a fresh in-flight run as stale', async () => {
     await addRun(makeRun('run-live', { runKey: 'r-1:manual:1', state: 'running', startedAt: NOW - 60_000 }));
     const claim = await claimRoutineRun(makeRun('run-2', { runKey: 'r-1:manual:2', state: 'running' }), NOW);
@@ -218,6 +267,27 @@ describe('claimRoutineRun — atomic run admission', () => {
     // the ordered history (no startedAt → outside the index) and never block admission.
     expect(await autonomyDb.runs.count()).toBe(3);
     expect(await listRuns()).toHaveLength(1);
+  });
+
+  it('commits an admitted event and its terminal run record atomically', async () => {
+    await addRun(makeRun('run-1', { state: 'running' }));
+    const terminal = makeRun('run-1', { state: 'completed', outcome: 'event', eventId: 'e-1', completedAt: NOW });
+    await completeRunWithEvent(terminal, makeEvent('e-1'));
+    expect(await listEvents()).toHaveLength(1);
+    expect((await listRuns())[0]).toMatchObject({ state: 'completed', outcome: 'event', eventId: 'e-1' });
+  });
+
+  it('rolls back BOTH writes when the run terminalization fails inside the transaction', async () => {
+    await addRun(makeRun('run-1', { state: 'running' }));
+    const terminal = makeRun('run-1', { state: 'completed', outcome: 'event', eventId: 'e-bad', completedAt: NOW });
+    // Fault injection: an event with no primary key makes the event put fail
+    // inside the shared transaction — the run write must roll back with it.
+    const keyless = { ...makeEvent('e-bad'), id: undefined } as never;
+    await expect(completeRunWithEvent(terminal, keyless)).rejects.toThrow();
+    expect(await listEvents()).toHaveLength(0);
+    const surviving = (await listRuns())[0];
+    expect(surviving).toMatchObject({ id: 'run-1', state: 'running' });
+    expect('eventId' in surviving).toBe(false);
   });
 
   it('keeps run and event history when the originating routine is deleted', async () => {

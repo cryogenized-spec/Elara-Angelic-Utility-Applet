@@ -1,7 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  DEFAULT_ROUTINE_DELIVERY,
-  DEFAULT_ROUTINE_POLICY,
   MAX_ROUTINES,
   ROUTINE_GOOGLE_CAPABILITIES,
   elaraRoutineSchema,
@@ -10,6 +8,18 @@ import {
   type RoutineRunRecord,
   type AutonomousEvent,
 } from '../../autonomy/contracts';
+import {
+  blankDraft,
+  customDaysLabel,
+  type RoutineDraft,
+  draftFromRoutine,
+  draftToRoutine,
+  selectOptions,
+  COOLDOWN_PRESETS,
+  RUNS_PER_DAY_PRESETS,
+  TIME_PRESETS,
+  TOOLCALL_PRESETS,
+} from './autonomy-draft';
 import { computeNextOccurrence, describeSchedule } from '../../autonomy/schedule';
 import { executeRoutineRun } from '../../autonomy/runner';
 import {
@@ -47,11 +57,6 @@ const CAPABILITY_LABELS: Record<RoutineGoogleCapability, string> = {
   'sheets.read': 'Sheets',
 };
 
-const TIME_PRESETS = ['15', '30', '60', '120', '240', '360', '720', '1440'];
-const COOLDOWN_PRESETS = ['1', '6', '12', '24', '48', '72', '168'];
-const TOOLCALL_PRESETS = ['2', '4', '8', '12', '16', '20'];
-const RUNS_PER_DAY_PRESETS = ['1', '2', '4', '6', '8', '12'];
-
 function isValidTimezone(timeZone: string): boolean {
   try {
     new Intl.DateTimeFormat('en-US', { timeZone });
@@ -83,108 +88,6 @@ function formatNextOccurrence(routine: ElaraRoutine): string | null {
   }
 }
 
-interface RoutineDraft {
-  id: string | null;
-  name: string;
-  instruction: string;
-  timezone: string;
-  scheduleKind: 'daily' | 'interval';
-  time: string;
-  days: 'every' | 'weekdays' | 'weekends';
-  everyMinutes: string;
-  betweenEnabled: boolean;
-  betweenStart: string;
-  betweenEnd: string;
-  memory: boolean;
-  capabilities: string[];
-  cooldownHours: string;
-  maxToolCalls: string;
-  maxRunsPerDay: string;
-}
-
-function blankDraft(): RoutineDraft {
-  return {
-    id: null,
-    name: '',
-    instruction: '',
-    timezone: localTimezone(),
-    scheduleKind: 'daily',
-    time: '09:00',
-    days: 'every',
-    everyMinutes: '60',
-    betweenEnabled: false,
-    betweenStart: '09:00',
-    betweenEnd: '18:00',
-    memory: false,
-    capabilities: [],
-    cooldownHours: String(DEFAULT_ROUTINE_POLICY.cooldownHours),
-    maxToolCalls: String(DEFAULT_ROUTINE_POLICY.maxToolCalls),
-    maxRunsPerDay: String(DEFAULT_ROUTINE_POLICY.maxRunsPerDay),
-  };
-}
-
-function draftDays(routine: ElaraRoutine): RoutineDraft['days'] {
-  if (routine.schedule.kind !== 'daily') return 'every';
-  const days = routine.schedule.days;
-  // NOTE: the editor offers the three named day sets only. A persisted custom
-  // weekday list (e.g. from a future authoring surface or direct store
-  // tampering) is shown to the user as "Every day" BEFORE saving — visible,
-  // never a silent reinterpretation. The routine card keeps displaying the
-  // exact days via describeSchedule() until the user saves an edit.
-  return days === 'every' || days === 'weekdays' || days === 'weekends' ? days : 'every';
-}
-
-function draftFromRoutine(routine: ElaraRoutine): RoutineDraft {
-  const schedule = routine.schedule;
-  return {
-    id: routine.id,
-    name: routine.name,
-    instruction: routine.instruction,
-    timezone: routine.timezone,
-    scheduleKind: schedule.kind,
-    time: schedule.kind === 'daily' ? schedule.time : '09:00',
-    days: draftDays(routine),
-    everyMinutes: schedule.kind === 'interval' ? String(schedule.everyMinutes) : '60',
-    betweenEnabled: schedule.kind === 'interval' && Boolean(schedule.between),
-    betweenStart: schedule.kind === 'interval' && schedule.between ? schedule.between.start : '09:00',
-    betweenEnd: schedule.kind === 'interval' && schedule.between ? schedule.between.end : '18:00',
-    memory: routine.permissions.memory,
-    capabilities: [...routine.permissions.google],
-    cooldownHours: String(routine.policy.cooldownHours),
-    maxToolCalls: String(routine.policy.maxToolCalls),
-    maxRunsPerDay: String(routine.policy.maxRunsPerDay),
-  };
-}
-
-function draftToRoutine(draft: RoutineDraft, existing: ElaraRoutine | undefined): ElaraRoutine {
-  const everyMinutes = Math.max(15, Math.min(1_440, Number.parseInt(draft.everyMinutes, 10) || 60));
-  const routine: ElaraRoutine = {
-    id: draft.id ?? `routine-${crypto.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`}`,
-    name: draft.name.trim(),
-    enabled: existing?.enabled ?? true,
-    instruction: draft.instruction.trim(),
-    schedule: draft.scheduleKind === 'daily'
-      ? { kind: 'daily', time: draft.time, days: draft.days }
-      : { kind: 'interval', everyMinutes, ...(draft.betweenEnabled ? { between: { start: draft.betweenStart, end: draft.betweenEnd } } : {}) },
-    timezone: draft.timezone.trim() || 'UTC',
-    permissions: {
-      memory: draft.memory,
-      google: ROUTINE_GOOGLE_CAPABILITIES.filter((capability) => draft.capabilities.includes(capability)),
-    },
-    delivery: existing?.delivery ?? DEFAULT_ROUTINE_DELIVERY,
-    policy: {
-      cooldownHours: Math.max(1, Math.min(168, Number.parseInt(draft.cooldownHours, 10) || DEFAULT_ROUTINE_POLICY.cooldownHours)),
-      maxToolCalls: Math.max(1, Math.min(20, Number.parseInt(draft.maxToolCalls, 10) || DEFAULT_ROUTINE_POLICY.maxToolCalls)),
-      maxRunsPerDay: Math.max(1, Math.min(12, Number.parseInt(draft.maxRunsPerDay, 10) || DEFAULT_ROUTINE_POLICY.maxRunsPerDay)),
-    },
-    createdAt: existing?.createdAt ?? Date.now(),
-    updatedAt: Date.now(),
-    ...(existing?.lastRunAt !== undefined ? { lastRunAt: existing.lastRunAt } : {}),
-    ...(existing?.lastResult !== undefined ? { lastResult: existing.lastResult } : {}),
-  };
-  return routine;
-}
-
 function describeRunOutcome(run: RoutineRunRecord): string {
   if (run.state === 'skipped') {
     if (run.errorCode === 'AUTONOMY_DISABLED') return 'Skipped — autonomous routines are switched off.';
@@ -198,11 +101,6 @@ function describeRunOutcome(run: RoutineRunRecord): string {
   if (run.outcome === 'suppressed') return `Held back by policy (${run.suppressedReason ?? 'policy'}).`;
   if (run.outcome === 'error') return `Failed — ${run.errorCode ?? 'unknown error'}`;
   return run.state;
-}
-
-function selectOptions(presets: readonly string[], current: string): { value: string; label: string }[] {
-  const values = [...new Set([...presets, current])].sort((a, b) => Number(a) - Number(b));
-  return values.map((value) => ({ value, label: value }));
 }
 
 export function AutonomySettings() {
@@ -336,7 +234,7 @@ export function AutonomySettings() {
           <span className="autonomy-section-kicker">ROUTINES</span>
           <strong>Routine library</strong>
         </div>
-        <button type="button" className="autonomy-button autonomy-button--primary" disabled={atLimit || draft !== null} onClick={() => { setDraft(blankDraft()); setDraftErrors([]); }}>
+        <button type="button" className="autonomy-button autonomy-button--primary" disabled={atLimit || draft !== null} onClick={() => { setDraft(blankDraft(localTimezone())); setDraftErrors([]); }}>
           {atLimit ? `Limit ${MAX_ROUTINES}` : '+ Routine'}
         </button>
       </div>
@@ -372,6 +270,7 @@ export function AutonomySettings() {
                     <option value="every">Every day</option>
                     <option value="weekdays">Weekdays</option>
                     <option value="weekends">Weekends</option>
+                    {draft.days === 'custom' && <option value="custom">{customDaysLabel(routines.find((routine) => routine.id === draft.id))}</option>}
                   </select>
                 </label>
               </>

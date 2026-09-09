@@ -179,3 +179,43 @@ test('granted read permissions bound the provider tool surface, and routines per
   await expect(page.locator('.autonomy-routine', { hasText: 'Task sweep' })).toContainText('1 Google read');
   await expect(page.getByRole('switch', { name: 'Autonomous routines master switch' })).toHaveAttribute('aria-checked', 'true');
 });
+
+// The composition regression: the capability→tool mapping (routineToolSet)
+// and the read-only admission policy (streamGoogleToolLoop) are enforced by
+// two modules. This test joins them in a real browser through the REAL
+// routine engine (no injected engine): a Drive-granted routine's Run now must
+// reach the provider with the Drive read tools declared. If the mapping and
+// the admission policy ever diverge again (the original defect: the loop
+// rejected exactly the tools the mapping produced), the declaration check
+// throws, no provider request is issued, and this test fails.
+test('a Drive-granted routine runs through the real engine with only Drive read tools declared', async ({ page }) => {
+  const requests: Array<Record<string, unknown>> = [];
+  await page.route('**/v1/interactions*', async (route) => {
+    requests.push(JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>);
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse('routine-run-4', NOOP_OUTCOME) });
+  });
+
+  await page.goto('');
+  await unlockTestGemini(page);
+  await openAutonomySettings(page);
+
+  await page.getByRole('button', { name: '+ Routine' }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Drive sweep');
+  await page.getByLabel(/Instruction — what Elara should do each run/).fill('Look for recently changed files in my Elara Drive folder.');
+  await page.getByLabel('Drive — app files', { exact: true }).check();
+  await page.getByRole('button', { name: 'Save routine' }).click();
+  await expect(page.locator('.autonomy-routine', { hasText: 'Drive sweep' })).toBeVisible();
+
+  await page.getByRole('switch', { name: 'Autonomous routines master switch' }).click();
+  await page.locator('.autonomy-routine', { hasText: 'Drive sweep' }).getByRole('button', { name: 'Run now' }).click();
+
+  // The run must COMPLETE (a real engine pass, not a RUN_INTERNAL failure).
+  await expect(page.locator('.autonomy-routine__status', { hasText: 'Nothing noteworthy (all quiet).' })).toBeVisible();
+
+  // And the provider must have received exactly the Drive read tool declarations.
+  expect(requests.length).toBeGreaterThanOrEqual(1);
+  const tools = (requests[0] as { tools?: Array<{ name: string }> }).tools;
+  const names = (tools ?? []).map((tool) => tool.name);
+  expect(names).toEqual(expect.arrayContaining(['drive.searchFiles', 'drive.getFile', 'drive.downloadFile']));
+  expect(names.some((name) => /create|delete|write|update|move|insert|replace|append|clear|modify|send/i.test(name))).toBe(false);
+});

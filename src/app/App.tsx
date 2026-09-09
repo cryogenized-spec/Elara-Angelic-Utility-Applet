@@ -27,6 +27,8 @@ import {
   type GenerationState,
 } from '../chat/generation-state';
 import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, isFailedPartialTarget, regenerateBaseFor, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
+import { loadPairing } from '../autonomy/cloud/pairing';
+import { fullSync } from '../autonomy/cloud/sync';
 import { createTurnWatchdog } from '../chat/turn-watchdog';
 import { attachmentsForTurn } from '../chat/turn-lineage';
 import type { GoogleToolName } from '../google/tools/contracts';
@@ -127,6 +129,16 @@ export function App() {
   }, []);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
+
+  // App open (design §8.5 sync lifecycle): when the device is paired with an
+  // autonomy worker, mirror the configuration, sync the Autonomy Context if
+  // its hash changed, and pull scheduler observations into the local run
+  // history. Fire-and-forget: local-first — a cloud failure never blocks the
+  // app, and the Autonomy panel surfaces sync status when opened.
+  useEffect(() => {
+    const pairing = loadPairing();
+    if (pairing) void fullSync(pairing).catch(() => undefined);
+  }, []);
   async function refreshThreads() { setThreads(await loadThreads()); }
   async function handleFilesSelected(files: FileList | null): Promise<void> {
     if (!files?.length) return;

@@ -37,7 +37,7 @@ function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
 }
 
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
-type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
+type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; memoryContext?: 'thread' | 'none'; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
 
 function initialFunctionArguments(step: Record<string, unknown>): string {
   const initial = step.arguments;
@@ -184,7 +184,12 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
-    const contextualInstruction = await composeSystemInstruction(request.systemInstruction, query);
+    // Interactive chat composes thread-scoped durable memory here. Callers that
+    // own their own memory scoping (autonomous routine runs) pass
+    // memoryContext: 'none' and receive their instruction verbatim.
+    const contextualInstruction = request.memoryContext === 'none'
+      ? (request.systemInstruction?.trim() || undefined)
+      : await composeSystemInstruction(request.systemInstruction, query);
     const providerInput = await resolveGeminiInput({ ...request, signal }, client);
     const stream = await client.interactions.create(buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction }) as never);
     for await (const rawEvent of stream as unknown as AsyncIterable<unknown>) {

@@ -125,6 +125,20 @@ export class ElaraDatabase extends Dexie {
       artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
       artifactBlobs: 'id',
     });
+    // v8: per-memory Autonomy Context consent flag (design §8.5) — index only,
+    // no data migration: records predating the flag default to false (not
+    // consented) when validated.
+    this.version(8).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+      memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt, autonomyContext',
+      artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
+      artifactBlobs: 'id',
+    });
   }
 }
 

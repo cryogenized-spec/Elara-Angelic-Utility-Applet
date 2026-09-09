@@ -35,6 +35,14 @@ export interface GeminiTurnRequest {
   generationConfig?: EffectiveGeminiSettings;
   systemInstruction?: string;
   tools?: readonly string[];
+  /**
+   * Memory context composition mode. `'thread'` (default, interactive chat)
+   * appends the active thread's durable-memory projection inside the provider
+   * boundary. `'none'` passes the caller's system instruction through
+   * verbatim — used by non-chat callers (autonomous routine runs) that own
+   * their own memory scoping.
+   */
+  memoryContext?: 'thread' | 'none';
   /** Existing app generation arbiter context for artifact-producing work. */
   generationId?: string;
   isGenerationActive?: () => boolean;

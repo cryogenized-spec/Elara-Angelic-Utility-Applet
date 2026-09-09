@@ -2,6 +2,7 @@ import type { GeminiToolContinuationRequest, GeminiToolResult, GeminiTurnRequest
 import { geminiTurnPort } from './provider';
 import { executeGoogleTool, confirmationRequestForCall, type GoogleToolHandlers, type GoogleToolExecutorOptions } from '../google/tools/executor';
 import type { GoogleToolCall, GoogleToolName } from '../google/tools/contracts';
+import { googleToolRegistry } from '../google/tools/registry';
 import { googleServiceToolHandlers } from '../google/tools/service-handlers';
 import { googleReadToolHandlers } from '../google/tools/read-handlers';
 import { roleplayWorldToolHandlers } from '../google/tools/roleplay-world-handlers';
@@ -17,6 +18,26 @@ export interface GoogleToolLoopOptions {
   readonly readOnly?: boolean;
   readonly maxToolCalls?: number;
   readonly executor?: Partial<GoogleToolExecutorOptions>;
+  /**
+   * Skip the interactive-chat runtime-context decorator (roleplay guidance,
+   * wall-clock framing). Autonomous routine runs supply their own runtime
+   * context and must not receive chat/roleplay instructions.
+   */
+  readonly suppressRuntimeContext?: boolean;
+  /**
+   * Honor an explicitly empty tool list instead of falling back to the full
+   * read-tool surface. Non-chat callers (routine runs without Google
+   * permissions) need a genuine no-tool request; the chat default (all read
+   * tools) must not change.
+   */
+  readonly allowEmptyTools?: boolean;
+  /**
+   * Non-interactive caller (autonomous routine run). Headless callers must
+   * never park on interactive UI: capability-grant and write-confirmation
+   * brokers are bypassed (the tool result keeps its error / the mutation is
+   * declined) instead of waiting on a user who is not watching a chat turn.
+   */
+  readonly headless?: boolean;
 }
 
 const DEFAULT_MAX_TOOL_CALLS = 8;
@@ -27,6 +48,24 @@ const DEFAULT_MAX_TOOL_CALLS = 8;
  */
 const TOOL_CONFIRMATION_HEARTBEAT_MS = 20_000;
 
+// ---------------------------------------------------------------------------
+// ONE authoritative read-only policy.
+//
+// The registry descriptor's `risk` field — and nothing else — decides whether
+// a tool is read-only. Handler maps answer "can this tool execute in this
+// caller?" (availability); the registry answers "what is this tool allowed to
+// do?" (classification). They must never be conflated, and namespace prefixes
+// are never a security mechanism. Applied at BOTH declaration time and call
+// time; at call time the tool must also be in the declared set, so a model
+// that hallucinates an undeclared tool — read or not — is refused.
+// ---------------------------------------------------------------------------
+
+const registryRiskByName: ReadonlyMap<string, string> = new Map(googleToolRegistry.map((descriptor) => [descriptor.name, descriptor.risk]));
+
+function isRegistryReadTool(tool: string): boolean {
+  return registryRiskByName.get(tool) === 'read';
+}
+
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -36,8 +75,10 @@ function delay(ms: number): Promise<void> {
 
 type PendingToolCall = GoogleToolCall & Pick<GeminiToolResult, 'callId' | 'name'>;
 
-function normalizeTools(tools: readonly GoogleToolName[] | undefined): readonly GoogleToolName[] {
-  return tools?.length ? tools : Object.keys(googleReadToolHandlers) as GoogleToolName[];
+function normalizeTools(tools: readonly GoogleToolName[] | undefined, allowEmpty: boolean): readonly GoogleToolName[] {
+  if (tools?.length) return tools;
+  if (allowEmpty && tools) return [];
+  return Object.keys(googleReadToolHandlers) as GoogleToolName[];
 }
 
 function executorOptions(options: GoogleToolLoopOptions, request: GeminiTurnRequest, signal?: AbortSignal): GoogleToolExecutorOptions {
@@ -71,7 +112,7 @@ function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandl
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
-  const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools);
+  const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools, options.allowEmptyTools === true);
   const maxToolCalls = Math.max(1, Math.min(options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS, 20));
   const executeOptions = executorOptions(options, request, signal);
 
@@ -80,12 +121,12 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   // should still receive the prompt, and an actually-invoked unavailable tool
   // is handled as a normal tool result below.
   for (const tool of tools) {
-    if (readOnly && !Object.prototype.hasOwnProperty.call(googleReadToolHandlers, tool) && !tool.startsWith('roleplay_setting.')) {
+    if (readOnly && !isRegistryReadTool(tool)) {
       throw new Error(`Tool ${tool} is not permitted in read-only mode.`);
     }
   }
 
-  const systemInstruction = withRuntimeContext(request.systemInstruction);
+  const systemInstruction = options.suppressRuntimeContext === true ? request.systemInstruction?.trim() : withRuntimeContext(request.systemInstruction);
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
   let executedCalls = 0;
   let toolBudgetExhausted = false;
@@ -100,7 +141,11 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       // never flatten a structured failure into a string. The turn runner owns
       // the terminal outcome.
       if (event.type === 'tool-call' && !toolBudgetExhausted) pendingCalls.push({ callId: event.callId, name: event.name as GoogleToolName, tool: event.name as GoogleToolName, arguments: event.arguments });
-      if (signal?.aborted || event.type === 'cancelled') return;
+      if (signal?.aborted) {
+        yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+        return;
+      }
+      if (event.type === 'cancelled') return;
       if (event.type === 'failed') return;
     }
 
@@ -115,7 +160,20 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
     const immediateCalls: PendingToolCall[] = [];
     for (const call of allowedCalls) {
+      if (readOnly && (!isRegistryReadTool(call.name) || !(tools as readonly string[]).includes(call.name))) {
+        // Call-time read-only enforcement, same oracle as declaration time:
+        // the registry descriptor's risk must be exactly 'read' AND the tool
+        // must be in the declared set. A model that hallucinates an undeclared
+        // tool — write, destructive, send, or even a legitimate read it was
+        // never granted — gets a refusal result; the handler is never invoked
+        // and no confirmation UI is requested.
+        results.push(errorToolResult(call, 'TOOL_NOT_PERMITTED'));
+        continue;
+      }
       if (!isRegisteredToolHandler(call.name as GoogleToolName, executeOptions.handlers)) {
+        // Authorization passed but availability failed: a registry read tool
+        // without a handler in this caller is a structured refusal, never an
+        // execution.
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
         continue;
       }
@@ -131,11 +189,17 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           yield { type: 'interaction-status', interactionId, status: 'preparing_document' };
           yield { type: 'interaction-status', interactionId, status: 'compiling_pdf' };
         }
-        if (signal?.aborted || request.isGenerationActive?.() === false) return;
+        if (signal?.aborted || request.isGenerationActive?.() === false) {
+          yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+          return;
+        }
         let result = await executeGoogleTool(call, executeOptions);
-        if (signal?.aborted || request.isGenerationActive?.() === false) return;
+        if (signal?.aborted || request.isGenerationActive?.() === false) {
+          yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+          return;
+        }
         if (call.name === 'document.create_pdf') yield { type: 'interaction-status', interactionId, status: 'finalizing_artifact' };
-        if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
+        if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
           const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
           let granted = false;
@@ -149,7 +213,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           }
           if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(call, executeOptions);
         }
-        if (signal?.aborted || request.isGenerationActive?.() === false) return;
+        if (signal?.aborted || request.isGenerationActive?.() === false) {
+          yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+          return;
+        }
         if (result.ok) {
           results.push({ callId: call.callId, name: call.name, result: result.result });
           const created = artifactEvent(call.name, result.result);
@@ -162,6 +229,9 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     if (mutationEntries.length) {
       if (executeOptions.confirm) {
         decisions = await Promise.all(mutationEntries.map((entry) => executeOptions.confirm!(entry.confirmation)));
+      } else if (options.headless) {
+        // A headless caller has nobody to ask: mutations are declined, never parked on UI.
+        decisions = mutationEntries.map(() => false);
       } else {
         yield { type: 'interaction-status', interactionId, status: 'awaiting_tool_confirmation' };
         const pending = requestGoogleToolConfirmations(mutationEntries.map((entry) => entry.confirmation), signal);
@@ -185,10 +255,16 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(entry.call, 'USER_DECLINED'));
         continue;
       }
-      if (signal?.aborted || request.isGenerationActive?.() === false) return;
+      if (signal?.aborted || request.isGenerationActive?.() === false) {
+        yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+        return;
+      }
       let result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
-      if (signal?.aborted || request.isGenerationActive?.() === false) return;
-      if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
+      if (signal?.aborted || request.isGenerationActive?.() === false) {
+        yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+        return;
+      }
+      if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
         yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
         const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
         let granted = false;
@@ -202,7 +278,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         }
         if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
       }
-      if (signal?.aborted || request.isGenerationActive?.() === false) return;
+      if (signal?.aborted || request.isGenerationActive?.() === false) {
+        yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+        return;
+      }
       if (result.ok) {
         results.push({ callId: entry.call.callId, name: entry.call.name, result: result.result });
         const created = artifactEvent(entry.call.name, result.result);

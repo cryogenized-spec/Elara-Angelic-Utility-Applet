@@ -61,3 +61,15 @@ export const DEFAULT_ROLEPLAY: RoleplayPreferences = {
   weather: '',
   atmosphere: '',
 };
+
+export interface AutonomyPreferences {
+  /** Master switch: when false, no autonomous execution of any kind. */
+  enabled: boolean;
+  /** Maximum AutonomousEvents per rolling 24 hours across all routines. */
+  maxEventsPerDay: number;
+}
+
+export const DEFAULT_AUTONOMY: AutonomyPreferences = {
+  enabled: false,
+  maxEventsPerDay: 10,
+};

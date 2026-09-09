@@ -7,7 +7,7 @@ const makeMemory = (overrides: Partial<DurableMemory>): DurableMemory => ({
   createdAt: 1_000, updatedAt: 1_000, observedAt: 1_000, confidence: 0.8, importance: 0.6,
   lifecycle: 'active', source: { source: 'user', createdAt: 1_000 }, tags: ['project'],
   relatedMemoryIds: [], supportingMemoryIds: [], conflictingMemoryIds: [], supersedes: [], supersededBy: [],
-  reinforcementCount: 0, folderId: 'folder-a', expiresAt: null, lastRecalledAt: null, recallCount: 0,
+  reinforcementCount: 0, folderId: 'folder-a', expiresAt: null, lastRecalledAt: null, recallCount: 0, autonomyContext: false,
   ...overrides,
 });
 

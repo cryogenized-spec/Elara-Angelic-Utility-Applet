@@ -1,0 +1,127 @@
+import { expect, test, type Page } from '@playwright/test';
+
+// ---------------------------------------------------------------------------
+// Autonomous routines — the local product loop, end to end in a real browser:
+// create routine → master switch → Run now → read-only agent turn → structured
+// outcome → deterministic policy → Autonomy Inbox → run history. The Gemini
+// provider is satisfied by a route-mocked SSE stream (same pattern as the chat
+// specs); no Google permissions are granted, so the run is a plain provider
+// turn with no tools.
+
+function sse(interactionId: string, text: string): string {
+  return [
+    `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: interactionId, status: 'in_progress', model: 'gemini-3.8-flash' } })}\n\n`,
+    `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: interactionId, index: 0, delta: { type: 'text', text } })}\n\n`,
+    `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: interactionId, status: 'completed' } })}\n\n`,
+  ].join('');
+}
+
+async function unlockTestGemini(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Lockbox' }).click();
+  await page.getByLabel('Gemini API key').fill(['e2e', 'test', 'api', 'key'].join('-'));
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
+  await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
+}
+
+async function openAutonomySettings(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Autonomy' }).click();
+}
+
+async function createRoutine(page: Page, name: string, instruction: string): Promise<void> {
+  await page.getByRole('button', { name: '+ Routine' }).click();
+  await page.getByLabel('Name', { exact: true }).fill(name);
+  await page.getByLabel(/Instruction — what Elara should do each run/).fill(instruction);
+  await page.getByRole('button', { name: 'Save routine' }).click();
+  await expect(page.getByRole('heading', { name: 'Autonomy' })).toBeVisible();
+  await expect(page.locator('.autonomy-routine', { hasText: name })).toBeVisible();
+}
+
+const EVENT_OUTCOME = JSON.stringify({
+  outcome: 'event',
+  title: 'Stand-up moved to 09:30',
+  summary: 'Your stand-up moved later and now overlaps the design review.',
+  importance: 2,
+  confidence: 3,
+  evidence: [{ kind: 'tool', ref: 'morning checklist', note: 'planned day' }],
+});
+
+const NOOP_OUTCOME = JSON.stringify({ outcome: 'noop', reason: 'all quiet', itemsExamined: 2 });
+
+test('a routine run delivers an admitted event to the Autonomy Inbox', async ({ page }) => {
+  const requests: Array<Record<string, unknown>> = [];
+  await page.route('**/v1/interactions*', async (route) => {
+    requests.push(JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>);
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse('routine-run-1', EVENT_OUTCOME) });
+  });
+
+  await page.goto('');
+  await unlockTestGemini(page);
+  await openAutonomySettings(page);
+
+  await expect(page.getByText('No routines yet.')).toBeVisible();
+  await createRoutine(page, 'Morning brief', 'Look at my day and tell me about morning changes.');
+
+  // The master switch ships OFF: autonomy is opt-in.
+  const masterSwitch = page.getByRole('switch', { name: 'Autonomous routines master switch' });
+  await expect(masterSwitch).toHaveAttribute('aria-checked', 'false');
+
+  // Enable autonomy, then run the routine manually.
+  await masterSwitch.click();
+  await expect(masterSwitch).toHaveAttribute('aria-checked', 'true');
+  await page.locator('.autonomy-routine', { hasText: 'Morning brief' }).getByRole('button', { name: 'Run now' }).click();
+
+  await expect(page.locator('.autonomy-routine__status', { hasText: 'Event delivered to the Autonomy Inbox.' })).toBeVisible();
+
+  // The provider received a read-only routine turn: hard-coded policy instruction,
+  // the routine prompt, and no tool declarations (no Google permissions granted).
+  expect(requests.length).toBeGreaterThanOrEqual(1);
+  const run = requests[0] as { system_instruction?: string; input?: string; tools?: unknown };
+  expect(run.system_instruction).toContain('EXECUTION POLICY');
+  expect(run.system_instruction).toContain('untrusted EVIDENCE');
+  expect(run.system_instruction).toContain('Morning brief');
+  expect(run.input).toContain('Morning brief');
+  expect(run.tools).toBeUndefined();
+
+  // The event lands unread in the inbox; reading it clears the badge.
+  const inbox = page.locator('.autonomy-event', { hasText: 'Stand-up moved to 09:30' });
+  await expect(inbox).toBeVisible();
+  await expect(inbox.locator('.autonomy-event__dot')).toBeVisible();
+  await expect(page.getByText('Autonomy Inbox · 1 new')).toBeVisible();
+  await inbox.click();
+  await expect(inbox.locator('.autonomy-event__dot')).toHaveCount(0);
+
+  // Run history records the completed manual run.
+  await expect(page.locator('.autonomy-run', { hasText: 'Morning brief' })).toContainText('completed');
+  await expect(page.locator('.autonomy-run', { hasText: 'Morning brief' })).toContainText('manual');
+});
+
+test('the authority gate and no-op silence behave as designed', async ({ page }) => {
+  await page.route('**/v1/interactions*', async (route) => {
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse('routine-run-2', NOOP_OUTCOME) });
+  });
+
+  await page.goto('');
+  await unlockTestGemini(page);
+  await openAutonomySettings(page);
+  await createRoutine(page, 'Evening digest', 'Summarize anything that changed today.');
+
+  // With the master switch off, Run now is skipped without executing anything.
+  await page.locator('.autonomy-routine', { hasText: 'Evening digest' }).getByRole('button', { name: 'Run now' }).click();
+  await expect(page.locator('.autonomy-routine__status', { hasText: 'Skipped — autonomous routines are switched off.' })).toBeVisible();
+  await expect(page.locator('.autonomy-run', { hasText: 'Evening digest' })).toContainText('skipped');
+  expect(await page.locator('.autonomy-event').count()).toBe(0);
+
+  // Enabled: a no-op is a successful, silent run — the inbox stays quiet.
+  await page.getByRole('switch', { name: 'Autonomous routines master switch' }).click();
+  await page.locator('.autonomy-routine', { hasText: 'Evening digest' }).getByRole('button', { name: 'Run now' }).click();
+  await expect(page.locator('.autonomy-routine__status', { hasText: 'Nothing noteworthy (all quiet).' })).toBeVisible();
+  await expect(page.getByText('Quiet. When a routine run produces something worth telling you, it lands here — nothing else will.')).toBeVisible();
+  await expect(page.locator('.autonomy-run', { hasText: 'Evening digest' })).toContainText('no-op');
+});

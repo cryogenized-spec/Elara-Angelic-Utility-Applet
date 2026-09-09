@@ -12,7 +12,8 @@ const requiredFiles = [
   'src/character/system-instruction.ts', 'src/persistence/character.ts', 'src/persistence/character.test.ts', 'src/persistence/gemini-api-key.ts', 'src/persistence/gemini-api-key.test.ts', 'src/persistence/preferences.ts', 'src/persistence/roleplay-world.ts',
   'src/domain/roleplay-world.ts', 'src/domain/roleplay-world.test.ts',
   'src/gemini/runtime-context.ts', 'src/google/confirmation/broker.ts', 'src/google/confirmation/roleplay-broker.ts', 'src/google/tools/roleplay-world-schemas.ts', 'src/google/tools/roleplay-world-handlers.ts', 'src/google/tools/gemini-declarations.test.ts',
-  'e2e/roleplay-world.spec.ts',
+  'src/autonomy/contracts.ts', 'src/autonomy/schedule.ts', 'src/autonomy/policy.ts', 'src/autonomy/outcome.ts', 'src/autonomy/authority.ts', 'src/autonomy/instruction.ts', 'src/autonomy/runner.ts', 'src/autonomy/runner.test.ts', 'src/persistence/autonomy.ts', 'src/persistence/autonomy.test.ts',
+  'e2e/roleplay-world.spec.ts', 'e2e/autonomy.spec.ts',
 ];
 
 for (const relative of requiredFiles) if (!existsSync(join(root, relative))) throw new Error(`Reliability gate: missing ${relative}`);

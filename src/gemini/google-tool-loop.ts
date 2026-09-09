@@ -17,6 +17,19 @@ export interface GoogleToolLoopOptions {
   readonly readOnly?: boolean;
   readonly maxToolCalls?: number;
   readonly executor?: Partial<GoogleToolExecutorOptions>;
+  /**
+   * Skip the interactive-chat runtime-context decorator (roleplay guidance,
+   * wall-clock framing). Autonomous routine runs supply their own runtime
+   * context and must not receive chat/roleplay instructions.
+   */
+  readonly suppressRuntimeContext?: boolean;
+  /**
+   * Honor an explicitly empty tool list instead of falling back to the full
+   * read-tool surface. Non-chat callers (routine runs without Google
+   * permissions) need a genuine no-tool request; the chat default (all read
+   * tools) must not change.
+   */
+  readonly allowEmptyTools?: boolean;
 }
 
 const DEFAULT_MAX_TOOL_CALLS = 8;
@@ -36,8 +49,10 @@ function delay(ms: number): Promise<void> {
 
 type PendingToolCall = GoogleToolCall & Pick<GeminiToolResult, 'callId' | 'name'>;
 
-function normalizeTools(tools: readonly GoogleToolName[] | undefined): readonly GoogleToolName[] {
-  return tools?.length ? tools : Object.keys(googleReadToolHandlers) as GoogleToolName[];
+function normalizeTools(tools: readonly GoogleToolName[] | undefined, allowEmpty: boolean): readonly GoogleToolName[] {
+  if (tools?.length) return tools;
+  if (allowEmpty && tools) return [];
+  return Object.keys(googleReadToolHandlers) as GoogleToolName[];
 }
 
 function executorOptions(options: GoogleToolLoopOptions, request: GeminiTurnRequest, signal?: AbortSignal): GoogleToolExecutorOptions {
@@ -71,7 +86,7 @@ function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandl
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
-  const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools);
+  const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools, options.allowEmptyTools === true);
   const maxToolCalls = Math.max(1, Math.min(options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS, 20));
   const executeOptions = executorOptions(options, request, signal);
 
@@ -85,7 +100,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     }
   }
 
-  const systemInstruction = withRuntimeContext(request.systemInstruction);
+  const systemInstruction = options.suppressRuntimeContext === true ? request.systemInstruction?.trim() : withRuntimeContext(request.systemInstruction);
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
   let executedCalls = 0;
   let toolBudgetExhausted = false;

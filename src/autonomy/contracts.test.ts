@@ -91,3 +91,29 @@ describe('evaluateAutonomyPermission', () => {
     expect(evaluateAutonomyPermission({ ...settings, enabled: false }, normalizeRoutine({ ...baseRoutine, enabled: false }))).toEqual({ permitted: false, reason: 'master-disabled' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Hardening: full-garbage records and tampered persisted permissions.
+// ---------------------------------------------------------------------------
+
+describe('normalizeRoutine — malformed persisted state', () => {
+  it('turns a garbage record into a disabled, fully-defaulted routine instead of crashing', () => {
+    const routine = normalizeRoutine({ garbage: true });
+    expect(routine).toMatchObject({
+      name: 'Untitled routine',
+      enabled: false,
+      instruction: 'No instruction was saved for this routine.',
+      timezone: 'UTC',
+      permissions: { memory: false, google: [] },
+    });
+    expect(routine.schedule).toEqual({ kind: 'daily', time: '09:00', days: 'every' });
+  });
+
+  it('drops write-class and unknown capabilities from tampered persisted permissions', () => {
+    const routine = normalizeRoutine({
+      ...baseRoutine,
+      permissions: { memory: true, google: ['tasks.read', 'tasks.write', 'gmail.modify', 'documents.local', 'made-up.read', 'drive.library.write'] },
+    });
+    expect(routine.permissions).toEqual({ memory: true, google: ['tasks.read'] });
+  });
+});

@@ -1031,7 +1031,9 @@ backend" was rejected: privacy, cost, and security all point the wrong way for t
 - **Routines read memory** via (a) the **Autonomy Context** (cloud routines): the bounded,
   explicitly consented, inspectable read-only projection specified in §8.5, synced to the DO;
   and (b) **live local retrieval** (device routines): the existing `loadMemoryContext` path
-  unchanged.
+  unchanged. *(A1 implements (b) only, in `loadLocalRoutineMemoryContext` — local execution.
+  Path (a) arrives with cloud execution: the worker receives the §8.5 payload via
+  `RoutineRunOptions.memoryContext` and must never import or call the local memory store.)*
 - **`memory.search`** is a read-only tool over the pack (ranked, budgeted) so the agent can
   cross-reference ("did the user already discuss this task?") rather than receiving one static
   context block. The static block (top-ranked, ~4 KB) is also provided as grounding.
@@ -1190,6 +1192,33 @@ Each phase is independently testable, reviewable, and leaves main green (PR #11 
 **Complexity estimate:** A0–D ≈ 5–7 PRs of moderate size (comparable individually to single
 passes of PR #11, not the whole PR); E–G ≈ 3–4 more. The critical path (A0–D + F) delivers the
 full two-loci product.
+
+#### Implementation status — A0/A1 as landed (2026-09-09, PR #12)
+
+The first implementation slice deliberately tightened the A0/A1 rows above (owner greenlight:
+"zero-cloud product loop first"). What EXISTS today:
+
+- The full local routine domain (`src/autonomy/contracts.ts`), tz/DST due-time computation
+  (`schedule.ts`), deterministic admission policy (`policy.ts`), structured outcome gate
+  (`outcome.ts`), authority gate (`authority.ts`), run instruction (`instruction.ts`), and the
+  scheduler-agnostic run executor with atomic run admission (`runner.ts`).
+- Persistence in a **dedicated `elara-autonomy` Dexie database** (the repo's per-concern DB
+  convention, cf. the roleplay world store) — routines, events, run history with retention.
+- Local **Run Now** (`executionMode: 'manual'`) through `streamGoogleToolLoop` in read-only,
+  headless mode; the Autonomy Inbox and run history in Settings ▸ Autonomy; autonomy
+  preferences (master switch, default OFF) in the preferences store.
+- `scheduled`/`catch-up` exist as domain execution modes with occurrence-derived run identity
+  (`routineRunKey`, `RoutineRunOptions.scheduledFor`) — **no scheduler exists yet**.
+
+What is deliberately NOT in this slice (all Phase B+ unless noted): no Cloudflare execution, no
+Cron/DO/Workflow, no push, no server-side Google OAuth, no background execution of any kind;
+the A1-row items `autonomyContext` memory consent flag, `buildAutonomyContext()` projection
+builder, Memory Bank consent UI, and NL→structured authoring are deferred (the editor is
+explicit structured forms; permissions are never inferred from free text); the A0-row
+pairing/health endpoints were resolved as local-only (no execution to pair). Local runs read
+memory via live local retrieval (§11(b)); cloud runs will receive the §8.5 Autonomy Context as
+a bounded payload through `RoutineRunOptions.memoryContext` — the worker must never call
+`retrieveMemories()`.
 
 ---
 

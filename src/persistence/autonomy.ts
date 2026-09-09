@@ -143,6 +143,66 @@ export async function findRunInFlight(routineId: string): Promise<RoutineRunReco
   return runs.find((run) => run.state === 'pending' || run.state === 'running');
 }
 
+/**
+ * A 'running'/'pending' run older than this is a crashed run — typically the
+ * app/tab closed mid-run. The next claim abandons it (state 'failed',
+ * RUN_ABANDONED) instead of letting it block the routine forever. Fifteen
+ * minutes comfortably exceeds the worst legitimate run (≤ 20 tool calls
+ * bounded by the loop's own budget).
+ */
+export const STALE_RUN_MS = 15 * 60_000;
+
+export type RunClaimResult =
+  | { status: 'claimed'; run: RoutineRunRecord }
+  | { status: 'in-flight'; run: RoutineRunRecord }
+  | { status: 'already-executed'; run: RoutineRunRecord };
+
+/**
+ * Atomically admit ONE run for a routine: the in-flight check, duplicate-runKey
+ * check, crash recovery, and insert all happen inside a single IndexedDB
+ * transaction, so two concurrent execution contexts can never both observe "no
+ * run in flight" and both insert (the read/write race the previous
+ * check-then-insert sequence allowed).
+ *
+ * Check order is deliberate:
+ * 1. runKey already exists → 'already-executed' (idempotent redelivery of the
+ *    same occurrence — also covers a same-millisecond duplicate manual trigger).
+ *    Checked FIRST so the rejected caller can still record its skip without
+ *    colliding with the active run's unique runKey.
+ * 2. fresh in-flight run exists → 'in-flight' (overlap refused).
+ * 3. stale in-flight runs are abandoned (crash recovery), then the run is claimed.
+ *
+ * The semantics map 1:1 onto a future Durable Object: a DO serializes access
+ * per key, so the same claim logic will hold without domain changes.
+ */
+export async function claimRoutineRun(run: RoutineRunRecord, now = Date.now()): Promise<RunClaimResult> {
+  const result = await db.transaction('rw', db.runs, async (): Promise<RunClaimResult> => {
+    const existing = await db.runs.where('routineId').equals(run.routineId).toArray();
+    const duplicate = existing.find((candidate) => candidate.runKey === run.runKey);
+    if (duplicate) return { status: 'already-executed', run: duplicate };
+    const inFlight = existing.filter((candidate) => (candidate.state === 'pending' || candidate.state === 'running') && now - candidate.startedAt < STALE_RUN_MS);
+    const stale = existing.filter((candidate) => (candidate.state === 'pending' || candidate.state === 'running') && now - candidate.startedAt >= STALE_RUN_MS);
+    for (const crashed of stale) {
+      // Crash recovery: keep history truthful and unblock the routine. The run
+      // record (with its denormalized routine name) survives as the evidence.
+      await db.runs.put({
+        ...crashed,
+        state: 'failed',
+        outcome: 'error',
+        errorCode: 'RUN_ABANDONED',
+        errorMessage: 'The run did not finish (the app closed before completion).',
+        completedAt: now,
+        durationMs: Math.max(0, now - crashed.startedAt),
+      });
+    }
+    if (inFlight.length) return { status: 'in-flight', run: inFlight[0] };
+    await db.runs.put(run);
+    return { status: 'claimed', run };
+  });
+  if (result.status === 'claimed') notify();
+  return result;
+}
+
 export async function addRun(run: RoutineRunRecord): Promise<RoutineRunRecord> {
   await db.runs.put(run);
   await pruneRuns(run.startedAt);

@@ -1,8 +1,9 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { executeRoutineRun, routineToolSet, type RoutineEngine, type RoutineEngineRequest } from './runner';
-import { addEvent, addRun, clearAutonomyStore, getRoutine, listEvents, listRuns } from '../persistence/autonomy';
+import { addEvent, addRun, clearAutonomyStore, deleteRoutine, getRoutine, listEvents, listRuns, saveRoutine } from '../persistence/autonomy';
 import { noveltyFingerprint } from './policy';
+import { normalizeRoutine } from './contracts';
 import type { AutonomyPreferences } from '../domain/preferences';
 import type { AutonomousEvent, ElaraRoutine, RoutineRunRecord } from './contracts';
 import type { GeminiStreamEvent } from '../gemini/contracts';
@@ -61,13 +62,14 @@ const EVENT = JSON.stringify({
   evidence: [{ kind: 'tool', ref: 'calendar.listEvents', note: 'today' }],
 });
 
-function runOptions(engine: RoutineEngine) {
-  let counter = 0;
+let idCounter = 0;
+
+function runOptions(engine: RoutineEngine, now: () => number = () => NOW) {
   return {
     engine,
-    now: () => NOW,
+    now,
     model: 'test-model',
-    generateId: () => `id-${(counter += 1)}`,
+    generateId: () => `id-${(idCounter += 1)}`,
   };
 }
 
@@ -104,6 +106,7 @@ describe('executeRoutineRun — authority and overlap guards', () => {
 
 describe('executeRoutineRun — outcomes', () => {
   it('records a completed no-op run and persists run history', async () => {
+    await saveRoutine(makeRoutine());
     const toolCall: GeminiStreamEvent = { type: 'tool-call', interactionId: 'it-1', index: 2, callId: 'c1', name: 'calendar.listEvents', arguments: {} };
     const { run, event } = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engineFor(textRun(NOOP, [toolCall]))));
     expect(run.state).toBe('completed');
@@ -125,6 +128,7 @@ describe('executeRoutineRun — outcomes', () => {
   });
 
   it('delivers an admitted event to the inbox and stamps the routine', async () => {
+    await saveRoutine(makeRoutine());
     const { run, event } = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engineFor(textRun(EVENT))));
     expect(run.state).toBe('completed');
     expect(run.outcome).toBe('event');
@@ -238,6 +242,25 @@ describe('routineToolSet', () => {
   it('yields an empty tool surface when no Google permissions are granted', () => {
     expect(routineToolSet(makeRoutine())).toEqual([]);
   });
+
+  it('cannot acquire write, destructive, internal, or local-artifact tools from tampered persisted permissions', () => {
+    // Tamper the persisted record directly: write-class capabilities, an unknown
+    // capability, and the local-document capability (whose PDF tool is risk 'read'
+    // and Gemini-exposed, so only the capability enum stands between it and routines).
+    const tampered = normalizeRoutine({
+      ...makeRoutine(),
+      permissions: { memory: false, google: ['tasks.read', 'tasks.write', 'tasks.delete' as never, 'docs.write', 'documents.local' as never, 'nonexistent.read' as never] },
+    });
+    // The capability enum itself is the boundary: everything outside the
+    // read-only routine set is dropped during normalization, before any
+    // registry lookup can happen.
+    expect(tampered.permissions.google).toEqual(['tasks.read']);
+    const tools = routineToolSet(tampered);
+    expect(tools).toEqual(expect.arrayContaining(['tasks.listTasks']));
+    expect(tools.some((tool) => /create|delete|write|update|move|insert|replace|append|clear|modify/i.test(tool))).toBe(false);
+    expect(tools).not.toContain('document.create_pdf');
+    expect(tools).not.toContain('docs.inspectDocument');
+  });
 });
 
 describe('executeRoutineRun — engine request composition', () => {
@@ -279,3 +302,200 @@ function makeSeedEvent(id: string): AutonomousEvent {
     readAt: null,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Hardening regressions: concurrent admission, occurrence identity, terminal
+// stamping, mid-run mutation, memory boundary, stale-run recovery.
+// ---------------------------------------------------------------------------
+
+/** An engine that parks after its first event until released — lets tests
+ * hold a run in flight while a second execution or a user edit happens. */
+function pausableEngine(): { engine: RoutineEngine; started: Promise<void>; release: () => void } {
+  let releaseGate!: () => void;
+  let startedResolve!: () => void;
+  const gate = new Promise<void>((resolve) => { releaseGate = resolve; });
+  const started = new Promise<void>((resolve) => { startedResolve = resolve; });
+  const engine: RoutineEngine = async function* () {
+    startedResolve();
+    yield { type: 'interaction-created', interactionId: 'it-gated', model: 'test-model' };
+    await gate;
+    yield { type: 'text-delta', index: 1, text: NOOP };
+    yield { type: 'completed', interactionId: 'it-gated', status: 'done', durationMs: 5 };
+  };
+  return { engine, started, release: releaseGate };
+}
+
+describe('executeRoutineRun — concurrent Run Now admission', () => {
+  it('admits at most one of two overlapping runs and refuses the other with RUN_IN_FLIGHT', async () => {
+    const { engine, started, release } = pausableEngine();
+    let clock = NOW;
+    const first = executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engine, () => clock));
+    await started; // the first run has claimed and entered its engine
+    clock += 1; // a later trigger must have its own identity (same-ms is the already-executed case)
+    const second = executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engine, () => clock));
+    release();
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    const outcomes = [firstResult.run, secondResult.run].sort((a, b) => (a.state === 'skipped' ? 1 : 0) - (b.state === 'skipped' ? 1 : 0));
+    expect(outcomes[0]).toMatchObject({ state: 'completed', outcome: 'no-op' });
+    expect(outcomes[1]).toMatchObject({ state: 'skipped', outcome: 'skipped', errorCode: 'RUN_IN_FLIGHT' });
+
+    const stored = await listRuns();
+    expect(stored.filter((run) => run.state === 'completed')).toHaveLength(1);
+    expect(stored.filter((run) => run.state === 'running')).toHaveLength(0);
+    expect(await listEvents()).toEqual([]);
+  });
+
+  it('recovers from a crashed run: a stale in-flight record is abandoned, not obeyed forever', async () => {
+    const staleStartedAt = NOW - 16 * 60_000;
+    await addRun({
+      id: 'crashed', runKey: 'r-1:manual:old', routineId: 'r-1', routineName: 'Morning brief',
+      executionMode: 'manual', scheduledFor: staleStartedAt, startedAt: staleStartedAt, state: 'running',
+    });
+    const { run } = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engineFor(textRun(NOOP))));
+    expect(run.state).toBe('completed');
+    const crashed = (await listRuns()).find((record) => record.id === 'crashed');
+    expect(crashed).toMatchObject({ state: 'failed', outcome: 'error', errorCode: 'RUN_ABANDONED' });
+  });
+});
+
+describe('executeRoutineRun — occurrence identity (scheduled / catch-up)', () => {
+  it('derives run identity from the occurrence, not the start time', async () => {
+    const { run } = await executeRoutineRun(makeRoutine(), settings, 'scheduled', { ...runOptions(engineFor(textRun(NOOP))), scheduledFor: 5_000 });
+    expect(run.runKey).toBe('r-1:scheduled:5000');
+    expect(run.scheduledFor).toBe(5_000);
+    expect(run.startedAt).toBe(NOW);
+  });
+
+  it('redelivery of the same scheduled occurrence executes once and returns the existing record', async () => {
+    const first = await executeRoutineRun(makeRoutine(), settings, 'scheduled', { ...runOptions(engineFor(textRun(EVENT))), scheduledFor: 5_000 });
+    const second = await executeRoutineRun(makeRoutine(), settings, 'scheduled', { ...runOptions(engineFor(textRun(EVENT))), scheduledFor: 5_000 });
+    expect(second.run.id).toBe(first.run.id);
+    expect(await listRuns()).toHaveLength(1);
+    expect(await listEvents()).toHaveLength(1);
+  });
+
+  it('a different occurrence is a different execution', async () => {
+    await executeRoutineRun(makeRoutine(), settings, 'scheduled', { ...runOptions(engineFor(textRun(NOOP))), scheduledFor: 5_000 });
+    const later = await executeRoutineRun(makeRoutine(), settings, 'scheduled', { ...runOptions(engineFor(textRun(NOOP))), scheduledFor: 6_000 });
+    expect(later.run.runKey).toBe('r-1:scheduled:6000');
+    expect(await listRuns()).toHaveLength(2);
+  });
+
+  it('catch-up retains the source occurrence identity, and a repeated catch-up dedupes', async () => {
+    const first = await executeRoutineRun(makeRoutine(), settings, 'catch-up', { ...runOptions(engineFor(textRun(NOOP))), scheduledFor: 5_000 });
+    expect(first.run.runKey).toBe('r-1:catch-up:5000');
+    expect(first.run.scheduledFor).toBe(5_000);
+    const repeat = await executeRoutineRun(makeRoutine(), settings, 'catch-up', { ...runOptions(engineFor(textRun(NOOP))), scheduledFor: 5_000 });
+    expect(repeat.run.id).toBe(first.run.id);
+    expect(await listRuns()).toHaveLength(1);
+  });
+});
+
+describe('executeRoutineRun — lastResult stamping across every terminal path', () => {
+  type TerminalCase = { name: string; events: () => GeminiStreamEvent[]; state: RoutineRunRecord['state']; outcome?: RoutineRunRecord['outcome']; seed?: () => Promise<void> };
+
+  const cases: TerminalCase[] = [
+    { name: 'completed no-op', events: () => textRun(NOOP), state: 'completed', outcome: 'no-op' },
+    { name: 'completed admitted event', events: () => textRun(EVENT), state: 'completed', outcome: 'event' },
+    { name: 'completed suppressed (cooldown)', events: () => textRun(EVENT), state: 'completed', outcome: 'suppressed', seed: async () => { await addEvent({ ...makeSeedEvent('e-1'), createdAt: NOW - 2 * HOUR }); } },
+    { name: 'failed provider error', events: () => [{ type: 'failed', error: { category: 'network', code: 'PROVIDER_NETWORK', message: 'The request failed.', retryable: true, cancelled: false, debug: {} } }], state: 'failed', outcome: 'error' },
+    { name: 'failed malformed outcome', events: () => textRun('definitely not JSON'), state: 'failed', outcome: 'error' },
+    { name: 'failed no terminal event', events: () => [{ type: 'text-delta', index: 1, text: 'half an answer' }], state: 'failed', outcome: 'error' },
+    { name: 'failed engine exception', events: () => textRun(NOOP), state: 'failed', outcome: 'error' }, // replaced inline below
+    { name: 'cancelled by provider', events: () => [{ type: 'cancelled', interactionId: 'it-1' }], state: 'cancelled' },
+  ];
+
+  it.each(cases.filter((testCase) => testCase.name !== 'failed engine exception'))('stamps lastResult for: $name', async ({ events, state, outcome, seed }) => {
+    await saveRoutine(makeRoutine());
+    await seed?.();
+    const { run } = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engineFor(events())));
+    expect(run.state).toBe(state);
+    if (outcome) expect(run.outcome).toBe(outcome);
+    expect(run.completedAt).toBeDefined();
+    expect(run.durationMs).toBeGreaterThanOrEqual(0);
+    const routine = await getRoutine('r-1');
+    expect(routine?.lastRunAt).toBe(run.completedAt);
+    expect(routine?.lastResult).toMatchObject({ at: run.completedAt, state, ...(outcome ? { outcome } : {}) });
+  });
+
+  it('stamps lastResult for: failed engine exception', async () => {
+    await saveRoutine(makeRoutine());
+    const exploding: RoutineEngine = async function* () { throw new Error('transport collapsed'); };
+    const { run } = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(exploding));
+    expect(run).toMatchObject({ state: 'failed', outcome: 'error', errorCode: 'RUN_INTERNAL' });
+    const routine = await getRoutine('r-1');
+    expect(routine?.lastResult).toMatchObject({ state: 'failed', outcome: 'error' });
+  });
+
+  it('does NOT stamp lastResult for skipped runs — the previous real run stays the "last run"', async () => {
+    await saveRoutine(makeRoutine());
+    const completed = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engineFor(textRun(NOOP))));
+    const before = (await getRoutine('r-1'))?.lastResult;
+
+    await executeRoutineRun(makeRoutine(), { ...settings, enabled: false }, 'manual', runOptions(engineFor([])));
+    await executeRoutineRun(makeRoutine({ enabled: false }), settings, 'manual', runOptions(engineFor([])));
+
+    const routine = await getRoutine('r-1');
+    expect(routine?.lastResult).toEqual(before);
+    expect(routine?.lastRunAt).toBe(completed.run.completedAt);
+  });
+});
+
+describe('executeRoutineRun — routine mutated or deleted mid-run', () => {
+  it('a user edit made while the run executes is never clobbered by the run\'s stale routine copy', async () => {
+    const { engine, started, release } = pausableEngine();
+    const promise = executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engine));
+    await started;
+    await saveRoutine(makeRoutine({ name: 'Renamed mid-run', instruction: 'Updated instruction.' }));
+    release();
+    const { run } = await promise;
+    expect(run.state).toBe('completed');
+    const routine = await getRoutine('r-1');
+    expect(routine?.name).toBe('Renamed mid-run');
+    expect(routine?.instruction).toBe('Updated instruction.');
+    expect(routine?.lastResult).toMatchObject({ state: 'completed', outcome: 'no-op' });
+  });
+
+  it('a routine deleted mid-run completes its record without resurrecting the routine', async () => {
+    const { engine, started, release } = pausableEngine();
+    const promise = executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engine));
+    await started;
+    await deleteRoutine('r-1');
+    release();
+    const { run } = await promise;
+    expect(run.state).toBe('completed');
+    expect(await getRoutine('r-1')).toBeUndefined();
+    expect((await listRuns()).map((record) => record.routineName)).toEqual(['Morning brief']);
+  });
+});
+
+describe('executeRoutineRun — memory context boundary', () => {
+  it('honors an explicit bounded context payload only when the memory permission is granted', async () => {
+    let clock = NOW;
+    let seen: RoutineEngineRequest | undefined;
+    const granted = makeRoutine({ permissions: { memory: true, google: [] } });
+    await executeRoutineRun(granted, settings, 'manual', { ...runOptions(engineFor(textRun(NOOP), (request) => { seen = request; }), () => clock), memoryContext: 'PACK: user prefers morning meetings' });
+    expect(seen?.systemInstruction).toContain('PACK: user prefers morning meetings');
+
+    clock += 1;
+    let seenDenied: RoutineEngineRequest | undefined;
+    const denied = makeRoutine({ permissions: { memory: false, google: [] } });
+    await executeRoutineRun(denied, settings, 'manual', { ...runOptions(engineFor(textRun(NOOP), (request) => { seenDenied = request; }), () => clock), memoryContext: 'PACK: must never appear' });
+    expect(seenDenied?.systemInstruction).not.toContain('PACK: must never appear');
+    expect(seenDenied?.systemInstruction).not.toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
+  });
+
+  it('local Run Now (no payload) composes context from the local store only when permitted', async () => {
+    let clock = NOW;
+    let seenGranted: RoutineEngineRequest | undefined;
+    await executeRoutineRun(makeRoutine({ permissions: { memory: true, google: [] } }), settings, 'manual', runOptions(engineFor(textRun(NOOP), (request) => { seenGranted = request; }), () => clock));
+    // The local memory store is empty in tests: no context section is added, and the run still succeeds.
+    expect(seenGranted?.systemInstruction).toContain('{"outcome":"noop"');
+
+    clock += 1;
+    let seenPlain: RoutineEngineRequest | undefined;
+    await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engineFor(textRun(NOOP), (request) => { seenPlain = request; }), () => clock));
+    expect(seenPlain?.systemInstruction).not.toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
+  });
+});

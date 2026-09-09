@@ -19,7 +19,8 @@ import {
 import {
   addEvent,
   addRun,
-  findRunInFlight,
+  claimRoutineRun,
+  getRoutine,
   recentEvents,
   saveRoutine,
   updateRun,
@@ -28,15 +29,21 @@ import {
 // ---------------------------------------------------------------------------
 // Routine run executor.
 //
-// Executes ONE routine run end-to-end: authority gate → in-flight guard →
-// context → read-only agent loop → structured outcome gate → deterministic
-// event policy → durable event + run record.
+// Executes ONE routine run end-to-end: authority gate → atomic run admission
+// (claim) → context → read-only agent loop → structured outcome gate →
+// deterministic event policy → durable event + run record.
 //
 // Scheduler-agnostic BY CONSTRUCTION: this module never decides WHEN a run
 // happens. `executionMode` records how it was triggered ('manual' today;
 // 'scheduled'/'catch-up' arrive with the Phase B cloud scheduler behind the
-// SchedulerPort). The engine is injectable so tests drive the loop without
-// providers, exactly like the interactive tool-loop tests.
+// SchedulerPort) and `options.scheduledFor` carries the OCCURRENCE identity the
+// scheduler resolved — the engine is the same either way. The engine is
+// injectable so tests drive the loop without providers, exactly like the
+// interactive tool-loop tests.
+//
+// Every exit path returns a coherent RoutineRunRecord (or the already-existing
+// record for an idempotent redelivery); a crashed process leaves at worst a
+// 'running' record, which the next claim abandons after STALE_RUN_MS.
 // ---------------------------------------------------------------------------
 
 export interface RoutineEngineRequest {
@@ -50,7 +57,7 @@ export interface RoutineEngineRequest {
 
 export type RoutineEngine = (request: RoutineEngineRequest) => AsyncGenerator<GeminiStreamEvent>;
 
-/** Default engine: the canonical Google tool loop (read-only), or a plain provider turn when no tools are granted. */
+/** Default engine: the canonical Google tool loop (read-only, headless), or a plain provider turn when no tools are granted. */
 export const routineEngine: RoutineEngine = (request) => {
   if (request.tools.length > 0) {
     const turnRequest: GeminiTurnRequest = {
@@ -60,17 +67,36 @@ export const routineEngine: RoutineEngine = (request) => {
       tools: request.tools,
       memoryContext: 'none',
     };
-    return streamGoogleToolLoop(turnRequest, { tools: request.tools, readOnly: true, maxToolCalls: request.maxToolCalls, suppressRuntimeContext: true, allowEmptyTools: false }, request.signal);
+    return streamGoogleToolLoop(turnRequest, { tools: request.tools, readOnly: true, maxToolCalls: request.maxToolCalls, suppressRuntimeContext: true, allowEmptyTools: false, headless: true }, request.signal);
   }
   return geminiTurnPort.streamReply({ model: request.model, input: request.input, systemInstruction: request.systemInstruction, memoryContext: 'none' }, request.signal);
 };
 
 export interface RoutineRunOptions {
   readonly model?: string;
+  /**
+   * The occurrence this run executes. Manual runs default to the trigger
+   * time; a scheduler executing 'scheduled'/'catch-up' MUST pass the
+   * occurrence instant (computeNextOccurrence output — for catch-up, the
+   * SOURCE occurrence being caught up, never the catch-up trigger time),
+   * because run identity (runKey) and idempotent redelivery derive from it.
+   */
+  readonly scheduledFor?: number;
   readonly now?: () => number;
   readonly signal?: AbortSignal;
   readonly engine?: RoutineEngine;
   readonly generateId?: () => string;
+  /**
+   * Bounded, pre-projected Autonomy Context payload (design doc §8.5) for
+   * NON-LOCAL executors only. LOCAL "Run now" leaves this undefined and the
+   * runner reads the local memory store directly (§11(b)). Honored only when
+   * the routine holds the memory permission — a payload can never expand
+   * permissions. A cloud executor MUST build the §8.5 projection in the app
+   * (user-consented, ≤ 100 KB / ≤ 200 records) and pass it here; it must
+   * NEVER call retrieveMemories() or import the local memory store from a
+   * Worker.
+   */
+  readonly memoryContext?: string;
 }
 
 export interface RoutineRunResult {
@@ -92,7 +118,15 @@ export function routineToolSet(routine: ElaraRoutine): GoogleToolName[] {
     .map((descriptor) => descriptor.name);
 }
 
-async function loadRoutineMemoryContext(routine: ElaraRoutine): Promise<string> {
+/**
+ * LOCAL EXECUTION ONLY (design doc §11(b)): live retrieval from the device's
+ * durable memory store, gated by the routine's memory permission. This
+ * function must never be called from — or imported by — a cloud executor; the
+ * Phase C worker receives the §8.5 Autonomy Context projection through
+ * `RoutineRunOptions.memoryContext` instead (the local memory store does not
+ * exist server-side and must never be mirrored wholesale).
+ */
+async function loadLocalRoutineMemoryContext(routine: ElaraRoutine): Promise<string> {
   if (!routine.permissions.memory) return '';
   try {
     const query = `${routine.name}\n${routine.instruction}`.slice(0, 2_000);
@@ -104,9 +138,23 @@ async function loadRoutineMemoryContext(routine: ElaraRoutine): Promise<string> 
 }
 
 /**
- * Execute one routine run. Expected failures (authority denial, provider
- * failure, invalid outcome contract, suppression) are RETURNED as run records,
- * not thrown — the run history is the error surface.
+ * Record a skipped (never-executed) run attempt. Constraint-safe: a
+ * same-millisecond duplicate skip colliding on the unique runKey index is
+ * still a correct structured result even if it cannot be persisted twice.
+ */
+async function recordSkippedRun(run: RoutineRunRecord): Promise<RoutineRunRecord> {
+  try {
+    return await addRun(run);
+  } catch {
+    return run;
+  }
+}
+
+/**
+ * Execute one routine run. Expected failures (authority denial, duplicate
+ * delivery, in-flight refusal, provider failure, invalid outcome contract,
+ * suppression) are RETURNED as run records, not thrown — the run history is
+ * the error surface.
  */
 export async function executeRoutineRun(
   routine: ElaraRoutine,
@@ -134,42 +182,36 @@ export async function executeRoutineRun(
       outcome: 'skipped',
       errorCode: permission.reason === 'master-disabled' ? 'AUTONOMY_DISABLED' : 'ROUTINE_DISABLED',
     };
-    return { run: await addRun(run), event: null };
-  }
-
-  const inFlight = await findRunInFlight(routine.id);
-  if (inFlight) {
-    const startedAt = now();
-    const run: RoutineRunRecord = {
-      id: id(),
-      runKey: routineRunKey(routine.id, executionMode, startedAt),
-      routineId: routine.id,
-      routineName: routine.name,
-      executionMode,
-      scheduledFor: startedAt,
-      startedAt,
-      completedAt: startedAt,
-      state: 'skipped',
-      outcome: 'skipped',
-      errorCode: 'RUN_IN_FLIGHT',
-    };
-    return { run: await addRun(run), event: null };
+    return { run: await recordSkippedRun(run), event: null };
   }
 
   const startedAt = now();
+  const scheduledFor = options.scheduledFor ?? startedAt;
   const run: RoutineRunRecord = {
     id: id(),
-    runKey: routineRunKey(routine.id, executionMode, startedAt),
+    runKey: routineRunKey(routine.id, executionMode, scheduledFor),
     routineId: routine.id,
     routineName: routine.name,
     executionMode,
-    scheduledFor: startedAt,
+    scheduledFor,
     startedAt,
     state: 'running',
   };
-  await addRun(run);
 
-  const memoryContext = await loadRoutineMemoryContext(routine);
+  // Atomic admission: duplicate occurrence → idempotent redelivery (return the
+  // existing record, no new history row); concurrent execution → refused.
+  const claim = await claimRoutineRun(run, now());
+  if (claim.status === 'already-executed') {
+    return { run: claim.run, event: null };
+  }
+  if (claim.status === 'in-flight') {
+    const skippedAt = now();
+    return { run: await recordSkippedRun({ ...run, runKey: routineRunKey(routine.id, executionMode, skippedAt), scheduledFor, startedAt: skippedAt, completedAt: skippedAt, state: 'skipped', outcome: 'skipped', errorCode: 'RUN_IN_FLIGHT' }), event: null };
+  }
+
+  const memoryContext = routine.permissions.memory
+    ? (options.memoryContext ?? await loadLocalRoutineMemoryContext(routine))
+    : '';
   const systemInstruction = composeRoutineSystemInstruction(routine, memoryContext);
   const tools = routineToolSet(routine);
 
@@ -178,10 +220,18 @@ export async function executeRoutineRun(
   let interactionId: string | undefined;
   let sawTerminal = false;
 
-  /** Stamp the routine's last-run summary. Best-effort: the run record is authoritative. */
+  /**
+   * Stamp the routine's last-run summary. Re-reads the CURRENT routine record
+   * so a user edit made while the run was executing is never clobbered by the
+   * stale copy captured at run start; a routine deleted mid-run is simply not
+   * stamped (the run record, with its denormalized name, remains the history).
+   * Best-effort: the run record is authoritative.
+   */
   const stampRoutine = async (completedAt: number, state: RoutineRunRecord['state'], outcome: RoutineRunRecord['outcome'], eventId?: string): Promise<void> => {
     try {
-      await saveRoutine({ ...routine, lastRunAt: completedAt, lastResult: { at: completedAt, state, ...(outcome ? { outcome } : {}), ...(eventId ? { eventId } : {}) } });
+      const current = await getRoutine(routine.id);
+      if (!current) return;
+      await saveRoutine({ ...current, lastRunAt: completedAt, lastResult: { at: completedAt, state, ...(outcome ? { outcome } : {}), ...(eventId ? { eventId } : {}) } });
     } catch {
       // Persisting the last-run summary is best-effort; the run record itself is authoritative.
     }
@@ -190,7 +240,14 @@ export async function executeRoutineRun(
   const finish = async (patch: Partial<RoutineRunRecord>): Promise<RoutineRunResult> => {
     const completedAt = patch.completedAt ?? now();
     const completedRun: RoutineRunRecord = { ...run, ...patch, completedAt, toolCalls, durationMs: Math.max(0, completedAt - startedAt), ...(interactionId ? { interactionId } : {}) };
-    const savedRun = await updateRun(completedRun);
+    let savedRun = completedRun;
+    try {
+      savedRun = await updateRun(completedRun);
+    } catch {
+      // If the terminal record cannot be persisted (store failure), still
+      // return a coherent record; the claimed 'running' row is abandoned as
+      // stale by the next claim rather than blocking the routine forever.
+    }
     if (completedRun.state === 'completed' || completedRun.state === 'cancelled' || completedRun.state === 'failed') {
       await stampRoutine(completedAt, completedRun.state, completedRun.outcome, completedRun.eventId);
     }
@@ -260,11 +317,18 @@ export async function executeRoutineRun(
     createdAt: now(),
     readAt: null,
   };
-  await addEvent(event);
-  const completedAt = now();
-  const completedRun = await updateRun({ ...run, state: 'completed', outcome: 'event', eventId: event.id, completedAt, toolCalls, durationMs: Math.max(0, completedAt - startedAt), ...(interactionId ? { interactionId } : {}) });
-  await stampRoutine(completedAt, 'completed', 'event', event.id);
-  return { run: completedRun, event };
+  try {
+    await addEvent(event);
+    const completedAt = now();
+    const completedRun = await updateRun({ ...run, state: 'completed', outcome: 'event', eventId: event.id, completedAt, toolCalls, durationMs: Math.max(0, completedAt - startedAt), ...(interactionId ? { interactionId } : {}) });
+    await stampRoutine(completedAt, 'completed', 'event', event.id);
+    return { run: completedRun, event };
+  } catch (cause) {
+    // Delivery-tail persistence failure. If the event slipped through before
+    // the failure the inbox may hold one extra entry while history reports the
+    // failure — safe direction (no phantom success, no lost history).
+    return finish({ state: 'failed', outcome: 'error', errorCode: 'RUN_INTERNAL', errorMessage: cause instanceof Error ? cause.message : 'The event could not be delivered.' });
+  }
 }
 
 function routineInstructionPrompt(routine: ElaraRoutine): string {

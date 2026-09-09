@@ -126,6 +126,11 @@ function blankDraft(): RoutineDraft {
 function draftDays(routine: ElaraRoutine): RoutineDraft['days'] {
   if (routine.schedule.kind !== 'daily') return 'every';
   const days = routine.schedule.days;
+  // NOTE: the editor offers the three named day sets only. A persisted custom
+  // weekday list (e.g. from a future authoring surface or direct store
+  // tampering) is shown to the user as "Every day" BEFORE saving — visible,
+  // never a silent reinterpretation. The routine card keeps displaying the
+  // exact days via describeSchedule() until the user saves an edit.
   return days === 'every' || days === 'weekdays' || days === 'weekends' ? days : 'every';
 }
 

@@ -5,8 +5,11 @@ import { expect, test, type Page } from '@playwright/test';
 // create routine → master switch → Run now → read-only agent turn → structured
 // outcome → deterministic policy → Autonomy Inbox → run history. The Gemini
 // provider is satisfied by a route-mocked SSE stream (same pattern as the chat
-// specs); no Google permissions are granted, so the run is a plain provider
-// turn with no tools.
+// specs); no Google permissions are granted in the first two tests, so those
+// runs are plain provider turns with no tools.
+//
+// NOTE: browser binaries cannot be downloaded in the development sandbox
+// (CDN-blocked); GitHub CI is the authoritative executor of this spec.
 
 function sse(interactionId: string, text: string): string {
   return [
@@ -98,12 +101,18 @@ test('a routine run delivers an admitted event to the Autonomy Inbox', async ({ 
   await expect(inbox.locator('.autonomy-event__dot')).toHaveCount(0);
 
   // Run history records the completed manual run.
-  await expect(page.locator('.autonomy-run', { hasText: 'Morning brief' })).toContainText('completed');
-  await expect(page.locator('.autonomy-run', { hasText: 'Morning brief' })).toContainText('manual');
+  const historyRow = page.locator('.autonomy-run', { hasText: 'Morning brief' });
+  await expect(historyRow).toContainText('completed');
+  await expect(historyRow).toContainText('manual');
+
+  // Autonomous events stay out of the interactive conversation entirely.
+  await expect(page.locator('.message-user')).toHaveCount(0);
 });
 
 test('the authority gate and no-op silence behave as designed', async ({ page }) => {
+  const requests: Array<Record<string, unknown>> = [];
   await page.route('**/v1/interactions*', async (route) => {
+    requests.push(JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>);
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse('routine-run-2', NOOP_OUTCOME) });
   });
 
@@ -112,10 +121,13 @@ test('the authority gate and no-op silence behave as designed', async ({ page })
   await openAutonomySettings(page);
   await createRoutine(page, 'Evening digest', 'Summarize anything that changed today.');
 
-  // With the master switch off, Run now is skipped without executing anything.
+  // With the master switch off, Run now is skipped without executing anything:
+  // no provider request is ever issued.
   await page.locator('.autonomy-routine', { hasText: 'Evening digest' }).getByRole('button', { name: 'Run now' }).click();
   await expect(page.locator('.autonomy-routine__status', { hasText: 'Skipped — autonomous routines are switched off.' })).toBeVisible();
-  await expect(page.locator('.autonomy-run', { hasText: 'Evening digest' })).toContainText('skipped');
+  await expect.poll(() => requests.length).toBe(0);
+  const skippedRow = page.locator('.autonomy-run', { hasText: 'Evening digest' });
+  await expect(skippedRow).toContainText('skipped');
   expect(await page.locator('.autonomy-event').count()).toBe(0);
 
   // Enabled: a no-op is a successful, silent run — the inbox stays quiet.
@@ -123,5 +135,47 @@ test('the authority gate and no-op silence behave as designed', async ({ page })
   await page.locator('.autonomy-routine', { hasText: 'Evening digest' }).getByRole('button', { name: 'Run now' }).click();
   await expect(page.locator('.autonomy-routine__status', { hasText: 'Nothing noteworthy (all quiet).' })).toBeVisible();
   await expect(page.getByText('Quiet. When a routine run produces something worth telling you, it lands here — nothing else will.')).toBeVisible();
-  await expect(page.locator('.autonomy-run', { hasText: 'Evening digest' })).toContainText('no-op');
+  await expect(page.locator('.autonomy-run', { hasText: 'Evening digest' }).first()).toContainText('no-op');
+});
+
+test('granted read permissions bound the provider tool surface, and routines persist across reload', async ({ page }) => {
+  const requests: Array<Record<string, unknown>> = [];
+  await page.route('**/v1/interactions*', async (route) => {
+    requests.push(JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>);
+    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse('routine-run-3', NOOP_OUTCOME) });
+  });
+
+  await page.goto('');
+  await unlockTestGemini(page);
+  await openAutonomySettings(page);
+
+  // Create a routine WITH the Tasks read capability granted.
+  await page.getByRole('button', { name: '+ Routine' }).click();
+  await page.getByLabel('Name', { exact: true }).fill('Task sweep');
+  await page.getByLabel(/Instruction — what Elara should do each run/).fill('Check my task lists for anything overdue.');
+  await page.getByLabel('Tasks', { exact: true }).check();
+  await page.getByRole('button', { name: 'Save routine' }).click();
+  await expect(page.locator('.autonomy-routine', { hasText: 'Task sweep' })).toBeVisible();
+
+  await page.getByRole('switch', { name: 'Autonomous routines master switch' }).click();
+  await page.locator('.autonomy-routine', { hasText: 'Task sweep' }).getByRole('button', { name: 'Run now' }).click();
+  await expect(page.locator('.autonomy-routine__status', { hasText: 'Nothing noteworthy (all quiet).' })).toBeVisible();
+
+  // The provider request carries ONLY read-only Tasks tool declarations —
+  // no write, no destructive, no internal, no local-artifact tools.
+  expect(requests.length).toBeGreaterThanOrEqual(1);
+  const tools = (requests[0] as { tools?: Array<{ name: string }> }).tools;
+  expect(Array.isArray(tools)).toBe(true);
+  const names = (tools ?? []).map((tool) => tool.name);
+  expect(names).toEqual(expect.arrayContaining(['tasks.listTaskLists', 'tasks.listTasks', 'tasks.getTask']));
+  expect(names.some((name) => /create|delete|write|update|move|insert|replace|append|clear|modify/i.test(name))).toBe(false);
+  expect(names).not.toContain('document.create_pdf');
+
+  // Persistence is real: the routine, its permissions, and the master switch
+  // all survive a full page reload (Dexie, not component state).
+  await page.reload();
+  await openAutonomySettings(page);
+  await expect(page.locator('.autonomy-routine', { hasText: 'Task sweep' })).toBeVisible();
+  await expect(page.locator('.autonomy-routine', { hasText: 'Task sweep' })).toContainText('1 Google read');
+  await expect(page.getByRole('switch', { name: 'Autonomous routines master switch' })).toHaveAttribute('aria-checked', 'true');
 });

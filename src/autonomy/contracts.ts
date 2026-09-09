@@ -126,20 +126,50 @@ export type RoutineExecutionMode = (typeof ROUTINE_EXECUTION_MODES)[number];
 export const ROUTINE_RUN_STATES = ['pending', 'running', 'completed', 'skipped', 'failed', 'cancelled', 'missed'] as const;
 export type RoutineRunState = (typeof ROUTINE_RUN_STATES)[number];
 
+// Run-state semantics (authoritative):
+// - 'pending'/'running': in flight. The atomic claim (claimRoutineRun) refuses
+//   a second concurrent run; a stale in-flight record (crashed process, e.g.
+//   the tab closed mid-run) is abandoned by the next claim after STALE_RUN_MS.
+// - 'completed': the run executed to a terminal model outcome (no-op, event,
+//   or suppressed).
+// - 'skipped': the routine did NOT execute — an authority guard (master switch
+//   off, routine disabled) or admission guard (run already in flight) stopped
+//   it before any model call. Always carries an errorCode.
+// - 'failed': execution was attempted but could not complete (provider
+//   failure, invalid outcome contract, internal error, crash abandonment).
+// - 'cancelled': deliberately stopped (abort signal / provider cancellation).
+//   No 'cancelled' outcome exists — the state carries the semantics.
+// - 'missed': RESERVED for the Phase B scheduler (an occurrence whose grace
+//   window passed without executing). Nothing in A1 produces it.
+
 export const ROUTINE_RUN_OUTCOMES = ['no-op', 'event', 'suppressed', 'error', 'skipped', 'missed'] as const;
 export type RoutineRunOutcome = (typeof ROUTINE_RUN_OUTCOMES)[number];
+
+// Outcome semantics (authoritative — these must never be conflated):
+// - 'no-op': the run EXECUTED successfully and found nothing worth surfacing.
+//   Silence is a successful outcome, not an error.
+// - 'event': the run executed and its proposal PASSED the deterministic
+//   admission policy; an AutonomousEvent exists and eventId is set.
+// - 'suppressed': the run executed and the model PROPOSED an event, but
+//   deterministic policy rejected delivery (cooldown | duplicate | daily-cap).
+//   Only valid with state 'completed' and suppressedReason set. The model
+//   proposed; code decided.
+// - 'error': execution was attempted but could not complete.
+// - 'skipped': the routine did not execute (see run states above).
+// - 'missed': reserved for the scheduler (Phase B).
 
 export const ROUTINE_SUPPRESSION_REASONS = ['cooldown', 'duplicate', 'daily-cap'] as const;
 export type RoutineSuppressionReason = (typeof ROUTINE_SUPPRESSION_REASONS)[number];
 
 export const routineRunRecordSchema = z.strictObject({
   id: z.string().min(1),
-  /** Idempotency key: `${routineId}:${executionMode}:${scheduledFor}` for manual runs. */
+  /** Idempotency key — see routineRunKey() for per-mode identity semantics. */
   runKey: z.string().min(1),
   routineId: z.string().min(1),
   /** Denormalized so history survives routine deletion. */
   routineName: z.string().min(1),
   executionMode: z.enum(ROUTINE_EXECUTION_MODES),
+  /** The occurrence this run executes: trigger time for manual, occurrence instant for scheduled/catch-up. */
   scheduledFor: z.number(),
   startedAt: z.number(),
   completedAt: z.number().optional(),
@@ -188,6 +218,24 @@ export function isRunInFlight(run: Pick<RoutineRunRecord, 'state'>): boolean {
   return run.state === 'pending' || run.state === 'running';
 }
 
+/**
+ * Stable identity for ONE execution of one routine occurrence:
+ * `${routineId}:${executionMode}:${scheduledFor}`.
+ *
+ * - manual: `scheduledFor` is the trigger timestamp — each explicit Run Now is
+ *   its own execution. The key is NOT an idempotency mechanism for manual runs
+ *   (two deliberate clicks are two runs); overlap is refused by the atomic
+ *   claim guard, and a same-millisecond duplicate trigger collapses onto the
+ *   same key and is returned as already-executed.
+ * - scheduled: `scheduledFor` is the OCCURRENCE instant (computeNextOccurrence
+ *   output). Redelivery of the same occurrence dedupes on the unique runKey
+ *   index — the at-least-once delivery scenario.
+ * - catch-up: `scheduledFor` is the SOURCE occurrence being caught up, never
+ *   the catch-up trigger time, so a repeated catch-up attempt for the same
+ *   missed occurrence also dedupes.
+ *
+ * Phase C Cloudflare Workflow instance ids derive directly from this key.
+ */
 export function routineRunKey(routineId: string, executionMode: RoutineExecutionMode, scheduledFor: number): string {
   return `${routineId}:${executionMode}:${scheduledFor}`;
 }

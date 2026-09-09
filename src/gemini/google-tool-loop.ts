@@ -30,6 +30,13 @@ export interface GoogleToolLoopOptions {
    * tools) must not change.
    */
   readonly allowEmptyTools?: boolean;
+  /**
+   * Non-interactive caller (autonomous routine run). Headless callers must
+   * never park on interactive UI: capability-grant and write-confirmation
+   * brokers are bypassed (the tool result keeps its error / the mutation is
+   * declined) instead of waiting on a user who is not watching a chat turn.
+   */
+  readonly headless?: boolean;
 }
 
 const DEFAULT_MAX_TOOL_CALLS = 8;
@@ -130,6 +137,15 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
     const immediateCalls: PendingToolCall[] = [];
     for (const call of allowedCalls) {
+      if (readOnly && !Object.prototype.hasOwnProperty.call(googleReadToolHandlers, call.name) && !call.name.startsWith('roleplay_setting.')) {
+        // Call-time read-only enforcement. The declaration-time check above
+        // governs which tools were ADVERTISED; this governs which calls may
+        // EXECUTE. A model that hallucinates an undeclared write tool in a
+        // read-only caller (an autonomous routine run) gets a refusal result —
+        // the handler is never invoked and no confirmation UI is requested.
+        results.push(errorToolResult(call, 'TOOL_NOT_PERMITTED'));
+        continue;
+      }
       if (!isRegisteredToolHandler(call.name as GoogleToolName, executeOptions.handlers)) {
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
         continue;
@@ -150,7 +166,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         let result = await executeGoogleTool(call, executeOptions);
         if (signal?.aborted || request.isGenerationActive?.() === false) return;
         if (call.name === 'document.create_pdf') yield { type: 'interaction-status', interactionId, status: 'finalizing_artifact' };
-        if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
+        if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
           const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
           let granted = false;
@@ -177,6 +193,9 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     if (mutationEntries.length) {
       if (executeOptions.confirm) {
         decisions = await Promise.all(mutationEntries.map((entry) => executeOptions.confirm!(entry.confirmation)));
+      } else if (options.headless) {
+        // A headless caller has nobody to ask: mutations are declined, never parked on UI.
+        decisions = mutationEntries.map(() => false);
       } else {
         yield { type: 'interaction-status', interactionId, status: 'awaiting_tool_confirmation' };
         const pending = requestGoogleToolConfirmations(mutationEntries.map((entry) => entry.confirmation), signal);
@@ -203,7 +222,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       if (signal?.aborted || request.isGenerationActive?.() === false) return;
       let result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
       if (signal?.aborted || request.isGenerationActive?.() === false) return;
-      if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm) {
+      if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
         yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
         const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
         let granted = false;

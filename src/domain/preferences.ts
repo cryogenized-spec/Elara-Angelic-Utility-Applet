@@ -5,6 +5,8 @@ export interface AppUiPreferences {
   chatTextSize: number;
   portraitScale: 1 | 2 | 3;
   portraitBackground: 'midnight' | 'blue-hour' | 'violet' | 'rose';
+  /** Composer: Enter sends (Shift+Enter newline) when true; Enter inserts a newline and Ctrl/Cmd+Enter sends when false. */
+  enterToSend: boolean;
 }
 
 export interface ChatAppearancePreferences {
@@ -36,6 +38,7 @@ export const DEFAULT_APP_UI: AppUiPreferences = {
   chatTextSize: 15,
   portraitScale: 2,
   portraitBackground: 'midnight',
+  enterToSend: true,
 };
 
 export const DEFAULT_CHAT_APPEARANCE: ChatAppearancePreferences = {

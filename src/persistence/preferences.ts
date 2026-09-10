@@ -41,6 +41,7 @@ export function normalizeAppUiPreferences(value: Partial<AppUiPreferences> | nul
     chatTextSize: clamp(merged.chatTextSize, 10, 24, DEFAULT_APP_UI.chatTextSize),
     portraitScale: merged.portraitScale === 1 || merged.portraitScale === 3 ? merged.portraitScale : 2,
     portraitBackground: merged.portraitBackground === 'blue-hour' || merged.portraitBackground === 'violet' || merged.portraitBackground === 'rose' ? merged.portraitBackground : 'midnight',
+    enterToSend: typeof merged.enterToSend === 'boolean' ? merged.enterToSend : DEFAULT_APP_UI.enterToSend,
   };
 }
 

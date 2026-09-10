@@ -11,6 +11,7 @@ import { GeminiApiLockbox } from './GeminiApiLockbox';
 import { CharacterSettings } from './CharacterSettings';
 import { DurableMemorySettings } from './DurableMemorySettings';
 import { RoleplaySettings } from './RoleplaySettings';
+import { ToggleSwitch } from './ToggleSwitch';
 import { ChatAppearanceSettings } from './ChatAppearanceSettings';
 import { GoogleOAuthSettings } from './GoogleOAuthSettings';
 import { WorkspaceShortcutSettings } from './WorkspaceShortcutSettings';
@@ -87,6 +88,8 @@ export function SettingsScreen({
   onChatAppearanceChange,
   roleplay,
   onRoleplayChange,
+  enterToSend,
+  onEnterToSendChange,
   initialSection,
   onBack,
 }: {
@@ -109,6 +112,8 @@ export function SettingsScreen({
   onChatAppearanceChange: (value: ChatAppearancePreferences) => void;
   roleplay: RoleplayPreferences;
   onRoleplayChange: (value: RoleplayPreferences) => void;
+  enterToSend: boolean;
+  onEnterToSendChange: (value: boolean) => void;
   initialSection?: SettingsSection;
   onBack: () => void;
 }) {
@@ -152,7 +157,7 @@ export function SettingsScreen({
           {section === 'model' && <div className="settings-copy"><span className="panel-kicker">GEMINI</span><h2>Model & generation</h2><p>The selected production model controls which generation settings are valid. Changes save automatically.</p><div className="model-settings"><div className="model-settings__field"><label htmlFor="gemini-model">Model</label><select id="gemini-model" className="model-settings__select" value={selectedModel} onChange={(event) => onModelChange(event.target.value)}>{GEMINI_MODELS.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select><span className="model-settings__hint">{model.id} · {model.inputTokenLimit.toLocaleString()} input · {model.outputTokenLimit.toLocaleString()} output tokens</span></div><GeminiGenerationControls model={model} settings={geminiSettings} onChange={onGeminiSettingsChange} /><div className="model-settings__unsupported">Temperature, top-p and top-k are intentionally not offered here.</div><div className="model-settings__actions"><button className="model-settings__button model-settings__button--reset" type="button" onClick={onResetGeminiSettings}>Reset to {model.name} defaults</button></div><div className="model-settings__status" role="status">Settings save automatically.</div></div></div>}
           {section === 'google' && <div className="settings-copy"><span className="panel-kicker">AUTHORIZATION</span><h2>Google</h2><p>Connect Workspace capabilities independently. Authorization state and secrets remain owned by the protected OAuth authority.</p><GoogleOAuthSettings /><WorkspaceShortcutSettings /></div>}
           {section === 'autonomy' && <div className="settings-copy"><span className="panel-kicker">ROUTINES</span><h2>Autonomy</h2><p>Scheduled routines Elara runs on your behalf. Every run is read-only, policy-gated, and lands in the Autonomy Inbox — nothing is sent silently. Local “Run now” proves the loop today; the cloud scheduler arrives in the next phase.</p><AutonomySettings /></div>}
-          {section === 'chat' && <div className="settings-copy"><span className="panel-kicker">CONVERSATION</span><h2>Chat</h2><p>Conversation-specific preferences live here as the application grows. Speaker colour and surface controls are in Appearance.</p><div className="setting-card"><strong>Gemini transport</strong><span>Direct browser connection · API key supplied by the local Lockbox</span></div><div className="setting-card"><strong>Startup screen</strong><span>Chat / empty chat · last chat option planned</span></div></div>}
+          {section === 'chat' && <div className="settings-copy"><span className="panel-kicker">CONVERSATION</span><h2>Chat</h2><p>Conversation-specific preferences live here as the application grows. Speaker colour and surface controls are in Appearance.</p><div className="setting-card setting-card--switch"><div className="setting-card__copy"><strong id="enter-to-send-label">Enter sends message</strong><span id="enter-to-send-hint">{enterToSend ? 'Enter sends · Shift+Enter inserts a new line.' : 'Enter inserts a new line · Ctrl/Cmd+Enter sends. The Send button always works.'}</span></div><ToggleSwitch checked={enterToSend} onCheckedChange={onEnterToSendChange} labelledBy="enter-to-send-label" describedBy="enter-to-send-hint" /></div><div className="setting-card"><strong>Gemini transport</strong><span>Direct browser connection · API key supplied by the local Lockbox</span></div><div className="setting-card"><strong>Startup screen</strong><span>Chat / empty chat · last chat option planned</span></div></div>}
           {section === 'roleplay' && <div className="settings-copy"><span className="panel-kicker">CREATIVE CONTEXT</span><h2>Roleplay</h2><p>Roleplay is an explicit fictional/creative context. Its controls are hidden while disabled.</p><RoleplaySettings value={roleplay} onChange={onRoleplayChange} /></div>}
           {section === 'security' && <div className="settings-copy"><span className="panel-kicker">SECURITY</span><h2>API Lockbox</h2><p>The Gemini API key is encrypted locally with a Lockbox password. It must be unlocked before Gemini can use it.</p><GeminiApiLockbox /></div>}
         </section>

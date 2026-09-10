@@ -87,7 +87,9 @@ test('a routine run delivers an admitted event to the Autonomy Inbox', async ({ 
   expect(requests.length).toBeGreaterThanOrEqual(1);
   const run = requests[0] as { system_instruction?: string; input?: string; tools?: unknown };
   expect(run.system_instruction).toContain('EXECUTION POLICY');
-  expect(run.system_instruction).toContain('untrusted EVIDENCE');
+  // No Google tools granted => cloud locus: frozen context only, no retrieval, no tools.
+  expect(run.system_instruction).toContain('You have no retrieval loop and no tools');
+  expect(run.system_instruction).toContain('Execution locus: cloud-native');
   expect(run.system_instruction).toContain('Morning brief');
   expect(run.input).toContain('Morning brief');
   expect(run.tools).toBeUndefined();

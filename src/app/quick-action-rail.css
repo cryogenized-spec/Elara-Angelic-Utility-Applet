@@ -11,10 +11,12 @@
 .tool-rail::before { content: ''; position: absolute; inset: -6px -12px 0 0; z-index: -1; background: rgba(5,5,7,.96); pointer-events: none; }
 .tool-rail__track { position: relative; z-index: 51; }
 
-/* Portrait presentation gets a compact upright shortcut block; landscape keeps the original single-row rail. */
+/* Portrait presentation gets a compact upright shortcut block; landscape keeps the original single-row rail.
+   The block sits in the open area on the LEFT, clear of the absolute left spine
+   (menu button: left 12px + 42px wide), so the right margin is the auto one. */
 .app-shell:has(.artwork-mode-portrait) .tool-rail {
   width: min(176px, 48vw);
-  margin: 2px 8px 4px auto;
+  margin: 2px auto 4px 62px;
   overflow: visible;
   min-height: auto;
 }

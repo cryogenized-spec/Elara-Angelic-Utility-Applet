@@ -13,6 +13,7 @@ import { insertTranscriptAtSelection } from '../../vtt/draft-insertion';
 import { transcribeVttCapture } from '../../vtt/transcription';
 import { transformVttTranscript, type VttTransformMode } from '../../vtt/transformation';
 import { DEFAULT_GEMINI_MODEL } from '../../gemini/contracts';
+import { composerEnterKeyHint, isComposerSendShortcut } from './composer-keys';
 import './composer.css';
 
 const MAX_HEIGHT = 132;
@@ -29,9 +30,11 @@ type ComposerProps = {
   attachments?: Attachment[];
   onFilesSelected?: (files: FileList | null) => void;
   onRemoveAttachment?: (id: string) => void;
+  /** Persisted preference; defaults to Enter = Send. */
+  enterToSend?: boolean;
 };
 
-export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, systemInstruction, onDraftChange, onSend, onCancel, attachments = [], onFilesSelected, onRemoveAttachment }: ComposerProps) {
+export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, systemInstruction, onDraftChange, onSend, onCancel, attachments = [], onFilesSelected, onRemoveAttachment, enterToSend = true }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<VttRecorder | null>(null);
@@ -146,18 +149,17 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   const vttBusy = vttState === 'requesting' || vttState === 'recording' || vttState === 'processing';
   const composerLocked = status === 'streaming' || vttBusy;
 
+  const canSend = status !== 'streaming' && !vttBusy && (Boolean(draft.trim()) || attachments.length > 0);
+  const enterKeyHint = composerEnterKeyHint(enterToSend);
+
+  // Both composers share one Enter rule (see composer-keys.ts). Only the
+  // configured send shortcut is intercepted; every other Enter reaches the
+  // textarea so newlines behave natively.
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-    if (status === 'streaming' || vttBusy || (!draft.trim() && attachments.length === 0)) return;
+    if (!isComposerSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, isComposing: event.nativeEvent.isComposing }, enterToSend)) return;
+    if (!canSend) return;
     event.preventDefault();
     onSend();
-  }
-
-  function handleExpandedKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && status !== 'streaming' && !vttBusy && (draft.trim() || attachments.length > 0)) {
-      event.preventDefault();
-      onSend();
-    }
   }
 
   function transformModeLabel(): string {
@@ -430,9 +432,10 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           aria-label="Expanded message"
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={handleExpandedKeyDown}
+          onKeyDown={handleKeyDown}
           placeholder="Write your message…"
           disabled={composerLocked}
+          enterKeyHint={enterKeyHint}
           autoFocus
         />
         {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}
@@ -461,7 +464,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
       </button>
       {attachmentPicker()}
       <div className="composer__input-wrap">
-        <textarea ref={textareaRef} aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint="send" />
+        <textarea ref={textareaRef} aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint={enterKeyHint} />
         <button className="composer__expand" type="button" aria-label="Expand message editor" onClick={() => setExpanded(true)} disabled={composerLocked}>
           <Icon name="expand" size={15} />
         </button>

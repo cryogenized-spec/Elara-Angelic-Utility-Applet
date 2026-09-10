@@ -1,0 +1,8 @@
+.toggle-switch{appearance:none;width:48px;height:30px;margin:0;padding:0;flex:0 0 48px;border:0;background:transparent;cursor:pointer;touch-action:manipulation;border-radius:999px}
+.toggle-switch__track{position:relative;display:flex;align-items:center;width:48px;height:30px;padding:3px;box-sizing:border-box;border:1px solid rgba(255,255,255,.11);border-radius:999px;background:rgba(255,255,255,.08);box-shadow:inset 0 1px 2px rgba(0,0,0,.35);transition:background .18s ease,border-color .18s ease,box-shadow .18s ease}
+.toggle-switch__thumb{width:22px;height:22px;flex:0 0 22px;border-radius:50%;background:rgba(255,255,255,.88);box-shadow:0 2px 7px rgba(0,0,0,.28);transform:translateX(0);transition:transform .18s ease,background .18s ease}
+.toggle-switch.is-on .toggle-switch__track{border-color:rgba(110,168,255,.54);background:rgba(110,168,255,.24);box-shadow:inset 0 1px 2px rgba(0,0,0,.22),0 0 0 1px rgba(110,168,255,.06)}
+.toggle-switch.is-on .toggle-switch__thumb{transform:translateX(18px);background:#fff}
+.toggle-switch:focus-visible{outline:2px solid var(--blue);outline-offset:4px}
+.toggle-switch:disabled{cursor:not-allowed;opacity:.45}
+@media(prefers-reduced-motion:reduce){.toggle-switch__track,.toggle-switch__thumb{transition:none}}

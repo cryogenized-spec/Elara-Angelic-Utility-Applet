@@ -7,8 +7,10 @@ import {
   type SchedulerJournalEntry,
 } from '../../../src/autonomy/scheduler';
 import { normalizeRoutine, type AutonomousEvent, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
-import { evaluateEventAdmission } from '../../../src/autonomy/policy';
+import { evaluateEventAdmission, noveltyFingerprint } from '../../../src/autonomy/policy';
+import { STALE_GENERATION_CODE } from '../../../src/autonomy/scheduler';
 import type { RoutineRunEnvelope } from '../../../src/autonomy/envelope';
+import type { CloudAdmitResult } from '../../../src/autonomy/cloud-result';
 
 // ---------------------------------------------------------------------------
 // Durable Object storage — one SQLite-backed AutonomyEngine per installation.
@@ -304,6 +306,145 @@ export class AutonomyStore {
   }
 
   /**
+   * C2 authoritative admission: re-read live configGeneration, master flag,
+   * and routine row in the same SQL transaction as event insert / terminalize.
+   * stateGeneration is not a stale trigger. Does not advance schedules.
+   */
+  completeCloudAdmission(input: {
+    runKey: string;
+    result: CloudAdmitResult;
+    eventId: string;
+    now: number;
+  }): { status: 'already-completed' | 'missing-envelope' | 'stale' | 'cancelled' | 'completed' | 'suppressed' | 'failed' } {
+    let status: 'already-completed' | 'missing-envelope' | 'stale' | 'cancelled' | 'completed' | 'suppressed' | 'failed' = 'failed';
+    this.transact(() => {
+      const stored = this.getStoredRun(input.runKey);
+      if (!stored) {
+        status = 'missing-envelope';
+        return;
+      }
+      if (stored.record.state === 'completed' || stored.record.state === 'failed' || stored.record.state === 'skipped' || stored.record.state === 'missed') {
+        status = 'already-completed';
+        return;
+      }
+      const envelopeRow = this.getEnvelope(input.runKey);
+      if (!envelopeRow) {
+        status = 'missing-envelope';
+        return;
+      }
+      const liveConfig = this.getMetaNumber('configGeneration', 0);
+      const stateGeneration = this.getMetaNumber('stateGeneration', 0);
+      if (envelopeRow.envelope.configGeneration !== liveConfig) {
+        this.updateRunRecord(input.runKey, {
+          ...stored.record,
+          completedAt: input.now,
+          state: 'failed',
+          outcome: 'error',
+          errorCode: STALE_GENERATION_CODE,
+          errorMessage: `Frozen configGeneration ${envelopeRow.envelope.configGeneration} is stale (live ${liveConfig}).`,
+        }, stateGeneration, stored.locus);
+        status = 'stale';
+        return;
+      }
+      const liveRoutine = this.getRoutine(stored.record.routineId);
+      const masterOn = this.getMetaBoolean('autonomyEnabled', false);
+      if (!masterOn || !liveRoutine || !liveRoutine.enabled) {
+        this.updateRunRecord(input.runKey, {
+          ...stored.record,
+          completedAt: input.now,
+          state: 'failed',
+          outcome: 'error',
+          errorCode: 'cancelled-admission',
+          errorMessage: 'Live gate closed before events could be admitted.',
+        }, stateGeneration, stored.locus);
+        status = 'cancelled';
+        return;
+      }
+      const frozen = envelopeRow.envelope.routine;
+      const result = input.result;
+      if (result.disposition === 'error') {
+        this.updateRunRecord(input.runKey, {
+          ...stored.record, completedAt: input.now, state: 'failed', outcome: 'error', errorCode: result.errorCode, errorMessage: result.errorMessage,
+        }, stateGeneration, stored.locus);
+        status = 'failed';
+        return;
+      }
+      if (result.disposition === 'noop' || result.disposition === 'cannot_act') {
+        this.updateRunRecord(input.runKey, {
+          ...stored.record,
+          completedAt: input.now,
+          state: 'completed',
+          outcome: 'no-op',
+          reason: result.reason,
+          itemsExamined: result.disposition === 'noop' ? result.itemsExamined : undefined,
+        }, stateGeneration, stored.locus);
+        status = 'completed';
+        return;
+      }
+      const event: AutonomousEvent = {
+        id: input.eventId,
+        routineId: frozen.id,
+        runKey: stored.record.runKey,
+        title: result.title,
+        summary: result.summary,
+        importance: result.importance,
+        confidence: result.confidence,
+        evidence: result.evidence ?? [],
+        noveltyFingerprint: noveltyFingerprint(frozen.id, result.title, result.summary),
+        createdAt: input.now,
+        readAt: null,
+      };
+      const written = this.admitProposedEventNested({ stored: stored.record, frozen, event, generation: stateGeneration, locus: stored.locus, now: input.now });
+      status = written === 'suppressed' ? 'suppressed' : 'completed';
+    });
+    return { status };
+  }
+
+  private admitProposedEventNested(input: {
+    stored: RoutineRunRecord;
+    frozen: ElaraRoutine;
+    event: AutonomousEvent;
+    generation: number;
+    locus: 'cloud' | 'device';
+    now: number;
+  }): 'event' | 'suppressed' | 'duplicate' {
+    if (this.getEventByRunKey(input.event.runKey)) return 'duplicate';
+    const admission = evaluateEventAdmission({
+      routineId: input.frozen.id,
+      fingerprint: input.event.noveltyFingerprint,
+      recentEvents: this.listRecentEvents(input.now - 7 * 24 * 3_600_000),
+      policy: input.frozen.policy,
+      maxEventsPerDay: this.getMetaNumber('maxEventsPerDay', 10),
+      now: input.now,
+    });
+    if (!admission.admitted) {
+      this.updateRunRecord(input.stored.runKey, {
+        ...input.stored,
+        completedAt: input.now,
+        state: 'completed',
+        outcome: 'suppressed',
+        suppressedReason: admission.reason,
+        reason: admission.detail,
+      }, input.generation, input.locus);
+      return 'suppressed';
+    }
+    try {
+      this.insertEvent(input.event);
+    } catch (error) {
+      if (isEventsIdentityUniqueConflict(error) && this.getEventByRunKey(input.event.runKey)) return 'duplicate';
+      throw error;
+    }
+    this.updateRunRecord(input.stored.runKey, {
+      ...input.stored,
+      completedAt: input.now,
+      state: 'completed',
+      outcome: 'event',
+      eventId: input.event.id,
+    }, input.generation, input.locus);
+    return 'event';
+  }
+
+  /**
    * Authoritative event admission: policy (cooldown / duplicate fingerprint /
    * rolling 24h cap) is evaluated INSIDE the same SQLite transaction as the
    * insert. Two distinct runKeys cannot jointly exceed maxEventsPerDay.
@@ -321,47 +462,7 @@ export class AutonomyStore {
   }): 'event' | 'suppressed' | 'duplicate' {
     let outcome: 'event' | 'suppressed' | 'duplicate' = 'event';
     this.transact(() => {
-      if (this.getEventByRunKey(input.event.runKey)) {
-        outcome = 'duplicate';
-        return;
-      }
-      const admission = evaluateEventAdmission({
-        routineId: input.frozen.id,
-        fingerprint: input.event.noveltyFingerprint,
-        recentEvents: this.listRecentEvents(input.now - 7 * 24 * 3_600_000),
-        policy: input.frozen.policy,
-        maxEventsPerDay: this.getMetaNumber('maxEventsPerDay', 10),
-        now: input.now,
-      });
-      if (!admission.admitted) {
-        this.updateRunRecord(input.stored.runKey, {
-          ...input.stored,
-          completedAt: input.now,
-          state: 'completed',
-          outcome: 'suppressed',
-          suppressedReason: admission.reason,
-          reason: admission.detail,
-        }, input.generation, input.locus);
-        outcome = 'suppressed';
-        return;
-      }
-      try {
-        this.insertEvent(input.event);
-      } catch (error) {
-        if (isEventsIdentityUniqueConflict(error) && this.getEventByRunKey(input.event.runKey)) {
-          outcome = 'duplicate';
-          return;
-        }
-        throw error;
-      }
-      this.updateRunRecord(input.stored.runKey, {
-        ...input.stored,
-        completedAt: input.now,
-        state: 'completed',
-        outcome: 'event',
-        eventId: input.event.id,
-      }, input.generation, input.locus);
-      outcome = 'event';
+      outcome = this.admitProposedEventNested(input);
     });
     return outcome;
   }

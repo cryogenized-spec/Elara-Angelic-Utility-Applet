@@ -46,4 +46,28 @@ export class TestAutonomyEngine extends AutonomyEngine {
   async envelopePresent(runKey: string): Promise<boolean> {
     return Boolean(this.store.getEnvelope(runKey));
   }
+
+  /** C2 tests: bump configGeneration without recoverInFlight / Workflow dispatch. */
+  async setConfigGeneration(generation: number): Promise<{ generation: number }> {
+    this.store.setMeta('configGeneration', String(generation));
+    return { generation };
+  }
+
+  /** C2 tests: live gates without bumping configGeneration. */
+  async setMasterEnabled(enabled: boolean): Promise<{ enabled: boolean }> {
+    this.store.setMeta('autonomyEnabled', String(enabled));
+    return { enabled };
+  }
+
+  async disableRoutine(routineId: string): Promise<{ disabled: boolean }> {
+    const routine = this.store.getRoutine(routineId);
+    if (!routine) return { disabled: false };
+    this.store.putRoutine({ ...routine, enabled: false, updatedAt: Date.now() });
+    return { disabled: true };
+  }
+
+  async deleteRoutineMirror(routineId: string): Promise<{ deleted: boolean }> {
+    this.store.deleteRoutine(routineId);
+    return { deleted: true };
+  }
 }

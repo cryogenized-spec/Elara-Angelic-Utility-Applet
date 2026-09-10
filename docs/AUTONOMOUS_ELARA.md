@@ -83,6 +83,15 @@ request. Effectively zero; no paid plan is required for Phase B.
 |---|---|---|
 | Routine definitions (name, schedule, timezone, instruction, permissions, policy) | app → worker | Pairing + each routine save. The worker's copy is a **disposable mirror**; the app stays the source of truth. |
 | Autonomy settings (master switch, event budget) | app → worker | Pairing. Carries a **generation counter** so an older configuration can never overwrite a newer one. |
+
+### Phase C2 — generation model (stale-run protection)
+
+1. **Authoritative generation:** installation-wide `configGeneration` (Durable Object `meta`). There is no per-routine generation; a config sync invalidates every in-flight cloud claim.
+2. **Where stored:** DO `meta.configGeneration`. `stateGeneration` is a separate journal/context snapshot and **is not** a stale trigger (context-only sync must not kill runs).
+3. **When captured:** `freezeEnvelope` at claim copies live `configGeneration` and `stateGeneration` onto the frozen envelope.
+4. **Where checked:** `AutonomyStore.completeCloudAdmission`, inside the same SQLite transaction as event insert / run terminalization. The Workflow does not compare generations.
+5. **When stale** (`frozen.configGeneration !== live configGeneration`): no event, no schedule advance at admission, terminal `STALE_GENERATION`, HTTP `status: stale`. Dispatch-time schedule advances are not rewound.
+6. **Live gates (separate from generation):** master-off, routine disable, routine delete → `cancelled-admission`, also no event and no schedule advance at that admission. When a real config sync turns the master off it also bumps `configGeneration`, so those in-flight claims fail as stale (still fail-closed).
 | **Autonomy Context** — a bounded, read-only memory projection | app → worker | **A separate opt-in flag per memory** (`autonomyContext`, default off). ≤ 200 records, ≤ 100 KB, only active, non-expired, established (CORE/CONTEXTUAL/EPISODIC) memories you explicitly ticked. |
 | Scheduler observations (run records) | worker → app | Implied — pulled into your local run history on app open. |
 

@@ -57,6 +57,8 @@ export const SCHEDULER_BUDGET_CODE = 'SCHEDULER_BUDGET_EXCEEDED';
 export const SCHEDULER_OVERLAP_CODE = 'RUN_IN_FLIGHT';
 /** A crashed in-flight run was abandoned (tombstoned) so it cannot swallow its occurrence forever. */
 export const RUN_ABANDONED_CODE = 'RUN_ABANDONED';
+/** Cloud run's frozen configGeneration no longer matches live DO meta — C2 stale-run protection. */
+export const STALE_GENERATION_CODE = 'STALE_GENERATION';
 
 export const SCHEDULER_JOURNAL_KINDS = [
   'heartbeat',
@@ -83,6 +85,7 @@ export const SCHEDULER_JOURNAL_KINDS = [
   'recovered',
   'completed',
   'cancelled-admission',
+  'stale-generation',
   'error',
 ] as const;
 export type SchedulerJournalKind = (typeof SCHEDULER_JOURNAL_KINDS)[number];

@@ -28,11 +28,9 @@ import {
   type SchedulerJournalEntry,
   type SchedulerJournalKind,
 } from '../../../src/autonomy/scheduler';
-import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type AutonomousEvent, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
 import { routineRunEnvelopeSchema, runCompleteRequestSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 import { eventIdForRunKey, workflowInstanceIdForRunKey } from '../../../src/autonomy/workflow-identity';
-import { noveltyFingerprint } from '../../../src/autonomy/policy';
-import type { CloudAdmitResult } from '../../../src/autonomy/cloud-result';
 import { AutonomyStore } from './store';
 import type { SchedulerPort } from './ports';
 
@@ -528,8 +526,8 @@ export class AutonomyEngine extends DurableObject {
    * create). get() proves instance identity/existence, not liveness or health.
    * Any other failure is dispatch-failed and retried by heartbeat.
    *
-   * Envelope generations (configGeneration, stateGeneration) are frozen
-   * snapshots of the claim. Mid-run generation checks are Phase C2.
+   * Envelope generations are frozen snapshots. C2 re-reads live
+   * configGeneration at completeClaim — never here.
    */
   private async dispatchWorkflow(envelope: RoutineRunEnvelope, now: number, generation: number): Promise<boolean> {
     const binding = this.autonomyEnv.ROUTINE_RUN;
@@ -614,9 +612,10 @@ export class AutonomyEngine extends DurableObject {
   }
 
   /**
-   * Idempotent completion from the Workflow. Snapshot-and-finish: master-off,
-   * routine disable, or delete blocks event admission and records
-   * cancelled-admission. Completing twice is a no-op.
+   * Idempotent completion from the Workflow. C2: live configGeneration is
+   * re-read inside the same SQL transaction as event insert. Stale and
+   * cancelled admissions do not create events and do not advance schedules.
+   * Completing twice is a no-op.
    */
   async completeClaim(raw: unknown, now: number): Promise<RouteResult> {
     const parsed = runCompleteRequestSchema.safeParse(raw);
@@ -642,75 +641,27 @@ export class AutonomyEngine extends DurableObject {
     if (!result) {
       return { status: 500, body: { status: 'retryable-error', code: 'missing-result', message: 'Active claim completion requires a structured C1 result.' } };
     }
-    const liveRoutine = this.store.getRoutine(stored.record.routineId);
-    const masterOn = this.store.getMetaBoolean('autonomyEnabled', false);
-    const cancelled = !masterOn || !liveRoutine || !liveRoutine.enabled;
+    const eventId = await eventIdForRunKey(runKey);
+    const decision = this.store.completeCloudAdmission({ runKey, result, eventId, now });
     const generation = this.stateGeneration();
-    const frozen = envelopeRow.envelope.routine;
-    if (cancelled) {
-      const record: RoutineRunRecord = {
-        ...stored.record,
-        completedAt: now,
-        state: 'failed',
-        outcome: 'error',
-        errorCode: 'cancelled-admission',
-        errorMessage: 'Live gate closed before events could be admitted.',
-      };
-      this.store.admitCompletedRun(runKey, record, generation, stored.locus);
+    if (decision.status === 'missing-envelope') {
+      return { status: 500, body: { status: 'retryable-error', code: 'missing-envelope', message: 'Active claim is missing its frozen envelope; retry after recovery.' } };
+    }
+    if (decision.status === 'already-completed') {
+      return { status: 200, body: { status: 'already-completed', runKey, alreadyCompleted: true } };
+    }
+    if (decision.status === 'stale') {
+      this.journal(now, 'stale-generation', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
+      return { status: 200, body: { status: 'stale', runKey, alreadyCompleted: false, cancelled: false } };
+    }
+    if (decision.status === 'cancelled') {
       this.journal(now, 'cancelled-admission', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
-      if (liveRoutine) this.advanceScheduleIfNeeded(runKey, liveRoutine, now, generation, stored.record.scheduledFor);
       return { status: 200, body: { status: 'cancelled', runKey, alreadyCompleted: false, cancelled: true } };
     }
-    const admitted = await this.admitResult(stored.record, result, frozen, now, generation, stored.locus);
-    this.journal(now, admitted.status === 'suppressed' ? 'completed' : admitted.status === 'completed' ? 'completed' : 'completed', {
-      generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey,
-    });
-    this.advanceScheduleIfNeeded(runKey, liveRoutine, now, generation, stored.record.scheduledFor);
-    return { status: 200, body: { status: admitted.status, runKey, alreadyCompleted: false, cancelled: false } };
-  }
-
-  private async admitResult(
-    stored: RoutineRunRecord,
-    result: CloudAdmitResult,
-    frozen: ElaraRoutine,
-    now: number,
-    generation: number,
-    locus: 'cloud' | 'device',
-  ): Promise<{ status: 'completed' | 'suppressed' | 'failed' }> {
-    if (result.disposition === 'error') {
-      this.store.admitCompletedRun(stored.runKey, {
-        ...stored, completedAt: now, state: 'failed', outcome: 'error', errorCode: result.errorCode, errorMessage: result.errorMessage,
-      }, generation, locus);
-      return { status: 'failed' };
-    }
-    if (result.disposition === 'noop' || result.disposition === 'cannot_act') {
-      this.store.admitCompletedRun(stored.runKey, {
-        ...stored,
-        completedAt: now,
-        state: 'completed',
-        outcome: 'no-op',
-        reason: result.reason,
-        itemsExamined: result.disposition === 'noop' ? result.itemsExamined : undefined,
-      }, generation, locus);
-      return { status: 'completed' };
-    }
-    const fingerprint = noveltyFingerprint(frozen.id, result.title, result.summary);
-    const event: AutonomousEvent = {
-      id: await eventIdForRunKey(stored.runKey),
-      routineId: frozen.id,
-      runKey: stored.runKey,
-      title: result.title,
-      summary: result.summary,
-      importance: result.importance,
-      confidence: result.confidence,
-      evidence: result.evidence ?? [],
-      noveltyFingerprint: fingerprint,
-      createdAt: now,
-      readAt: null,
-    };
-    const written = this.store.admitProposedEvent({ stored, frozen, event, generation, locus, now });
-    if (written === 'suppressed') return { status: 'suppressed' };
-    return { status: 'completed' };
+    this.journal(now, 'completed', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
+    const liveRoutine = this.store.getRoutine(stored.record.routineId);
+    if (liveRoutine) this.advanceScheduleIfNeeded(runKey, liveRoutine, now, generation, stored.record.scheduledFor);
+    return { status: 200, body: { status: decision.status, runKey, alreadyCompleted: false, cancelled: false } };
   }
 
   /** Tombstone a crashed in-flight run: same id, freed occurrence key, terminal failed state. */

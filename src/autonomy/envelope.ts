@@ -9,7 +9,9 @@ import { cloudAdmitResultSchema } from './cloud-result';
 // The Workflow must not reread the live routine mirror. Instruction, permissions,
 // policy, and Autonomy Context at claim are the only inputs C2 may reason over.
 // Live disable/delete/master-off still gate *admission* at completion (C0).
-// configGeneration/stateGeneration are snapshots. Mid-run checks are C2.
+// C2: configGeneration is the installation-wide authoritative generation.
+// The Workflow does not compare generations. The DO re-reads live
+// configGeneration inside the same SQL transaction as event insert.
 // ---------------------------------------------------------------------------
 
 export const C0_SHELL_CODE = 'C0_SHELL';

@@ -15,4 +15,14 @@ describe('runtime context', () => {
     expect(context).toContain('Always establish or mention a physical setting');
     expect(context).toContain('Physical action and scene narration use italics');
   });
+
+  it('describes the durable-memory capability as deliberate model judgment, not a keyword trigger', () => {
+    const context = withRuntimeContext('Character Master');
+    expect(context).toContain('DURABLE MEMORY');
+    expect(context).toContain('memory.save');
+    expect(context).toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
+    expect(context).toContain('never treat every statement as permanent memory');
+    expect(context).toContain('must never produce a save');
+    expect(context).not.toMatch(/includes\(\s*['"]remember/i);
+  });
 });

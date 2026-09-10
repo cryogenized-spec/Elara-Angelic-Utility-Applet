@@ -3,6 +3,7 @@ import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiToolContinuati
 import { normalizeGeminiError } from './errors';
 import { getGeminiApiKey, getGeminiLockboxStatus } from '../persistence/gemini-api-key';
 import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
+import { memoryGeminiFunctionDeclarations } from '../memory/gemini-tool';
 import { composeSystemInstruction } from './memory-context';
 import { artifactRepository } from '../artifacts/repository';
 import { ArtifactError } from '../artifacts/errors';
@@ -157,7 +158,7 @@ export function toGeminiGenerationConfig(value: unknown): Record<string, unknown
 
 function buildInteractionPayload(request: InteractionRequest) {
   const requestedTools = request.tools ?? [];
-  const declarations = googleGeminiFunctionDeclarations.filter((tool) => requestedTools.includes(tool.name));
+  const declarations = [...googleGeminiFunctionDeclarations, ...memoryGeminiFunctionDeclarations].filter((tool) => requestedTools.includes(tool.name));
   const generationConfig = toGeminiGenerationConfig(request.generationConfig);
   const payload: Record<string, unknown> = { model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, previous_interaction_id: request.previousInteractionId, generation_config: generationConfig, tools: declarations.length ? declarations : undefined, stream: true, store: true };
   const systemInstruction = request.systemInstruction?.trim();

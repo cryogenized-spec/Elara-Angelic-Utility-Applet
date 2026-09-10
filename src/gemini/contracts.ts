@@ -43,6 +43,13 @@ export interface GeminiTurnRequest {
    * their own memory scoping.
    */
   memoryContext?: 'thread' | 'none';
+  /**
+   * Application-owned provenance for model-requested memory mutations.
+   * Carried alongside the turn so a memory.save tool call can be attributed
+   * to its conversation/message; never sent to the provider.
+   */
+  conversationId?: string;
+  messageId?: string;
   /** Existing app generation arbiter context for artifact-producing work. */
   generationId?: string;
   isGenerationActive?: () => boolean;

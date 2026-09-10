@@ -68,6 +68,14 @@ This means a casual sentence in chat does not automatically become a permanent m
 
 The application provides a deliberate memory capability through which Elara can request that useful information be stored. The application, rather than the model, owns the durable identity, timestamps, validation, provenance, and persistence rules.
 
+Elara may also exercise judgment about what is worth preserving: when
+something in conversation looks like durable knowledge — a stable
+preference, a recurring habit, an important constraint — she can save it
+through the same capability without being explicitly told to “remember”.
+Every such save is attributed to Elara, scoped by the application, and
+visible to you in the Memory Bank. Ordinary chatter is still never
+transcript-archived automatically.
+
 The user can also create and edit memories directly in **Settings → Memory Bank**.
 
 ### Observations are not the same as established memories
@@ -492,6 +500,16 @@ Yes. You can archive it for reversible forgetting or permanently delete it from 
 ### "Can Elara delete my memories on its own?"
 
 Not by default. Model `forget` and `delete` permissions are disabled in the default policy.
+
+### "Can Elara save memories on its own?"
+
+Yes — deliberately, not automatically. Elara can decide that something is
+worth preserving and save it through the application's memory capability.
+“What is worth remembering?” is her judgment; how it is stored, scoped, and
+attributed is the application's decision. An explicit “remember this” is a
+strong signal to save, while “don't remember that” must never produce a
+save. Every model-created memory is labeled with its Elara provenance in
+the Memory Bank.
 
 ### "Does looking at a memory count as Elara using it?"
 

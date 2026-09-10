@@ -33,6 +33,7 @@ import { createTurnWatchdog } from '../chat/turn-watchdog';
 import { attachmentsForTurn } from '../chat/turn-lineage';
 import type { GoogleToolName } from '../google/tools/contracts';
 import { googleGeminiFunctionNames } from '../google/tools/gemini-declarations';
+import { memoryGeminiFunctionNames, type MemoryToolName } from '../memory/gemini-tool';
 import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import { getGeminiModel } from '../gemini/model-registry';
 import { resolveMasterCharacterInstruction } from '../character/system-instruction';
@@ -59,7 +60,7 @@ import './components/composer-layout.css';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 const DEFAULT_TITLE = 'New conversation';
-const DEFAULT_GEMINI_TOOLS = googleGeminiFunctionNames() as readonly GoogleToolName[];
+const DEFAULT_GEMINI_TOOLS: readonly (GoogleToolName | MemoryToolName)[] = [...(googleGeminiFunctionNames() as readonly GoogleToolName[]), ...memoryGeminiFunctionNames()];
 const makeMessage = (role: ChatMessage['role'], text: string, conversationId: string): ChatMessage => ({ id: `${role}-${crypto.randomUUID()}`, role, text, conversationId, createdAt: Date.now() });
 
 function backgroundValue(preferences: ChatAppearancePreferences): string {
@@ -292,7 +293,7 @@ export function App() {
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
-  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; attachments?: readonly string[]; inputMessageId?: string; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }): Promise<string | null> {
+  async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly (GoogleToolName | MemoryToolName)[]; attachments?: readonly string[]; inputMessageId?: string; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }): Promise<string | null> {
     if (activeConversationIdRef.current !== conversationId || controller.signal.aborted) return null;
     const previousInteractionId = options.previousInteractionId ?? [...baseConversation.messages].reverse().find((message) => message.role === 'assistant' && message.providerTurn)?.providerTurn?.interactionId;
     const assistantMessage = { ...makeMessage('assistant', '', conversationId), responseGroupId: options.responseGroupId, responseVariant: options.responseVariant } satisfies ChatMessage;
@@ -363,7 +364,7 @@ export function App() {
     });
 
     try {
-      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools, generationId, isGenerationActive: isActiveGeneration };
+      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools, generationId, isGenerationActive: isActiveGeneration, conversationId, messageId: options.inputMessageId };
       const stream = options.tools?.length
         ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
         : geminiTurnPort.streamReply(request, controller.signal);

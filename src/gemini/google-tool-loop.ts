@@ -12,9 +12,11 @@ import { googleOAuthAuthority } from '../google/oauth/authority';
 import type { GoogleCapabilityKey } from '../google/oauth/contracts';
 import { withRuntimeContext } from './runtime-context';
 import { documentToolHandlers } from '../documents/tool-handler';
+import { executeMemoryTool } from '../memory/tool-executor';
+import { isMemoryToolName, type MemoryToolName } from '../memory/gemini-tool';
 
 export interface GoogleToolLoopOptions {
-  readonly tools?: readonly GoogleToolName[];
+  readonly tools?: readonly (GoogleToolName | MemoryToolName)[];
   readonly readOnly?: boolean;
   readonly maxToolCalls?: number;
   readonly executor?: Partial<GoogleToolExecutorOptions>;
@@ -58,6 +60,11 @@ const TOOL_CONFIRMATION_HEARTBEAT_MS = 20_000;
 // are never a security mechanism. Applied at BOTH declaration time and call
 // time; at call time the tool must also be in the declared set, so a model
 // that hallucinates an undeclared tool — read or not — is refused.
+//
+// Memory tools (memory.save) are application-local rather than Google tools:
+// they carry their own centralized permission policy and need no OAuth grant
+// or write confirmation. They are still declaration-gated and are refused in
+// read-only turns, so a read-only caller can never be mutated through memory.
 // ---------------------------------------------------------------------------
 
 const registryRiskByName: ReadonlyMap<string, string> = new Map(googleToolRegistry.map((descriptor) => [descriptor.name, descriptor.risk]));
@@ -73,9 +80,9 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-type PendingToolCall = GoogleToolCall & Pick<GeminiToolResult, 'callId' | 'name'>;
+type PendingToolCall = { tool: string; arguments: Record<string, unknown> } & Pick<GeminiToolResult, 'callId' | 'name'>;
 
-function normalizeTools(tools: readonly GoogleToolName[] | undefined, allowEmpty: boolean): readonly GoogleToolName[] {
+function normalizeTools(tools: readonly (GoogleToolName | MemoryToolName)[] | undefined, allowEmpty: boolean): readonly (GoogleToolName | MemoryToolName)[] {
   if (tools?.length) return tools;
   if (allowEmpty && tools) return [];
   return Object.keys(googleReadToolHandlers) as GoogleToolName[];
@@ -112,7 +119,7 @@ function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandl
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
-  const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools, options.allowEmptyTools === true);
+  const tools = normalizeTools(request.tools as readonly (GoogleToolName | MemoryToolName)[] | undefined ?? options.tools, options.allowEmptyTools === true);
   const maxToolCalls = Math.max(1, Math.min(options.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS, 20));
   const executeOptions = executorOptions(options, request, signal);
 
@@ -159,7 +166,16 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
 
     const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
     const immediateCalls: PendingToolCall[] = [];
+    const memoryCalls: PendingToolCall[] = [];
     for (const call of allowedCalls) {
+      if (isMemoryToolName(call.name)) {
+        if (readOnly || !(tools as readonly string[]).includes(call.name)) {
+          results.push(errorToolResult(call, 'TOOL_NOT_PERMITTED'));
+          continue;
+        }
+        memoryCalls.push(call);
+        continue;
+      }
       if (readOnly && (!isRegistryReadTool(call.name) || !(tools as readonly string[]).includes(call.name))) {
         // Call-time read-only enforcement, same oracle as declaration time:
         // the registry descriptor's risk must be exactly 'read' AND the tool
@@ -177,12 +193,12 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
         continue;
       }
-      const confirmation = confirmationRequestForCall(call);
+      const confirmation = confirmationRequestForCall(call as GoogleToolCall);
       if (confirmation) mutationEntries.push({ call, confirmation });
       else immediateCalls.push(call);
     }
 
-    if (immediateCalls.length > 0) {
+    if (immediateCalls.length > 0 || memoryCalls.length > 0) {
       yield { type: 'interaction-status', interactionId, status: 'executing_tools' };
       for (const call of immediateCalls) {
         if (call.name === 'document.create_pdf') {
@@ -193,7 +209,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
           return;
         }
-        let result = await executeGoogleTool(call, executeOptions);
+        let result = await executeGoogleTool(call as GoogleToolCall, executeOptions);
         if (signal?.aborted || request.isGenerationActive?.() === false) {
           yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
           return;
@@ -211,7 +227,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
             if (outcome.settled) { granted = outcome.value; break; }
             yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
           }
-          if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(call, executeOptions);
+          if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(call as GoogleToolCall, executeOptions);
         }
         if (signal?.aborted || request.isGenerationActive?.() === false) {
           yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
@@ -222,6 +238,34 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           const created = artifactEvent(call.name, result.result);
           if (created) yield created;
         } else results.push(errorToolResult(call, result.code));
+      }
+
+      // Memory tools execute directly under the centralized memory permission
+      // policy: no OAuth grant (application-local) and no write confirmation
+      // (model forget/delete are structurally unavailable, and every save is
+      // inspectable and reversible in the Memory Bank).
+      for (const call of memoryCalls) {
+        if (signal?.aborted || request.isGenerationActive?.() === false) {
+          yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+          return;
+        }
+        const outcome = await executeMemoryTool(
+          { tool: call.name as MemoryToolName, arguments: { ...call.arguments } },
+          { conversationId: request.conversationId, messageId: request.messageId },
+        );
+        if (signal?.aborted || request.isGenerationActive?.() === false) {
+          yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
+          return;
+        }
+        if (outcome.ok) {
+          results.push({
+            callId: call.callId,
+            name: call.name,
+            result: { ok: true, memoryId: outcome.memoryId, title: outcome.title, kind: outcome.kind, deduped: outcome.deduped },
+          });
+        } else {
+          results.push(errorToolResult(call, outcome.code));
+        }
       }
     }
 
@@ -259,7 +303,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
         return;
       }
-      let result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+      let result = await executeGoogleTool(entry.call as GoogleToolCall, { ...executeOptions, confirm: async () => true });
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
         return;
@@ -276,7 +320,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           if (outcome.settled) { granted = outcome.value; break; }
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
         }
-        if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+        if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(entry.call as GoogleToolCall, { ...executeOptions, confirm: async () => true });
       }
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };

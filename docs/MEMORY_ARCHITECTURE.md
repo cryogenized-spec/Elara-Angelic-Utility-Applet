@@ -77,6 +77,20 @@ Implemented UI details:
 
 Harden the same canonical store for long-running use without introducing a second authority. The implementation adds a read-only integrity health scan, multi-thousand-record retrieval stress coverage, and focused protection around deletion/permission semantics and conflict handling. Recovery remains explicit: malformed durable records are reported rather than silently deleted or rewritten. Export/import remains a future extension point, not an alternate persistence mechanism.
 
+### Pass 9 — Operational model-facing capability (Interim Memory Module)
+
+Connect Gemini to the canonical store through one explicit application-owned
+tool, `memory.save`. The model supplies only semantic prose (`title`, `body`,
+`kind`, `tags`); a capability adapter owns exposure checks, strict schema
+validation, the centralized permission check, application-resolved folder
+scope, `elara` provenance injection, duplicate resilience through the
+existing pure retrieval boundary, and persistence through `memory.save()`.
+The runtime instruction describes the capability as deliberate model
+judgment. Model forget/delete remain denied by policy and refused
+structurally; observations keep their own later operational pathway; a pure
+reflection-input contract is established as the extension point for future
+consolidation work. See `documents/MEMORY_PASS_09_STATUS.md`.
+
 ## Canonical memory document
 
 A durable memory is a structured document with prose as its primary payload.
@@ -208,3 +222,13 @@ Pass 7 is complete when Memory Bank provides search, metadata filters, collapsed
 ## Pass 8 completion criterion
 
 Pass 8 is complete when the canonical durable-memory store has explicit read-only integrity diagnostics, malformed records are surfaced without destructive implicit repair, large candidate sets are covered by stress tests with hard retrieval budgets, and deletion/permission/conflict semantics remain explicitly tested without introducing a second persistence authority.
+
+## Pass 9 completion criterion
+
+Pass 9 is complete when Gemini can autonomously propose a durable memory
+through exactly one Gemini-visible tool, the application admits it through
+strict validation, centralized authorization, application-owned scope and
+provenance, and the canonical store, saved memories become available to
+future bounded retrieval, model forget/delete remain denied, and the
+operational path — including duplicate resilience and the future reflection
+contract — is covered by focused tests.

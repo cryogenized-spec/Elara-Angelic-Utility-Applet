@@ -81,4 +81,14 @@ describe('composer autosize bound', () => {
     expect(layoutCss).toMatch(/grid-template-rows:\s*minmax\(42px, auto\)/);
     expect(layoutCss).toMatch(/align-items:\s*end/);
   });
+
+  it('keeps the composer in flex flow and lets the conversation absorb the growth', () => {
+    // A ten-line composer must never push the conversation out of the shell:
+    // the composer reserves its own space (flex: 0 0 auto) and the conversation
+    // is the only track allowed to shrink (flex: 1 1 auto; min-height: 0).
+    expect(layoutCss).toMatch(/\.app-shell form\.composer \{[^}]*flex:\s*0 0 auto/);
+    const conversation = appCss.match(/\.conversation \{([^}]*)\}/)?.[1] ?? '';
+    expect(conversation).toMatch(/flex:\s*1 1 auto/);
+    expect(conversation).toMatch(/min-height:\s*0/);
+  });
 });

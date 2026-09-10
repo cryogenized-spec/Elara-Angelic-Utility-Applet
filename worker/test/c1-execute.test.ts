@@ -52,7 +52,7 @@ describe('C1 executeCloudRoutine', () => {
   it('projects frozen context record-by-record under the model budget', () => {
     const records = Array.from({ length: 40 }, (_, index) => ({
       id: `mem-${String(index).padStart(3, '0')}`,
-      kind: 'CORE',
+      kind: 'CORE' as const,
       title: `Title ${index}`,
       body: 'x'.repeat(400),
       tags: [],

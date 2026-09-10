@@ -25,11 +25,19 @@ export const SCHEDULER_ON_TIME_TOLERANCE_MS = 5 * 60_000;
  * STALE_RUN_MS in src/persistence/autonomy.ts covers local budgets; this
  * constant covers the Durable Object's own runs table.
  */
-export const CLOUD_STALE_RUN_MS = 15 * 60_000;
+/**
+ * Phase B used a 15-minute stale window. Phase C0 forbids abandoning a cloud
+ * `running` claim on wall-clock alone — Workflow liveness is the recovery
+ * oracle. Callers that still pass a stale window (tests of decideRunClaim)
+ * may override; the DO uses Number.MAX_SAFE_INTEGER.
+ */
+export const CLOUD_STALE_RUN_MS = Number.MAX_SAFE_INTEGER;
 
 /** Bounded cloud run history — mirrors the local retention contract (30 d / 1 000). */
 export const CLOUD_RUN_RETENTION_MS = 30 * 24 * 3_600_000;
 export const CLOUD_RUN_RETENTION_COUNT = 1_000;
+export const CLOUD_EVENT_RETENTION_MS = 90 * 24 * 3_600_000;
+export const CLOUD_EVENT_RETENTION_COUNT = 500;
 
 /** The scheduler decision journal is a bounded ring, not an unbounded ledger. */
 export const SCHEDULER_JOURNAL_MAX = 200;
@@ -49,6 +57,8 @@ export const SCHEDULER_BUDGET_CODE = 'SCHEDULER_BUDGET_EXCEEDED';
 export const SCHEDULER_OVERLAP_CODE = 'RUN_IN_FLIGHT';
 /** A crashed in-flight run was abandoned (tombstoned) so it cannot swallow its occurrence forever. */
 export const RUN_ABANDONED_CODE = 'RUN_ABANDONED';
+/** Cloud run's frozen configGeneration no longer matches live DO meta — C2 stale-run protection. */
+export const STALE_GENERATION_CODE = 'STALE_GENERATION';
 
 export const SCHEDULER_JOURNAL_KINDS = [
   'heartbeat',
@@ -69,6 +79,13 @@ export const SCHEDULER_JOURNAL_KINDS = [
   'config-sync',
   'context-sync',
   'context-clear',
+  'claimed',
+  'dispatched',
+  'dispatch-failed',
+  'recovered',
+  'completed',
+  'cancelled-admission',
+  'stale-generation',
   'error',
 ] as const;
 export type SchedulerJournalKind = (typeof SCHEDULER_JOURNAL_KINDS)[number];
@@ -224,6 +241,15 @@ export function planScheduleReconciliation(routines: readonly ElaraRoutine[], cu
 /** The single alarm instant: the earliest due entry, or null when nothing is scheduled. */
 export function nextAlarmTime(entries: readonly SchedulerEntry[]): number | null {
   return entries.length ? Math.min(...entries.map((entry) => entry.dueAt)) : null;
+}
+
+/**
+ * Next due instant after a processed occurrence. Recovery MUST call this with
+ * the original occurrence, never wall-clock `now`: recomputing from recovery
+ * time can skip intervening occurrences.
+ */
+export function nextOccurrenceAfterProcessed(routine: ElaraRoutine, occurrence: number): number {
+  return computeNextOccurrence(routine.schedule, routine.timezone, occurrence, { anchor: routine.createdAt });
 }
 
 // ---------------------------------------------------------------------------

@@ -17,16 +17,20 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   plugins: [
     cloudflareTest({
-      main: 'worker/src/index.ts',
+      main: 'worker/src/index.test-entry.ts',
       miniflare: {
         compatibilityDate: '2026-08-22',
         durableObjects: {
-          AUTONOMY: { className: 'AutonomyEngine', useSQLite: true },
+          AUTONOMY: { className: 'TestAutonomyEngine', useSQLite: true },
+        },
+        workflows: {
+          ROUTINE_RUN: { name: 'elara-routine-run', className: 'RoutineRunWorkflow' },
         },
         bindings: {
           GEMINI_API_KEY: 'test-gemini-key',
           ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io',
           ELARA_INSTALLATION_TOKEN: 'test-installation-token-please-ignore',
+          C1_MODEL_STUB: '{"disposition":"noop","reason":"test stub"}',
         },
       },
       runInBackground: true, // alarms may fire while tests await

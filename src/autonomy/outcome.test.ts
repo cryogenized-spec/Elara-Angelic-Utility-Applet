@@ -51,6 +51,13 @@ describe('parseRoutineOutcome', () => {
     expect(parseRoutineOutcome('{"outcome":"explode"}')).toMatchObject({ ok: false, error: 'INVALID_CONTRACT' });
   });
 
+  it('accepts cannot_act as a successful structured refusal', () => {
+    expect(parseRoutineOutcome('{\"outcome\":\"cannot_act\",\"reason\":\"frozen context is empty\"}')).toEqual({
+      ok: true,
+      outcome: { outcome: 'cannot_act', reason: 'frozen context is empty' },
+    });
+  });
+
   it('never falls back to an action when the text is not valid JSON', () => {
     expect(parseRoutineOutcome('Nothing to report — all quiet today.')).toMatchObject({ ok: false, error: 'NO_JSON' });
   });

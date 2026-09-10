@@ -112,6 +112,7 @@ function describeRunOutcome(run: RoutineRunRecord): string {
   }
   if (run.state === 'cancelled') return 'Cancelled.'
   if (run.outcome === 'event') return 'Event delivered to the Autonomy Inbox.';
+  if (run.outcome === 'cannot_act') return run.reason ? `Could not act (${run.reason}).` : 'Could not act on the frozen context.';
   if (run.outcome === 'no-op') return run.reason ? `Nothing noteworthy (${run.reason}).` : 'Nothing noteworthy.';
   if (run.outcome === 'suppressed') return `Held back by policy (${run.suppressedReason ?? 'policy'}).`;
   if (run.outcome === 'error') return `Failed — ${run.errorCode ?? 'unknown error'}`;

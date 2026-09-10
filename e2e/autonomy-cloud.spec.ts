@@ -1,12 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
-// Cloud scheduler (Phase B, DRY RUN) — end to end in a real browser with the
-// worker boundary NETWORK-MOCKED (the real DO/alarm behavior is covered by
-// the workers-pool tests; Playwright validates the application state machine:
-// pairing → config sync → scheduler-visible state → dry-run history → context
-// lifecycle). E2E cannot validate real Cloudflare production behavior and
-// does not pretend to.
+// Cloud scheduler (Phase C) — end to end in a real browser with the worker
+// boundary NETWORK-MOCKED (real DO/alarm behavior is covered by the workers-pool
+// tests; Playwright validates pairing → config sync → scheduler-visible state →
+// run history pull → context lifecycle). E2E cannot validate Cloudflare production.
 //
 // NOTE: browser binaries cannot be downloaded in the development sandbox
 // (CDN-blocked); GitHub CI is the authoritative executor of this spec.
@@ -58,8 +56,8 @@ async function mockWorker(page: Page, options: { contextStale?: boolean } = {}):
         },
       });
     }
-    if (path === '/autonomy/health') return route.fulfill(corsJson({ service: 'elara-gemini', autonomy: { configured: true, version: '1.0.0-phase-b', schemaVersion: 1, capabilities: ['config-sync', 'context-sync', 'scheduler-dry-run'], cron: '0 * * * *', dryRun: true } }));
-    if (path === '/autonomy/pair') return route.fulfill(corsJson({ installationId: 'a'.repeat(32), service: 'elara-gemini', version: '1.0.0-phase-b', schemaVersion: 1, capabilities: ['config-sync', 'context-sync', 'scheduler-dry-run'], cron: '0 * * * *', dryRun: true }));
+    if (path === '/autonomy/health') return route.fulfill(corsJson({ service: 'elara-gemini', autonomy: { configured: true, version: '1.0.0-phase-c', schemaVersion: 1, capabilities: ['config-sync', 'context-sync', 'cloud-execution'], cron: '0 * * * *', dryRun: false, schedulerLive: true, agentExecution: true } }));
+    if (path === '/autonomy/pair') return route.fulfill(corsJson({ installationId: 'a'.repeat(32), service: 'elara-gemini', version: '1.0.0-phase-c', schemaVersion: 1, capabilities: ['config-sync', 'context-sync', 'cloud-execution'], cron: '0 * * * *', dryRun: false, schedulerLive: true, agentExecution: true }));
     if (path === '/autonomy/config') {
       configs.push(JSON.parse(route.request().postData() ?? '{}') as CapturedConfig);
       return route.fulfill(corsJson({ accepted: true, generation: configs.at(-1)!.generation, stateGeneration: 1, processed: 0, nextAlarmAt: 1_789_000_000_000 }));
@@ -73,7 +71,7 @@ async function mockWorker(page: Page, options: { contextStale?: boolean } = {}):
     }
     if (path === '/autonomy/state') {
       return route.fulfill(corsJson({
-        paired: true, dryRun: true, generation: 1, stateGeneration: 2, autonomyEnabled: true, maxEventsPerDay: 10,
+        paired: true, dryRun: false, schedulerLive: true, agentExecution: true, generation: 1, stateGeneration: 2, autonomyEnabled: true, maxEventsPerDay: 10,
         lastHeartbeatAt: 1_788_900_000_000, lastSyncedAt: 1_788_900_000_000, nextAlarmAt: 1_789_000_000_000,
         routines: [{ id: 'routine-cloud-1', name: 'Cloud brief', enabled: true, locus: 'cloud', schedule: { kind: 'daily', time: '09:00', days: 'every' }, timezone: 'UTC', nextDueAt: 1_789_000_000_000 }],
         // The card renders the context summary from the STATE response (the
@@ -91,8 +89,11 @@ async function mockWorker(page: Page, options: { contextStale?: boolean } = {}):
       return route.fulfill(corsJson({ runs: [{
         id: 'cloud-run-1', runKey: 'routine-cloud-1:scheduled:1789000000000', routineId: 'routine-cloud-1', routineName: 'Cloud brief',
         executionMode: 'scheduled', scheduledFor: 1_789_000_000_000, startedAt: 1_789_000_000_100, completedAt: 1_789_000_000_100,
-        state: 'skipped', outcome: 'skipped', errorCode: 'SCHEDULER_DRY_RUN',
+        state: 'completed', outcome: 'no-op', reason: 'nothing to surface',
       }] }));
+    }
+    if (path === '/autonomy/events') {
+      return route.fulfill(corsJson({ events: [] }));
     }
     return route.fulfill(corsJson({ code: 'not_found', message: 'No mock for this route.' }, 404));
   });
@@ -109,10 +110,10 @@ async function pair(page: Page): Promise<void> {
   await page.getByLabel('Worker URL').fill(WORKER);
   await page.getByLabel(/Installation token/).fill(TOKEN);
   await page.getByRole('button', { name: 'Verify & pair' }).click();
-  await expect(page.getByText('dry run').first()).toBeVisible();
+  await expect(page.getByText('cloud execution').first()).toBeVisible();
 }
 
-test('pairing, configuration sync, scheduler visibility, and dry-run history', async ({ page }) => {
+test('pairing, configuration sync, scheduler visibility, and run history', async ({ page }) => {
   const { configs } = await mockWorker(page);
   await page.goto('');
   await openAutonomySettings(page);
@@ -125,7 +126,7 @@ test('pairing, configuration sync, scheduler visibility, and dry-run history', a
   // The paired card shows truthful scheduler state (never "executing").
   await expect(page.getByText('Cloud scheduler', { exact: false }).first()).toBeVisible();
   await expect(page.locator('.autonomy-cloud__schedule', { hasText: 'Cloud brief' })).toContainText('Next due:');
-  await expect(page.locator('.autonomy-cloud__schedule', { hasText: 'Cloud brief' })).toContainText('execution: next phase');
+  await expect(page.locator('.autonomy-cloud__schedule', { hasText: 'Cloud brief' })).toContainText('runs in the worker');
   await page.locator('.autonomy-cloud__journal summary').click(); // expand the collapsed decision journal
   await expect(page.locator('.autonomy-cloud__journal')).toContainText('registered');
   await expect(page.locator('.autonomy-cloud__journal')).toContainText('heartbeat');
@@ -143,8 +144,7 @@ test('pairing, configuration sync, scheduler visibility, and dry-run history', a
   // (The pull is async — poll for the row, then assert its labels.)
   await expect(page.locator('.autonomy-run', { hasText: 'Cloud brief' })).toHaveCount(1, { timeout: 10_000 });
   const historyRow = page.locator('.autonomy-run', { hasText: 'Cloud brief' });
-  await expect(historyRow).toContainText('skipped');
-  await expect(historyRow).toContainText('cloud dry run');
+  await expect(historyRow).toContainText('no-op');
 });
 
 test('the Autonomy Context lifecycle: replace on sync, manual clear, stale warning', async ({ page }) => {

@@ -15,7 +15,7 @@ const requiredFiles = [
   'src/autonomy/contracts.ts', 'src/autonomy/schedule.ts', 'src/autonomy/policy.ts', 'src/autonomy/outcome.ts', 'src/autonomy/authority.ts', 'src/autonomy/instruction.ts', 'src/autonomy/runner.ts', 'src/autonomy/runner.test.ts', 'src/autonomy/tool-surface.test.ts', 'src/persistence/autonomy.ts', 'src/persistence/autonomy.test.ts', 'src/app/components/AutonomySettings.tsx', 'src/gemini/google-tool-loop.readonly.test.ts',
   'src/autonomy/scheduler.ts', 'src/autonomy/scheduler.test.ts', 'src/autonomy/context.ts', 'src/autonomy/context.test.ts', 'src/autonomy/protocol.ts', 'src/autonomy/protocol.test.ts',
   'src/autonomy/cloud/pairing.ts', 'src/autonomy/cloud/pairing.test.ts', 'src/autonomy/cloud/client.ts', 'src/autonomy/cloud/sync.ts', 'src/autonomy/cloud/sync.test.tsx', 'src/app/components/AutonomyCloud.tsx',
-  'worker/src/autonomy/ports.ts', 'worker/src/autonomy/store.ts', 'worker/src/autonomy/engine.ts', 'worker/src/autonomy/routes.ts', 'worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts', 'worker/test/helpers.ts', 'vitest.workers.config.ts',
+  'worker/src/autonomy/ports.ts', 'worker/src/autonomy/store.ts', 'worker/src/autonomy/engine.ts', 'worker/src/autonomy/routes.ts', 'worker/src/autonomy/workflow.ts', 'worker/src/autonomy/cloud-execute.ts', 'src/autonomy/history-page.ts', 'src/autonomy/history-page.test.ts', 'src/autonomy/config-identity.ts', 'src/autonomy/config-identity.test.ts', 'src/autonomy/cloud-result.ts', 'src/autonomy/workflow-identity.ts', 'src/autonomy/envelope.ts', 'worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts', 'worker/test/helpers.ts', 'vitest.workers.config.ts',
   'scripts/verify-autonomy-worker.mjs', 'docs/AUTONOMOUS_ELARA.md', 'e2e/autonomy-cloud.spec.ts',
   'e2e/roleplay-world.spec.ts', 'e2e/autonomy.spec.ts',
 ];
@@ -173,8 +173,8 @@ for (const path of workerSourceFiles) {
   if (forbiddenWorkerImports.test(importLines)) throw new Error(`Reliability gate: worker module must not import browser-only concerns (memory store / persistence / OAuth / Dexie): ${path}`);
   // No server-side Google credentials or OAuth exchange anywhere in the worker.
   if (/accounts\.google\.com|googleapis\.com\/oauth|refresh_token|authorization.?code/i.test(source)) throw new Error(`Reliability gate: server-side Google OAuth markers must not appear in worker code: ${path}`);
-  // No Workflows before Phase C; no Agents SDK anywhere.
-  if (/cloudflare:workflows|from ['"]agents['"]|@cloudflare\/agents/.test(source)) throw new Error(`Reliability gate: Workflows/Agents SDK must not appear before their phase: ${path}`);
+  if (/from ['"]agents['"]|@cloudflare\/agents/.test(source)) throw new Error(`Reliability gate: Agents SDK must not appear: ${path}`);
+  if (/cloudflare:workflows/.test(source)) throw new Error(`Reliability gate: do not import cloudflare:workflows (${path}); bind Workflows via wrangler.`);
   // No Web Push before Phase D.
   if (/vapid|web-push|pushManager|PushSubscription/i.test(source)) throw new Error(`Reliability gate: Web Push must not appear before Phase D: ${path}`);
 }
@@ -210,6 +210,22 @@ const wranglerSource = readFileSync(join(root, 'worker', 'wrangler.toml'), 'utf8
 const crons = wranglerSource.match(/crons\s*=\s*\[([^\]]*)\]/);
 if (!crons || crons[1].split(',').filter((entry) => entry.trim()).length !== 1 || !crons[1].includes('0 * * * *')) throw new Error('Reliability gate: the worker must carry exactly one hourly cron trigger.');
 if (!wranglerSource.includes('new_sqlite_classes') || !wranglerSource.includes('AutonomyEngine')) throw new Error('Reliability gate: the AutonomyEngine Durable Object must be declared with SQLite storage.');
+if (!wranglerSource.includes('class_name = "RoutineRunWorkflow"') || !wranglerSource.includes('binding = "ROUTINE_RUN"')) throw new Error('Reliability gate: wrangler must declare the RoutineRun Workflow binding.');
+const workflowSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'workflow.ts'), 'utf8');
+if (!workflowSource.includes('class RoutineRunWorkflow') || !workflowSource.includes('WorkflowEntrypoint')) throw new Error('Reliability gate: RoutineRunWorkflow must be a WorkflowEntrypoint.');
+if (!engineSource.includes('completeClaim') || !engineSource.includes('dispatchWorkflow')) throw new Error('Reliability gate: the DO must claim then dispatch a Workflow.');
+if (engineSource.includes("path === '/c0/fixture'")) throw new Error('Reliability gate: production DO fetch must not expose /c0/fixture.');
+if (engineSource.includes('claimWithoutDispatch') || engineSource.includes('markDispatchedWithoutAdvance')) throw new Error('Reliability gate: crash fixtures must not be public methods on AutonomyEngine.');
+if (workerEntrySource.includes('TestAutonomyEngine')) throw new Error('Reliability gate: production worker entry must not export TestAutonomyEngine.');
+if (wranglerSource.includes('TestAutonomyEngine')) throw new Error('Reliability gate: production wrangler must not bind TestAutonomyEngine.');
+if (!engineSource.includes('nextOccurrenceAfterProcessed')) throw new Error('Reliability gate: schedule advance must be occurrence-anchored.');
+if (!engineSource.includes('schedulerLive') || !engineSource.includes('agentExecution')) throw new Error('Reliability gate: scheduler liveness and agent execution must not share one dryRun flag.');
+if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('pruneEnvelopes')) throw new Error('Reliability gate: envelopes must be pruned with runs.');
+if (wranglerSource.includes('C1_MODEL_STUB')) throw new Error('Reliability gate: C1_MODEL_STUB must not be declared in production wrangler.');
+if (workflowSource.includes('C0_SHELL') || engineSource.includes('C0_SHELL')) throw new Error('Reliability gate: C0 shell completion must not remain after C1.');
+if (!workflowSource.includes('executeCloudRoutine')) throw new Error('Reliability gate: the Workflow must execute the C1 model step.');
+if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('admitProposedEvent')) throw new Error('Reliability gate: event admission policy must run inside the DO transaction.');
+if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('CREATE TABLE IF NOT EXISTS events')) throw new Error('Reliability gate: cloud events must be durable.');
 
 // The shared scheduler domain stays pure (no Cloudflare, browser, or provider imports).
 const allowedSchedulerImports = /^\s*(?:import|export)\s.*from\s+['"](?:zod|\.\/contracts|\.\/schedule|\.\.\/memory\/retrieval|\.\.\/memory\/types)['"];?\s*$/;
@@ -224,4 +240,4 @@ for (const shared of ['src/autonomy/scheduler.ts', 'src/autonomy/context.ts']) {
 
 if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24') throw new Error('Reliability gate: Node baseline must remain 24.');
 
-process.stdout.write(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract, plus the Phase B scheduler invariants: SchedulerPort/WakeSource seam, DO single-alarm scheduler with shared pure due-time truth, heartbeat-only cron, no public wake endpoint, worker isolation from browser memory/persistence/OAuth, no server-side Google credentials, no Agents SDK, no pre-phase Workflows or Web Push, single hourly cron trigger, and pure shared scheduler/context modules.\n`);
+process.stdout.write(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract, plus the Phase B scheduler invariants: SchedulerPort/WakeSource seam, DO single-alarm scheduler with shared pure due-time truth, heartbeat-only cron, no public wake endpoint, worker isolation from browser memory/persistence/OAuth, no server-side Google credentials, no Agents SDK, Workflows bound via wrangler, no Web Push, single hourly cron trigger, and pure shared scheduler/context modules.\n`);

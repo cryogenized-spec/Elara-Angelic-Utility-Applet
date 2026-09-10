@@ -22,6 +22,8 @@ interface DurableObjectStorage {
   getAlarm(): Promise<number | null>;
   deleteAlarm(): Promise<boolean>;
   transaction<T>(closure: () => Promise<T>): Promise<T>;
+  /** Synchronous SQLite transaction: all exec() calls inside commit or roll back together. */
+  transactionSync<T>(closure: () => T): T;
 }
 
 interface DurableObjectState {
@@ -66,11 +68,37 @@ interface ExecutionContext {
   passThroughOnException(): void;
 }
 
+interface WorkflowInstance {
+  readonly id: string;
+  status(): Promise<{ status: string }>;
+}
+
+interface Workflow<Params = unknown> {
+  create(options?: { id?: string; params?: Params }): Promise<WorkflowInstance>;
+  get(id: string): Promise<WorkflowInstance>;
+}
+
+interface WorkflowEvent<T> {
+  payload: Readonly<T>;
+  timestamp: Date;
+  instanceId: string;
+}
+
+interface WorkflowStep {
+  do<T>(name: string, callback: () => Promise<T> | T): Promise<T>;
+}
+
 declare module 'cloudflare:workers' {
   export class DurableObject {
     readonly ctx: DurableObjectState;
     readonly env: Record<string, unknown>;
     constructor(ctx: DurableObjectState, env: Record<string, unknown>);
     fetch(request: Request): Promise<Response>;
+  }
+
+  export class WorkflowEntrypoint<Env = unknown, Params = unknown> {
+    readonly env: Env;
+    constructor(ctx: unknown, env: Env);
+    run(event: WorkflowEvent<Params>, step: WorkflowStep): Promise<unknown>;
   }
 }

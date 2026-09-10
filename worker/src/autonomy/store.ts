@@ -1,10 +1,17 @@
 import {
+  CLOUD_EVENT_RETENTION_COUNT,
+  CLOUD_EVENT_RETENTION_MS,
   CLOUD_RUN_RETENTION_COUNT,
   CLOUD_RUN_RETENTION_MS,
   SCHEDULER_JOURNAL_MAX,
+  STALE_GENERATION_CODE,
+  nextOccurrenceAfterProcessed,
   type SchedulerJournalEntry,
 } from '../../../src/autonomy/scheduler';
-import { normalizeRoutine, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+import { normalizeRoutine, type AutonomousEvent, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+import { evaluateEventAdmission, noveltyFingerprint } from '../../../src/autonomy/policy';
+import type { RoutineRunEnvelope } from '../../../src/autonomy/envelope';
+import type { CloudAdmitResult } from '../../../src/autonomy/cloud-result';
 
 // ---------------------------------------------------------------------------
 // Durable Object storage — one SQLite-backed AutonomyEngine per installation.
@@ -16,7 +23,7 @@ import { normalizeRoutine, type ElaraRoutine, type RoutineRunRecord } from '../.
 // future schema change is an explicit, reviewable migration.
 // ---------------------------------------------------------------------------
 
-const SCHEMA_VERSION = '1';
+const SCHEMA_VERSION = '3';
 
 export interface StoredSchedule {
   routineId: string;
@@ -47,11 +54,28 @@ export interface ContextMetadata {
   byteSize: number;
 }
 
-type MetaKey = 'schemaVersion' | 'configGeneration' | 'stateGeneration' | 'autonomyEnabled' | 'maxEventsPerDay' | 'lastHeartbeatAt' | 'lastSyncedAt';
+type MetaKey = 'schemaVersion' | 'configGeneration' | 'stateGeneration' | 'configPayloadHash' | 'autonomyEnabled' | 'maxEventsPerDay' | 'lastHeartbeatAt' | 'lastSyncedAt';
+
+function isActiveRunState(state: RoutineRunRecord['state']): boolean {
+  return state === 'pending' || state === 'running';
+}
+
+/**
+ * Duplicate identity for one AutonomousEvent. SQLite names the column:
+ * `UNIQUE constraint failed: events.runKey` or `events.id`.
+ * Other SQLITE_CONSTRAINT failures (CHECK, NOT NULL, foreign keys) must throw.
+ */
+export function isEventsIdentityUniqueConflict(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /UNIQUE constraint failed: events\.(runKey|id)\b/i.test(message);
+}
 
 /** Thin typed layer over DO SQL. Every statement is one exec call. */
 export class AutonomyStore {
-  constructor(private readonly sql: DurableObjectSql) {}
+  constructor(
+    private readonly sql: DurableObjectSql,
+    private readonly transact: (closure: () => void) => void = (closure) => closure(),
+  ) {}
 
   ensureSchema(): void {
     this.sql.exec('CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
@@ -64,7 +88,10 @@ export class AutonomyStore {
     this.sql.exec('CREATE TABLE IF NOT EXISTS journal (seq INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, kind TEXT NOT NULL, generation INTEGER NOT NULL, routineId TEXT, occurrence INTEGER, detail TEXT)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS context (id INTEGER PRIMARY KEY CHECK (id = 1), contentHash TEXT NOT NULL, syncedAt INTEGER NOT NULL, generation INTEGER NOT NULL, recordCount INTEGER NOT NULL, byteSize INTEGER NOT NULL, records TEXT NOT NULL)');
     this.sql.exec('CREATE TABLE IF NOT EXISTS nonces (nonce TEXT PRIMARY KEY, seenAt INTEGER NOT NULL)');
-    if (this.getMeta('schemaVersion') === undefined) this.setMeta('schemaVersion', SCHEMA_VERSION);
+    this.sql.exec('CREATE TABLE IF NOT EXISTS envelopes (runKey TEXT PRIMARY KEY, workflowInstanceId TEXT NOT NULL UNIQUE, payload TEXT NOT NULL, dispatched INTEGER NOT NULL, scheduleAdvanced INTEGER NOT NULL)');
+    this.sql.exec('CREATE TABLE IF NOT EXISTS events (id TEXT PRIMARY KEY, runKey TEXT NOT NULL UNIQUE, routineId TEXT NOT NULL, record TEXT NOT NULL, createdAt INTEGER NOT NULL)');
+    this.sql.exec('CREATE INDEX IF NOT EXISTS events_created ON events(createdAt)');
+    this.setMeta('schemaVersion', SCHEMA_VERSION);
   }
 
   // ----- meta -----
@@ -129,13 +156,86 @@ export class AutonomyStore {
     this.sql.exec('INSERT INTO runs (id, runKey, routineId, record, generation, locus, startedAt) VALUES (?, ?, ?, ?, ?, ?, ?)', record.id, record.runKey, record.routineId, JSON.stringify(record), generation, locus, record.startedAt);
   }
 
+  /**
+   * Atomic durable claim: the running row and its frozen envelope commit
+   * together or not at all. A crash cannot leave `running` without an envelope.
+   */
+  claimCloudRun(record: RoutineRunRecord, envelope: RoutineRunEnvelope, generation: number): void {
+    this.transact(() => {
+      this.insertRun(record, generation, 'cloud');
+      this.putEnvelope(envelope, false, false);
+    });
+  }
+
   /** Rewrite one run row (crash tombstoning): same id, new runKey/state. */
   replaceRun(originalRunKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device'): void {
     this.sql.exec('UPDATE runs SET runKey = ?, record = ?, generation = ?, locus = ? WHERE runKey = ?', record.runKey, JSON.stringify(record), generation, locus, originalRunKey);
   }
 
+  /** Terminalize an in-flight run without changing its canonical runKey. */
+  updateRunRecord(runKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device'): void {
+    this.sql.exec('UPDATE runs SET record = ?, generation = ?, locus = ? WHERE runKey = ?', JSON.stringify(record), generation, locus, runKey);
+  }
+
   runExists(runKey: string): boolean {
     return this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM runs WHERE runKey = ?', runKey).toArray()[0]!.n > 0;
+  }
+
+  getStoredRun(runKey: string): StoredRun | undefined {
+    const row = this.sql.exec<{ record: string; generation: number; locus: string }>('SELECT record, generation, locus FROM runs WHERE runKey = ?', runKey).toArray()[0];
+    return row ? { record: JSON.parse(row.record) as RoutineRunRecord, generation: row.generation, locus: row.locus as 'cloud' | 'device' } : undefined;
+  }
+
+  listRunningCloud(): StoredRun[] {
+    return this.sql.exec<{ record: string; generation: number; locus: string }>('SELECT record, generation, locus FROM runs WHERE locus = ? ORDER BY startedAt', 'cloud')
+      .toArray()
+      .map((row) => ({ record: JSON.parse(row.record) as RoutineRunRecord, generation: row.generation, locus: row.locus as 'cloud' | 'device' }))
+      .filter((stored) => stored.record.state === 'pending' || stored.record.state === 'running');
+  }
+
+  putEnvelope(envelope: RoutineRunEnvelope, dispatched: boolean, scheduleAdvanced: boolean): void {
+    this.sql.exec(
+      'INSERT INTO envelopes (runKey, workflowInstanceId, payload, dispatched, scheduleAdvanced) VALUES (?, ?, ?, ?, ?) ON CONFLICT(runKey) DO UPDATE SET workflowInstanceId = excluded.workflowInstanceId, payload = excluded.payload, dispatched = excluded.dispatched, scheduleAdvanced = excluded.scheduleAdvanced',
+      envelope.runKey,
+      envelope.workflowInstanceId,
+      JSON.stringify(envelope),
+      dispatched ? 1 : 0,
+      scheduleAdvanced ? 1 : 0,
+    );
+  }
+
+  getEnvelope(runKey: string): { envelope: RoutineRunEnvelope; dispatched: boolean; scheduleAdvanced: boolean } | undefined {
+    const row = this.sql.exec<{ payload: string; dispatched: number; scheduleAdvanced: number }>('SELECT payload, dispatched, scheduleAdvanced FROM envelopes WHERE runKey = ?', runKey).toArray()[0];
+    return row ? { envelope: JSON.parse(row.payload) as RoutineRunEnvelope, dispatched: row.dispatched === 1, scheduleAdvanced: row.scheduleAdvanced === 1 } : undefined;
+  }
+
+  markEnvelopeDispatched(runKey: string): void {
+    this.sql.exec('UPDATE envelopes SET dispatched = 1 WHERE runKey = ?', runKey);
+  }
+
+  markEnvelopeScheduleAdvanced(runKey: string): void {
+    this.sql.exec('UPDATE envelopes SET scheduleAdvanced = 1 WHERE runKey = ?', runKey);
+  }
+
+  /**
+   * Write the next due instant and the scheduleAdvanced marker together so a
+   * crash cannot leave the schedule moved without the marker (or vice versa).
+   */
+  commitScheduleAdvance(routineId: string, nextDueAt: number, updatedAt: number, runKey: string | null): void {
+    this.transact(() => this.commitScheduleAdvanceNested(routineId, nextDueAt, updatedAt, runKey));
+  }
+
+  private commitScheduleAdvanceNested(routineId: string, nextDueAt: number, updatedAt: number, runKey: string | null): void {
+    this.upsertSchedule(routineId, nextDueAt, updatedAt);
+    if (runKey) this.markEnvelopeScheduleAdvanced(runKey);
+  }
+
+  listEnvelopeRunKeys(): string[] {
+    return this.sql.exec<{ runKey: string }>('SELECT runKey FROM envelopes').toArray().map((row) => row.runKey);
+  }
+
+  deleteEnvelope(runKey: string): void {
+    this.sql.exec('DELETE FROM envelopes WHERE runKey = ?', runKey);
   }
 
   listRunsForRoutine(routineId: string): StoredRun[] {
@@ -144,10 +244,11 @@ export class AutonomyStore {
       .map((row) => ({ record: JSON.parse(row.record) as RoutineRunRecord, generation: row.generation, locus: row.locus as 'cloud' | 'device' }));
   }
 
-  listRunsSince(since: number, limit = 200): RoutineRunRecord[] {
-    return this.sql.exec<{ record: string }>('SELECT record FROM runs WHERE startedAt > ? ORDER BY startedAt DESC LIMIT ?', since, limit)
-      .toArray()
-      .map((row) => JSON.parse(row.record) as RoutineRunRecord);
+  listRunsPage(afterAt: number, afterId: string, limit: number): RoutineRunRecord[] {
+    return this.sql.exec<{ record: string }>(
+      'SELECT record FROM runs WHERE startedAt > ? OR (startedAt = ? AND id > ?) ORDER BY startedAt ASC, id ASC LIMIT ?',
+      afterAt, afterAt, afterId, limit,
+    ).toArray().map((row) => JSON.parse(row.record) as RoutineRunRecord);
   }
 
   /**
@@ -156,11 +257,297 @@ export class AutonomyStore {
    * pass have committed, and never allowed to reject them.
    */
   pruneRuns(now: number): void {
-    this.sql.exec('DELETE FROM runs WHERE startedAt < ?', now - CLOUD_RUN_RETENTION_MS);
-    const count = this.sql.exec<{ n: number }>('SELECT COUNT(*) AS n FROM runs').toArray()[0]!.n;
-    if (count > CLOUD_RUN_RETENTION_COUNT) {
-      this.sql.exec(`DELETE FROM runs WHERE id IN (SELECT id FROM runs ORDER BY startedAt ASC LIMIT ${count - CLOUD_RUN_RETENTION_COUNT})`);
+    const cutoff = now - CLOUD_RUN_RETENTION_MS;
+    const aged = this.sql.exec<{ id: string; record: string; startedAt: number }>('SELECT id, record, startedAt FROM runs').toArray();
+    for (const row of aged) {
+      if (row.startedAt < cutoff && !isActiveRunState((JSON.parse(row.record) as RoutineRunRecord).state)) {
+        this.sql.exec('DELETE FROM runs WHERE id = ?', row.id);
+      }
     }
+    const remaining = this.sql.exec<{ id: string; record: string; startedAt: number }>('SELECT id, record, startedAt FROM runs').toArray();
+    if (remaining.length > CLOUD_RUN_RETENTION_COUNT) {
+      const excess = remaining.length - CLOUD_RUN_RETENTION_COUNT;
+      const evict = remaining
+        .filter((row) => !isActiveRunState((JSON.parse(row.record) as RoutineRunRecord).state))
+        .sort((a, b) => a.startedAt - b.startedAt)
+        .slice(0, excess);
+      for (const row of evict) this.sql.exec('DELETE FROM runs WHERE id = ?', row.id);
+    }
+    this.pruneEnvelopes();
+    this.pruneEvents(now);
+  }
+
+  insertEvent(event: AutonomousEvent): void {
+    this.sql.exec(
+      'INSERT INTO events (id, runKey, routineId, record, createdAt) VALUES (?, ?, ?, ?, ?)',
+      event.id,
+      event.runKey,
+      event.routineId,
+      JSON.stringify(event),
+      event.createdAt,
+    );
+  }
+
+  getEventByRunKey(runKey: string): AutonomousEvent | undefined {
+    const row = this.sql.exec<{ record: string }>('SELECT record FROM events WHERE runKey = ?', runKey).toArray()[0];
+    return row ? JSON.parse(row.record) as AutonomousEvent : undefined;
+  }
+
+  listEventsPage(afterAt: number, afterId: string, limit: number): AutonomousEvent[] {
+    return this.sql.exec<{ record: string }>(
+      'SELECT record FROM events WHERE createdAt > ? OR (createdAt = ? AND id > ?) ORDER BY createdAt ASC, id ASC LIMIT ?',
+      afterAt, afterAt, afterId, limit,
+    ).toArray().map((row) => JSON.parse(row.record) as AutonomousEvent);
+  }
+
+  listRecentEvents(since: number): AutonomousEvent[] {
+    return this.sql.exec<{ record: string }>('SELECT record FROM events WHERE createdAt > ? ORDER BY createdAt DESC', since)
+      .toArray()
+      .map((row) => JSON.parse(row.record) as AutonomousEvent);
+  }
+
+  admitCompletedRun(runKey: string, record: RoutineRunRecord, generation: number, locus: 'cloud' | 'device'): void {
+    this.updateRunRecord(runKey, record, generation, locus);
+  }
+
+  /**
+   * C2 authoritative admission: re-read live configGeneration, master flag,
+   * and routine row in the same SQL transaction as event insert, run
+   * terminalize, and (on current-generation success only) schedule advance.
+   * The runs.generation column stays the claim's configGeneration.
+   */
+  completeCloudAdmission(input: {
+    runKey: string;
+    result: CloudAdmitResult;
+    eventId: string;
+    now: number;
+  }): { status: 'already-completed' | 'missing-envelope' | 'stale' | 'cancelled' | 'completed' | 'suppressed' | 'failed' } {
+    let status: 'already-completed' | 'missing-envelope' | 'stale' | 'cancelled' | 'completed' | 'suppressed' | 'failed' = 'failed';
+    this.transact(() => {
+      const stored = this.getStoredRun(input.runKey);
+      if (!stored) {
+        status = 'missing-envelope';
+        return;
+      }
+      if (stored.record.state === 'completed' || stored.record.state === 'failed' || stored.record.state === 'skipped' || stored.record.state === 'missed') {
+        status = 'already-completed';
+        return;
+      }
+      const envelopeRow = this.getEnvelope(input.runKey);
+      if (!envelopeRow) {
+        status = 'missing-envelope';
+        return;
+      }
+      const claimGeneration = stored.generation;
+      const liveConfig = this.getMetaNumber('configGeneration', 0);
+      if (envelopeRow.envelope.configGeneration !== liveConfig) {
+        this.updateRunRecord(input.runKey, {
+          ...stored.record,
+          completedAt: input.now,
+          state: 'failed',
+          outcome: 'error',
+          errorCode: STALE_GENERATION_CODE,
+          errorMessage: `Frozen configGeneration ${envelopeRow.envelope.configGeneration} is stale (live ${liveConfig}).`,
+        }, claimGeneration, stored.locus);
+        status = 'stale';
+        return;
+      }
+      const liveRoutine = this.getRoutine(stored.record.routineId);
+      const masterOn = this.getMetaBoolean('autonomyEnabled', false);
+      if (!masterOn || !liveRoutine || !liveRoutine.enabled) {
+        this.updateRunRecord(input.runKey, {
+          ...stored.record,
+          completedAt: input.now,
+          state: 'failed',
+          outcome: 'error',
+          errorCode: 'cancelled-admission',
+          errorMessage: 'Live gate closed before events could be admitted.',
+        }, claimGeneration, stored.locus);
+        status = 'cancelled';
+        return;
+      }
+      const frozen = envelopeRow.envelope.routine;
+      const result = input.result;
+      if (result.disposition === 'error') {
+        this.updateRunRecord(input.runKey, {
+          ...stored.record, completedAt: input.now, state: 'failed', outcome: 'error', errorCode: result.errorCode, errorMessage: result.errorMessage,
+        }, claimGeneration, stored.locus);
+        status = 'failed';
+      } else if (result.disposition === 'noop' || result.disposition === 'cannot_act') {
+        this.updateRunRecord(input.runKey, {
+          ...stored.record,
+          completedAt: input.now,
+          state: 'completed',
+          outcome: result.disposition === 'cannot_act' ? 'cannot_act' : 'no-op',
+          reason: result.reason,
+          itemsExamined: result.disposition === 'noop' ? result.itemsExamined : undefined,
+        }, claimGeneration, stored.locus);
+        status = 'completed';
+      } else {
+        const event: AutonomousEvent = {
+          id: input.eventId,
+          routineId: frozen.id,
+          runKey: stored.record.runKey,
+          title: result.title,
+          summary: result.summary,
+          importance: result.importance,
+          confidence: result.confidence,
+          evidence: result.evidence ?? [],
+          noveltyFingerprint: noveltyFingerprint(frozen.id, result.title, result.summary),
+          createdAt: input.now,
+          readAt: null,
+        };
+        const written = this.admitProposedEventNested({ stored: stored.record, frozen, event, generation: claimGeneration, locus: stored.locus, now: input.now });
+        status = written === 'suppressed' ? 'suppressed' : 'completed';
+      }
+      if (!envelopeRow.scheduleAdvanced) {
+        const next = nextOccurrenceAfterProcessed(frozen, stored.record.scheduledFor);
+        this.commitScheduleAdvanceNested(frozen.id, next, input.now, input.runKey);
+      }
+    });
+    return { status };
+  }
+
+  /**
+   * Recovery path: a claim whose frozen generation or live gates no longer
+   * match must not dispatch or advance. Terminalize without an event.
+   */
+  terminalizeInactiveClaim(runKey: string, now: number): 'stale' | 'cancelled' | 'current' | 'already-completed' | 'missing-envelope' {
+    let status: 'stale' | 'cancelled' | 'current' | 'already-completed' | 'missing-envelope' = 'current';
+    this.transact(() => {
+      const stored = this.getStoredRun(runKey);
+      if (!stored) {
+        status = 'missing-envelope';
+        return;
+      }
+      if (stored.record.state !== 'pending' && stored.record.state !== 'running') {
+        status = 'already-completed';
+        return;
+      }
+      const envelopeRow = this.getEnvelope(runKey);
+      if (!envelopeRow) {
+        status = 'missing-envelope';
+        return;
+      }
+      const liveConfig = this.getMetaNumber('configGeneration', 0);
+      const liveRoutine = this.getRoutine(stored.record.routineId);
+      const masterOn = this.getMetaBoolean('autonomyEnabled', false);
+      if (envelopeRow.envelope.configGeneration === liveConfig && masterOn && liveRoutine?.enabled) {
+        status = 'current';
+        return;
+      }
+      const stale = envelopeRow.envelope.configGeneration !== liveConfig;
+      this.updateRunRecord(runKey, {
+        ...stored.record,
+        completedAt: now,
+        state: 'failed',
+        outcome: 'error',
+        errorCode: stale ? STALE_GENERATION_CODE : 'cancelled-admission',
+        errorMessage: stale
+          ? `Frozen configGeneration ${envelopeRow.envelope.configGeneration} is stale (live ${liveConfig}).`
+          : 'Live gate closed before events could be admitted.',
+      }, stored.generation, stored.locus);
+      status = stale ? 'stale' : 'cancelled';
+    });
+    return status;
+  }
+
+  private admitProposedEventNested(input: {
+    stored: RoutineRunRecord;
+    frozen: ElaraRoutine;
+    event: AutonomousEvent;
+    generation: number;
+    locus: 'cloud' | 'device';
+    now: number;
+  }): 'event' | 'suppressed' | 'duplicate' {
+    if (this.getEventByRunKey(input.event.runKey)) return 'duplicate';
+    const admission = evaluateEventAdmission({
+      routineId: input.frozen.id,
+      fingerprint: input.event.noveltyFingerprint,
+      recentEvents: this.listRecentEvents(input.now - 7 * 24 * 3_600_000),
+      policy: input.frozen.policy,
+      maxEventsPerDay: this.getMetaNumber('maxEventsPerDay', 10),
+      now: input.now,
+    });
+    if (!admission.admitted) {
+      this.updateRunRecord(input.stored.runKey, {
+        ...input.stored,
+        completedAt: input.now,
+        state: 'completed',
+        outcome: 'suppressed',
+        suppressedReason: admission.reason,
+        reason: admission.detail,
+      }, input.generation, input.locus);
+      return 'suppressed';
+    }
+    try {
+      this.insertEvent(input.event);
+    } catch (error) {
+      if (isEventsIdentityUniqueConflict(error) && this.getEventByRunKey(input.event.runKey)) return 'duplicate';
+      throw error;
+    }
+    this.updateRunRecord(input.stored.runKey, {
+      ...input.stored,
+      completedAt: input.now,
+      state: 'completed',
+      outcome: 'event',
+      eventId: input.event.id,
+    }, input.generation, input.locus);
+    return 'event';
+  }
+
+  /**
+   * Authoritative event admission: policy (cooldown / duplicate fingerprint /
+   * rolling 24h cap) is evaluated INSIDE the same SQLite transaction as the
+   * insert. Two distinct runKeys cannot jointly exceed maxEventsPerDay.
+   *
+   * UNIQUE conflicts on this runKey are duplicates. Any other SQL failure
+   * throws so the Workflow retries.
+   */
+  admitProposedEvent(input: {
+    stored: RoutineRunRecord;
+    frozen: ElaraRoutine;
+    event: AutonomousEvent;
+    generation: number;
+    locus: 'cloud' | 'device';
+    now: number;
+  }): 'event' | 'suppressed' | 'duplicate' {
+    let outcome: 'event' | 'suppressed' | 'duplicate' = 'event';
+    this.transact(() => {
+      outcome = this.admitProposedEventNested(input);
+    });
+    return outcome;
+  }
+
+  pruneEvents(now: number): void {
+    const cutoff = now - CLOUD_EVENT_RETENTION_MS;
+    this.sql.exec('DELETE FROM events WHERE createdAt < ?', cutoff);
+    const remaining = this.sql.exec<{ id: string; createdAt: number }>('SELECT id, createdAt FROM events').toArray();
+    if (remaining.length > CLOUD_EVENT_RETENTION_COUNT) {
+      const excess = remaining.length - CLOUD_EVENT_RETENTION_COUNT;
+      const evict = remaining.sort((a, b) => a.createdAt - b.createdAt).slice(0, excess);
+      for (const row of evict) this.sql.exec('DELETE FROM events WHERE id = ?', row.id);
+    }
+  }
+
+  /**
+   * Envelopes follow execution state, not unbounded history:
+   * active pending/running claims keep their envelope; terminal or already-
+   * pruned runs drop it (Workflow recovery no longer needs the payload).
+   */
+  pruneEnvelopes(): void {
+    for (const runKey of this.listEnvelopeRunKeys()) {
+      const stored = this.getStoredRun(runKey);
+      if (stored && isActiveRunState(stored.record.state)) continue;
+      this.deleteEnvelope(runKey);
+    }
+  }
+
+  /** Test fixture: rewrite startedAt (retention crash window). */
+  setRunStartedAt(runKey: string, startedAt: number): void {
+    const stored = this.getStoredRun(runKey);
+    if (!stored) return;
+    this.sql.exec('UPDATE runs SET record = ?, startedAt = ? WHERE runKey = ?', JSON.stringify({ ...stored.record, startedAt }), startedAt, runKey);
   }
 
   // ----- journal (bounded scheduler observability) -----

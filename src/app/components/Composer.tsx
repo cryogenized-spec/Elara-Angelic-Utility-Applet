@@ -14,9 +14,9 @@ import { transcribeVttCapture } from '../../vtt/transcription';
 import { transformVttTranscript, type VttTransformMode } from '../../vtt/transformation';
 import { DEFAULT_GEMINI_MODEL } from '../../gemini/contracts';
 import { composerEnterKeyHint, isComposerSendShortcut } from './composer-keys';
+import { useComposerAutosize } from './composer-autosize';
 import './composer.css';
 
-const MAX_HEIGHT = 132;
 const VTT_LONG_PRESS_MS = 300;
 
 type ComposerProps = {
@@ -61,14 +61,10 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   const [vttTransformMode, setVttTransformMode] = useState<VttTransformMode>('raw');
   const [vttModeOpen, setVttModeOpen] = useState(false);
 
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea || expanded) return;
-    textarea.style.height = 'auto';
-    const nextHeight = Math.min(MAX_HEIGHT, Math.max(42, textarea.scrollHeight));
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden';
-  }, [draft, expanded]);
+  // Autosize: grow to ~COMPOSER_VISIBLE_LINES lines, then scroll internally.
+  // The bound comes from the editor's own line-height, and the measurement is
+  // cached — no per-keystroke style recalculation beyond the text itself.
+  useComposerAutosize(textareaRef, draft, { enabled: !expanded });
 
   useEffect(() => {
     if (!expanded) return;
@@ -391,15 +387,34 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     setAttachmentMenuOpen(false);
   }
 
+  // The paperclip is the single home for the composer's secondary tools:
+  // attachment sources first, then the Markdown reference. Every action is
+  // represented by a Lucide icon plus its text label, so the menu stays legible
+  // at phone widths without a separate control stealing editor width.
   function attachmentPicker() {
     return <div className="composer__attachment-control" ref={attachmentControlRef}>
-      <button className="composer__icon" type="button" aria-label="Attach image or document" aria-expanded={attachmentMenuOpen} aria-haspopup="menu" disabled={composerLocked} onClick={() => setAttachmentMenuOpen((open) => !open)}>
+      <button className="composer__icon" type="button" aria-label="Composer tools" aria-expanded={attachmentMenuOpen} aria-haspopup="menu" disabled={composerLocked} onClick={() => setAttachmentMenuOpen((open) => !open)}>
         <Icon name="paperclip" size={19} />
       </button>
-      {attachmentMenuOpen && <div className="composer__attachment-menu" role="menu" aria-label="Attachment source">
-        <button type="button" role="menuitem" onClick={() => cameraInputRef.current?.click()}><span>Camera</span><small>Take a photo</small></button>
-        <button type="button" role="menuitem" onClick={() => galleryInputRef.current?.click()}><span>Photos / Gallery</span><small>Choose an image</small></button>
-        <button type="button" role="menuitem" onClick={() => documentInputRef.current?.click()}><span>File / Document</span><small>Choose a document</small></button>
+      {attachmentMenuOpen && <div className="composer__attachment-menu" role="menu" aria-label="Composer tools">
+        <p className="composer__attachment-menu-title" role="presentation">ATTACH</p>
+        <button type="button" role="menuitem" aria-label="Camera: take a photo" title="Take a photo" onClick={() => cameraInputRef.current?.click()}>
+          <Icon name="camera" size={18} />
+          <span className="composer__attachment-menu-text"><span>Camera</span><small>Take a photo</small></span>
+        </button>
+        <button type="button" role="menuitem" aria-label="Photos / Gallery: choose an image" title="Choose an image" onClick={() => galleryInputRef.current?.click()}>
+          <Icon name="image" size={18} />
+          <span className="composer__attachment-menu-text"><span>Photos / Gallery</span><small>Choose an image</small></span>
+        </button>
+        <button type="button" role="menuitem" aria-label="File / Document: choose a document" title="Choose a document" onClick={() => documentInputRef.current?.click()}>
+          <Icon name="docs" size={18} />
+          <span className="composer__attachment-menu-text"><span>File / Document</span><small>Choose a document</small></span>
+        </button>
+        <p className="composer__attachment-menu-title" role="presentation">COMPOSE</p>
+        <button type="button" role="menuitem" aria-label="Markdown reference" title="Open the Markdown formatting reference" onClick={() => { setAttachmentMenuOpen(false); setMarkdownOpen((open) => !open); }}>
+          <Icon name="markdown" size={18} />
+          <span className="composer__attachment-menu-text"><span>Markdown</span><small>Formatting reference</small></span>
+        </button>
       </div>}
       <input ref={cameraInputRef} className="composer__file-input" type="file" accept="image/*" capture="environment" aria-label="Take a photo" onChange={handleFileInput} />
       <input ref={galleryInputRef} className="composer__file-input" type="file" accept="image/*" multiple aria-label="Choose photos" onChange={handleFileInput} />
@@ -445,9 +460,6 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
         />
         {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}
         <footer className="composer-expanded__footer">
-          <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
-            <Icon name="markdown" size={20} />
-          </button>
           {attachmentPicker()}
           <div className="composer-expanded__spacer" />
           {vttControl(expandedTextareaRef)}
@@ -464,12 +476,9 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     {banner}
     {attachmentPreviews()}
     <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
-      <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
-        <Icon name="markdown" size={20} />
-      </button>
       {attachmentPicker()}
       <div className="composer__input-wrap">
-        <textarea ref={textareaRef} aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint={enterKeyHint} />
+        <textarea ref={textareaRef} className="composer__input" aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint={enterKeyHint} />
         <button className="composer__expand" type="button" aria-label="Expand message editor" onClick={() => setExpanded(true)} disabled={composerLocked}>
           <Icon name="expand" size={15} />
         </button>

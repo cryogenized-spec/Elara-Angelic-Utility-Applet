@@ -20,7 +20,11 @@ The attachment and voice actions are capability-aware. If browser support or per
 
 ## Mobile keyboard behavior
 
-The input should grow within bounded limits, then become internally scrollable. The overall page should not jump as the draft grows. Focus remains on the composer after sending only when it does not conflict with the current request lifecycle.
+The input should grow within bounded limits, then become internally scrollable. The overall page should not jump as the draft grows.
+
+The bound is a **line count, not a pixel constant**: the editor grows to roughly ten visible lines (`COMPOSER_VISIBLE_LINES` in `composer-autosize.ts`) and then scrolls internally. The pixel bound is derived from the editor's own computed `line-height` plus vertical padding/border (published as `--composer-line-height` / `--composer-block-extra`), so it follows typography changes. Sizing itself is left to the engine (`field-sizing: content`) wherever it is supported, with a single-measurement fallback otherwise — the typing path performs no repeated DOM reads or writes.
+
+Fonts are static: bundled `@font-face` rules plus a stylesheet-driven family. Nothing on the typing path injects, loads, swaps, or measures fonts, and the draft is never written to persistence (it stays ephemeral UI state until submission). Focus remains on the composer after sending only when it does not conflict with the current request lifecycle.
 
 The shell uses visual-viewport/safe-area-aware layout rather than assuming a constant device viewport. Safe-area insets are handled with standards-based CSS environment variables. citeturn339022search3
 
@@ -31,6 +35,10 @@ Draft text is ephemeral UI state until submission. Once submitted, the chat/appl
 ## Error handling
 
 Invalid/empty submissions are blocked locally. Provider/network failures are reported by chat state and remain visible elsewhere in the conversation UI; the composer is not a generic error dispatcher.
+
+## Secondary tools
+
+The paperclip is the single home for the composer's secondary tools: attachment sources first (camera, gallery, document), then the Markdown reference. Nothing else sits beside the editor, so the text column keeps the full flexible width. Every entry is icon-led but keeps its text label, description, tooltip, and accessible name.
 
 ## Attachments
 

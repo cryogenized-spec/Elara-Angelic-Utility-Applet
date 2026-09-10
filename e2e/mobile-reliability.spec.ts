@@ -30,27 +30,58 @@ test.describe('Android portrait reliability', () => {
     expect(railBox!.x + railBox!.width).toBeLessThanOrEqual(viewport!.width);
   });
 
-  test('keeps the consolidated Workspace trigger usable and opens services to its right', async ({ page }) => {
+  test('keeps a single Workspace trigger usable and opens services to its right', async ({ page }) => {
     await page.goto('');
 
     const viewport = page.viewportSize();
     expect(viewport).not.toBeNull();
-    const trigger = page.getByRole('button', { name: 'Workspace', exact: true });
+    const rail = page.getByRole('navigation', { name: 'Quick actions' });
+    // Default state: exactly one Workspace button, no per-service pills.
+    await expect(rail.getByRole('button')).toHaveCount(1);
+    const trigger = rail.getByRole('button', { name: 'Workspace', exact: true });
+    await expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    for (const name of ['Calendar', 'Tasks', 'Gmail']) {
+      await expect(rail.getByRole('button', { name, exact: true })).toHaveCount(0);
+    }
     const triggerBox = await trigger.boundingBox();
     expect(triggerBox).not.toBeNull();
     expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
 
     await trigger.click();
-    const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+    const menu = page.getByRole('group', { name: 'Google Workspace services' });
     await expect(menu).toBeVisible();
     for (const name of ['Calendar', 'Tasks', 'Gmail']) {
-      await expect(menu.getByRole('menuitem', { name, exact: true })).toBeVisible();
+      await expect(menu.getByRole('button', { name, exact: true })).toBeVisible();
     }
     const menuBox = await menu.boundingBox();
     expect(menuBox).not.toBeNull();
     // Flyout opens to the right of the trigger and stays inside the viewport.
     expect(menuBox!.x).toBeGreaterThanOrEqual(triggerBox!.x + triggerBox!.width);
     expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport!.width);
+  });
+
+  test('keeps the Workspace flyout inside narrow portrait widths', async ({ page }) => {
+    await page.goto('');
+    for (const width of [412, 390, 360]) {
+      await page.setViewportSize({ width, height: 800 });
+      const trigger = page.getByRole('button', { name: 'Workspace', exact: true });
+      await expect(trigger).toBeVisible();
+      await trigger.click();
+
+      const menu = page.getByRole('group', { name: 'Google Workspace services' });
+      await expect(menu).toBeVisible();
+      const menuBox = await menu.boundingBox();
+      const triggerBox = await trigger.boundingBox();
+      expect(menuBox && triggerBox).toBeTruthy();
+      expect(menuBox!.x).toBeGreaterThanOrEqual(0);
+      expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(width);
+      // Services stay readable/tappable at every width.
+      const row = menu.getByRole('button', { name: 'Calendar', exact: true });
+      const rowBox = await row.boundingBox();
+      expect(rowBox!.height).toBeGreaterThanOrEqual(44);
+      await page.keyboard.press('Escape');
+      await expect(menu).toHaveCount(0);
+    }
   });
 
   test('opens and closes the sidebar without losing the composer position', async ({ page }) => {
@@ -112,7 +143,7 @@ test.describe('Android portrait reliability', () => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('');
     const trigger = page.getByRole('button', { name: 'Workspace', exact: true });
-    const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+    const menu = page.getByRole('group', { name: 'Google Workspace services' });
 
     const transition = await trigger.evaluate((element) => getComputedStyle(element).transitionDuration);
     const durations = transition.split(',').map((value) => Number.parseFloat(value));
@@ -129,7 +160,7 @@ test.describe('Android portrait reliability', () => {
     await trigger.focus();
     await expect(trigger).toBeFocused();
     await page.keyboard.press('Enter');
-    const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+    const menu = page.getByRole('group', { name: 'Google Workspace services' });
     await expect(menu).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(menu).not.toBeVisible();

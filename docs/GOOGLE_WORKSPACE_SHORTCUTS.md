@@ -6,6 +6,10 @@ The top quick-action rail should be a fast launcher for saved Google Workspace a
 
 The top rail is a single consolidated Workspace trigger. Tapping it opens a services flyout to its right listing Calendar, Tasks, and Gmail; as Drive, Docs, and Sheets become production-ready they should join the same flyout without changing the interaction model.
 
+The trigger is a **disclosure**, not a desktop application menu: it owns `aria-expanded`/`aria-controls`, the flyout is a labelled group, each service row is a disclosure button for its shortcut group, and every shortcut is an ordinary button. Tab/Enter/Space and Escape therefore behave exactly as the visible interaction implies. The flyout closes on outside pointerdown and on Escape (returning focus to the trigger), and it unmounts on close so a reopened flyout always starts collapsed.
+
+Geometry: the flyout opens to the right of the trigger and is clamped to the viewport (`min-width`/`max-width` share the same `100vw` budget so `min-width` can never defeat the clamp). Below ~400px it reuses the fallback position below the trigger, where the full viewport width is available. At no width does it obscure the composer: its height is capped and it scrolls internally.
+
 Tapping a service expands a compact vertically scrollable chooser of that service's saved recipes. Selecting a recipe does not append a synthetic user message to the visible conversation. It creates an internal agent-task request; the final assistant response appears normally in the conversation.
 
 The exact small-row pixel height is a visual tuning value, not a data-model contract. Keep the chooser touch-friendly and keyboard accessible.

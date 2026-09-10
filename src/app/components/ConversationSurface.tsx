@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '../../domain/chat';
 import type { GenerationState } from '../../chat/generation-state';
 import { deleteMessage } from '../../persistence/conversation';
@@ -15,7 +15,12 @@ function responseGroupFor(message: ChatMessage): string {
   return message.responseGroupId || message.id;
 }
 
-export function ConversationSurface({ messages, fontSize, generation, onRegenerate }: { messages: ChatMessage[]; fontSize: number; generation: GenerationState | null; onRegenerate: (messageId: string) => void }) {
+/**
+ * Memoised: the surface is the most expensive subtree in the shell (every
+ * message body is parsed by `react-markdown`), so it must not re-render when
+ * unrelated shell state — the composer draft above all — changes.
+ */
+export const ConversationSurface = memo(function ConversationSurface({ messages, fontSize, generation, onRegenerate }: { messages: ChatMessage[]; fontSize: number; generation: GenerationState | null; onRegenerate: (messageId: string) => void }) {
   const conversationRef = useRef<HTMLElement>(null);
   const shouldStickToEndRef = useRef(true);
   const [pinned, setPinned] = useState(true);
@@ -70,22 +75,32 @@ export function ConversationSurface({ messages, fontSize, generation, onRegenera
     return entries;
   }, [visibleMessages]);
 
+  // Reconciles the selected response variant with the available variants. It
+  // returns the *same* object when nothing changed so this effect cannot force
+  // a second render pass when an ancestor re-renders with an equivalent (but
+  // freshly built) message array.
   useEffect(() => {
     setSelectedVariants((current) => {
       const next = { ...current };
+      let changed = false;
       for (const entry of grouped) {
         if (entry.message.role !== 'assistant') continue;
         const key = responseGroupFor(entry.message);
         const count = entry.variants.length;
         const previousCount = seenCountsRef.current[key];
+        let value: number;
         if (!(key in next) || (previousCount !== undefined && count > previousCount)) {
-          next[key] = count - 1;
+          value = count - 1;
         } else {
-          next[key] = Math.min(next[key] ?? count - 1, count - 1);
+          value = Math.min(next[key] ?? count - 1, count - 1);
         }
         seenCountsRef.current[key] = count;
+        if (next[key] !== value) {
+          next[key] = value;
+          changed = true;
+        }
       }
-      return next;
+      return changed ? next : current;
     });
   }, [grouped]);
 
@@ -154,4 +169,4 @@ export function ConversationSurface({ messages, fontSize, generation, onRegenera
     </div>
     {!pinned && <button type="button" className="conversation__jump" aria-label="Jump to latest messages" onClick={jumpToLatest}>↓ Newest</button>}
   </section>;
-}
+});

@@ -27,39 +27,57 @@ test('loads the Elara shell', async ({ page }) => {
   await expect(page.locator('.elara-banner__portrait')).toBeVisible();
 });
 
-test('composer keeps attachment, Markdown, microphone, and Send controls aligned', async ({ page }) => {
+test('composer keeps attachment, microphone, and Send controls aligned', async ({ page }) => {
   await page.goto('');
   const composer = page.locator('form.composer');
-  await expect(composer.getByRole('button', { name: 'Attach image or document' })).toBeVisible();
+  await expect(composer.getByRole('button', { name: 'Composer tools' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Expand message editor' })).toBeVisible();
-  await expect(composer.getByRole('button', { name: 'Markdown reference' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Send message' })).toBeVisible();
 
-  const attachmentBox = await composer.getByRole('button', { name: 'Attach image or document' }).boundingBox();
+  const attachmentBox = await composer.getByRole('button', { name: 'Composer tools' }).boundingBox();
   const inputBox = await composer.getByPlaceholder('Message Elara…').boundingBox();
-  const markdownBox = await composer.getByRole('button', { name: 'Markdown reference' }).boundingBox();
   const micBox = await composer.getByRole('button', { name: 'VTT voice input' }).boundingBox();
   const sendBox = await composer.getByRole('button', { name: 'Send message' }).boundingBox();
-  expect(attachmentBox && inputBox && markdownBox && micBox && sendBox).toBeTruthy();
+  expect(attachmentBox && inputBox && micBox && sendBox).toBeTruthy();
   expect(attachmentBox!.x).toBeLessThan(inputBox!.x);
-  expect(inputBox!.width).toBeGreaterThan(120);
-  expect(markdownBox!.x).toBeLessThan(inputBox!.x);
+  // Moving the Markdown control into the paperclip menu leaves the editor the
+  // whole flexible column: it must be wider than the old four-control row.
+  expect(inputBox!.width).toBeGreaterThan(150);
   expect(inputBox!.x + inputBox!.width).toBeLessThan(micBox!.x);
   expect(micBox!.x).toBeLessThan(sendBox!.x);
-  expect(Math.abs(markdownBox!.y - sendBox!.y)).toBeLessThan(2);
   expect(Math.abs(attachmentBox!.y - sendBox!.y)).toBeLessThan(2);
   expect(Math.abs(micBox!.y - sendBox!.y)).toBeLessThan(2);
+});
+
+test('keeps the Markdown reference inside the paperclip menu, not beside the editor', async ({ page }) => {
+  await page.goto('');
+  const composer = page.locator('form.composer');
+  await expect(composer.getByRole('button', { name: 'Markdown reference' })).toHaveCount(0);
+
+  await composer.getByRole('button', { name: 'Composer tools' }).click();
+  const menu = page.getByRole('menu', { name: 'Composer tools' });
+  await expect(menu).toBeVisible();
+  const markdown = menu.getByRole('menuitem', { name: 'Markdown reference' });
+  await expect(markdown).toBeVisible();
+  // Icon-led rows still carry text, so nothing is cryptic.
+  await expect(menu.getByRole('menuitem', { name: 'Camera: take a photo' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Photos / Gallery: choose an image' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'File / Document: choose a document' })).toBeVisible();
+
+  await markdown.click();
+  await expect(page.getByRole('dialog', { name: 'Markdown' })).toBeVisible();
+  await expect(menu).toHaveCount(0);
 });
 
 test('paperclip opens camera, gallery, and document actions and persists an attachment preview', async ({ page }) => {
   await page.goto('');
   const composer = page.locator('form.composer');
   const tiny = pngFile('receipt.png');
-  const paperclip = composer.getByRole('button', { name: 'Attach image or document' });
+  const paperclip = composer.getByRole('button', { name: 'Composer tools' });
 
   await paperclip.click();
-  await expect(page.getByRole('menu', { name: 'Attachment source' })).toBeVisible();
+  await expect(page.getByRole('menu', { name: 'Composer tools' })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /Camera/ })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /Photos \/ Gallery/ })).toBeVisible();
   await expect(page.getByRole('menuitem', { name: /File \/ Document/ })).toBeVisible();
@@ -304,16 +322,17 @@ test('opens Workspace quick-action surfaces without injecting a chat prompt', as
   const conversation = page.getByRole('region', { name: 'Conversation' });
   const before = await conversation.locator('.message').count();
   await page.getByRole('button', { name: 'Workspace', exact: true }).click();
-  const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+  const menu = page.getByRole('group', { name: 'Google Workspace services' });
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('menuitem', { name: 'Calendar', exact: true })).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Calendar', exact: true })).toBeVisible();
   await expect(menu.getByText('calendar.events.read')).toBeVisible();
   await expect(conversation.locator('.message')).toHaveCount(before);
 });
 
 test('renders the supported Markdown reference', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Markdown reference' }).click();
+  await page.getByRole('button', { name: 'Composer tools' }).click();
+  await page.getByRole('menuitem', { name: 'Markdown reference' }).click();
   const dialog = page.getByRole('dialog', { name: 'Markdown' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('Italic', { exact: true })).toBeVisible();

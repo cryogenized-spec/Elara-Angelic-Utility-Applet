@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -7,7 +8,12 @@ export function safeMarkdownUrl(url: string): string {
   return /^https:\/\//i.test(url.trim()) ? url.trim() : '';
 }
 
-export function MarkdownText({ text }: { text: string }) {
+/**
+ * Memoised: `react-markdown` builds a fresh processor and re-parses its input
+ * on every render, so re-rendering an unchanged message body is expensive.
+ * Memoising keeps typing (and streaming) from re-parsing the whole transcript.
+ */
+export const MarkdownText = memo(function MarkdownText({ text }: { text: string }) {
   return <ReactMarkdown
     remarkPlugins={[remarkGfm]}
     skipHtml
@@ -21,4 +27,4 @@ export function MarkdownText({ text }: { text: string }) {
       },
     }}
   >{text}</ReactMarkdown>;
-}
+});

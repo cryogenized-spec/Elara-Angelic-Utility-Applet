@@ -43,6 +43,13 @@ export interface GeminiTurnRequest {
    * their own memory scoping.
    */
   memoryContext?: 'thread' | 'none';
+  /**
+   * Interactive-chat thread identity for runtime-context freshness. Provider
+   * adapters ignore it; the Google tool loop uses it to decide whether this
+   * invocation re-establishes fresh wall-clock context (new thread, or first
+   * invocation after >=30 minutes of thread inactivity).
+   */
+  threadId?: string;
   /** Existing app generation arbiter context for artifact-producing work. */
   generationId?: string;
   isGenerationActive?: () => boolean;

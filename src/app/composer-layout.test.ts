@@ -82,6 +82,40 @@ describe('composer autosize bound', () => {
     expect(layoutCss).toMatch(/align-items:\s*end/);
   });
 
+  it('keeps the rail controls bottom-anchored independently of editor growth', () => {
+    // Default row flow: the four children share the single row (a column-flow
+    // leftover would contradict the documented single-row intent).
+    expect(layoutCss).not.toMatch(/grid-auto-flow\s*:/);
+    expect(composerCss).not.toMatch(/grid-auto-flow\s*:/);
+    // The rail items carry an explicit bottom constraint, scoped to the
+    // compact form so the expanded composer's footer is untouched.
+    expect(layoutCss).toMatch(/\.app-shell form\.composer > \.composer__attachment-control,[\s\S]*?align-self:\s*end/);
+    expect(layoutCss).toMatch(/\.app-shell form\.composer > \.composer__vtt-control/);
+    expect(layoutCss).toMatch(/\.app-shell form\.composer > \.composer__send/);
+  });
+
+  it('bottom-anchors the expand control instead of centering it in the growing editor', () => {
+    const expandRule = composerCss.match(/\.composer__expand \{([^}]*)\}/)?.[1] ?? '';
+    expect(expandRule).toMatch(/bottom:\s*8px/);
+    expect(expandRule).not.toMatch(/top:\s*50%/);
+    expect(expandRule).not.toMatch(/translateY\(-50%\)/);
+  });
+
+  it('suppresses the platform tap highlight on composer controls without a global reset', () => {
+    // Scoped suppression (the transient green flash on the send button is the
+    // browser's default touch feedback, not an author style).
+    expect(composerCss).toMatch(/\.composer__send[^{]*\{[^}]*-webkit-tap-highlight-color:\s*transparent/);
+    expect(composerCss).toMatch(/\.composer__icon[^{]*\{[^}]*-webkit-tap-highlight-color:\s*transparent/);
+    expect(composerCss).toMatch(/touch-action:\s*manipulation/);
+    expect(composerCss).not.toMatch(/\*\s*\{[^}]*-webkit-tap-highlight-color/);
+    // Explicit pressed affordance that never fires for disabled controls.
+    expect(composerCss).toMatch(/\.composer__send:active:not\(:disabled\)[^{]*\{[^}]*transform:\s*scale\(\.96\)/);
+    // Accessibility and state behaviour are preserved, not overridden.
+    expect(composerCss).not.toMatch(/\.composer__send[^{]*\{[^}]*outline:\s*none/);
+    expect(appCss).toMatch(/button:focus-visible[^{]*\{[^}]*outline:\s*2px solid var\(--blue\)/);
+    expect(appCss).toMatch(/\.composer__send:disabled\s*\{[^}]*opacity:\s*\.35/);
+  });
+
   it('keeps the composer in flex flow and lets the conversation absorb the growth', () => {
     // A ten-line composer must never push the conversation out of the shell:
     // the composer reserves its own space (flex: 0 0 auto) and the conversation

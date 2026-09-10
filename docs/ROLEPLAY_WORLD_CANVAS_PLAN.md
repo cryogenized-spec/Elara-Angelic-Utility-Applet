@@ -68,12 +68,14 @@ The confirmation card is an interception point only. It does not independently d
 
 ## Runtime context
 
-Real-world time is not persisted in the World Canvas. Every conversational tool turn receives live device context:
+Real-world time is not persisted in the World Canvas. Fresh device context is established on the first invocation of a new thread:
 
 - local date;
 - local time;
 - weekday;
 - timezone.
+
+An existing thread re-establishes fresh device context only on the first invocation after 30 continuous minutes of thread inactivity; normal consecutive turns omit the clock while keeping the stable roleplay/world framing.
 
 When Roleplay Mode is active, the application context instructs Elara to maintain a coherent physical setting, use the World Canvas as authoritative persistent context, use the current runtime clock dynamically, and use italics for physical action/scene narration.
 

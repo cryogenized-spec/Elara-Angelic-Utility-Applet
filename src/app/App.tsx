@@ -363,7 +363,7 @@ export function App() {
     });
 
     try {
-      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools, generationId, isGenerationActive: isActiveGeneration };
+      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools, threadId: conversationId, generationId, isGenerationActive: isActiveGeneration };
       const stream = options.tools?.length
         ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
         : geminiTurnPort.streamReply(request, controller.signal);

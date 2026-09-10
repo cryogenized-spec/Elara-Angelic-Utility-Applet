@@ -36,14 +36,29 @@ function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
   return summary || undefined;
 }
 
-type PendingFunctionCall = { callId: string; name: string; arguments: string };
+// `arguments` accumulates the documented streaming path: `arguments_delta`
+// JSON-string fragments. `initialArguments` holds an already-structured object
+// carried on `step.start`. The Interactions API emits a placeholder object
+// (`"arguments": {}`) on `step.start` and then streams the real arguments as
+// deltas, so the two sources must never be concatenated as text.
+type PendingFunctionCall = { callId: string; name: string; arguments: string; initialArguments?: unknown };
 type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; memoryContext?: 'thread' | 'none'; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
 
-function initialFunctionArguments(step: Record<string, unknown>): string {
+function pendingFunctionCall(callId: string, name: string, step: Record<string, unknown>): PendingFunctionCall {
   const initial = step.arguments;
-  if (initial === undefined) return '';
-  if (typeof initial === 'string') return initial;
-  return JSON.stringify(initial) ?? '';
+  // A string on step.start is the first JSON fragment; later deltas append to it.
+  if (typeof initial === 'string') return { callId, name, arguments: initial };
+  // Any structured value on step.start is kept separately (unvalidated) and
+  // only consulted when no argument deltas arrive; streamed deltas win. Shape
+  // validation happens once, in resolveFunctionArguments.
+  if (initial === undefined || initial === null) return { callId, name, arguments: '' };
+  return { callId, name, arguments: '', initialArguments: initial };
+}
+
+function resolveFunctionArguments(pending: PendingFunctionCall): Record<string, unknown> {
+  const source: unknown = pending.arguments.length > 0 ? JSON.parse(pending.arguments) : pending.initialArguments === undefined ? {} : pending.initialArguments;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('Function arguments must be an object.');
+  return source as Record<string, unknown>;
 }
 
 type GeminiInputPart = Record<string, unknown>;
@@ -214,7 +229,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         }
         const signature = readString(step, 'signature');
         if (signature) yield { type: 'thought-signature', index, signature };
-        if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, { callId, name, arguments: initialFunctionArguments(step) }); }
+        if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, pendingFunctionCall(callId, name, step)); }
         continue;
       }
       if (eventType === 'step.delta') {
@@ -225,7 +240,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
         continue;
       }
-      if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = (pending.arguments.length === 0 ? {} : JSON.parse(pending.arguments)) as unknown; if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.'); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args as Record<string, unknown> }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
+      if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
       if (eventType === 'interaction.completed') {
         const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed';
         if (status === 'requires_action') { sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }

@@ -263,6 +263,85 @@ describe('Gemini provider stream fidelity', () => {
     expect(collected).toContainEqual(expect.objectContaining({ type: 'tool-call', callId: 'call-streamed', name: 'calendar.listEvents', arguments: { timeMin: '2026-09-04T00:00:00Z', timeMax: '2026-09-04T23:59:59Z' } }));
   });
 
+  it('regression: accepts a step.start placeholder arguments object followed by arguments_delta JSON (roleplay_setting.create)', async () => {
+    // Observed production shape: the Interactions API emits `"arguments": {}`
+    // on step.start and then streams the real arguments as arguments_delta.
+    // Concatenating "{}" with the streamed JSON produced "{}{...}", which is
+    // invalid JSON and surfaced as GEMINI_UNKNOWN "invalid function-call arguments".
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-rp', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-rp', name: 'roleplay_setting.create', arguments: {} } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: '{"type":"building","name":"The Residence",' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: '"description":"A quiet home above the city."}' } },
+      { event_type: 'step.stop', index: 0 },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-rp', status: 'requires_action' } },
+    ]);
+
+    expect(collected.some((event) => (event as { type: string }).type === 'failed')).toBe(false);
+    expect(collected).toContainEqual(expect.objectContaining({
+      type: 'tool-call', interactionId: 'interaction-rp', callId: 'call-rp', name: 'roleplay_setting.create',
+      arguments: { type: 'building', name: 'The Residence', description: 'A quiet home above the city.' },
+    }));
+  });
+
+  it('regression: emits one tool-call per parallel function_call step when each step.start carries a placeholder object', async () => {
+    // Multi-entity creation is expressed by the model as several independent
+    // roleplay_setting.create calls in one turn, not as a batch payload.
+    const entities = [
+      { index: 0, id: 'call-a', args: { type: 'building', name: 'The Residence' } },
+      { index: 1, id: 'call-b', args: { type: 'room', name: 'Master Suite', parentId: 'the_residence_01' } },
+      { index: 2, id: 'call-c', args: { type: 'room', name: 'Steam Sauna & Walk-in Shower', parentId: 'master_suite_01' } },
+      { index: 3, id: 'call-d', args: { type: 'outdoor', name: 'Sky Terrace', parentId: 'the_residence_01' } },
+    ];
+    const stream: unknown[] = [{ event_type: 'interaction.created', interaction: { id: 'interaction-multi', model: 'gemini-3.8-flash' } }];
+    for (const entity of entities) {
+      stream.push({ event_type: 'step.start', index: entity.index, step: { type: 'function_call', id: entity.id, name: 'roleplay_setting.create', arguments: {} } });
+      stream.push({ event_type: 'step.delta', index: entity.index, delta: { type: 'arguments_delta', arguments: JSON.stringify(entity.args) } });
+      stream.push({ event_type: 'step.stop', index: entity.index });
+    }
+    stream.push({ event_type: 'interaction.completed', interaction: { id: 'interaction-multi', status: 'requires_action' } });
+
+    const collected = await collect(stream);
+    const toolCalls = collected.filter((event) => (event as { type: string }).type === 'tool-call');
+    expect(collected.some((event) => (event as { type: string }).type === 'failed')).toBe(false);
+    expect(toolCalls).toHaveLength(4);
+    for (const entity of entities) expect(toolCalls).toContainEqual(expect.objectContaining({ callId: entity.id, name: 'roleplay_setting.create', arguments: entity.args }));
+  });
+
+  it('uses structured step.start arguments only when no argument deltas arrive', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-unary', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-unary', name: 'roleplay_setting.create', arguments: { type: 'room', name: 'Master Suite' } } },
+      { event_type: 'step.stop', index: 0 },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-unary', status: 'requires_action' } },
+    ]);
+
+    expect(collected).toContainEqual(expect.objectContaining({ type: 'tool-call', callId: 'call-unary', name: 'roleplay_setting.create', arguments: { type: 'room', name: 'Master Suite' } }));
+  });
+
+  it('does not merge or fall back when streamed argument deltas are malformed even if step.start had a placeholder object', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-bad', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-bad', name: 'roleplay_setting.create', arguments: {} } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: '{"type":"building","name":' } },
+      { event_type: 'step.stop', index: 0 },
+    ]);
+
+    expect(collected.some((event) => (event as { type: string }).type === 'tool-call')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({ type: 'failed', error: { message: 'Gemini produced invalid function-call arguments.' } });
+  });
+
+  it('rejects non-object step.start arguments (array) when no deltas arrive', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-array', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-array', name: 'roleplay_setting.create', arguments: [{ type: 'building', name: 'The Residence' }] } },
+      { event_type: 'step.stop', index: 0 },
+    ]);
+
+    expect(collected.some((event) => (event as { type: string }).type === 'tool-call')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({ type: 'failed', error: { message: 'Gemini produced invalid function-call arguments.' } });
+  });
+
   it('preserves structured failure for malformed function-call arguments', async () => {
     const collected = await collect([
       { event_type: 'interaction.created', interaction: { id: 'interaction-invalid', model: 'gemini-3.8-flash' } },

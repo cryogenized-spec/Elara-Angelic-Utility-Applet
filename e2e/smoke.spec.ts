@@ -281,6 +281,7 @@ test('cancelling a streaming response stops the stream without an assistant mess
     });
   });
   const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  const conversation = page.getByRole('region', { name: 'Conversation' });
   await composer.fill('Reply that should never arrive');
   await page.getByRole('button', { name: 'Send message' }).click();
   const cancel = page.getByRole('button', { name: 'Cancel response' });
@@ -290,9 +291,12 @@ test('cancelling a streaming response stops the stream without an assistant mess
   await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
   // Let the delayed provider response arrive; it must be ignored.
   await page.waitForTimeout(2200);
-  await expect(page.getByText('Reply that should never arrive')).toBeVisible();
+  // Scoped to the conversation: the auto-generated thread title carries the
+  // same text into the sidebar thread list.
+  await expect(conversation.getByText('Reply that should never arrive', { exact: true })).toBeVisible();
   await expect(page.getByText('Late provider text.')).toHaveCount(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(composer).toBeEnabled();
 });
 
 test('opens Workspace quick-action surfaces without injecting a chat prompt', async ({ page }) => {

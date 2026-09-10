@@ -42,7 +42,11 @@
   z-index: 60;
   width: max-content;
   min-width: 184px;
-  max-width: min(248px, calc(100vw - 24px));
+  /* Keep the right edge inside the viewport at every width: the worst-case
+     flyout left edge is ~202px (12px shell padding + 62px portrait rail
+     margin + ~120px trigger + 8px gap), plus 12px right shell padding.
+     Content wraps/ellipsizes inside the bound; interactive controls stay whole. */
+  max-width: min(248px, calc(100vw - 214px));
   max-height: min(60vh, 440px);
   overflow-y: auto;
   padding: 8px;
@@ -78,8 +82,9 @@
 }
 
 @media (max-width: 380px) {
-  /* Very narrow phones cannot fit a side flyout: drop it below the trigger. */
-  .workspace-menu { left: 0; top: calc(100% + 8px); max-height: 62vh; }
+  /* Very narrow phones cannot fit a side flyout: drop it below the trigger,
+     where the full viewport width is available again. */
+  .workspace-menu { left: 0; top: calc(100% + 8px); max-height: 62vh; max-width: min(248px, calc(100vw - 24px)); }
 }
 
 @media (prefers-reduced-motion: reduce) {

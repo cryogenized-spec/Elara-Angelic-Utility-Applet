@@ -10,10 +10,14 @@ let refreshCallback: (() => void) | null = null;
 let updaterInitialized = false;
 
 /**
- * Register the service worker with aggressive update discovery: check
- * immediately on load, on a timer, and whenever the app regains visibility or
- * focus. `onNeedRefresh` fires when a new worker has taken control and fresh
- * assets are one reload away. Safe to call twice (React StrictMode remounts).
+ * Register the service worker (prompt strategy, see vite.config.ts) with
+ * aggressive update discovery: check immediately on load, on a timer, and
+ * whenever the app regains visibility or focus. Discovery only installs a
+ * WAITING worker — the running page keeps its own worker, so polling can
+ * never invalidate active chat state. `onNeedRefresh` fires while the new
+ * worker waits; the user's Refresh tap sends SKIP_WAITING and reloads once
+ * the new worker takes control. Safe to call twice (React StrictMode
+ * remounts); registration and listeners are created exactly once.
  */
 export function initPwaUpdater(onNeedRefresh: () => void): void {
   refreshCallback = onNeedRefresh;
@@ -44,7 +48,11 @@ export function initPwaUpdater(onNeedRefresh: () => void): void {
   };
 }
 
-/** Reload into the waiting service worker's fresh assets. No-op until one exists. */
+/**
+ * Apply the waiting update: sends SKIP_WAITING to the waiting worker, which
+ * reloads the page once the new worker takes control. No waiting worker, no
+ * refresh — safe to call any time.
+ */
 export function applyPwaUpdate(): void {
   applyPendingUpdate?.();
 }

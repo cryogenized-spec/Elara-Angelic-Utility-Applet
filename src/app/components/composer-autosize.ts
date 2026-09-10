@@ -12,7 +12,7 @@ import type { RefObject } from 'react';
  *
  * Two paths, one contract:
  *  - Chromium (`field-sizing: content`) sizes the textarea natively: the typing
- *    path performs no DOM measurement at all.
+ *    path performs no DOM measurement or style writes.
  *  - Everywhere else a single `scrollHeight` read per draft change (the previous
  *    implementation forced two synchronous layouts and two style writes per
  *    keystroke, even when the height had not changed).
@@ -73,10 +73,15 @@ export function supportsFieldSizing(): boolean {
   return CSS.supports('field-sizing', 'content');
 }
 
-function publishMetrics(element: HTMLTextAreaElement, metrics: ComposerMetrics, lines: number): void {
-  // The stylesheet already expresses the bounds in `lh`-equivalent units; only
-  // override with real measurements when the engine needs them (i.e. when it
-  // cannot resolve the CSS fallback). Publishing is idempotent and cheap.
+function publishMetrics(
+  element: HTMLTextAreaElement,
+  metrics: ComposerMetrics,
+  lines: number,
+  publishedRef: { current: string | null },
+): void {
+  const signature = `${metrics.lineHeight}|${metrics.blockExtra}|${lines}`;
+  if (publishedRef.current === signature) return;
+  publishedRef.current = signature;
   element.style.setProperty('--composer-line-height', `${metrics.lineHeight}px`);
   element.style.setProperty('--composer-block-extra', `${metrics.blockExtra}px`);
   element.style.setProperty('--composer-visible-lines', String(lines));
@@ -86,10 +91,17 @@ function publishMetrics(element: HTMLTextAreaElement, metrics: ComposerMetrics, 
  * Sizes the textarea to its draft, capped at `lines` visible lines.
  * Returns the applied height (0 when the engine owns sizing).
  */
-function syncHeight(element: HTMLTextAreaElement, metrics: ComposerMetrics, lines: number): number {
+function syncHeight(
+  element: HTMLTextAreaElement,
+  metrics: ComposerMetrics,
+  lines: number,
+  publishedRef: { current: string | null },
+  fieldSizingRef: { current: boolean | null },
+): number {
   const bounds = composerBounds(metrics, lines);
-  publishMetrics(element, metrics, lines);
-  if (supportsFieldSizing()) return 0;
+  publishMetrics(element, metrics, lines, publishedRef);
+  if (fieldSizingRef.current === null) fieldSizingRef.current = supportsFieldSizing();
+  if (fieldSizingRef.current) return 0;
   element.style.height = 'auto';
   const next = nextComposerHeight(element.scrollHeight, bounds);
   element.style.height = `${next}px`;
@@ -105,7 +117,9 @@ export interface ComposerAutosizeOptions {
 /**
  * Keeps a textarea sized to its content between one and `lines` lines.
  * Measurement is cached: typography is re-read only on mount, when fonts finish
- * loading, or when the element's width actually changes.
+ * loading, or when the element's width actually changes. Published CSS variables
+ * and field-sizing support are also cached, so the Chromium typing path performs
+ * no repeated DOM reads or writes.
  */
 export function useComposerAutosize(
   ref: RefObject<HTMLTextAreaElement | null>,
@@ -114,6 +128,8 @@ export function useComposerAutosize(
 ): void {
   const metricsRef = useRef<ComposerMetrics | null>(null);
   const widthRef = useRef(0);
+  const publishedMetricsRef = useRef<string | null>(null);
+  const fieldSizingRef = useRef<boolean | null>(null);
 
   const measure = useCallback((): ComposerMetrics | null => {
     const element = ref.current;
@@ -128,7 +144,7 @@ export function useComposerAutosize(
     if (!enabled || !element) return;
     const metrics = measure();
     if (!metrics) return;
-    syncHeight(element, metrics, lines);
+    syncHeight(element, metrics, lines, publishedMetricsRef, fieldSizingRef);
   }, [enabled, lines, measure, ref, value]);
 
   // Re-measure only when the box width changes (rotation, resize, breakpoint
@@ -142,8 +158,9 @@ export function useComposerAutosize(
       if (width === widthRef.current) return;
       widthRef.current = width;
       metricsRef.current = null;
+      publishedMetricsRef.current = null;
       const metrics = measure();
-      if (metrics) syncHeight(element, metrics, lines);
+      if (metrics) syncHeight(element, metrics, lines, publishedMetricsRef, fieldSizingRef);
     });
     observer.observe(element);
     return () => observer.disconnect();
@@ -160,8 +177,9 @@ export function useComposerAutosize(
       const element = ref.current;
       if (!element) return;
       metricsRef.current = null;
+      publishedMetricsRef.current = null;
       const metrics = measure();
-      if (metrics) syncHeight(element, metrics, lines);
+      if (metrics) syncHeight(element, metrics, lines, publishedMetricsRef, fieldSizingRef);
     });
     return () => { cancelled = true; };
   }, [enabled, lines, measure, ref]);

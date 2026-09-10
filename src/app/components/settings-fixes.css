@@ -95,3 +95,8 @@
 @media (max-width: 420px) {
   .background-options { grid-template-columns: 1fr; }
 }
+
+/* Setting card with a trailing switch (Chat → Enter sends message). */
+.setting-card--switch { display: flex; align-items: center; justify-content: space-between; gap: 18px; min-height: 72px; }
+.setting-card--switch .setting-card__copy { min-width: 0; flex: 1 1 auto; }
+.setting-card--switch .setting-card__copy span { max-width: 34rem; line-height: 1.45; }

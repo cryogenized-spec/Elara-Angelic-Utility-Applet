@@ -19,6 +19,13 @@ describe('preference normalization', () => {
     expect(value.portraitBackground).toBe(DEFAULT_APP_UI.portraitBackground);
   });
 
+  it('defaults enterToSend to true and only accepts booleans', () => {
+    expect(normalizeAppUiPreferences({}).enterToSend).toBe(true);
+    expect(normalizeAppUiPreferences({ enterToSend: false }).enterToSend).toBe(false);
+    expect(normalizeAppUiPreferences({ enterToSend: 'no' as never }).enterToSend).toBe(true);
+    expect(DEFAULT_APP_UI.enterToSend).toBe(true);
+  });
+
   it('falls back from an invalid persisted custom font', () => {
     const value = normalizeAppUiPreferences({
       font: { kind: 'custom', family: 'Inter', stylesheetUrl: 'https://example.com/font.css' },

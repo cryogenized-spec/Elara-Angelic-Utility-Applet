@@ -123,3 +123,30 @@ test.describe('Android portrait reliability', () => {
     await expect(page.getByRole('button', { name: 'Tasks', exact: true })).toBeFocused();
   });
 });
+test.describe('Portrait artwork layout', () => {
+  test('places the Workspace tool cluster in the left opening, clear of the spine, at phone and narrow widths', async ({ page }) => {
+    await page.goto('');
+    await openSettings(page);
+    await page.getByRole('button', { name: 'Character' }).click();
+    await page.getByRole('radio', { name: /Portrait · 4:5/ }).click();
+    await page.getByRole('button', { name: 'Back to chat' }).click();
+    await expect(page.locator('.artwork-mode-portrait')).toBeVisible();
+
+    for (const width of [412, 360, 320]) {
+      await page.setViewportSize({ width, height: 800 });
+      const rail = page.getByRole('navigation', { name: 'Quick actions' });
+      const spine = page.getByRole('button', { name: 'Open sidebar' });
+      const railBox = await rail.boundingBox();
+      const spineBox = await spine.boundingBox();
+      expect(railBox && spineBox).toBeTruthy();
+      // Left-anchored: starts to the right of the spine button, and its right
+      // edge leaves free space (it is not pushed against the right edge).
+      expect(railBox!.x).toBeGreaterThanOrEqual(spineBox!.x + spineBox!.width);
+      expect(railBox!.x).toBeLessThan(width / 3);
+      expect(railBox!.x + railBox!.width).toBeLessThan(width - 24);
+      expect(railBox!.x + railBox!.width).toBeLessThanOrEqual(width);
+      const columns = await page.locator('.tool-rail__track').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
+      expect(columns).toBe(2);
+    }
+  });
+});

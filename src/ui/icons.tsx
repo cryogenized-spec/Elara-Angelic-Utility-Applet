@@ -4,6 +4,7 @@ import {
   Bot,
   CalendarDays,
   ChevronDown,
+  ChevronRight,
   FileCode2,
   FileText,
   Folder,
@@ -47,6 +48,7 @@ export type IconName =
   | 'mic'
   | 'send'
   | 'chevron'
+  | 'chevron-right'
   | 'shield'
   | 'type'
   | 'palette'
@@ -82,6 +84,7 @@ const icons: Record<IconName, LucideIcon> = {
   mic: Mic,
   send: Send,
   chevron: ChevronDown,
+  'chevron-right': ChevronRight,
   shield: ShieldCheck,
   type: Type,
   palette: Palette,

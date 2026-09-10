@@ -41,6 +41,11 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
+        // Take control of open clients as soon as a new worker installs so an
+        // installed PWA picks up deploys without waiting for every client to
+        // close. The app surfaces a refresh toast when new assets are ready.
+        clientsClaim: true,
+        skipWaiting: true,
         cleanupOutdatedCaches: true,
       },
     }),

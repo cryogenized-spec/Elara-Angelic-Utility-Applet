@@ -36,9 +36,21 @@ html, body, #root { overflow: hidden; }
     padding-left: 7px;
   }
 
+  /* WhatsApp-style flush composer: the input row sits directly against the
+     keyboard with no dark spacer strip. The desktop-only gradient fade and
+     bottom margin are removed here because the flex layout never overlaps
+     the conversation, so they only rendered as a black bar above the IME. */
   .app-shell form.composer {
-    padding-bottom: 0;
-    margin-bottom: 10px;
+    margin-bottom: 0;
+    padding-top: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+    background: transparent;
+  }
+
+  /* Keyboard open: drop the safe-area inset too so the input row lands flush
+     on the keyboard toolbar, exactly like WhatsApp. */
+  :root.keyboard-open .app-shell form.composer {
+    padding-bottom: 6px;
   }
 }
 

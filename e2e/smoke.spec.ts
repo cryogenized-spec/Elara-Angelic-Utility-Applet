@@ -264,14 +264,46 @@ test('normalizes a direct Gemini network failure without fabricating a response'
   await expect(page.getByText('Verify the live runtime boundary')).toBeVisible();
 });
 
+test('cancelling a streaming response stops the stream without an assistant message', async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto('');
+  await unlockTestGemini(page);
+  await page.route('**/v1/interactions*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: 'cancel-test', status: 'in_progress', model: 'gemini-3.8-flash' } })}\n\n`,
+        `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: 'cancel-test', index: 0, delta: { type: 'text', text: 'Late provider text.' } })}\n\n`,
+        `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: 'cancel-test', status: 'completed' } })}\n\n`,
+      ].join(''),
+    });
+  });
+  const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  await composer.fill('Reply that should never arrive');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  const cancel = page.getByRole('button', { name: 'Cancel response' });
+  await expect(cancel).toBeVisible();
+  await expect(cancel).toBeEnabled();
+  await cancel.click();
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+  // Let the delayed provider response arrive; it must be ignored.
+  await page.waitForTimeout(2200);
+  await expect(page.getByText('Reply that should never arrive')).toBeVisible();
+  await expect(page.getByText('Late provider text.')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
+
 test('opens Workspace quick-action surfaces without injecting a chat prompt', async ({ page }) => {
   await page.goto('');
   const conversation = page.getByRole('region', { name: 'Conversation' });
   const before = await conversation.locator('.message').count();
-  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
-  const calendarSurface = page.getByRole('region', { name: 'Calendar action surface' });
-  await expect(calendarSurface).toBeVisible();
-  await expect(calendarSurface.getByText('Capability · calendar.events.read')).toBeVisible();
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Calendar', exact: true })).toBeVisible();
+  await expect(menu.getByText('calendar.events.read')).toBeVisible();
   await expect(conversation.locator('.message')).toHaveCount(before);
 });
 

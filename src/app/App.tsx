@@ -39,6 +39,7 @@ import { resolveMasterCharacterInstruction } from '../character/system-instructi
 import { Icon } from '../ui/icons';
 import { fontFamilyForCss } from '../ui/fontRegistry';
 import { useVisualViewport } from '../ui/useVisualViewport';
+import { applyPwaUpdate, initPwaUpdater } from '../pwa';
 import { Sidebar } from './components/Sidebar';
 import { SettingsScreen, type SettingsSection } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
@@ -47,6 +48,7 @@ import { ConversationSurface } from './components/ConversationSurface';
 import { GenerationError } from './components/GenerationError';
 import { Composer } from './components/Composer';
 import { FirstRunWelcome } from './components/FirstRunWelcome';
+import { UpdateToast } from './components/UpdateToast';
 import type { WorkspaceShortcutDefinition } from './quick-actions/shortcuts';
 import { DEFAULT_QUICK_ACTIONS } from './quick-actions/defaults';
 import '../ui/fonts.css';
@@ -93,6 +95,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance');
   const [firstRunWelcomeOpen, setFirstRunWelcomeOpen] = useState(false);
+  const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState(false);
   const [workspaceShortcuts, setWorkspaceShortcuts] = useState<StoredWorkspaceShortcut[]>([]);
   const [uiSettings, setUiSettings] = useState<AppUiPreferences>(DEFAULT_APP_UI);
   const [geminiModel, setGeminiModel] = useState(DEFAULT_GEMINI_MODEL);
@@ -129,6 +132,10 @@ export function App() {
   }, []);
 
   useEffect(() => () => abortControllerRef.current?.abort(), []);
+
+  useEffect(() => {
+    initPwaUpdater(() => setPwaUpdateAvailable(true));
+  }, []);
 
   // App open (design §8.5 sync lifecycle): when the device is paired with an
   // autonomy worker, mirror the configuration, sync the Autonomy Context if
@@ -342,10 +349,14 @@ export function App() {
       idleStallMs,
       absoluteMs,
       onIdleStall: () => {
+        // A user-cancelled turn is already terminal by intent: never let a
+        // late watchdog firing convert the cancellation into a timeout error.
+        if (controller.signal.aborted) return;
         failTurn(generationTimeoutError(`Gemini stopped responding${stallPhaseHint(current.phase)} (no stream activity for ${Math.round(idleStallMs / 1000)}s).`, { interactionId: current.currentInteractionId, durationMs: Date.now() - wallStartedAt }));
         controller.abort();
       },
       onAbsoluteTimeout: () => {
+        if (controller.signal.aborted) return;
         failTurn(generationTimeoutError(`Gemini turn exceeded the ${Math.round(absoluteMs / 60000)}-minute limit${stallPhaseHint(current.phase)}.`, { interactionId: current.currentInteractionId, durationMs: Date.now() - wallStartedAt }));
         controller.abort();
       },
@@ -357,6 +368,15 @@ export function App() {
         ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
         : geminiTurnPort.streamReply(request, controller.signal);
       for await (const event of stream) {
+        // Stop means stop: once the turn is aborted, late provider events
+        // (buffered text deltas, tool results) must never reach the transcript.
+        // Synthesize the terminal cancellation exactly once, then break so the
+        // underlying provider/tool-loop generators are closed via return().
+        if (controller.signal.aborted) {
+          const interactionId = current.currentInteractionId;
+          dispatch({ type: 'cancelled', ...(interactionId ? { interactionId } : {}) });
+          break;
+        }
         dispatch(event);
         if (event.type === 'cancelled') break;
       }
@@ -444,6 +464,7 @@ export function App() {
     <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={uiSettings.chatTextSize} generation={generation} onRegenerate={(messageId) => void regenerate(messageId)} />
     {error && <GenerationError message={error} structured={structuredError} onRetry={canRetry ? () => void retryLastTurn() : null} onOpenLockbox={showLockboxAction ? () => openLockbox() : null} />}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} attachments={draftAttachments} onFilesSelected={(files) => void handleFilesSelected(files)} onRemoveAttachment={(id) => void removeDraftAttachment(id)} enterToSend={uiSettings.enterToSend} />
+    {pwaUpdateAvailable && <UpdateToast onRefresh={() => applyPwaUpdate()} onDismiss={() => setPwaUpdateAvailable(false)} />}
     <Sidebar open={sidebarOpen} threads={threads} activeId={conversation.id} onClose={() => setSidebarOpen(false)} onSelect={(id) => void switchThread(id)} onNewChat={() => void startNewChat()} onRename={(id, title) => void handleRename(id, title)} onArchive={(id) => void handleArchive(id)} onDelete={(id) => void handleDelete(id)} onSettings={() => { setSidebarOpen(false); setSettingsSection('appearance'); setSettingsOpen(true); }} />
     {firstRunWelcomeOpen && <FirstRunWelcome character={character} onSaveCharacter={handleCharacterChange} onComplete={finishFirstRun} />}
   </main>;

@@ -4,9 +4,9 @@ The top quick-action rail should be a fast launcher for saved Google Workspace a
 
 ## UI contract
 
-The top rail currently contains Calendar, Tasks, and Gmail. As Drive, Docs, and Sheets become production-ready they should join the same rail without changing the interaction model.
+The top rail is a single consolidated Workspace trigger. Tapping it opens a services flyout to its right listing Calendar, Tasks, and Gmail; as Drive, Docs, and Sheets become production-ready they should join the same flyout without changing the interaction model.
 
-Tapping a service opens a compact vertically scrollable chooser of that service's saved recipes. Selecting a recipe does not append a synthetic user message to the visible conversation. It creates an internal agent-task request; the final assistant response appears normally in the conversation.
+Tapping a service expands a compact vertically scrollable chooser of that service's saved recipes. Selecting a recipe does not append a synthetic user message to the visible conversation. It creates an internal agent-task request; the final assistant response appears normally in the conversation.
 
 The exact small-row pixel height is a visual tuning value, not a data-model contract. Keep the chooser touch-friendly and keyboard accessible.
 

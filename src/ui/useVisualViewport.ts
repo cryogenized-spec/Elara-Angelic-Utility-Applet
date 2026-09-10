@@ -16,6 +16,9 @@ interface NavigatorWithVirtualKeyboard extends Navigator {
   };
 }
 
+/** Visual-height delta treated as an open software keyboard (not browser chrome). */
+const KEYBOARD_OPEN_THRESHOLD_PX = 100;
+
 function getVisualViewport(): VisualViewportLike | null {
   if (typeof window === 'undefined' || !window.visualViewport) return null;
   return window.visualViewport as VisualViewportLike;
@@ -28,7 +31,9 @@ function writeViewportMetrics() {
   const offsetTop = visualViewport?.offsetTop ?? 0;
   const keyboardHeight = Math.max(0, window.innerHeight - visualHeight - offsetTop);
 
+  root.style.setProperty('--elara-visual-viewport-height', `${Math.round(visualHeight)}px`);
   root.style.setProperty('--elara-keyboard-height', `${Math.round(keyboardHeight)}px`);
+  root.classList.toggle('keyboard-open', keyboardHeight > KEYBOARD_OPEN_THRESHOLD_PX);
 }
 
 export function useVisualViewport() {
@@ -56,7 +61,9 @@ export function useVisualViewport() {
       visualViewport?.removeEventListener('resize', update);
       visualViewport?.removeEventListener('scroll', update);
       virtualKeyboard?.removeEventListener('geometrychange', update);
+      document.documentElement.style.removeProperty('--elara-visual-viewport-height');
       document.documentElement.style.removeProperty('--elara-keyboard-height');
+      document.documentElement.classList.remove('keyboard-open');
     };
   }, []);
 }

@@ -165,6 +165,25 @@ function buildInteractionPayload(request: InteractionRequest) {
   return payload;
 }
 
+/**
+ * Await the next stream item, but resolve promptly when `signal` aborts
+ * instead of hanging until the next provider chunk arrives. Cancellation must
+ * terminate the turn immediately even when the network is idle.
+ */
+async function nextStreamItem(iterator: AsyncIterator<unknown>, signal?: AbortSignal): Promise<IteratorResult<unknown> | 'aborted'> {
+  if (!signal || signal.aborted) return signal?.aborted ? 'aborted' : iterator.next();
+  let onAbort: (() => void) | undefined;
+  const abortPromise = new Promise<'aborted'>((resolve) => {
+    onAbort = () => resolve('aborted');
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try {
+    return await Promise.race([iterator.next(), abortPromise]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
 async function* streamDirectRequest(request: InteractionRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const startedAt = performance.now();
   const requestId = crypto.randomUUID();
@@ -207,63 +226,78 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
       : await composeSystemInstruction(request.systemInstruction, query);
     const providerInput = await resolveGeminiInput({ ...request, signal }, client);
     const stream = await client.interactions.create(buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction }) as never);
-    for await (const rawEvent of stream as unknown as AsyncIterable<unknown>) {
-      if (signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }
-      const raw = asRecord(rawEvent);
-      const eventType = readString(raw, 'event_type') ?? readString(raw, 'type') ?? '';
-      const eventInteractionId = interactionIdFrom(raw);
-      if (eventInteractionId) interactionId = eventInteractionId;
-      if (eventType === 'interaction.created') { const interaction = asRecord(raw.interaction); const id = readString(interaction, 'id') ?? interactionId ?? 'unknown'; interactionId = id; const model = readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL); yield { type: 'interaction-created', interactionId: id, model }; continue; }
-      if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') { const status = readString(raw, 'status') ?? readString(asRecord(raw.interaction), 'status') ?? eventType.replace('interaction.', ''); if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
-      if (eventType === 'step.start') {
-        const index = stepIndex(raw);
-        const step = asRecord(raw.step);
-        const type = stepType(raw);
-        yield { type: 'step-start', index, stepType: type };
-        if (type === 'thought') {
-          const summaryBlocks = Array.isArray(step.summary) ? step.summary : [];
-          for (const summaryBlock of summaryBlocks) {
-            const text = readString(asRecord(summaryBlock), 'text');
-            if (text) { appendThoughtSummary(thoughtSummaryParts, index, text); yield { type: 'thought-summary-delta', index, text }; }
-          }
+    const iterator = (stream as unknown as AsyncIterable<unknown>)[Symbol.asyncIterator]();
+    try {
+      for (;;) {
+        const next = await nextStreamItem(iterator, signal);
+        if (next === 'aborted' || signal?.aborted) {
+          // Best-effort reader cancellation (never awaited: the turn is over
+          // regardless of whether the SDK honors iterator cleanup).
+          void iterator.return?.()?.catch(() => undefined);
+          yield { type: 'cancelled', interactionId };
+          return;
         }
-        const signature = readString(step, 'signature');
-        if (signature) yield { type: 'thought-signature', index, signature };
-        if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, pendingFunctionCall(callId, name, step)); }
-        continue;
+        if (next.done) break;
+        const raw = asRecord(next.value);
+        const eventType = readString(raw, 'event_type') ?? readString(raw, 'type') ?? '';
+        const eventInteractionId = interactionIdFrom(raw);
+        if (eventInteractionId) interactionId = eventInteractionId;
+        if (eventType === 'interaction.created') { const interaction = asRecord(raw.interaction); const id = readString(interaction, 'id') ?? interactionId ?? 'unknown'; interactionId = id; const model = readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL); yield { type: 'interaction-created', interactionId: id, model }; continue; }
+        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') { const status = readString(raw, 'status') ?? readString(asRecord(raw.interaction), 'status') ?? eventType.replace('interaction.', ''); if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
+        if (eventType === 'step.start') {
+          const index = stepIndex(raw);
+          const step = asRecord(raw.step);
+          const type = stepType(raw);
+          yield { type: 'step-start', index, stepType: type };
+          if (type === 'thought') {
+            const summaryBlocks = Array.isArray(step.summary) ? step.summary : [];
+            for (const summaryBlock of summaryBlocks) {
+              const text = readString(asRecord(summaryBlock), 'text');
+              if (text) { appendThoughtSummary(thoughtSummaryParts, index, text); yield { type: 'thought-summary-delta', index, text }; }
+            }
+          }
+          const signature = readString(step, 'signature');
+          if (signature) yield { type: 'thought-signature', index, signature };
+          if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, pendingFunctionCall(callId, name, step)); }
+          continue;
+        }
+        if (eventType === 'step.delta') {
+          const delta = asRecord(raw.delta); const index = stepIndex(raw); const deltaType = readString(delta, 'type'); const content = asRecord(delta.content); const deltaText = readString(delta, 'text') ?? readString(content, 'text');
+          if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
+          else if (deltaType === 'thought_summary') { if (deltaText) { appendThoughtSummary(thoughtSummaryParts, index, deltaText); yield { type: 'thought-summary-delta', index, text: deltaText }; } }
+          else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; }
+          else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
+          continue;
+        }
+        if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
+        if (eventType === 'interaction.completed') {
+          const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed';
+          if (status === 'requires_action') { sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
+          sawTerminalEvent = true;
+          const usage = readUsage(interaction.usage) ?? readUsage(raw.usage); const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts); const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined); if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
+          yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage }; return;
+        }
+        if (eventType === 'error') {
+          const providerError = asRecord(raw.error);
+          const nestedError = asRecord(providerError.error);
+          const message = readString(providerError, 'message') ?? 'Gemini returned a streaming error.';
+          const failure = new Error(message) as Error & { status?: number; code?: string | number };
+          const providerStatus = readStatus(providerError, 'status') ?? readStatus(providerError, 'code') ?? readStatus(nestedError, 'status') ?? readStatus(nestedError, 'code');
+          if (providerStatus !== undefined) failure.status = providerStatus;
+          const providerCode = readString(providerError, 'code') ?? readString(providerError, 'type') ?? readString(nestedError, 'code');
+          if (providerCode !== undefined) failure.code = providerCode;
+          sawTerminalEvent = true;
+          yield { type: 'failed', error: normalizeGeminiError(failure, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
+          return;
+        }
       }
-      if (eventType === 'step.delta') {
-        const delta = asRecord(raw.delta); const index = stepIndex(raw); const deltaType = readString(delta, 'type'); const content = asRecord(delta.content); const deltaText = readString(delta, 'text') ?? readString(content, 'text');
-        if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
-        else if (deltaType === 'thought_summary') { if (deltaText) { appendThoughtSummary(thoughtSummaryParts, index, deltaText); yield { type: 'thought-summary-delta', index, text: deltaText }; } }
-        else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; }
-        else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
-        continue;
-      }
-      if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
-      if (eventType === 'interaction.completed') {
-        const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed';
-        if (status === 'requires_action') { sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
-        sawTerminalEvent = true;
-        const usage = readUsage(interaction.usage) ?? readUsage(raw.usage); const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts); const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined); if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
-        yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage }; return;
-      }
-      if (eventType === 'error') {
-        const providerError = asRecord(raw.error);
-        const nestedError = asRecord(providerError.error);
-        const message = readString(providerError, 'message') ?? 'Gemini returned a streaming error.';
-        const failure = new Error(message) as Error & { status?: number; code?: string | number };
-        const providerStatus = readStatus(providerError, 'status') ?? readStatus(providerError, 'code') ?? readStatus(nestedError, 'status') ?? readStatus(nestedError, 'code');
-        if (providerStatus !== undefined) failure.status = providerStatus;
-        const providerCode = readString(providerError, 'code') ?? readString(providerError, 'type') ?? readString(nestedError, 'code');
-        if (providerCode !== undefined) failure.code = providerCode;
-        sawTerminalEvent = true;
-        yield { type: 'failed', error: normalizeGeminiError(failure, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
-        return;
-      }
+      if (sawRequiresAction || sawTerminalEvent) return;
+      yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
+    } finally {
+      // Consumer abandoned the stream early (turn cancelled or superseded):
+      // release the SDK reader without blocking generator teardown.
+      void iterator.return?.()?.catch(() => undefined);
     }
-    if (sawRequiresAction || sawTerminalEvent) return;
-    yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
   } catch (cause) {
     const normalized = normalizeGeminiError(cause, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) });
     const error = cause instanceof ArtifactError

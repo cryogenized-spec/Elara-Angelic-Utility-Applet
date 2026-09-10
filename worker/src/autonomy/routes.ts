@@ -21,10 +21,10 @@ import {
 // the DO only through the Worker→DO binding (see scheduled() in index.ts).
 // ---------------------------------------------------------------------------
 
-export const AUTONOMY_WORKER_VERSION = '1.0.0-phase-b';
+export const AUTONOMY_WORKER_VERSION = '1.0.0-phase-c1';
 export const AUTONOMY_SCHEMA_VERSION = 1;
 /** What this deployment supports — the app refuses to enable autonomy on mismatch. */
-export const AUTONOMY_CAPABILITIES = ['config-sync', 'context-sync', 'scheduler-dry-run'] as const;
+export const AUTONOMY_CAPABILITIES = ['config-sync', 'context-sync', 'scheduler-live', 'routine-run-workflow', 'cloud-execution'] as const;
 export const AUTONOMY_CRON = '0 * * * *';
 
 export interface AutonomyEnv {
@@ -92,7 +92,9 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
         schemaVersion: AUTONOMY_SCHEMA_VERSION,
         capabilities: AUTONOMY_CAPABILITIES,
         cron: AUTONOMY_CRON,
-        dryRun: true,
+        schedulerLive: true,
+        agentExecution: true,
+        dryRun: false,
       },
     }, 200, corsOrigin);
   }
@@ -115,14 +117,16 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
       schemaVersion: AUTONOMY_SCHEMA_VERSION,
       capabilities: AUTONOMY_CAPABILITIES,
       cron: AUTONOMY_CRON,
-      dryRun: true,
+      schedulerLive: true,
+      agentExecution: true,
+      dryRun: false,
     }, 200, corsOrigin);
   }
 
   const isRead = request.method === 'GET';
   const isWrite = request.method === 'POST';
 
-  if (isRead && (pathname === '/autonomy/state' || pathname === '/autonomy/runs' || pathname === '/autonomy/context')) {
+  if (isRead && (pathname === '/autonomy/state' || pathname === '/autonomy/runs' || pathname === '/autonomy/events' || pathname === '/autonomy/context')) {
     // First-pass bearer check; the DO re-verifies.
     if (!(await verifyBearerToken(await bearerOf(request), token))) {
       return json({ code: 'auth', message: 'A valid installation token is required.' }, 401, corsOrigin);
@@ -138,6 +142,7 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
       method: request.method,
       path: pathname,
       timestamp: request.headers.get(ELARA_AUTH_TIMESTAMP_HEADER) ?? '',
+      nonce: request.headers.get(ELARA_AUTH_NONCE_HEADER) ?? '',
       signature: request.headers.get(ELARA_AUTH_SIGNATURE_HEADER) ?? '',
       body,
     }, token, Date.now());

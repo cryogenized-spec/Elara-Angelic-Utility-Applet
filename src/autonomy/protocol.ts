@@ -4,10 +4,10 @@
 // The browser client and the Worker both import exactly these definitions, so
 // the signature format can never drift between signer and verifier:
 // - Reads:      `Authorization: Bearer <installation token>`
-// - Writes:     HMAC-SHA256 over `method\npath\ntimestamp\nbody` with the
+// - Writes:     HMAC-SHA256 over `method\npath\ntimestamp\nnonce\nbody` with the
 //               installation token, a ±5-minute timestamp window, and a
 //               per-request nonce (strict replay rejection via the Durable
-//               Object's nonce ledger).
+//               Object's nonce ledger). The nonce is inside the MAC.
 // - Internal:   the cron heartbeat reaches the Durable Object through the
 //   Worker-to-DO binding only — there is no public wake endpoint — and
 //   carries an internal marker derived from the same token so the DO can
@@ -67,13 +67,13 @@ export async function deriveInstallationId(token: string): Promise<string> {
 }
 
 /** The canonical signed-write message: exact bytes both sides must agree on. */
-export function signedWriteMessage(method: string, path: string, timestamp: string, body: string): string {
-  return `${method.toUpperCase()}\n${path}\n${timestamp}\n${body}`;
+export function signedWriteMessage(method: string, path: string, timestamp: string, nonce: string, body: string): string {
+  return `${method.toUpperCase()}\n${path}\n${timestamp}\n${nonce}\n${body}`;
 }
 
 /** Sign a write exactly the way the app client does. */
 export async function signWrite(token: string, method: string, path: string, timestamp: number, nonce: string, body: string): Promise<string> {
-  return hmacSha256(token, signedWriteMessage(method, path, String(timestamp), body));
+  return hmacSha256(token, signedWriteMessage(method, path, String(timestamp), nonce, body));
 }
 
 export interface SignedWriteVerification {
@@ -92,15 +92,16 @@ export async function verifySignedWrite(input: {
   method: string;
   path: string;
   timestamp: string;
+  nonce: string;
   signature: string;
   body: string;
 }, token: string, now: number): Promise<SignedWriteVerification> {
-  if (!input.timestamp || !input.signature) return { ok: false, code: 'bad-signature' };
+  if (!input.timestamp || !input.signature || !input.nonce) return { ok: false, code: 'bad-signature' };
   const timestampMs = Number(input.timestamp);
   if (!Number.isFinite(timestampMs) || Math.abs(now - timestampMs) > ELARA_AUTH_TIMESTAMP_WINDOW_MS) {
     return { ok: false, code: 'stale-timestamp' };
   }
-  const expected = await hmacSha256(token, signedWriteMessage(input.method, input.path, input.timestamp, input.body));
+  const expected = await hmacSha256(token, signedWriteMessage(input.method, input.path, input.timestamp, input.nonce, input.body));
   if (!constantTimeEqual(expected, input.signature)) return { ok: false, code: 'bad-signature' };
   return { ok: true, installationId: await deriveInstallationId(token) };
 }

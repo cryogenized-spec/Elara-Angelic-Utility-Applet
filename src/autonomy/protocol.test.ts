@@ -27,33 +27,60 @@ describe('signed writes', () => {
   it('round-trips: a correctly signed write verifies', async () => {
     const body = JSON.stringify({ generation: 4, routines: [] });
     const timestamp = NOW;
-    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', timestamp, newNonce(), body);
-    const result = await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(timestamp), signature, body }, TOKEN, NOW);
+    const nonce = newNonce();
+    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', timestamp, nonce, body);
+    const result = await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(timestamp), nonce, signature, body }, TOKEN, NOW);
     expect(result.ok).toBe(true);
     expect(result.installationId).toBe(await deriveInstallationId(TOKEN));
   });
 
   it('method and path are bound into the signature (no path transplantation)', async () => {
     const body = '{}';
-    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW, newNonce(), body);
-    const moved = await verifySignedWrite({ method: 'POST', path: '/autonomy/context', timestamp: String(NOW), signature, body }, TOKEN, NOW);
+    const nonce = newNonce();
+    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW, nonce, body);
+    const moved = await verifySignedWrite({ method: 'POST', path: '/autonomy/context', timestamp: String(NOW), nonce, signature, body }, TOKEN, NOW);
     expect(moved).toEqual({ ok: false, code: 'bad-signature' });
   });
 
   it('a tampered body fails verification', async () => {
-    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW, newNonce(), '{"a":1}');
-    const result = await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(NOW), signature, body: '{"a":2}' }, TOKEN, NOW);
+    const nonce = newNonce();
+    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW, nonce, '{"a":1}');
+    const result = await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(NOW), nonce, signature, body: '{"a":2}' }, TOKEN, NOW);
     expect(result).toEqual({ ok: false, code: 'bad-signature' });
   });
 
+  it('changing the nonce invalidates the signature', async () => {
+    const nonce = newNonce();
+    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW, nonce, '{}');
+    const result = await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(NOW), nonce: newNonce(), signature, body: '{}' }, TOKEN, NOW);
+    expect(result).toEqual({ ok: false, code: 'bad-signature' });
+  });
+
+  it('changing the timestamp invalidates the signature', async () => {
+    const nonce = newNonce();
+    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW, nonce, '{}');
+    const result = await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(NOW + 1), nonce, signature, body: '{}' }, TOKEN, NOW);
+    expect(result).toEqual({ ok: false, code: 'bad-signature' });
+  });
+
+  it('a newly generated nonce requires a newly generated signature', async () => {
+    const firstNonce = newNonce();
+    const secondNonce = newNonce();
+    const firstSig = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW, firstNonce, '{}');
+    expect(await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(NOW), nonce: secondNonce, signature: firstSig, body: '{}' }, TOKEN, NOW)).toEqual({ ok: false, code: 'bad-signature' });
+    const secondSig = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW, secondNonce, '{}');
+    expect((await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(NOW), nonce: secondNonce, signature: secondSig, body: '{}' }, TOKEN, NOW)).ok).toBe(true);
+  });
+
   it('a timestamp outside the ±5-minute window is rejected before signature comparison', async () => {
-    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW - 6 * 60_000, newNonce(), '{}');
-    const result = await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(NOW - 6 * 60_000), signature, body: '{}' }, TOKEN, NOW);
+    const nonce = newNonce();
+    const signature = await signWrite(TOKEN, 'POST', '/autonomy/config', NOW - 6 * 60_000, nonce, '{}');
+    const result = await verifySignedWrite({ method: 'POST', path: '/autonomy/config', timestamp: String(NOW - 6 * 60_000), nonce, signature, body: '{}' }, TOKEN, NOW);
     expect(result).toEqual({ ok: false, code: 'stale-timestamp' });
   });
 
-  it('the canonical message format is exact bytes both sides agree on', () => {
-    expect(signedWriteMessage('post', '/x', '123', 'body')).toBe('POST\n/x\n123\nbody');
+  it('the canonical message format includes the nonce', () => {
+    expect(signedWriteMessage('post', '/x', '123', 'nonce-1', 'body')).toBe('POST\n/x\n123\nnonce-1\nbody');
   });
 });
 
@@ -62,7 +89,6 @@ describe('bearer verification', () => {
     expect(await verifyBearerToken(TOKEN, TOKEN)).toBe(true);
     expect(await verifyBearerToken(null, TOKEN)).toBe(false);
     expect(await verifyBearerToken('wrong-token', TOKEN)).toBe(false);
-    // A similar-length token must not pass.
     expect(await verifyBearerToken(`${TOKEN}x`, TOKEN)).toBe(false);
   });
 });

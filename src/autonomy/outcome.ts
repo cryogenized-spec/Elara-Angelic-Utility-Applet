@@ -25,6 +25,10 @@ export const routineOutcomeSchema = z.discriminatedUnion('outcome', [
     itemsExamined: z.number().int().min(0).max(100_000).optional(),
     evidence: z.array(routineEvidenceSchema).max(8).optional(),
   }),
+  z.strictObject({
+    outcome: z.literal('cannot_act'),
+    reason: z.string().min(1).max(500),
+  }),
 ]);
 export type RoutineOutcome = z.infer<typeof routineOutcomeSchema>;
 

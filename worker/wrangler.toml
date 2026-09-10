@@ -20,3 +20,10 @@ bindings = [{ name = "AUTONOMY", class_name = "AutonomyEngine" }]
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AutonomyEngine"]
+
+# Phase C0: Workflow is the execution plane. Instance id is a hash of runKey;
+# the scheduler (DO) remains the only due-time authority.
+[[workflows]]
+name = "elara-routine-run"
+binding = "ROUTINE_RUN"
+class_name = "RoutineRunWorkflow"

@@ -27,6 +27,9 @@ const PAIRING: AutonomyPairing = {
   lastSyncedAt: null,
   lastSyncedContextHash: null,
   lastPulledRunsAt: 0,
+  lastPulledRunsId: '',
+  lastPulledEventsAt: 0,
+  lastPulledEventsId: '',
 };
 
 const CONTEXT_NOW = 1_700_000_000_000;
@@ -129,7 +132,8 @@ describe('fullSync', () => {
         storedContextHash = JSON.parse(requests.at(-1)!.body).contentHash;
         return jsonResponse({ accepted: true, metadata: { recordCount: 1, byteSize: 120 } });
       },
-      'GET /autonomy/runs': () => jsonResponse({ runs: [run] }),
+      'GET /autonomy/runs': () => jsonResponse({ runs: [run], next: null, limit: 200 }),
+      'GET /autonomy/events': () => jsonResponse({ events: [], next: null, limit: 200 }),
     });
 
     const result = await fullSync({ ...PAIRING });
@@ -179,6 +183,52 @@ describe('fullSync', () => {
     expect(pushes).toHaveLength(1); // never blindly re-pushed the older payload
   });
 
+  it('equal-generation config-conflict adopts the worker generation and does not replay', async () => {
+    bumpConfigGeneration();
+    mockWorker({
+      'POST /autonomy/config': () => jsonResponse({ code: 'config-conflict', message: 'same gen different body', generation: 4 }, 409),
+      'GET /autonomy/state': () => jsonResponse({
+        paired: true, dryRun: false, generation: 4, stateGeneration: 4, autonomyEnabled: true, maxEventsPerDay: 10,
+        lastHeartbeatAt: 1, lastSyncedAt: 1, nextAlarmAt: null, routines: [], context: null, journal: [],
+      }),
+    });
+    const result = await syncConfiguration(PAIRING);
+    expect(result.staleRejected).toBe(true);
+    expect(configGeneration()).toBe(4);
+    expect(requests.filter((request) => request.path === '/autonomy/config')).toHaveLength(1);
+  });
+
+  it('walks keyset run pages without skipping older records', async () => {
+    const pages = [
+      Array.from({ length: 2 }, (_, index) => cloudDryRunRecord(`run-${index}`, 1_700_000_000_100 + index)),
+      [cloudDryRunRecord('run-2', 1_700_000_000_200)],
+    ];
+    let runCalls = 0;
+    mockWorker({
+      'POST /autonomy/config': () => jsonResponse({ accepted: true, stateGeneration: 1 }),
+      'GET /autonomy/state': () => jsonResponse({
+        paired: true, dryRun: false, generation: 0, stateGeneration: 1, autonomyEnabled: true, maxEventsPerDay: 10,
+        lastHeartbeatAt: 1, lastSyncedAt: 1, nextAlarmAt: 2, routines: [], context: null, journal: [],
+      }),
+      'POST /autonomy/context': () => jsonResponse({ accepted: true, metadata: { recordCount: 0, byteSize: 2 } }),
+      'GET /autonomy/runs': (request) => {
+        const params = new URLSearchParams(request.path.split('?')[1] ?? '');
+        const afterAt = Number(params.get('afterAt') ?? '0');
+        const afterId = params.get('afterId') ?? '';
+        const page = runCalls === 0 ? pages[0]! : pages[1]!;
+        runCalls += 1;
+        if (runCalls === 1) expect(afterAt).toBe(0);
+        if (runCalls === 2) expect(afterId).toBe('run-1');
+        return jsonResponse({ runs: page, next: runCalls === 1 ? { at: page[page.length - 1]!.startedAt, id: page[page.length - 1]!.id } : null, limit: 2 });
+      },
+      'GET /autonomy/events': () => jsonResponse({ events: [], next: null, limit: 200 }),
+    });
+    const result = await fullSync({ ...PAIRING });
+    expect(result.pulledRuns).toBe(3);
+    expect(runCalls).toBe(2);
+    expect((await listRuns(20)).map((run) => run.id).sort()).toEqual(['run-0', 'run-1', 'run-2']);
+  });
+
   it('clears the worker-side pack immediately', async () => {
     mockWorker({
       'POST /autonomy/context': () => jsonResponse({ accepted: true, metadata: null }),
@@ -198,7 +248,7 @@ describe('AutonomyCloud (unpaired render)', () => {
     window.localStorage.clear();
     const html = renderToStaticMarkup(<AutonomyCloud onNotice={() => undefined} />);
     expect(html).toContain('Cloud scheduler — not connected');
-    expect(html).toContain('dry runs');
+    expect(html).toContain('Cloudflare worker');
     expect(html).not.toContain('Connected to');
   });
 });

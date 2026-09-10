@@ -105,6 +105,13 @@ describe('executeRoutineRun — authority and overlap guards', () => {
 });
 
 describe('executeRoutineRun — outcomes', () => {
+  it('records cannot_act as a distinct completed outcome', async () => {
+    await saveRoutine(makeRoutine());
+    const { run, event } = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engineFor(textRun('{"outcome":"cannot_act","reason":"frozen context is empty"}'))));
+    expect(run).toMatchObject({ state: 'completed', outcome: 'cannot_act', reason: 'frozen context is empty' });
+    expect(event).toBeNull();
+  });
+
   it('records a completed no-op run and persists run history', async () => {
     await saveRoutine(makeRoutine());
     const toolCall: GeminiStreamEvent = { type: 'tool-call', interactionId: 'it-1', index: 2, callId: 'c1', name: 'calendar.listEvents', arguments: {} };
@@ -346,22 +353,16 @@ describe('executeRoutineRun — concurrent Run Now admission', () => {
     expect(await listEvents()).toEqual([]);
   });
 
-  it('reclaims its own crashed occurrence: stale same-runKey redelivery executes instead of deduplicating', async () => {
-    // The Phase B at-least-once scenario, end to end through the runner:
-    // occurrence 500 crashed mid-run; the scheduler redelivers occurrence 500.
+  it('never treats a mirrored cloud scheduled running row as a local stale crash', async () => {
     const staleStartedAt = NOW - 16 * 60_000;
     await addRun({
-      id: 'crashed', runKey: 'r-1:scheduled:500', routineId: 'r-1', routineName: 'Morning brief',
+      id: 'cloud-running', runKey: 'r-1:scheduled:500', routineId: 'r-1', routineName: 'Morning brief',
       executionMode: 'scheduled', scheduledFor: 500, startedAt: staleStartedAt, state: 'running',
     });
     const { run } = await executeRoutineRun(makeRoutine(), settings, 'scheduled', { ...runOptions(engineFor(textRun(NOOP))), scheduledFor: 500 });
-    expect(run).toMatchObject({ state: 'completed', outcome: 'no-op', runKey: 'r-1:scheduled:500', scheduledFor: 500 });
-
-    const rows = await listRuns(10);
-    expect(rows.filter((row) => row.runKey === 'r-1:scheduled:500')).toHaveLength(1);
-    const crashed = rows.find((row) => row.id === 'crashed');
-    expect(crashed).toMatchObject({ state: 'failed', errorCode: 'RUN_ABANDONED' });
-    expect(crashed?.runKey).toMatch(/#abandoned-crashed$/);
+    expect(run).toMatchObject({ errorCode: 'RUN_IN_FLIGHT' });
+    const still = (await listRuns(10)).find((row) => row.id === 'cloud-running');
+    expect(still).toMatchObject({ state: 'running', runKey: 'r-1:scheduled:500' });
   });
 
   it('recovers from a crashed run: a stale in-flight record is abandoned, not obeyed forever', async () => {

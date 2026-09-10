@@ -5,11 +5,10 @@ design decisions live in [`AUTONOMOUS_ELARA_DESIGN.md`](./AUTONOMOUS_ELARA_DESIG
 (the design-of-record); this document tells you what to do, what to expect, and
 — honestly — what does not exist yet.
 
-> **Phase status (2026-09): Phase B — cloud scheduler, DRY RUN.**
-> The cloud scheduler decides *when* each routine is due and records the
-> decision in your run history. **No model runs in the cloud yet.** Local
-> "Run now" execution (Phase A1) is fully functional. See
-> [What is actually implemented](#what-is-actually-implemented).
+> **Phase status (2026-09): Phase C — cloud execution (C0–C2).**
+> Cloud-native routines can run in your worker (memory only). Google-backed
+> routines stay on the device. Stale generations are rejected at admission.
+> See [What is actually implemented](#what-is-actually-implemented).
 
 ---
 
@@ -32,9 +31,9 @@ what you allowed her to see, and leave results in your Autonomy Inbox. It is
 
 | | Cloud routine | Device routine |
 |---|---|---|
-| Tools | None yet (Phase C adds web + memory-pack tools) | Your granted Google read tools + local memory |
+| Tools | Memory-pack tools only (no web, no Google) | Your granted Google read tools + local memory |
 | Credentials | Worker secrets only — never your Google tokens | Your browser Google authorization — unchanged |
-| Runs when | The scheduler records it as due in your worker | The scheduler records it as due; **the device executes** (catch-up execution arrives in a later phase) |
+| Runs when | The worker executes the frozen envelope | The scheduler records it as due; device catch-up arrives in a later phase |
 | Rule | No Google permissions granted | One or more Google read permissions granted |
 
 Google-backed routines stay **device-native**: your worker never receives
@@ -83,6 +82,18 @@ request. Effectively zero; no paid plan is required for Phase B.
 |---|---|---|
 | Routine definitions (name, schedule, timezone, instruction, permissions, policy) | app → worker | Pairing + each routine save. The worker's copy is a **disposable mirror**; the app stays the source of truth. |
 | Autonomy settings (master switch, event budget) | app → worker | Pairing. Carries a **generation counter** so an older configuration can never overwrite a newer one. |
+
+### Phase C2 — generation model (stale-run protection)
+
+1. **Authoritative generation:** installation-wide `configGeneration` (Durable Object `meta`). There is no per-routine generation; a config sync invalidates every in-flight cloud claim.
+2. **Where stored:** DO `meta.configGeneration`. `stateGeneration` is a separate journal/context snapshot and **is not** a stale trigger (context-only sync must not kill runs).
+3. **When captured:** `freezeEnvelope` at claim copies live `configGeneration` and `stateGeneration` onto the frozen envelope.
+4. **Where checked:** `AutonomyStore.completeCloudAdmission`, inside the same SQLite transaction as event insert / run terminalization. The Workflow does not compare generations.
+5. **When stale** (`frozen.configGeneration !== live configGeneration`): no event, no schedule advance at admission, terminal `STALE_GENERATION`, HTTP `status: stale`. Dispatch-time schedule advances are not rewound.
+6. **Live gates (separate from generation):** master-off, routine disable, routine delete → `cancelled-admission`, also no event and no schedule advance at that admission. When a real config sync turns the master off it also bumps `configGeneration`, so those in-flight claims fail as stale (still fail-closed).
+7. **Equal generation:** accepted only as an idempotent replay of the same payload hash. A different body at the same generation is `409 config-conflict`. The app adopts the worker generation and does not replay the rejected payload.
+8. **Recovery:** `recoverInFlight` must not dispatch or advance a claim whose frozen generation or live gates no longer match; it terminalizes instead. After Workflow `create()` yields, gates are re-read. Schedule advance uses the **frozen** routine and only while the claim is still current. Admission advances idempotently (`scheduleAdvanced`).
+9. **Signed writes:** HMAC covers `method`, `path`, `timestamp`, `nonce`, and `body`. The DO nonce ledger still rejects replays.
 | **Autonomy Context** — a bounded, read-only memory projection | app → worker | **A separate opt-in flag per memory** (`autonomyContext`, default off). ≤ 200 records, ≤ 100 KB, only active, non-expired, established (CORE/CONTEXTUAL/EPISODIC) memories you explicitly ticked. |
 | Scheduler observations (run records) | worker → app | Implied — pulled into your local run history on app open. |
 
@@ -119,16 +130,17 @@ Settings ▸ Autonomy ▸ *Autonomy Context* shows exactly what would travel:
   memory-dependent routine never *fails* because the pack is empty — it runs
   degraded ("autonomy context unavailable").
 
-## Dry-run semantics (read this)
+## Run records you will see
 
-Until Phase C ships, the cloud scheduler **records, not executes**. Your run
-history will show, honestly labeled:
+Cloud-native routines execute in the worker. Device-locus routines are still
+recorded as due, not auto-executed:
 
 | Record | Meaning |
 |---|---|
-| `skipped · SCHEDULER_DRY_RUN` | A cloud-locus occurrence came due. The scheduler observed it; execution arrives in Phase C. |
-| `skipped · SCHEDULER_DEVICE_DUE` | A Google-backed routine came due. The worker never executes these; device catch-up arrives in a later phase. |
-| `missed · SCHEDULER_MISSED` | An occurrence's grace window (half the interval, max 6 h; for daily schedules, until the next scheduled time) passed without processing. Recorded as missed — never silently re-run late. |
+| `completed` / `no-op` / `cannot_act` | A cloud-locus routine ran. Outcomes follow the C1 admission policy. |
+| `failed · STALE_GENERATION` | Config generation changed before admission; no event was written. |
+| `skipped · SCHEDULER_DEVICE_DUE` | A Google-backed routine came due. The worker never executes these. |
+| `missed · SCHEDULER_MISSED` | An occurrence's grace window passed without processing. |
 | `skipped · SCHEDULER_BUDGET_EXCEEDED` | The routine's "Max scheduled runs per day" budget was used. |
 
 The scheduler's own decisions (registrations, cancellations, repairs,
@@ -175,9 +187,7 @@ exact alarm missed (deploys, evictions, control-plane blips).
 
 ## What is NOT implemented yet (honest list)
 
-- **Phase C — cloud execution:** the model loop does not run in the worker.
-  Dry-run records are the honest placeholder; the scheduler contract they sit
-  on is the one Phase C will execute against.
+- **Phase C** (C0–C2) has landed for cloud-native routines. Do not treat this as Phase D.
 - **Phase D — notifications:** no Web Push, no quiet hours. The Autonomy
   Inbox is the only delivery channel.
 - **Phase E — web tools:** no web search/fetch for routines.

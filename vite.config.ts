@@ -9,7 +9,14 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // Prompt strategy: a newly deployed worker waits instead of activating
+      // behind the user's back. Discovery is aggressive (see src/pwa.ts), but
+      // nothing applies until the user taps Refresh in the update toast, which
+      // sends SKIP_WAITING and reloads once the new worker takes control.
+      // NOTE: registerType 'autoUpdate' would force skipWaiting/clientsClaim
+      // and auto-reload open pages without acknowledgement — the opposite of
+      // the intended detect -> notify -> user-refresh behaviour.
+      registerType: 'prompt',
       devOptions: {
         enabled: true,
       },
@@ -41,6 +48,12 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,png,svg,ico,woff2}'],
+        // No skipWaiting: an updated worker must wait so the running page
+        // keeps its own worker until the user refreshes via the update toast.
+        // clientsClaim only accelerates first-install control and cannot take
+        // over an open page for updates (activation stays gated on the user's
+        // Refresh tap, which sends SKIP_WAITING).
+        clientsClaim: true,
         cleanupOutdatedCaches: true,
       },
     }),

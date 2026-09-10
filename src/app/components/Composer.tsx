@@ -147,7 +147,12 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }, []);
 
   const vttBusy = vttState === 'requesting' || vttState === 'recording' || vttState === 'processing';
-  const composerLocked = status === 'streaming' || vttBusy;
+  const isStreaming = status === 'streaming';
+  const composerLocked = isStreaming || vttBusy;
+  // The send button doubles as the stop button while streaming: it must stay
+  // enabled so the user can cancel the turn. Every other composer control
+  // stays locked until the turn settles.
+  const sendDisabled = vttBusy || (!isStreaming && !draft.trim() && attachments.length === 0);
 
   const canSend = status !== 'streaming' && !vttBusy && (Boolean(draft.trim()) || attachments.length > 0);
   const enterKeyHint = composerEnterKeyHint(enterToSend);
@@ -446,8 +451,8 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           {attachmentPicker()}
           <div className="composer-expanded__spacer" />
           {vttControl(expandedTextareaRef)}
-          <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || (!draft.trim() && attachments.length === 0)} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
-            <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
+          <button className={`composer__send${isStreaming ? ' is-cancel' : ''}`} type="button" aria-label={isStreaming ? 'Cancel response' : 'Send message'} disabled={sendDisabled} onClick={() => { if (isStreaming) onCancel(); else onSend(); }}>
+            <Icon name={isStreaming ? 'close' : 'send'} size={19} />
           </button>
         </footer>
       </section>
@@ -470,8 +475,8 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
         </button>
       </div>
       {vttControl(textareaRef)}
-      <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || (!draft.trim() && attachments.length === 0)}>
-        <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
+      <button className={`composer__send${isStreaming ? ' is-cancel' : ''}`} type="submit" aria-label={isStreaming ? 'Cancel response' : 'Send message'} disabled={sendDisabled}>
+        <Icon name={isStreaming ? 'close' : 'send'} size={19} />
       </button>
     </form>
     {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}

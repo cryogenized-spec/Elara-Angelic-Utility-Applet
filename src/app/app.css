@@ -39,9 +39,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 
 .tool-rail { margin: 10px 0 4px 54px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
 .tool-rail::-webkit-scrollbar { display: none; }
-.tool-rail__track { display: flex; width: max-content; gap: 8px; padding-bottom: 3px; }
-.tool-pill { min-height: 36px; display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); border-radius: 13px; padding: 0 12px; background: rgba(15,16,23,.7); backdrop-filter: blur(14px); color: rgba(255,255,255,.82); font-size: 11px; white-space: nowrap; }
-.tool-pill:hover { border-color: rgba(110,168,255,.4); }
 .tool-notice { margin: 4px 0 0 54px; padding: 8px 11px; border-left: 1px solid var(--pink); color: var(--muted); font-size: 10px; }
 
 .conversation { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 7px 14px 54px; overscroll-behavior: contain; scroll-behavior: smooth; }

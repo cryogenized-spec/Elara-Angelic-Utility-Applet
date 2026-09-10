@@ -26,6 +26,7 @@ function keydown(target: Element, init: KeyboardEventInit & { isComposing?: bool
 }
 
 function compactTextarea(): HTMLTextAreaElement { return container.querySelector('textarea[aria-label="Message Elara"]')!; }
+function sendButton(): HTMLButtonElement { return container.querySelector('.composer__send')!; }
 function expandedTextarea(): HTMLTextAreaElement { return container.querySelector('textarea[aria-label="Expanded message"]')!; }
 function openExpanded(): void {
   act(() => { container.querySelector<HTMLButtonElement>('button[aria-label="Expand message editor"]')!.click(); });
@@ -76,6 +77,24 @@ describe('Composer Enter behaviour', () => {
       const { onSend } = render({ status: 'streaming' });
       keydown(compactTextarea(), {});
       expect(onSend).not.toHaveBeenCalled();
+    });
+    it('keeps the stop button enabled while streaming so the turn can be cancelled', () => {
+      const onCancel = vi.fn();
+      const onSend = vi.fn();
+      act(() => {
+        root.render(<Composer draft="" status="streaming" systemInstruction="" onDraftChange={() => {}} onSend={onSend} onCancel={onCancel} />);
+      });
+      const stop = sendButton();
+      expect(stop.getAttribute('aria-label')).toBe('Cancel response');
+      expect(stop.disabled).toBe(false);
+      expect(stop.classList.contains('is-cancel')).toBe(true);
+      act(() => { stop.click(); });
+      expect(onCancel).toHaveBeenCalledTimes(1);
+      expect(onSend).not.toHaveBeenCalled();
+    });
+    it('disables send when idle with an empty draft and no attachments', () => {
+      render({ draft: '   ', status: 'idle' });
+      expect(sendButton().disabled).toBe(true);
     });
   });
 

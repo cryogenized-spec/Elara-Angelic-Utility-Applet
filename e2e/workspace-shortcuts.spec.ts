@@ -17,10 +17,15 @@ test('opens a Workspace shortcut menu without creating a chat message', async ({
   const conversation = page.getByRole('region', { name: 'Conversation' });
   const before = await conversation.locator('.message').count();
 
-  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
-  await expect(page.getByRole('menu', { name: 'calendar shortcuts' })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: /Current schedule/ })).toBeVisible();
-  await expect(page.getByRole('menuitem', { name: /Next five hours/ })).toBeVisible();
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Calendar', exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Tasks', exact: true })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Gmail', exact: true })).toBeVisible();
+  await menu.getByRole('menuitem', { name: 'Calendar', exact: true }).click();
+  await expect(menu.getByRole('menuitem', { name: /Current schedule/ })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: /Next five hours/ })).toBeVisible();
   await expect(conversation.locator('.message')).toHaveCount(before);
 });
 
@@ -37,8 +42,10 @@ test('executes a shortcut as an internal task rather than an injected user promp
   const before = await conversation.locator('.message').count();
 
   await expect.poll(() => readStoredShortcutEnabled(page, 'calendar-today')).toBe(true);
-  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
-  await page.getByRole('menuitem', { name: /Today/ }).click();
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+  await menu.getByRole('menuitem', { name: 'Calendar', exact: true }).click();
+  await menu.getByRole('menuitem', { name: /Today/ }).click();
 
   await expect.poll(() => requestInput).toContain('Execute the saved Workspace shortcut');
   await expect(conversation.locator('.message')).toHaveCount(before);

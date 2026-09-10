@@ -30,19 +30,27 @@ test.describe('Android portrait reliability', () => {
     expect(railBox!.x + railBox!.width).toBeLessThanOrEqual(viewport!.width);
   });
 
-  test('keeps touch targets usable and the Workspace rail horizontally scrollable', async ({ page }) => {
+  test('keeps the consolidated Workspace trigger usable and opens services to its right', async ({ page }) => {
     await page.goto('');
 
-    for (const name of ['Calendar', 'Tasks', 'Gmail']) {
-      const button = page.getByRole('button', { name, exact: true });
-      const box = await button.boundingBox();
-      expect(box).not.toBeNull();
-      expect(box!.height).toBeGreaterThanOrEqual(44);
-    }
+    const viewport = page.viewportSize();
+    expect(viewport).not.toBeNull();
+    const trigger = page.getByRole('button', { name: 'Workspace', exact: true });
+    const triggerBox = await trigger.boundingBox();
+    expect(triggerBox).not.toBeNull();
+    expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
 
-    const track = page.locator('.tool-rail__track');
-    const metrics = await track.evaluate((element) => ({ clientWidth: element.clientWidth, scrollWidth: element.scrollWidth }));
-    expect(metrics.scrollWidth).toBeGreaterThanOrEqual(metrics.clientWidth);
+    await trigger.click();
+    const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+    await expect(menu).toBeVisible();
+    for (const name of ['Calendar', 'Tasks', 'Gmail']) {
+      await expect(menu.getByRole('menuitem', { name, exact: true })).toBeVisible();
+    }
+    const menuBox = await menu.boundingBox();
+    expect(menuBox).not.toBeNull();
+    // Flyout opens to the right of the trigger and stays inside the viewport.
+    expect(menuBox!.x).toBeGreaterThanOrEqual(triggerBox!.x + triggerBox!.width);
+    expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(viewport!.width);
   });
 
   test('opens and closes the sidebar without losing the composer position', async ({ page }) => {
@@ -103,24 +111,28 @@ test.describe('Android portrait reliability', () => {
   test('does not animate essential controls when reduced motion is requested', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('');
-    const calendar = page.getByRole('button', { name: 'Calendar', exact: true });
-    const surface = page.getByRole('region', { name: 'Calendar action surface' });
+    const trigger = page.getByRole('button', { name: 'Workspace', exact: true });
+    const menu = page.getByRole('menu', { name: 'Google Workspace services' });
 
-    const transition = await calendar.evaluate((element) => getComputedStyle(element).transitionDuration);
+    const transition = await trigger.evaluate((element) => getComputedStyle(element).transitionDuration);
     const durations = transition.split(',').map((value) => Number.parseFloat(value));
     expect(durations.every((duration) => duration <= 0.001)).toBe(true);
 
-    await calendar.click();
-    await expect(surface).toBeVisible();
+    await trigger.click();
+    await expect(menu).toBeVisible();
   });
 
   test('keeps the command rail reachable after keyboard navigation', async ({ page }) => {
     await page.goto('');
     const rail = page.getByRole('navigation', { name: 'Quick actions' });
-    await rail.getByRole('button', { name: 'Calendar', exact: true }).focus();
-    await expect(rail.getByRole('button', { name: 'Calendar', exact: true })).toBeFocused();
-    await page.keyboard.press('Tab');
-    await expect(page.getByRole('button', { name: 'Tasks', exact: true })).toBeFocused();
+    const trigger = rail.getByRole('button', { name: 'Workspace', exact: true });
+    await trigger.focus();
+    await expect(trigger).toBeFocused();
+    await page.keyboard.press('Enter');
+    const menu = page.getByRole('menu', { name: 'Google Workspace services' });
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).not.toBeVisible();
   });
 });
 test.describe('Portrait artwork layout', () => {
@@ -136,17 +148,18 @@ test.describe('Portrait artwork layout', () => {
       await page.setViewportSize({ width, height: 800 });
       const rail = page.getByRole('navigation', { name: 'Quick actions' });
       const spine = page.getByRole('button', { name: 'Open sidebar' });
+      const trigger = rail.getByRole('button', { name: 'Workspace', exact: true });
+      await expect(trigger).toBeVisible();
       const railBox = await rail.boundingBox();
       const spineBox = await spine.boundingBox();
-      expect(railBox && spineBox).toBeTruthy();
+      const triggerBox = await trigger.boundingBox();
+      expect(railBox && spineBox && triggerBox).toBeTruthy();
       // Left-anchored: starts to the right of the spine button, and its right
       // edge leaves free space (it is not pushed against the right edge).
-      expect(railBox!.x).toBeGreaterThanOrEqual(spineBox!.x + spineBox!.width);
-      expect(railBox!.x).toBeLessThan(width / 3);
-      expect(railBox!.x + railBox!.width).toBeLessThan(width - 24);
-      expect(railBox!.x + railBox!.width).toBeLessThanOrEqual(width);
-      const columns = await page.locator('.tool-rail__track').evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(' ').length);
-      expect(columns).toBe(2);
+      expect(triggerBox!.x).toBeGreaterThanOrEqual(spineBox!.x + spineBox!.width);
+      expect(triggerBox!.x).toBeLessThan(width / 3);
+      expect(triggerBox!.x + triggerBox!.width).toBeLessThan(width - 24);
+      expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(width);
     }
   });
 });

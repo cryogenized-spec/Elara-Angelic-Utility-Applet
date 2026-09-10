@@ -94,6 +94,9 @@ async function mockWorker(page: Page, options: { contextStale?: boolean } = {}):
         state: 'skipped', outcome: 'skipped', errorCode: 'SCHEDULER_DRY_RUN',
       }] }));
     }
+    if (path === '/autonomy/events') {
+      return route.fulfill(corsJson({ events: [] }));
+    }
     return route.fulfill(corsJson({ code: 'not_found', message: 'No mock for this route.' }, 404));
   });
   return { configs, contextPosts };

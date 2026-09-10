@@ -126,7 +126,7 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
   const isRead = request.method === 'GET';
   const isWrite = request.method === 'POST';
 
-  if (isRead && (pathname === '/autonomy/state' || pathname === '/autonomy/runs' || pathname === '/autonomy/context')) {
+  if (isRead && (pathname === '/autonomy/state' || pathname === '/autonomy/runs' || pathname === '/autonomy/events' || pathname === '/autonomy/context')) {
     // First-pass bearer check; the DO re-verifies.
     if (!(await verifyBearerToken(await bearerOf(request), token))) {
       return json({ code: 'auth', message: 'A valid installation token is required.' }, 401, corsOrigin);
@@ -142,6 +142,7 @@ export async function handleAutonomyRoute(pathname: string, request: Request, en
       method: request.method,
       path: pathname,
       timestamp: request.headers.get(ELARA_AUTH_TIMESTAMP_HEADER) ?? '',
+      nonce: request.headers.get(ELARA_AUTH_NONCE_HEADER) ?? '',
       signature: request.headers.get(ELARA_AUTH_SIGNATURE_HEADER) ?? '',
       body,
     }, token, Date.now());

@@ -11,7 +11,9 @@ const PAIRING: AutonomyPairing = {
   lastSyncedAt: null,
   lastSyncedContextHash: null,
   lastPulledRunsAt: 0,
+  lastPulledRunsId: '',
   lastPulledEventsAt: 0,
+  lastPulledEventsId: '',
 };
 
 beforeEach(() => {

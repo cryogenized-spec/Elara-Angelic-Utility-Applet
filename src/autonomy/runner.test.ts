@@ -105,6 +105,13 @@ describe('executeRoutineRun — authority and overlap guards', () => {
 });
 
 describe('executeRoutineRun — outcomes', () => {
+  it('records cannot_act as a distinct completed outcome', async () => {
+    await saveRoutine(makeRoutine());
+    const { run, event } = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(engineFor(textRun('{"outcome":"cannot_act","reason":"frozen context is empty"}'))));
+    expect(run).toMatchObject({ state: 'completed', outcome: 'cannot_act', reason: 'frozen context is empty' });
+    expect(event).toBeNull();
+  });
+
   it('records a completed no-op run and persists run history', async () => {
     await saveRoutine(makeRoutine());
     const toolCall: GeminiStreamEvent = { type: 'tool-call', interactionId: 'it-1', index: 2, callId: 'c1', name: 'calendar.listEvents', arguments: {} };

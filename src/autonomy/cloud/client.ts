@@ -162,13 +162,25 @@ export async function fetchSchedulerState(pairing: AutonomyPairing): Promise<Clo
   return bearerGet<CloudSchedulerState>(pairing, '/autonomy/state');
 }
 
-/** Pull cloud scheduler observation records for the local run history. */
-export async function fetchCloudRuns(pairing: AutonomyPairing, since: number): Promise<RoutineRunRecord[]> {
-  const body = await bearerGet<{ runs: RoutineRunRecord[] }>(pairing, `/autonomy/runs?since=${Math.max(0, Math.floor(since))}`);
-  return body.runs;
+export interface HistoryPage<T> {
+  items: T[];
+  next: { at: number; id: string } | null;
+  limit: number;
 }
 
-export async function fetchCloudEvents(pairing: AutonomyPairing, since: number): Promise<import('../contracts').AutonomousEvent[]> {
-  const body = await bearerGet<{ events: import('../contracts').AutonomousEvent[] }>(pairing, `/autonomy/events?since=${Math.max(0, Math.floor(since))}`);
-  return body.events;
+/** One keyset page of cloud run history (strictly after the cursor). */
+export async function fetchCloudRunsPage(pairing: AutonomyPairing, afterAt: number, afterId: string, limit = 200): Promise<HistoryPage<RoutineRunRecord>> {
+  const body = await bearerGet<{ runs: RoutineRunRecord[]; next: { at: number; id: string } | null; limit?: number }>(
+    pairing,
+    `/autonomy/runs?afterAt=${Math.max(0, Math.floor(afterAt))}&afterId=${encodeURIComponent(afterId)}&limit=${limit}`,
+  );
+  return { items: body.runs ?? [], next: body.next ?? null, limit: body.limit ?? limit };
+}
+
+export async function fetchCloudEventsPage(pairing: AutonomyPairing, afterAt: number, afterId: string, limit = 200): Promise<HistoryPage<import('../contracts').AutonomousEvent>> {
+  const body = await bearerGet<{ events: import('../contracts').AutonomousEvent[]; next: { at: number; id: string } | null; limit?: number }>(
+    pairing,
+    `/autonomy/events?afterAt=${Math.max(0, Math.floor(afterAt))}&afterId=${encodeURIComponent(afterId)}&limit=${limit}`,
+  );
+  return { items: body.events ?? [], next: body.next ?? null, limit: body.limit ?? limit };
 }

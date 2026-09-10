@@ -7,6 +7,35 @@ import { AutonomyEngine } from './engine';
  * binds AutonomyEngine, which does not expose these mutators as RPC.
  */
 export class TestAutonomyEngine extends AutonomyEngine {
+  private dispatchHold: Promise<void> | null = null;
+  private releaseDispatchHold: (() => void) | null = null;
+  private dispatchEntered: Promise<void> | null = null;
+  private markDispatchEntered: (() => void) | null = null;
+
+  async holdNextDispatch(): Promise<void> {
+    this.dispatchEntered = new Promise((resolve) => {
+      this.markDispatchEntered = resolve;
+    });
+    this.dispatchHold = new Promise((resolve) => {
+      this.releaseDispatchHold = resolve;
+    });
+  }
+
+  async waitUntilDispatchHeld(): Promise<void> {
+    if (this.dispatchEntered) await this.dispatchEntered;
+  }
+
+  async releaseHeldDispatch(): Promise<void> {
+    this.releaseDispatchHold?.();
+    this.dispatchHold = null;
+    this.releaseDispatchHold = null;
+  }
+
+  protected override async beforeWorkflowDispatch(): Promise<void> {
+    this.markDispatchEntered?.();
+    if (this.dispatchHold) await this.dispatchHold;
+  }
+
   async claimWithoutDispatch(routineId: string, dueAt: number): Promise<{ runKey: string; workflowInstanceId: string; dispatched: boolean }> {
     const now = Date.now();
     const generation = this.stateGeneration();

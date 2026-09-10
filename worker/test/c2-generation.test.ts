@@ -15,6 +15,9 @@ type EngineHarness = DurableObjectStub & {
   setMasterEnabled(enabled: boolean): Promise<{ enabled: boolean }>;
   disableRoutine(routineId: string): Promise<{ disabled: boolean }>;
   deleteRoutineMirror(routineId: string): Promise<{ deleted: boolean }>;
+  holdNextDispatch(): Promise<void>;
+  waitUntilDispatchHeld(): Promise<void>;
+  releaseHeldDispatch(): Promise<void>;
 };
 
 async function stub(): Promise<EngineHarness> {
@@ -179,6 +182,34 @@ describe('Phase C2 — generation enforcement', () => {
     const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
     expect(runs.find((run) => run.runKey === claimed.runKey)).toMatchObject({ state: 'failed', errorCode: STALE_GENERATION_CODE });
     expect(((await (await doFetch(await bearerRead('/autonomy/events?since=0'))).json()) as { events: AutonomousEvent[] }).events).toHaveLength(0);
+    expect(await dueAt(routine.id)).toBeNull();
+  });
+
+  it('cannot_act is persisted as cannot_act, not no-op', { timeout: 20_000 }, async () => {
+    const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
+    const engine = await stub();
+    const claimed = await engine.claimWithoutDispatch(routine.id, Date.now() - 10 * 60_000);
+    const response = await complete(claimed.runKey, claimed.workflowInstanceId, { disposition: 'cannot_act', reason: 'frozen context is empty' } as never);
+    expect(((await response.json()) as { status: string }).status).toBe('completed');
+    const runs = ((await (await doFetch(await bearerRead('/autonomy/runs'))).json()) as { runs: RoutineRunRecord[] }).runs;
+    expect(runs.find((run) => run.runKey === claimed.runKey)).toMatchObject({ state: 'completed', outcome: 'cannot_act', reason: 'frozen context is empty' });
+  });
+
+  it('config change during held dispatch cannot advance the stale schedule', { timeout: 20_000 }, async () => {
+    const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
+    const engine = await stub();
+    const due = Date.now() - 10 * 60_000;
+    const claimed = await engine.claimWithoutDispatch(routine.id, due);
+    await engine.holdNextDispatch();
+    const heartbeat = doFetch(await internalDo('/heartbeat', { method: 'POST' }));
+    await engine.waitUntilDispatchHeld();
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(2, [{ ...routine, enabled: false }])))).status).toBe(200);
+    await engine.releaseHeldDispatch();
+    expect((await heartbeat).status).toBe(200);
+    const runs = ((await (await doFetch(await bearerRead('/autonomy/runs'))).json()) as { runs: RoutineRunRecord[] }).runs;
+    expect(runs.find((run) => run.runKey === claimed.runKey)).toMatchObject({ state: 'failed', errorCode: STALE_GENERATION_CODE });
     expect(await dueAt(routine.id)).toBeNull();
   });
 

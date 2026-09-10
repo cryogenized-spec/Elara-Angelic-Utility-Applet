@@ -5,7 +5,7 @@ import { googleGeminiFunctionDeclarations } from '../../src/google/tools/gemini-
 import { ELARA_INTERNAL_HEADER, deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { autonomyPreflight, handleAutonomyRoute } from './autonomy/routes';
 
-// The Phase B autonomy engine Durable Object (one per installation). Re-exported
+// The autonomy engine Durable Object (one per installation). Re-exported
 // so the AUTONOMY binding can construct it.
 export { AutonomyEngine } from './autonomy/engine';
 export { RoutineRunWorkflow } from './autonomy/workflow';

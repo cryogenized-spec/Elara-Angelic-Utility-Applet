@@ -96,7 +96,9 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
         lastSyncedAt: null,
         lastSyncedContextHash: null,
         lastPulledRunsAt: 0,
+        lastPulledRunsId: '',
         lastPulledEventsAt: 0,
+        lastPulledEventsId: '',
       };
       savePairing(pairing);
       setPairing(pairing);
@@ -200,7 +202,7 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
       </div>
       <span>
         Connected to <code>{pairing.workerUrl}</code> · installation {pairing.installationId.slice(0, 8)} · worker v{pairing.workerVersion}.
-        The scheduler decides <em>when</em> each routine is due and records the observation — cloud execution itself arrives in the next phase.
+        The scheduler decides <em>when</em> each routine is due. Cloud-native routines execute in the worker (memory only). Google-backed routines stay on this device.
       </span>
       <div className="autonomy-cloud__meta">
         <span>Master switch: {state?.autonomyEnabled ? 'on' : 'off'}</span>

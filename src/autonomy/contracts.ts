@@ -143,12 +143,14 @@ export type RoutineRunState = (typeof ROUTINE_RUN_STATES)[number];
 // - 'missed': RESERVED for the Phase B scheduler (an occurrence whose grace
 //   window passed without executing). Nothing in A1 produces it.
 
-export const ROUTINE_RUN_OUTCOMES = ['no-op', 'event', 'suppressed', 'error', 'skipped', 'missed'] as const;
+export const ROUTINE_RUN_OUTCOMES = ['no-op', 'cannot_act', 'event', 'suppressed', 'error', 'skipped', 'missed'] as const;
 export type RoutineRunOutcome = (typeof ROUTINE_RUN_OUTCOMES)[number];
 
 // Outcome semantics (authoritative — these must never be conflated):
 // - 'no-op': the run EXECUTED successfully and found nothing worth surfacing.
 //   Silence is a successful outcome, not an error.
+// - 'cannot_act': the run EXECUTED but the frozen context/permissions were
+//   insufficient to act honestly. Terminal, non-event, distinct from silence.
 // - 'event': the run executed and its proposal PASSED the deterministic
 //   admission policy; an AutonomousEvent exists and eventId is set.
 // - 'suppressed': the run executed and the model PROPOSED an event, but

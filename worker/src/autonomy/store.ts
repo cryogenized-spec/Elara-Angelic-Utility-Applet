@@ -244,10 +244,11 @@ export class AutonomyStore {
       .map((row) => ({ record: JSON.parse(row.record) as RoutineRunRecord, generation: row.generation, locus: row.locus as 'cloud' | 'device' }));
   }
 
-  listRunsSince(since: number, limit = 200): RoutineRunRecord[] {
-    return this.sql.exec<{ record: string }>('SELECT record FROM runs WHERE startedAt > ? ORDER BY startedAt DESC LIMIT ?', since, limit)
-      .toArray()
-      .map((row) => JSON.parse(row.record) as RoutineRunRecord);
+  listRunsPage(afterAt: number, afterId: string, limit: number): RoutineRunRecord[] {
+    return this.sql.exec<{ record: string }>(
+      'SELECT record FROM runs WHERE startedAt > ? OR (startedAt = ? AND id > ?) ORDER BY startedAt ASC, id ASC LIMIT ?',
+      afterAt, afterAt, afterId, limit,
+    ).toArray().map((row) => JSON.parse(row.record) as RoutineRunRecord);
   }
 
   /**
@@ -292,10 +293,11 @@ export class AutonomyStore {
     return row ? JSON.parse(row.record) as AutonomousEvent : undefined;
   }
 
-  listEventsSince(since: number, limit = 200): AutonomousEvent[] {
-    return this.sql.exec<{ record: string }>('SELECT record FROM events WHERE createdAt >= ? ORDER BY createdAt DESC, id DESC LIMIT ?', since, limit)
-      .toArray()
-      .map((row) => JSON.parse(row.record) as AutonomousEvent);
+  listEventsPage(afterAt: number, afterId: string, limit: number): AutonomousEvent[] {
+    return this.sql.exec<{ record: string }>(
+      'SELECT record FROM events WHERE createdAt > ? OR (createdAt = ? AND id > ?) ORDER BY createdAt ASC, id ASC LIMIT ?',
+      afterAt, afterAt, afterId, limit,
+    ).toArray().map((row) => JSON.parse(row.record) as AutonomousEvent);
   }
 
   listRecentEvents(since: number): AutonomousEvent[] {
@@ -376,7 +378,7 @@ export class AutonomyStore {
           ...stored.record,
           completedAt: input.now,
           state: 'completed',
-          outcome: 'no-op',
+          outcome: result.disposition === 'cannot_act' ? 'cannot_act' : 'no-op',
           reason: result.reason,
           itemsExamined: result.disposition === 'noop' ? result.itemsExamined : undefined,
         }, claimGeneration, stored.locus);

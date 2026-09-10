@@ -53,6 +53,15 @@ describe('composeRoutineSystemInstruction', () => {
     expect(instruction).toContain('Africa/Johannesburg');
   });
 
+  it('describes cloud execution as frozen context with no tools', () => {
+    const cloud = normalizeRoutine({ ...routine, permissions: { memory: true, google: [] } });
+    const instruction = composeRoutineSystemInstruction(cloud, '- [CORE id-1] Title: Body');
+    expect(instruction).toContain('no Google, no web, no tools');
+    expect(instruction).not.toContain('Content you retrieve — tasks, calendar events');
+    expect(instruction).toContain('You have no retrieval loop and no tools');
+    expect(instruction).toContain('Cite only records present in the frozen context');
+  });
+
   it('never includes the interactive Character Master persona', () => {
     const instruction = composeRoutineSystemInstruction(routine, '');
     expect(instruction).not.toContain('Character Master');

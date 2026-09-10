@@ -32,6 +32,7 @@ import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type ElaraRout
 import { routineRunEnvelopeSchema, runCompleteRequestSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 import { eventIdForRunKey, workflowInstanceIdForRunKey } from '../../../src/autonomy/workflow-identity';
 import { hashConfigPayload } from '../../../src/autonomy/config-identity';
+import { nextHistoryCursor, parseHistoryCursor } from '../../../src/autonomy/history-page';
 import { AutonomyStore } from './store';
 import type { SchedulerPort } from './ports';
 
@@ -107,7 +108,7 @@ export class AutonomyEngine extends DurableObject {
 
   /**
    * Full write verification: bearer possession, HMAC signature over
-   * method+path+timestamp+body, timestamp window, and the nonce ledger
+   * method+path+timestamp+nonce+body, timestamp window, and the nonce ledger
    * (strict replay rejection — the ledger is durable and local to this DO).
    */
   private async verifyWrite(request: Request, path: string, body: string): Promise<AuthOutcome> {
@@ -118,7 +119,7 @@ export class AutonomyEngine extends DurableObject {
     const timestamp = request.headers.get(ELARA_AUTH_TIMESTAMP_HEADER) ?? '';
     const signature = request.headers.get(ELARA_AUTH_SIGNATURE_HEADER) ?? '';
     const nonce = request.headers.get(ELARA_AUTH_NONCE_HEADER) ?? '';
-    const verified = await verifySignedWrite({ method: request.method, path, timestamp, signature, body }, token, Date.now());
+    const verified = await verifySignedWrite({ method: request.method, path, timestamp, nonce, signature, body }, token, Date.now());
     if (!verified.ok || !verified.installationId) {
       const status = verified.code === 'stale-timestamp' ? 409 : 401;
       return { ok: false, status, code: verified.code ?? 'bad-signature', message: `Write rejected: ${verified.code ?? 'bad-signature'}.` };
@@ -169,14 +170,16 @@ export class AutonomyEngine extends DurableObject {
       if (request.method === 'GET' && path === '/autonomy/runs') {
         const auth = await this.verifyRead(request);
         if (!auth.ok) return Response.json({ code: auth.code, message: auth.message }, { status: auth.status });
-        const since = Number(url.searchParams.get('since') ?? '0');
-        return this.json({ runs: this.store.listRunsSince(Number.isFinite(since) ? since : 0) });
+        const { cursor, limit } = parseHistoryCursor(url.searchParams);
+        const runs = this.store.listRunsPage(cursor.at, cursor.id, limit);
+        return this.json({ runs, limit, next: nextHistoryCursor(runs, (row) => row.startedAt, limit) });
       }
       if (request.method === 'GET' && path === '/autonomy/events') {
         const auth = await this.verifyRead(request);
         if (!auth.ok) return Response.json({ code: auth.code, message: auth.message }, { status: auth.status });
-        const since = Number(url.searchParams.get('since') ?? '0');
-        return this.json({ events: this.store.listEventsSince(Number.isFinite(since) ? since : 0) });
+        const { cursor, limit } = parseHistoryCursor(url.searchParams);
+        const events = this.store.listEventsPage(cursor.at, cursor.id, limit);
+        return this.json({ events, limit, next: nextHistoryCursor(events, (row) => row.createdAt, limit) });
       }
       if (request.method === 'GET' && path === '/autonomy/context') {
         const auth = await this.verifyRead(request);
@@ -541,6 +544,9 @@ export class AutonomyEngine extends DurableObject {
    * Envelope generations are frozen snapshots. C2 re-reads live
    * configGeneration at completeClaim — never here.
    */
+  /** Test hook: TestAutonomyEngine parks here to force config mutation mid-dispatch. */
+  protected async beforeWorkflowDispatch(): Promise<void> {}
+
   private async dispatchWorkflow(envelope: RoutineRunEnvelope, now: number, generation: number): Promise<boolean> {
     const binding = this.autonomyEnv.ROUTINE_RUN;
     if (!binding) {
@@ -548,6 +554,7 @@ export class AutonomyEngine extends DurableObject {
       return false;
     }
     try {
+      await this.beforeWorkflowDispatch();
       try {
         await binding.create({ id: envelope.workflowInstanceId, params: envelope });
       } catch (error) {
@@ -606,7 +613,23 @@ export class AutonomyEngine extends DurableObject {
       const ok = await this.dispatchWorkflow(envelopeRow.envelope, now, generation);
       if (!ok) return;
     }
-    if (liveRoutine) this.advanceScheduleIfNeeded(runKey, liveRoutine, now, generation, stored.record.scheduledFor);
+    // Re-read after any await. Schedule advance uses the FROZEN routine and
+    // only while the claim is still current. Admission also advances
+    // idempotently via scheduleAdvanced.
+    const after = this.store.getEnvelope(runKey);
+    const storedAfter = this.store.getStoredRun(runKey);
+    if (!after || !storedAfter || (storedAfter.record.state !== 'pending' && storedAfter.record.state !== 'running')) return;
+    const liveConfigAfter = this.store.getMetaNumber('configGeneration', 0);
+    const liveRoutineAfter = this.store.getRoutine(storedAfter.record.routineId);
+    const masterAfter = this.store.getMetaBoolean('autonomyEnabled', false);
+    const stillCurrent = after.envelope.configGeneration === liveConfigAfter && masterAfter && Boolean(liveRoutineAfter?.enabled);
+    if (!stillCurrent) {
+      const rejected = this.store.terminalizeInactiveClaim(runKey, now);
+      if (rejected === 'stale') this.journal(now, 'stale-generation', { generation, routineId: storedAfter.record.routineId, occurrence: storedAfter.record.scheduledFor, detail: runKey });
+      if (rejected === 'cancelled') this.journal(now, 'cancelled-admission', { generation, routineId: storedAfter.record.routineId, occurrence: storedAfter.record.scheduledFor, detail: runKey });
+      return;
+    }
+    this.advanceScheduleIfNeeded(runKey, after.envelope.routine, now, generation, storedAfter.record.scheduledFor);
   }
 
   private async recoverInFlight(now: number): Promise<void> {

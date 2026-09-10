@@ -91,8 +91,9 @@ request. Effectively zero; no paid plan is required for Phase B.
 4. **Where checked:** `AutonomyStore.completeCloudAdmission`, inside the same SQLite transaction as event insert / run terminalization. The Workflow does not compare generations.
 5. **When stale** (`frozen.configGeneration !== live configGeneration`): no event, no schedule advance at admission, terminal `STALE_GENERATION`, HTTP `status: stale`. Dispatch-time schedule advances are not rewound.
 6. **Live gates (separate from generation):** master-off, routine disable, routine delete → `cancelled-admission`, also no event and no schedule advance at that admission. When a real config sync turns the master off it also bumps `configGeneration`, so those in-flight claims fail as stale (still fail-closed).
-7. **Equal generation:** accepted only as an idempotent replay of the same payload hash. A different body at the same generation is `409 config-conflict`.
-8. **Recovery:** `recoverInFlight` must not dispatch or advance a claim whose frozen generation or live gates no longer match; it terminalizes instead. Current-generation schedule advance is inside the admission transaction (and still allowed at dispatch only while the claim is current).
+7. **Equal generation:** accepted only as an idempotent replay of the same payload hash. A different body at the same generation is `409 config-conflict`. The app adopts the worker generation and does not replay the rejected payload.
+8. **Recovery:** `recoverInFlight` must not dispatch or advance a claim whose frozen generation or live gates no longer match; it terminalizes instead. After Workflow `create()` yields, gates are re-read. Schedule advance uses the **frozen** routine and only while the claim is still current. Admission advances idempotently (`scheduleAdvanced`).
+9. **Signed writes:** HMAC covers `method`, `path`, `timestamp`, `nonce`, and `body`. The DO nonce ledger still rejects replays.
 | **Autonomy Context** — a bounded, read-only memory projection | app → worker | **A separate opt-in flag per memory** (`autonomyContext`, default off). ≤ 200 records, ≤ 100 KB, only active, non-expired, established (CORE/CONTEXTUAL/EPISODIC) memories you explicitly ticked. |
 | Scheduler observations (run records) | worker → app | Implied — pulled into your local run history on app open. |
 

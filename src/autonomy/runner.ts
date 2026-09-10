@@ -288,7 +288,7 @@ export async function executeRoutineRun(
     return finish({ state: 'completed', outcome: 'no-op', ...(parsed.outcome.reason ? { reason: parsed.outcome.reason } : {}), ...(parsed.outcome.itemsExamined !== undefined ? { itemsExamined: parsed.outcome.itemsExamined } : {}) });
   }
   if (parsed.outcome.outcome === 'cannot_act') {
-    return finish({ state: 'completed', outcome: 'no-op', reason: parsed.outcome.reason });
+    return finish({ state: 'completed', outcome: 'cannot_act', reason: parsed.outcome.reason });
   }
 
   // Event proposal → deterministic policy gate (code decides, not the model).

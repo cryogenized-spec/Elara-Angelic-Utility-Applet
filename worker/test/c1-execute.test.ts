@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CloudExecuteRetryError, executeCloudRoutine } from '../src/autonomy/cloud-execute';
+import { CloudExecuteRetryError, executeCloudRoutine, formatFrozenContext } from '../src/autonomy/cloud-execute';
 import { makeRoutine } from './helpers';
 import type { RoutineRunEnvelope } from '../../src/autonomy/envelope';
 
@@ -47,6 +47,29 @@ describe('C1 executeCloudRoutine', () => {
       }),
     });
     expect(result).toMatchObject({ disposition: 'event', title: 'Inbox note' });
+  });
+
+  it('projects frozen context record-by-record under the model budget', () => {
+    const records = Array.from({ length: 40 }, (_, index) => ({
+      id: `mem-${String(index).padStart(3, '0')}`,
+      kind: 'CORE',
+      title: `Title ${index}`,
+      body: 'x'.repeat(400),
+      tags: [],
+      importance: 1,
+      confidence: 1,
+      observedAt: 1,
+      updatedAt: 1,
+    }));
+    const packed = envelope();
+    packed.routine = { ...packed.routine, permissions: { memory: true, google: [] } };
+    packed.context = { contentHash: 'a'.repeat(64), syncedAt: 1, records };
+    const first = formatFrozenContext(packed);
+    const second = formatFrozenContext(packed);
+    expect(first).toBe(second);
+    expect(first.length).toBeLessThanOrEqual(12_080);
+    expect(first).toContain('mem-000');
+    expect(first.split('\n').length).toBeLessThan(records.length);
   });
 
   it('maps a Gemini JSON outcome through the completeTurn hook', async () => {

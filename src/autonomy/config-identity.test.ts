@@ -25,6 +25,20 @@ describe('hashConfigPayload', () => {
     expect(a).toHaveLength(64);
   });
 
+  it('is stable across nested property insertion order', async () => {
+    const a = await hashConfigPayload({ enabled: true, maxEventsPerDay: 10, routines: [routine] });
+    const b = await hashConfigPayload({
+      maxEventsPerDay: 10,
+      enabled: true,
+      routines: [{
+        ...routine,
+        permissions: { google: [], memory: false },
+        delivery: { minImportanceForPush: 2, push: false, inbox: true },
+      }],
+    });
+    expect(a).toBe(b);
+  });
+
   it('changes when enabled, budget, or a routine field changes', async () => {
     const base = await hashConfigPayload({ enabled: true, maxEventsPerDay: 10, routines: [routine] });
     expect(await hashConfigPayload({ enabled: false, maxEventsPerDay: 10, routines: [routine] })).not.toBe(base);

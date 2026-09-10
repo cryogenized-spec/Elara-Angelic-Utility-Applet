@@ -17,14 +17,33 @@ export class CloudExecuteRetryError extends Error {
   }
 }
 
-function formatFrozenContext(envelope: RoutineRunEnvelope): string {
+/** Model-facing budget. The stored Autonomy Context pack may be larger. */
+export const CLOUD_MODEL_CONTEXT_MAX_CHARS = 12_000;
+const CLOUD_MODEL_RECORD_BODY_MAX = 800;
+
+export function formatFrozenContext(envelope: RoutineRunEnvelope): string {
   if (!envelope.routine.permissions.memory) return '';
   const records = envelope.context?.records ?? [];
   if (!records.length) return 'Autonomy Context is empty or unavailable for this run.';
-  return records.map((record) => {
+  const lines: string[] = [];
+  let omitted = 0;
+  for (const record of records) {
     const row = record as { id?: string; kind?: string; title?: string; body?: string };
-    return `- [${row.kind ?? 'record'} ${row.id ?? ''}] ${row.title ?? ''}: ${String(row.body ?? '').slice(0, 800)}`;
-  }).join('\n').slice(0, 12_000);
+    const line = `- [${row.kind ?? 'record'} ${row.id ?? ''}] ${row.title ?? ''}: ${String(row.body ?? '').slice(0, CLOUD_MODEL_RECORD_BODY_MAX)}`;
+    const next = lines.length ? `${lines.join('\n')}\n${line}` : line;
+    if (next.length > CLOUD_MODEL_CONTEXT_MAX_CHARS) {
+      omitted += 1;
+      continue;
+    }
+    lines.push(line);
+  }
+  if (!lines.length) return 'Autonomy Context was stored but omitted from this model prompt (over the model-facing budget).';
+  if (omitted > 0) {
+    const note = `\n[${omitted} frozen record(s) omitted from this prompt; they were not supplied to the model.]`;
+    const body = lines.join('\n');
+    return (body + note).length <= CLOUD_MODEL_CONTEXT_MAX_CHARS ? body + note : body;
+  }
+  return lines.join('\n');
 }
 
 export async function completeCloudGeminiTurn(apiKey: string, systemInstruction: string, input: string): Promise<string> {

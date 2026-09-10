@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
 import type { Attachment } from '../domain/artifact';
 import { artifactRepository } from '../artifacts/repository';
@@ -419,6 +419,12 @@ export function App() {
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
+  // Stable identity for the memoised conversation surface: dispatch to the
+  // latest `regenerate` closure through a ref so nothing can go stale.
+  const regenerateRef = useRef(regenerate);
+  useEffect(() => { regenerateRef.current = regenerate; });
+  const handleRegenerate = useCallback((messageId: string) => { void regenerateRef.current(messageId); }, []);
+
   function captureFailedAttempt(attempt: FailedTurnAttempt) {
     // Snapshot the message list: the retry base must never observe later mutations.
     setFailedAttempt({ ...attempt, base: { ...attempt.base, messages: [...attempt.base.messages] } });
@@ -452,7 +458,10 @@ export function App() {
   async function finishFirstRun(): Promise<void> { await completeOnboarding(); setFirstRunWelcomeOpen(false); }
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
   const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity, '--body-font-size': `${uiSettings.chatTextSize}px` } as React.CSSProperties), [chatAppearance, uiSettings.chatTextSize]);
-  const visibleMessages = conversation.messages.filter((message) => message.conversationId === conversation.id);
+  // Stable identity: the conversation surface is memoised, and rebuilding this
+  // array on every render (including every composer keystroke) used to force
+  // every message body through `react-markdown` again.
+  const visibleMessages = useMemo(() => conversation.messages.filter((message) => message.conversationId === conversation.id), [conversation]);
   const canRetry = canRetryFailedTurn(status, failedAttempt, conversation.id);
   const showLockboxAction = structuredError !== null && (structuredError.category === 'configuration' || structuredError.category === 'authentication' || structuredError.category === 'authorization' || structuredError.code === 'GEMINI_LOCKBOX_LOCKED');
   if (settingsOpen) return <SettingsScreen initialSection={settingsSection} font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value: ChatAppearancePreferences) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} enterToSend={uiSettings.enterToSend} onEnterToSendChange={(value) => handleUiSettingsChange({ enterToSend: value })} onBack={() => setSettingsOpen(false)} />;
@@ -461,7 +470,7 @@ export function App() {
     <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button></div>
     <PortraitBanner collapsed={sidebarOpen} scale={uiSettings.portraitScale} background={uiSettings.portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
     <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} systemInstruction={character.systemInstruction} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
-    <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={uiSettings.chatTextSize} generation={generation} onRegenerate={(messageId) => void regenerate(messageId)} />
+    <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={uiSettings.chatTextSize} generation={generation} onRegenerate={handleRegenerate} />
     {error && <GenerationError message={error} structured={structuredError} onRetry={canRetry ? () => void retryLastTurn() : null} onOpenLockbox={showLockboxAction ? () => openLockbox() : null} />}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} attachments={draftAttachments} onFilesSelected={(files) => void handleFilesSelected(files)} onRemoveAttachment={(id) => void removeDraftAttachment(id)} enterToSend={uiSettings.enterToSend} />
     {pwaUpdateAvailable && <UpdateToast onRefresh={() => applyPwaUpdate()} onDismiss={() => setPwaUpdateAvailable(false)} />}

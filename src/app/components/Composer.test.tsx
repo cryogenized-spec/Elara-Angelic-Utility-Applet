@@ -126,3 +126,98 @@ describe('Composer Enter behaviour', () => {
     });
   });
 });
+
+describe('Composer secondary tools (paperclip menu)', () => {
+  function paperclipButton(): HTMLButtonElement { return container.querySelector('button[aria-label="Composer tools"]')!; }
+  function menu(): HTMLElement { return container.querySelector('.composer__attachment-menu')!; }
+  function openMenu(): void { act(() => { paperclipButton().click(); }); }
+  function menuItem(name: RegExp): HTMLButtonElement {
+    return Array.from(menu().querySelectorAll('button')).find((button) => name.test(button.getAttribute('aria-label') ?? '')) as HTMLButtonElement;
+  }
+
+  it('does not spend editor width on a standalone Markdown button', () => {
+    render();
+    expect(container.querySelector('.composer__markdown')).toBeNull();
+    // The Markdown reference is reachable, but only from the paperclip menu.
+    expect(container.querySelector('button[aria-label="Markdown reference"]')).toBeNull();
+    openMenu();
+    expect(menuItem(/Markdown reference/)).toBeTruthy();
+  });
+
+  it('opens the paperclip menu as a single home for attachment and Markdown actions', () => {
+    render();
+    expect(menu()).toBeNull();
+    openMenu();
+    expect(paperclipButton().getAttribute('aria-expanded')).toBe('true');
+    expect(menu().getAttribute('role')).toBe('menu');
+    for (const name of [/Camera/, /Photos/, /File \/ Document/, /Markdown reference/]) {
+      expect(menuItem(name), `missing action ${String(name)}`).toBeTruthy();
+    }
+    expect(menu().querySelectorAll('button')).toHaveLength(4);
+  });
+
+  it('gives every icon-led action an accessible name, tooltip and glyph', () => {
+    render();
+    openMenu();
+    for (const button of Array.from(menu().querySelectorAll('button'))) {
+      expect(button.getAttribute('aria-label')?.trim().length ?? 0).toBeGreaterThan(0);
+      expect(button.getAttribute('title')?.trim().length ?? 0).toBeGreaterThan(0);
+      expect(button.querySelector('svg')).not.toBeNull();
+      expect(button.textContent?.trim().length ?? 0).toBeGreaterThan(0);
+    }
+  });
+
+  it('preserves the attachment sources and their file inputs', () => {
+    render();
+    openMenu();
+    const camera = container.querySelector<HTMLInputElement>('input[type="file"][capture="environment"]')!;
+    const gallery = container.querySelector<HTMLInputElement>('input[type="file"][accept="image/*"]:not([capture])')!;
+    const document = container.querySelector<HTMLInputElement>('input[type="file"][accept*="application/pdf"]')!;
+    expect(camera).not.toBeNull();
+    expect(gallery.multiple).toBe(true);
+    expect(document.multiple).toBe(true);
+
+    const clicks: string[] = [];
+    for (const [label, input] of [[/Camera/, camera], [/Photos/, gallery], [/File \/ Document/, document]] as const) {
+      const spy = vi.spyOn(input, 'click').mockImplementation(() => { clicks.push(input.accept || input.capture); });
+      act(() => { menuItem(label as RegExp).click(); });
+      spy.mockRestore();
+    }
+    expect(clicks).toEqual(['image/*', 'image/*', 'application/pdf,text/plain,text/markdown,application/json,text/csv,application/javascript,text/javascript,text/css,text/html,application/xml,text/xml']);
+  });
+
+  it('opens the Markdown reference from the menu and closes the menu behind it', () => {
+    render();
+    openMenu();
+    act(() => { menuItem(/Markdown reference/).click(); });
+    expect(container.querySelector('[role="dialog"][aria-labelledby="markdown-reference-title"]')).not.toBeNull();
+    expect(menu()).toBeNull();
+  });
+
+  it('closes the menu on Escape', () => {
+    render();
+    openMenu();
+    act(() => { document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
+    expect(menu()).toBeNull();
+  });
+
+  it('closes the menu when tapping outside it', () => {
+    render();
+    openMenu();
+    act(() => { document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })); });
+    expect(menu()).toBeNull();
+  });
+
+  it('uses the same combined menu in the expanded composer', () => {
+    render();
+    openExpanded();
+    const expandedRoot = container.querySelector('.composer-expanded')!;
+    expect(expandedRoot.querySelector('.composer__markdown')).toBeNull();
+    const trigger = expandedRoot.querySelector('button[aria-label="Composer tools"]') as HTMLButtonElement;
+    expect(trigger).not.toBeNull();
+    act(() => { trigger.click(); });
+    expect(expandedRoot.querySelector('.composer__attachment-menu')).not.toBeNull();
+    expect(Array.from(expandedRoot.querySelectorAll('.composer__attachment-menu button')).map((button) => button.getAttribute('aria-label')))
+      .toEqual(['Camera: take a photo', 'Photos / Gallery: choose an image', 'File / Document: choose a document', 'Markdown reference']);
+  });
+});

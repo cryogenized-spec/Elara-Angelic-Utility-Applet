@@ -41,14 +41,17 @@
   top: 0;
   z-index: 60;
   width: max-content;
-  min-width: 184px;
   /* Keep the right edge inside the viewport at every width: the worst-case
-     flyout left edge is ~202px (12px shell padding + 62px portrait rail
-     margin + ~120px trigger + 8px gap), plus 12px right shell padding.
-     Content wraps/ellipsizes inside the bound; interactive controls stay whole. */
-  max-width: min(248px, calc(100vw - 214px));
+     flyout left edge is ~212px (12px shell padding + 62px portrait rail
+     margin + ~130px trigger + 8px gap); 224px leaves a >=12px right gutter.
+     min-width is clamped by the same budget so it can never defeat max-width
+     (in CSS, min-width beats max-width) and push the panel off-screen.
+     Content wraps/ellipsizes inside the bound; controls stay whole. */
+  min-width: min(184px, calc(100vw - 224px));
+  max-width: min(248px, calc(100vw - 224px));
   max-height: min(60vh, 440px);
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 8px;
   border: 1px solid rgba(255,255,255,.1);
   border-radius: 16px;
@@ -58,7 +61,8 @@
   -webkit-backdrop-filter: blur(18px);
 }
 .workspace-menu__header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 7px 8px; border-bottom: 1px solid rgba(255,255,255,.07); color: rgba(255,255,255,.56); font-size: 10px; letter-spacing: .12em; }
-.workspace-menu__header button { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 9px; color: rgba(255,255,255,.7); background: rgba(255,255,255,.045); }
+.workspace-menu__header button { display: grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 0; border-radius: 10px; color: rgba(255,255,255,.7); background: rgba(255,255,255,.045); }
+.workspace-menu__header button:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 .workspace-menu__services { display: grid; gap: 4px; padding-top: 8px; }
 .workspace-service { display: grid; gap: 4px; }
 .workspace-service__row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; padding: 7px 9px; border: 1px solid transparent; border-radius: 11px; background: transparent; color: rgba(255,255,255,.88); text-align: left; }
@@ -72,7 +76,7 @@
 .workspace-service__text > span { font-size: 13px; font-weight: 650; line-height: 1.2; }
 .workspace-service__text > small { overflow: hidden; color: rgba(255,255,255,.42); font-size: 9px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .workspace-service__shortcuts { display: grid; gap: 3px; padding: 2px 0 4px 26px; }
-.workspace-menu__item { display: grid; gap: 2px; width: 100%; padding: 9px 10px; border: 1px solid transparent; border-radius: 10px; text-align: left; color: rgba(255,255,255,.9); background: rgba(255,255,255,.02); }
+.workspace-menu__item { display: grid; gap: 2px; width: 100%; min-height: 44px; padding: 9px 10px; border: 1px solid transparent; border-radius: 10px; text-align: left; color: rgba(255,255,255,.9); background: rgba(255,255,255,.02); }
 .workspace-menu__item:hover, .workspace-menu__item:focus-visible { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.08); outline: none; }
 .workspace-menu__item span { font-size: 13px; line-height: 1.2; }
 .workspace-menu__item small { font-size: 11px; line-height: 1.35; color: rgba(255,255,255,.48); }
@@ -81,10 +85,17 @@
   .workspace-trigger { min-height: 44px; }
 }
 
-@media (max-width: 380px) {
-  /* Very narrow phones cannot fit a side flyout: drop it below the trigger,
-     where the full viewport width is available again. */
-  .workspace-menu { left: 0; top: calc(100% + 8px); max-height: 62vh; max-width: min(248px, calc(100vw - 24px)); }
+/* Below ~400px the side flyout would be squeezed under ~180px, so it drops
+   below the trigger where the full viewport width is available again. Above it,
+   the flyout always opens to the right and stays inside the viewport. */
+@media (max-width: 400px) {
+  .workspace-menu {
+    left: 0;
+    top: calc(100% + 8px);
+    min-width: min(184px, calc(100vw - 24px));
+    max-width: min(248px, calc(100vw - 24px));
+    max-height: 62vh;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

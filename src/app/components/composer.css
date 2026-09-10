@@ -1,5 +1,23 @@
-.composer.composer { grid-template-columns: 38px 38px minmax(0,1fr) 40px 42px; grid-template-rows: 42px; align-items: stretch; gap: 12px; min-width: 0; }
-.composer textarea { display: block; max-height: 132px; min-height: 42px; overflow-y: hidden; }
+.composer.composer { grid-template-columns: 38px minmax(0,1fr) 40px 42px; grid-template-rows: minmax(42px, auto); align-items: end; gap: 12px; min-width: 0; }
+/* Autosize contract: the compact editor grows with the draft to roughly
+   --composer-visible-lines lines, then scrolls internally. The bound is derived
+   from the editor's own line-height (the CSS default mirrors the declared
+   1.35 ratio; the autosize hook publishes the measured value in px), so it
+   follows typography changes instead of being a fixed pixel constant.
+   `field-sizing: content` lets Chromium size the field natively — no DOM
+   measurement on the typing path at all. */
+.composer textarea.composer__input {
+  --composer-visible-lines: 10;
+  --composer-line-height: calc(1.35 * 1em);
+  --composer-block-extra: 22px;
+  display: block;
+  min-height: max(42px, calc(var(--composer-line-height) + var(--composer-block-extra)));
+  max-height: calc(var(--composer-visible-lines) * var(--composer-line-height) + var(--composer-block-extra));
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+  field-sizing: content;
+}
 .composer__input-wrap { position: relative; min-width: 0; width: 100%; }
 .composer__input-wrap textarea { padding-right: 42px; }
 .composer__expand { position: absolute; top: 50%; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; transform: translateY(-50%); border: 0; border-radius: 9px; background: transparent; color: rgba(255,255,255,.48); }
@@ -8,8 +26,6 @@
 .composer__send.is-cancel { color: var(--text); background: rgba(240, 123, 220, .14); border-color: rgba(240, 123, 220, .3); }
 .composer__icon:disabled, .composer textarea:disabled { cursor: not-allowed; opacity: .55; }
 .composer__expand:disabled { cursor: not-allowed; opacity: .45; }
-.composer__markdown { display: grid; place-items: center; font-size: 0; }
-.composer__markdown svg { display: block; width: 21px; height: 13px; }
 
 .composer__vtt-control { position: relative; display: grid; min-width: 0; width: 40px; justify-self: center; }
 .composer__vtt-button { position: relative; overflow: visible; isolation: isolate; width: 40px; }
@@ -91,7 +107,7 @@
 .composer-expanded-open { overflow: hidden; }
 
 @media (max-width: 560px) {
-  .composer.composer { grid-template-columns: 38px 38px minmax(0,1fr) 40px 42px; gap: 11px; }
+  .composer.composer { grid-template-columns: 38px minmax(0,1fr) 40px 42px; gap: 11px; }
   .composer__vtt-button { width: 40px; }
   .composer__vtt-menu { min-width: 150px; }
   .composer__vtt-banner { grid-template-columns: auto minmax(0,1fr) auto; gap: 7px; width: min(100% - 10px, 760px); }
@@ -100,20 +116,26 @@
 }
 
 @media (max-width: 390px) {
-  .composer.composer { grid-template-columns: 36px 36px minmax(0,1fr) 38px 42px; gap: 8px; }
+  .composer.composer { grid-template-columns: 36px minmax(0,1fr) 38px 42px; gap: 8px; }
   .composer__icon { width: 36px; }
   .composer__vtt-button { width: 38px; }
   .composer__send { width: 42px; }
 }
 .composer__attachment-control { position: relative; display: grid; min-width: 0; width: 38px; justify-self: center; }
 .composer__file-input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap; }
-.composer__attachment-menu { position: absolute; left: 0; bottom: calc(100% + 10px); z-index: 35; display: grid; gap: 4px; min-width: 190px; padding: 7px; border: 1px solid rgba(255,255,255,.12); border-radius: 15px; background: rgba(17,16,24,.97); box-shadow: 0 18px 42px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05); backdrop-filter: blur(18px) saturate(135%); -webkit-backdrop-filter: blur(18px) saturate(135%); }
-.composer__attachment-menu button { display: grid; gap: 2px; width: 100%; min-height: 42px; padding: 7px 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: rgba(255,255,255,.78); font-size: 11px; font-weight: 700; text-align: left; }
+.composer__attachment-menu { position: absolute; left: 0; bottom: calc(100% + 10px); z-index: 35; display: grid; gap: 3px; min-width: 196px; padding: 7px; border: 1px solid rgba(255,255,255,.12); border-radius: 15px; background: rgba(17,16,24,.97); box-shadow: 0 18px 42px rgba(0,0,0,.42), inset 0 1px 0 rgba(255,255,255,.05); backdrop-filter: blur(18px) saturate(135%); -webkit-backdrop-filter: blur(18px) saturate(135%); }
+/* Icon-first rows: the Lucide glyph leads, the label and its one-line
+   description keep every action unambiguous. */
+.composer__attachment-menu button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 46px; padding: 7px 10px; border: 1px solid transparent; border-radius: 10px; background: transparent; color: rgba(255,255,255,.78); font-size: 11px; font-weight: 700; text-align: left; }
+.composer__attachment-menu button > svg { flex: none; color: var(--blue); opacity: .9; }
+.composer__attachment-menu-text { display: grid; gap: 2px; min-width: 0; }
+.composer__attachment-menu-text > span { line-height: 1.25; }
 .composer__attachment-menu button small { color: rgba(255,255,255,.4); font-size: 9px; font-weight: 400; }
+.composer__attachment-menu-title { margin: 3px 0 1px; padding: 0 10px; color: rgba(255,255,255,.38); font-size: 8px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; }
 .composer__attachment-menu button:hover,.composer__attachment-menu button:focus-visible { border-color: rgba(110,168,255,.2); background: rgba(255,255,255,.075); color: var(--text); outline: none; }
 .composer__attachments { width: min(100% - 12px, 720px); margin: 0 auto 8px; grid-template-columns: repeat(auto-fit,minmax(180px,1fr)); }
 .composer__attachments .artifact-card { min-width: 0; }
 .composer__attachment-hint { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
 .composer__attachment-hint strong { color: var(--blue); font-weight: 600; }
 .composer-expanded .composer__attachments { width: 100%; margin-bottom: 0; }
-@media (max-width: 390px) { .composer__attachment-menu { left: -35px; min-width: 180px; } }
+@media (max-width: 390px) { .composer__attachment-menu { left: -4px; min-width: 188px; } }

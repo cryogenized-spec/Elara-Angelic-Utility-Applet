@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import 'fake-indexeddb/auto';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { DEFAULT_APP_UI } from '../domain/preferences';
-import { normalizeAppUiPreferences, normalizeChatAppearance, normalizeRoleplay } from './preferences';
+import {
+  loadAppUiPreferences,
+  normalizeAppUiPreferences,
+  normalizeChatAppearance,
+  normalizeRoleplay,
+  saveAppUiPreferences,
+} from './preferences';
 
 const longString = 'x'.repeat(400);
 
@@ -69,5 +76,35 @@ describe('preference normalization', () => {
     expect(value.environmentName).toHaveLength(160);
     expect(value.environmentName.startsWith('x')).toBe(true);
     expect(value.environmentDescription).toBe('Scene');
+  });
+});
+
+describe('enterToSend persistence', () => {
+  beforeEach(async () => {
+    await saveAppUiPreferences(DEFAULT_APP_UI);
+  });
+
+  it('persists the preference under the existing app-ui record', async () => {
+    await saveAppUiPreferences({ ...DEFAULT_APP_UI, enterToSend: false });
+    const loaded = await loadAppUiPreferences();
+    expect(loaded.enterToSend).toBe(false);
+    // Nothing else about the app-ui record is disturbed.
+    expect(loaded.font).toEqual(DEFAULT_APP_UI.font);
+    expect(loaded.chatTextSize).toBe(DEFAULT_APP_UI.chatTextSize);
+    expect(loaded.portraitScale).toBe(DEFAULT_APP_UI.portraitScale);
+    expect(loaded.portraitBackground).toBe(DEFAULT_APP_UI.portraitBackground);
+  });
+
+  it('defaults to Enter = Send when nothing has been stored', async () => {
+    const loaded = normalizeAppUiPreferences(await loadAppUiPreferences());
+    expect(loaded.enterToSend).toBe(true);
+  });
+
+  it('survives a save/load round trip in both directions', async () => {
+    for (const value of [false, true, false]) {
+      const saved = await saveAppUiPreferences({ ...DEFAULT_APP_UI, enterToSend: value });
+      expect(saved.enterToSend).toBe(value);
+      expect((await loadAppUiPreferences()).enterToSend).toBe(value);
+    }
   });
 });

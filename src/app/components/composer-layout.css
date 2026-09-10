@@ -2,9 +2,11 @@
 .app-shell form.composer {
   position: relative;
   flex: 0 0 auto;
-  grid-template-columns: 36px 36px minmax(0, 1fr) 40px 42px;
-  grid-template-rows: 42px;
-  align-items: stretch;
+  grid-template-columns: 36px minmax(0, 1fr) 40px 42px;
+  /* The row grows with the autosized editor; the fixed-height icon buttons
+     stay anchored to its bottom edge. */
+  grid-template-rows: minmax(42px, auto);
+  align-items: end;
   gap: 8px;
   grid-auto-flow: column;
   margin-top: 0;
@@ -23,14 +25,14 @@
 
 @media (min-width: 561px) {
   .app-shell form.composer {
-    grid-template-columns: 38px 38px minmax(0, 1fr) 40px 42px;
+    grid-template-columns: 38px minmax(0, 1fr) 40px 42px;
     gap: 9px;
   }
 }
 
 @media (max-width: 390px) {
   .app-shell form.composer {
-    grid-template-columns: 34px 34px minmax(0, 1fr) 38px 42px;
+    grid-template-columns: 34px minmax(0, 1fr) 38px 42px;
     gap: 6px;
   }
 

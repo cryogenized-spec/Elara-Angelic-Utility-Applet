@@ -57,7 +57,8 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 
 .error { margin: 0 0 8px 54px; padding: 10px 12px; border-radius: 13px; background: rgba(82,24,48,.48); border: 1px solid rgba(240,123,220,.18); color: #ffdfe9; font-size: 12px; }
 .composer { position: sticky; bottom: 0; display: grid; grid-template-columns: 40px minmax(0,1fr) 40px 42px; gap: 7px; margin-left: 54px; padding: 9px 0 max(8px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent 0, rgba(5,5,7,.92) 28%, #050507 58%); z-index: 4; }
-.composer textarea { width: 100%; min-height: 42px; max-height: 132px; resize: none; overflow-y: auto; border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; background: rgba(15,16,23,.82); color: inherit; line-height: 1.35; outline: none; }
+/* Height bounds live in composer.css: they are derived from the editor's line-height (see the autosize contract there). */
+.composer textarea { width: 100%; resize: none; overflow-y: auto; border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; background: rgba(15,16,23,.82); color: inherit; line-height: 1.35; outline: none; }
 .composer textarea:focus { border-color: rgba(110,168,255,.42); }
 .composer__icon, .composer__send { width: 40px; height: 42px; border-radius: 14px; }
 .composer__send { width: 42px; color: #08090e; background: linear-gradient(135deg, #77b1ff, #ef86db); border-color: transparent; }

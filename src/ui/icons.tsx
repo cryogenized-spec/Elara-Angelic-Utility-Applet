@@ -3,11 +3,13 @@ import type { LucideIcon } from 'lucide-react';
 import {
   Bot,
   CalendarDays,
+  Camera,
   ChevronDown,
   ChevronRight,
   FileCode2,
   FileText,
   Folder,
+  Image as ImageIcon,
   ListTodo,
   Loader2,
   LockKeyhole,
@@ -45,6 +47,8 @@ export type IconName =
   | 'mail'
   | 'plus'
   | 'paperclip'
+  | 'camera'
+  | 'image'
   | 'mic'
   | 'send'
   | 'chevron'
@@ -81,6 +85,8 @@ const icons: Record<IconName, LucideIcon> = {
   mail: Mail,
   plus: Plus,
   paperclip: Paperclip,
+  camera: Camera,
+  image: ImageIcon,
   mic: Mic,
   send: Send,
   chevron: ChevronDown,

@@ -20,7 +20,7 @@ export class TestAutonomyEngine extends AutonomyEngine {
     this.store.claimCloudRun({
       id: runId, runKey, routineId: routine.id, routineName: routine.name, executionMode,
       scheduledFor: dueAt, startedAt: now, state: 'running',
-    }, envelope, generation);
+    }, envelope, envelope.configGeneration);
     this.store.upsertSchedule(routine.id, dueAt, now);
     this.journal(now, 'claimed', { generation, routineId: routine.id, occurrence: dueAt, detail: envelope.workflowInstanceId });
     return { runKey, workflowInstanceId: envelope.workflowInstanceId, dispatched: false };

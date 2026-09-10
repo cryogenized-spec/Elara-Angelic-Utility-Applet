@@ -168,6 +168,20 @@ describe('Phase C2 — generation enforcement', () => {
     expect(events[0].title).toBe('Fresh racer');
   });
 
+  it('real config sync to N+1 terminalizes an in-flight claim without resurrecting its schedule', { timeout: 20_000 }, async () => {
+    const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);
+    const engine = await stub();
+    const due = Date.now() - 10 * 60_000;
+    const claimed = await engine.claimWithoutDispatch(routine.id, due);
+    const disabled = { ...routine, enabled: false };
+    expect((await doFetch(await signedWrite('/autonomy/config', configPayload(2, [disabled])))).status).toBe(200);
+    const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
+    expect(runs.find((run) => run.runKey === claimed.runKey)).toMatchObject({ state: 'failed', errorCode: STALE_GENERATION_CODE });
+    expect(((await (await doFetch(await bearerRead('/autonomy/events?since=0'))).json()) as { events: AutonomousEvent[] }).events).toHaveLength(0);
+    expect(await dueAt(routine.id)).toBeNull();
+  });
+
   it('wrong workflow identity is 409 even when the run is also stale', { timeout: 20_000 }, async () => {
     const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
     expect((await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])))).status).toBe(200);

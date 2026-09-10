@@ -200,7 +200,7 @@ describe('AutonomyCloud (unpaired render)', () => {
     window.localStorage.clear();
     const html = renderToStaticMarkup(<AutonomyCloud onNotice={() => undefined} />);
     expect(html).toContain('Cloud scheduler — not connected');
-    expect(html).toContain('dry runs');
+    expect(html).toContain('Cloudflare worker');
     expect(html).not.toContain('Connected to');
   });
 });

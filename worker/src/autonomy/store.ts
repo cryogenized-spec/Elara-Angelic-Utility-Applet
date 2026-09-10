@@ -4,11 +4,12 @@ import {
   CLOUD_RUN_RETENTION_COUNT,
   CLOUD_RUN_RETENTION_MS,
   SCHEDULER_JOURNAL_MAX,
+  STALE_GENERATION_CODE,
+  nextOccurrenceAfterProcessed,
   type SchedulerJournalEntry,
 } from '../../../src/autonomy/scheduler';
 import { normalizeRoutine, type AutonomousEvent, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
 import { evaluateEventAdmission, noveltyFingerprint } from '../../../src/autonomy/policy';
-import { STALE_GENERATION_CODE } from '../../../src/autonomy/scheduler';
 import type { RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 import type { CloudAdmitResult } from '../../../src/autonomy/cloud-result';
 
@@ -53,7 +54,7 @@ export interface ContextMetadata {
   byteSize: number;
 }
 
-type MetaKey = 'schemaVersion' | 'configGeneration' | 'stateGeneration' | 'autonomyEnabled' | 'maxEventsPerDay' | 'lastHeartbeatAt' | 'lastSyncedAt';
+type MetaKey = 'schemaVersion' | 'configGeneration' | 'stateGeneration' | 'configPayloadHash' | 'autonomyEnabled' | 'maxEventsPerDay' | 'lastHeartbeatAt' | 'lastSyncedAt';
 
 function isActiveRunState(state: RoutineRunRecord['state']): boolean {
   return state === 'pending' || state === 'running';
@@ -221,10 +222,12 @@ export class AutonomyStore {
    * crash cannot leave the schedule moved without the marker (or vice versa).
    */
   commitScheduleAdvance(routineId: string, nextDueAt: number, updatedAt: number, runKey: string | null): void {
-    this.transact(() => {
-      this.upsertSchedule(routineId, nextDueAt, updatedAt);
-      if (runKey) this.markEnvelopeScheduleAdvanced(runKey);
-    });
+    this.transact(() => this.commitScheduleAdvanceNested(routineId, nextDueAt, updatedAt, runKey));
+  }
+
+  private commitScheduleAdvanceNested(routineId: string, nextDueAt: number, updatedAt: number, runKey: string | null): void {
+    this.upsertSchedule(routineId, nextDueAt, updatedAt);
+    if (runKey) this.markEnvelopeScheduleAdvanced(runKey);
   }
 
   listEnvelopeRunKeys(): string[] {
@@ -290,7 +293,7 @@ export class AutonomyStore {
   }
 
   listEventsSince(since: number, limit = 200): AutonomousEvent[] {
-    return this.sql.exec<{ record: string }>('SELECT record FROM events WHERE createdAt > ? ORDER BY createdAt DESC LIMIT ?', since, limit)
+    return this.sql.exec<{ record: string }>('SELECT record FROM events WHERE createdAt >= ? ORDER BY createdAt DESC, id DESC LIMIT ?', since, limit)
       .toArray()
       .map((row) => JSON.parse(row.record) as AutonomousEvent);
   }
@@ -307,8 +310,9 @@ export class AutonomyStore {
 
   /**
    * C2 authoritative admission: re-read live configGeneration, master flag,
-   * and routine row in the same SQL transaction as event insert / terminalize.
-   * stateGeneration is not a stale trigger. Does not advance schedules.
+   * and routine row in the same SQL transaction as event insert, run
+   * terminalize, and (on current-generation success only) schedule advance.
+   * The runs.generation column stays the claim's configGeneration.
    */
   completeCloudAdmission(input: {
     runKey: string;
@@ -332,8 +336,8 @@ export class AutonomyStore {
         status = 'missing-envelope';
         return;
       }
+      const claimGeneration = stored.generation;
       const liveConfig = this.getMetaNumber('configGeneration', 0);
-      const stateGeneration = this.getMetaNumber('stateGeneration', 0);
       if (envelopeRow.envelope.configGeneration !== liveConfig) {
         this.updateRunRecord(input.runKey, {
           ...stored.record,
@@ -342,7 +346,7 @@ export class AutonomyStore {
           outcome: 'error',
           errorCode: STALE_GENERATION_CODE,
           errorMessage: `Frozen configGeneration ${envelopeRow.envelope.configGeneration} is stale (live ${liveConfig}).`,
-        }, stateGeneration, stored.locus);
+        }, claimGeneration, stored.locus);
         status = 'stale';
         return;
       }
@@ -356,7 +360,7 @@ export class AutonomyStore {
           outcome: 'error',
           errorCode: 'cancelled-admission',
           errorMessage: 'Live gate closed before events could be admitted.',
-        }, stateGeneration, stored.locus);
+        }, claimGeneration, stored.locus);
         status = 'cancelled';
         return;
       }
@@ -365,11 +369,9 @@ export class AutonomyStore {
       if (result.disposition === 'error') {
         this.updateRunRecord(input.runKey, {
           ...stored.record, completedAt: input.now, state: 'failed', outcome: 'error', errorCode: result.errorCode, errorMessage: result.errorMessage,
-        }, stateGeneration, stored.locus);
+        }, claimGeneration, stored.locus);
         status = 'failed';
-        return;
-      }
-      if (result.disposition === 'noop' || result.disposition === 'cannot_act') {
+      } else if (result.disposition === 'noop' || result.disposition === 'cannot_act') {
         this.updateRunRecord(input.runKey, {
           ...stored.record,
           completedAt: input.now,
@@ -377,27 +379,75 @@ export class AutonomyStore {
           outcome: 'no-op',
           reason: result.reason,
           itemsExamined: result.disposition === 'noop' ? result.itemsExamined : undefined,
-        }, stateGeneration, stored.locus);
+        }, claimGeneration, stored.locus);
         status = 'completed';
-        return;
+      } else {
+        const event: AutonomousEvent = {
+          id: input.eventId,
+          routineId: frozen.id,
+          runKey: stored.record.runKey,
+          title: result.title,
+          summary: result.summary,
+          importance: result.importance,
+          confidence: result.confidence,
+          evidence: result.evidence ?? [],
+          noveltyFingerprint: noveltyFingerprint(frozen.id, result.title, result.summary),
+          createdAt: input.now,
+          readAt: null,
+        };
+        const written = this.admitProposedEventNested({ stored: stored.record, frozen, event, generation: claimGeneration, locus: stored.locus, now: input.now });
+        status = written === 'suppressed' ? 'suppressed' : 'completed';
       }
-      const event: AutonomousEvent = {
-        id: input.eventId,
-        routineId: frozen.id,
-        runKey: stored.record.runKey,
-        title: result.title,
-        summary: result.summary,
-        importance: result.importance,
-        confidence: result.confidence,
-        evidence: result.evidence ?? [],
-        noveltyFingerprint: noveltyFingerprint(frozen.id, result.title, result.summary),
-        createdAt: input.now,
-        readAt: null,
-      };
-      const written = this.admitProposedEventNested({ stored: stored.record, frozen, event, generation: stateGeneration, locus: stored.locus, now: input.now });
-      status = written === 'suppressed' ? 'suppressed' : 'completed';
+      if (!envelopeRow.scheduleAdvanced) {
+        const next = nextOccurrenceAfterProcessed(frozen, stored.record.scheduledFor);
+        this.commitScheduleAdvanceNested(frozen.id, next, input.now, input.runKey);
+      }
     });
     return { status };
+  }
+
+  /**
+   * Recovery path: a claim whose frozen generation or live gates no longer
+   * match must not dispatch or advance. Terminalize without an event.
+   */
+  terminalizeInactiveClaim(runKey: string, now: number): 'stale' | 'cancelled' | 'current' | 'already-completed' | 'missing-envelope' {
+    let status: 'stale' | 'cancelled' | 'current' | 'already-completed' | 'missing-envelope' = 'current';
+    this.transact(() => {
+      const stored = this.getStoredRun(runKey);
+      if (!stored) {
+        status = 'missing-envelope';
+        return;
+      }
+      if (stored.record.state !== 'pending' && stored.record.state !== 'running') {
+        status = 'already-completed';
+        return;
+      }
+      const envelopeRow = this.getEnvelope(runKey);
+      if (!envelopeRow) {
+        status = 'missing-envelope';
+        return;
+      }
+      const liveConfig = this.getMetaNumber('configGeneration', 0);
+      const liveRoutine = this.getRoutine(stored.record.routineId);
+      const masterOn = this.getMetaBoolean('autonomyEnabled', false);
+      if (envelopeRow.envelope.configGeneration === liveConfig && masterOn && liveRoutine?.enabled) {
+        status = 'current';
+        return;
+      }
+      const stale = envelopeRow.envelope.configGeneration !== liveConfig;
+      this.updateRunRecord(runKey, {
+        ...stored.record,
+        completedAt: now,
+        state: 'failed',
+        outcome: 'error',
+        errorCode: stale ? STALE_GENERATION_CODE : 'cancelled-admission',
+        errorMessage: stale
+          ? `Frozen configGeneration ${envelopeRow.envelope.configGeneration} is stale (live ${liveConfig}).`
+          : 'Live gate closed before events could be admitted.',
+      }, stored.generation, stored.locus);
+      status = stale ? 'stale' : 'cancelled';
+    });
+    return status;
   }
 
   private admitProposedEventNested(input: {

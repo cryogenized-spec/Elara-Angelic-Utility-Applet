@@ -31,6 +31,7 @@ import {
 import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
 import { routineRunEnvelopeSchema, runCompleteRequestSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 import { eventIdForRunKey, workflowInstanceIdForRunKey } from '../../../src/autonomy/workflow-identity';
+import { hashConfigPayload } from '../../../src/autonomy/config-identity';
 import { AutonomyStore } from './store';
 import type { SchedulerPort } from './ports';
 
@@ -312,8 +313,18 @@ export class AutonomyEngine extends DurableObject {
     // Stale-config protection: an OLDER configuration can never overwrite a
     // newer one, no matter the network arrival order.
     const currentGeneration = this.store.getMetaNumber('configGeneration', 0);
+    const payloadHash = await hashConfigPayload(payload);
     if (payload.generation < currentGeneration) {
       return { status: 409, body: { code: 'stale-config', message: `Rejected configuration generation ${payload.generation} (current ${currentGeneration}).`, generation: currentGeneration } };
+    }
+    if (payload.generation === currentGeneration) {
+      const storedHash = this.store.getMeta('configPayloadHash');
+      if (storedHash && storedHash === payloadHash) {
+        return { status: 200, body: { accepted: true, generation: payload.generation, stateGeneration: this.stateGeneration(), processed: 0, nextAlarmAt: nextAlarmTime(this.store.listSchedules()), replay: true } };
+      }
+      if (currentGeneration > 0 || storedHash) {
+        return { status: 409, body: { code: 'config-conflict', message: 'Equal generation is only accepted as an idempotent replay of the same configuration.', generation: currentGeneration } };
+      }
     }
 
     const incoming = new Set(payload.routines.map((routine) => routine.id));
@@ -321,6 +332,7 @@ export class AutonomyEngine extends DurableObject {
     for (const existing of this.store.listRoutines()) if (!incoming.has(existing.id)) this.store.deleteRoutine(existing.id);
 
     this.store.setMeta('configGeneration', String(payload.generation));
+    this.store.setMeta('configPayloadHash', payloadHash);
     this.store.setMeta('autonomyEnabled', String(payload.enabled));
     this.store.setMeta('maxEventsPerDay', String(payload.maxEventsPerDay));
     this.store.setMeta('lastSyncedAt', String(now));
@@ -487,7 +499,7 @@ export class AutonomyEngine extends DurableObject {
             scheduledFor: entry.dueAt,
             startedAt: now,
             state: 'running',
-          }, envelope, generation);
+          }, envelope, envelope.configGeneration);
           this.journal(now, 'claimed', { generation, routineId: routine.id, occurrence: entry.dueAt, detail: envelope.workflowInstanceId });
           await this.progressClaim(runKey, now, generation, 'fresh');
         }
@@ -577,6 +589,16 @@ export class AutonomyEngine extends DurableObject {
       this.journal(now, 'error', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: `running claim ${runKey} has no envelope` });
       return;
     }
+    const liveConfig = this.store.getMetaNumber('configGeneration', 0);
+    const liveRoutine = this.store.getRoutine(stored.record.routineId);
+    const masterOn = this.store.getMetaBoolean('autonomyEnabled', false);
+    const current = envelopeRow.envelope.configGeneration === liveConfig && masterOn && Boolean(liveRoutine?.enabled);
+    if (!current) {
+      const rejected = this.store.terminalizeInactiveClaim(runKey, now);
+      if (rejected === 'stale') this.journal(now, 'stale-generation', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
+      if (rejected === 'cancelled') this.journal(now, 'cancelled-admission', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: runKey });
+      return;
+    }
     if (!envelopeRow.dispatched) {
       if (source === 'recover') {
         this.journal(now, 'recovered', { generation, routineId: stored.record.routineId, occurrence: stored.record.scheduledFor, detail: envelopeRow.envelope.workflowInstanceId });
@@ -584,8 +606,7 @@ export class AutonomyEngine extends DurableObject {
       const ok = await this.dispatchWorkflow(envelopeRow.envelope, now, generation);
       if (!ok) return;
     }
-    const routine = this.store.getRoutine(stored.record.routineId);
-    if (routine) this.advanceScheduleIfNeeded(runKey, routine, now, generation, stored.record.scheduledFor);
+    if (liveRoutine) this.advanceScheduleIfNeeded(runKey, liveRoutine, now, generation, stored.record.scheduledFor);
   }
 
   private async recoverInFlight(now: number): Promise<void> {

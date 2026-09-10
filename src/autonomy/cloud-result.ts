@@ -26,6 +26,8 @@ export const cloudAdmitResultSchema = z.discriminatedUnion('disposition', [
     importance: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     confidence: z.union([z.literal(1), z.literal(2), z.literal(3)]),
     itemsExamined: z.number().int().min(0).max(100_000).optional(),
+    // Empty/omitted evidence is allowed: a routine-derived reminder may have
+    // no memory cite. When present, every item must be kind memory.
     evidence: z.array(z.strictObject({
       kind: z.literal('memory'),
       ref: z.string().min(1).max(300),

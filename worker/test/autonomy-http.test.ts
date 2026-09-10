@@ -119,6 +119,15 @@ describe('autonomy boundary — signed writes', () => {
     expect(((await stale.json()) as { code: string }).code).toBe('stale-config');
   });
 
+  it('equal generation is idempotent for the same body and conflicts for a different body', async () => {
+    const first = makeRoutine({ id: 'routine-eq' });
+    expect((await SELF.fetch(await signedWrite('/autonomy/config', configPayload(4, [first])))).status).toBe(200);
+    expect((await SELF.fetch(await signedWrite('/autonomy/config', configPayload(4, [first])))).status).toBe(200);
+    const conflict = await SELF.fetch(await signedWrite('/autonomy/config', configPayload(4, [makeRoutine({ id: 'routine-other' })])));
+    expect(conflict.status).toBe(409);
+    expect(((await conflict.json()) as { code: string }).code).toBe('config-conflict');
+  });
+
   it('reads require the bearer token', async () => {
     expect((await get('/autonomy/state')).status).toBe(401);
     expect((await get('/autonomy/state', { Authorization: 'Bearer nope' })).status).toBe(401);

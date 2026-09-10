@@ -8,13 +8,11 @@ import { clearWorkerContext, fullSync, inspectContextProjection, syncConfigurati
 import { fetchSchedulerState, type CloudSchedulerState } from '../../autonomy/cloud/client';
 
 // ---------------------------------------------------------------------------
-// Cloud scheduler card — Settings ▸ Autonomy (Phase B, DRY-RUN).
+// Cloud scheduler card — Settings ▸ Autonomy (Phase C).
 //
-// Truthful by construction: this card NEVER claims routines are executing in
-// the cloud. Phase B's scheduler observes due occurrences and records them
-// (skipped-dry-run / device-due / missed); execution arrives in Phase C. The
-// Autonomy Context card shows exactly what would travel, before and after
-// sync — consent is the per-memory flag, never inferred.
+// Cloud-native routines execute in the worker (memory-only). Google-backed
+// routines stay device-native. The Autonomy Context card shows exactly what
+// would travel — consent is the per-memory flag, never inferred.
 // ---------------------------------------------------------------------------
 
 const CONFIG_CHANGED_EVENT = 'elara-autonomy-config-changed';
@@ -170,8 +168,8 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
       <div className="autonomy-policy-card autonomy-cloud">
         <strong>Cloud scheduler — not connected</strong>
         <span>
-          Elara can wake on a schedule in <em>your own</em> Cloudflare worker, decide when each routine is due, and leave the decision in your run history — while the app is closed.
-          This phase records due occurrences as <strong>dry runs</strong>: no model runs in the cloud yet, and Google-backed routines stay on this device. Everything local keeps working without it.
+          Elara can wake on a schedule in <em>your own</em> Cloudflare worker and run cloud-native routines there (memory only — no Google credentials leave this device).
+          Google-backed routines still run on this device. Everything local keeps working without pairing.
         </span>
         <label className="autonomy-field">
           <span>Worker URL</span>
@@ -197,7 +195,7 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
   return (
     <div className="autonomy-policy-card autonomy-cloud is-paired">
       <div className="autonomy-cloud__head">
-        <strong>Cloud scheduler <span className="autonomy-badge">dry run</span></strong>
+        <strong>Cloud scheduler <span className="autonomy-badge">{state?.agentExecution === false || state?.dryRun ? 'dry run' : 'cloud execution'}</span></strong>
         <button type="button" className="autonomy-button" onClick={unpair}>Unpair</button>
       </div>
       <span>
@@ -222,7 +220,7 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
               <strong>{routine.name}</strong>
               <span>
                 {describeSchedule(routine.schedule as never)}
-                {routine.locus === 'cloud' ? ' · runs in the worker (execution: next phase)' : ' · runs on this device (worker only records due)'}
+                {routine.locus === 'cloud' ? ' · runs in the worker' : ' · runs on this device (worker only records due)'}
               </span>
               <span>{routine.nextDueAt ? `Next due: ${formatTimestamp(routine.nextDueAt)}` : 'Not scheduled (disabled or off)'}</span>
             </div>

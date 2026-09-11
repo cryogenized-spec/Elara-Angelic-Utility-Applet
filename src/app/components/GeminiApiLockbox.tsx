@@ -8,11 +8,15 @@ import {
   enableGeminiLockboxWithPin,
   getGeminiLockboxMetadata,
   getGeminiLockboxStatus,
+  getYouTubeLockboxStatus,
+  clearYouTubeApiKey,
+  saveYouTubeApiKey,
   isGeminiLockboxPin,
   lockGeminiApiKey,
   saveGeminiApiKey,
   unlockGeminiApiKey,
   unlockGeminiApiKeyWithPin,
+  type LockboxSecretStatus,
 } from '../../persistence/gemini-api-key';
 import { changeGeminiLockboxPin, switchGeminiLockboxToPin } from '../../persistence/gemini-lockbox-settings';
 import {
@@ -34,7 +38,10 @@ export function GeminiApiLockbox() {
   const [hasPasskey, setHasPasskey] = useState(false);
   const [passkeyAvailable, setPasskeyAvailable] = useState(false);
   const [detail, setDetail] = useState('');
+  const [youtubeStatus, setYoutubeStatus] = useState<LockboxSecretStatus>('empty');
   const keyRef = useRef<HTMLInputElement>(null);
+  const youtubeKeyRef = useRef<HTMLInputElement>(null);
+  const youtubeCredentialRef = useRef<HTMLInputElement>(null);
   const passwordRef = useRef<HTMLInputElement>(null);
   const confirmPasswordRef = useRef<HTMLInputElement>(null);
   const pinRef = useRef<HTMLInputElement>(null);
@@ -50,20 +57,23 @@ export function GeminiApiLockbox() {
 
   async function refresh() {
     try {
-      const [nextStatus, metadata, nextHasPasskey, nextPasskeyAvailable] = await Promise.all([
+      const [nextStatus, metadata, nextHasPasskey, nextPasskeyAvailable, nextYoutubeStatus] = await Promise.all([
         getGeminiLockboxStatus(),
         getGeminiLockboxMetadata(),
         hasGeminiPasskey(),
         isGeminiPlatformAuthenticatorAvailable(),
+        getYouTubeLockboxStatus(),
       ]);
       setStatus(nextStatus);
       setMode(metadata?.mode ?? 'pin');
       setHasPasskey(nextHasPasskey);
       setPasskeyAvailable(nextPasskeyAvailable);
+      setYoutubeStatus(nextYoutubeStatus);
     } catch {
       setStatus('empty');
       setMode('pin');
       setHasPasskey(false);
+      setYoutubeStatus('empty');
     }
   }
 
@@ -250,7 +260,7 @@ export function GeminiApiLockbox() {
     try {
       await removeGeminiPasskey();
       await clearGeminiApiKey();
-      clearInputs(keyRef, passwordRef, confirmPasswordRef, pinRef, confirmPinRef, currentPinRef, switchPinRef, newPinRef, confirmNewPinRef, upgradePinRef, unlockPasswordRef, reenablePinRef, reenablePinConfirmRef);
+      clearInputs(keyRef, passwordRef, confirmPasswordRef, pinRef, confirmPinRef, currentPinRef, switchPinRef, newPinRef, confirmNewPinRef, upgradePinRef, unlockPasswordRef, reenablePinRef, reenablePinConfirmRef, youtubeKeyRef, youtubeCredentialRef);
       setStatus('empty');
       setMode('pin');
       setHasPasskey(false);
@@ -264,6 +274,39 @@ export function GeminiApiLockbox() {
     lockGeminiApiKey();
     setStatus('locked');
     setDetail('Lockbox locked. The API key is no longer available to the Gemini client.');
+  }
+
+  async function saveYouTubeKey() {
+    const value = read(youtubeKeyRef);
+    const credential = read(youtubeCredentialRef);
+    if (!value) {
+      setDetail('Paste a YouTube Data API v3 key first.');
+      return;
+    }
+    if (mode !== 'off' && !credential) {
+      setDetail(pinCapable ? 'Enter your current Lockbox PIN to encrypt the YouTube key.' : 'Enter your current Lockbox password to encrypt the YouTube key.');
+      return;
+    }
+    try {
+      await saveYouTubeApiKey(value, credential);
+      clearInputs(youtubeKeyRef, youtubeCredentialRef);
+      await refresh();
+      setDetail('YouTube Data API key encrypted in the Lockbox.');
+    } catch (error) {
+      setDetail(error instanceof Error ? error.message : 'Could not save the YouTube API key.');
+    }
+  }
+
+  async function clearYouTube() {
+    if (!window.confirm('Remove the encrypted YouTube Data API key from this browser?')) return;
+    try {
+      await clearYouTubeApiKey();
+      clearInputs(youtubeKeyRef, youtubeCredentialRef);
+      await refresh();
+      setDetail('YouTube Data API key removed from this browser.');
+    } catch (error) {
+      setDetail(error instanceof Error ? error.message : 'Could not remove the YouTube API key.');
+    }
   }
 
   const dataState = status === 'unlocked' ? 'healthy' : status === 'empty' ? 'degraded' : 'unknown';
@@ -366,6 +409,26 @@ export function GeminiApiLockbox() {
         <>
           <div className="worker-health__endpoint">Encrypted at rest · session unlocked · security mode: Password</div>
           <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={lock}>Lock</button><button className="model-settings__button worker-health__button" type="button" onClick={() => void turnOffSecurity()}>Turn Security Off</button><button className="model-settings__button worker-health__button" type="button" onClick={() => void clear()}>Clear Lockbox</button></div>
+        </>
+      )}
+
+      {status === 'unlocked' && (
+        <>
+          <div className="worker-health__endpoint">{youtubeStatus === 'unlocked'
+            ? 'YouTube Data API · configured · unlocked'
+            : youtubeStatus === 'mismatch'
+              ? 'YouTube Data API · saved under a different credential · re-save'
+              : youtubeStatus === 'locked'
+                ? 'YouTube Data API · configured · locked'
+                : 'YouTube Data API · not configured'}</div>
+          <label className="character-field"><span>YouTube API key</span><input ref={youtubeKeyRef} type="password" aria-label="YouTube API key" placeholder="Paste your YouTube Data API v3 key" autoComplete="off" spellCheck={false} /></label>
+          {mode !== 'off' && (
+            <label className="character-field"><span>{pinCapable ? 'Current Lockbox PIN' : 'Current Lockbox password'}</span><input ref={youtubeCredentialRef} type="password" aria-label="Current Lockbox credential for the YouTube key" placeholder={pinCapable ? 'Current PIN' : 'Current password'} inputMode={pinCapable ? 'numeric' : undefined} maxLength={pinCapable ? GEMINI_LOCKBOX_PIN_MAX_LENGTH : undefined} autoComplete="current-password" onKeyDown={(event) => { if (event.key === 'Enter') void saveYouTubeKey(); }} /></label>
+          )}
+          <div className="worker-health__actions">
+            <button className="model-settings__button worker-health__button" type="button" onClick={() => void saveYouTubeKey()}>{youtubeStatus === 'empty' ? 'Save YouTube Key' : 'Replace YouTube Key'}</button>
+            {youtubeStatus !== 'empty' && <button className="model-settings__button worker-health__button" type="button" onClick={() => void clearYouTube()}>Remove YouTube Key</button>}
+          </div>
         </>
       )}
 

@@ -16,6 +16,23 @@ Classify as safe public configuration: model IDs, feature flags, non-secret UI c
 
 Consumers receive the minimum capability required for an operation. No component receives a general-purpose `getSecret()` API. Secrets never enter React context, ordinary state stores, conversation records, analytics, diagnostic exports, or log payloads.
 
+## Credential records
+
+The Lockbox stores a keyed set of encrypted credential records rather than a single key. Each record has a fixed, compile-time identity — currently `gemini-api-key` and `youtube-api-key` — and is read and written only through that credential's own named accessors. There is no runtime lookup by arbitrary identifier, so generalizing the store does not weaken the access model above.
+
+The `gemini-api-key` record is the security authority. It alone carries the security metadata: the mode (`off`, `password`, `pin`, `passkey`), the failed-attempt counter, and the lockout deadline. Secondary records inherit the mode from it and are encrypted with the same unlock credential, so one unlock opens every credential in the Lockbox.
+
+Because a secondary record can have been written under a credential that no longer matches the primary, an unlock decrypts the primary first — with full backoff accounting — and then decrypts secondaries best effort. A secondary that fails to open is recorded and surfaced as its own `mismatch` status instead of failing the unlock. The user is told to save it again under the current credential; the undecryptable value is never displayed or echoed.
+
+Two invariants follow from the shared authority and are covered by tests:
+
+- Changing the Lockbox PIN re-encrypts every secondary record, not just the Gemini key. Otherwise a rotation would permanently orphan them.
+- Clearing the Lockbox removes every credential record. An orphaned secondary inherits its mode from the primary, so with the primary gone it would report itself unlocked while being impossible to decrypt.
+
+A credential added while security mode is `off` is encrypted with a device-local key generated for that purpose; it is not stored in plaintext, and it remains readable while security stays off.
+
+The stored value of any credential is write-only. The Settings surface reports a credential as configured, locked, or mismatched, and never renders the saved value back into the page.
+
 ## Gemini
 
 Although `@google/genai` supports browser initialization, production Elara must not bundle an application-owned Gemini secret into the client. The protected credential is supplied at the approved Worker/security boundary.

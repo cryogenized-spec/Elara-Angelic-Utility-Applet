@@ -141,6 +141,20 @@ function reasonOf(payload: unknown): string | undefined {
   return isRecord(first) ? boundedText(first.reason, 64) : undefined;
 }
 
+function markNetworkAttempted(error: unknown): void {
+  if (!error || typeof error !== 'object') return;
+  try {
+    Object.defineProperty(error, 'networkAttempted', {
+      configurable: true,
+      enumerable: false,
+      value: true,
+      writable: false,
+    });
+  } catch {
+    // The original error must still propagate as-is even when it cannot be annotated.
+  }
+}
+
 export function createYouTubeProvider(options: YouTubeSearchOptions): MediaProvider {
   const runFetch = options.fetch ?? globalThis.fetch.bind(globalThis);
   const maxResults = Math.min(Math.max(options.maxResults ?? MAX_MEDIA_ITEMS_PER_QUERY, 1), MAX_MEDIA_ITEMS_PER_QUERY);
@@ -165,29 +179,28 @@ export function createYouTubeProvider(options: YouTubeSearchOptions): MediaProvi
     url.searchParams.set('safeSearch', 'strict');
 
     let response: Response;
+    const controller = new AbortController();
+    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const onOuterAbort = () => controller.abort();
+    request.signal?.addEventListener('abort', onOuterAbort, { once: true });
     try {
-      const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
-      const onOuterAbort = () => controller.abort();
-      request.signal?.addEventListener('abort', onOuterAbort, { once: true });
       try {
-        // From this invocation onward the provider has dispatched the network
-        // request. Any subsequent rejection is budget-consuming by contract.
         response = await runFetch(url, {
           method: 'GET',
           headers: { accept: 'application/json', 'x-goog-api-key': key },
           signal: controller.signal,
         });
       } catch (error) {
-        if (error instanceof YouTubeSearchError) throw error;
+        if (request.signal?.aborted) {
+          markNetworkAttempted(error);
+          throw error;
+        }
         throw new YouTubeSearchError('network', 'Could not reach the YouTube Data API. Check the connection and try again.', true);
-      } finally {
-        clearTimeout(timer);
-        request.signal?.removeEventListener('abort', onOuterAbort);
       }
-    } catch (error) {
-      throw error;
+    } finally {
+      clearTimeout(timer);
+      request.signal?.removeEventListener('abort', onOuterAbort);
     }
 
     if (!response.ok) {

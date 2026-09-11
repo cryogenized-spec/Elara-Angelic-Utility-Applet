@@ -21,9 +21,8 @@ import { normalizeMediaQuery } from '../normalize';
  *  3. No `videos.list` follow-up for durations. That would double the calls.
  *
  * The API key is supplied per call by a resolver and sent as the
- * `x-goog-api-key` header rather than a query parameter. Query strings are the
- * part of a request that ends up in proxy logs, DevTools history, and error
- * reports; headers do not.
+ * `x-goog-api-key` header rather than a query parameter. The key is not placed
+ * in the URL and is not intentionally logged or propagated by this adapter.
  */
 
 const SEARCH_ENDPOINT = 'https://www.googleapis.com/youtube/v3/search';
@@ -39,7 +38,11 @@ export interface YouTubeSearchOptions {
 }
 
 export class YouTubeSearchError extends Error {
-  constructor(readonly reason: MediaFailureReason, message: string) {
+  constructor(
+    readonly reason: MediaFailureReason,
+    message: string,
+    readonly networkAttempted = false,
+  ) {
     super(message);
     this.name = 'YouTubeSearchError';
   }
@@ -98,7 +101,6 @@ function toMediaItem(raw: unknown): MediaItem | undefined {
     ...(boundedText(snippet.publishedAt, 40) ? { publishedAt: boundedText(snippet.publishedAt, 40) } : {}),
     ...(pickThumbnail(snippet.thumbnails) ? { thumbnail: pickThumbnail(snippet.thumbnails) } : {}),
     webUrl,
-    // Autoplay stays off. This invariant is asserted by test, not by comment.
     embedUrl: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(resourceId)}?autoplay=0`,
   };
 }
@@ -110,22 +112,22 @@ function toMediaItem(raw: unknown): MediaItem | undefined {
  */
 function classify(status: number, reason: string | undefined): YouTubeSearchError {
   switch (status) {
-    case 400: return new YouTubeSearchError('invalid-request', 'The YouTube search request was rejected as malformed.');
+    case 400: return new YouTubeSearchError('invalid-request', 'The YouTube search request was rejected as malformed.', true);
     case 401:
     case 403: {
       if (reason === 'quotaExceeded' || reason === 'dailyLimitExceeded') {
-        return new YouTubeSearchError('quota-exceeded', 'YouTube API quota for this key is exhausted. It resets at midnight Pacific time.');
+        return new YouTubeSearchError('quota-exceeded', 'YouTube API quota for this key is exhausted. It resets at midnight Pacific time.', true);
       }
       if (reason === 'rateLimitExceeded') {
-        return new YouTubeSearchError('rate-limited', 'YouTube is rate-limiting this key. Try again shortly.');
+        return new YouTubeSearchError('rate-limited', 'YouTube is rate-limiting this key. Try again shortly.', true);
       }
-      return new YouTubeSearchError('no-api-key', 'The YouTube API key was rejected. Check it in Settings and that the YouTube Data API v3 is enabled.');
+      return new YouTubeSearchError('no-api-key', 'The YouTube API key was rejected. Check it in Settings and that the YouTube Data API v3 is enabled.', true);
     }
-    case 429: return new YouTubeSearchError('rate-limited', 'YouTube is rate-limiting this key. Try again shortly.');
+    case 429: return new YouTubeSearchError('rate-limited', 'YouTube is rate-limiting this key. Try again shortly.', true);
     default:
       return status >= 500
-        ? new YouTubeSearchError('unknown', 'YouTube returned a server error. Try again shortly.')
-        : new YouTubeSearchError('unknown', 'YouTube could not complete the search.');
+        ? new YouTubeSearchError('unknown', 'YouTube returned a server error. Try again shortly.', true)
+        : new YouTubeSearchError('unknown', 'YouTube could not complete the search.', true);
   }
 }
 
@@ -155,8 +157,6 @@ export function createYouTubeProvider(options: YouTubeSearchOptions): MediaProvi
       throw new YouTubeSearchError('no-api-key', 'No YouTube API key is configured. Add one in Settings to search YouTube.');
     }
 
-    // `type=video` + `safeSearch=strict`: this is a conversational assistant, and
-    // neither filter costs an extra call.
     const url = new URL(SEARCH_ENDPOINT);
     url.searchParams.set('part', 'snippet');
     url.searchParams.set('type', 'video');
@@ -172,18 +172,22 @@ export function createYouTubeProvider(options: YouTubeSearchOptions): MediaProvi
       const onOuterAbort = () => controller.abort();
       request.signal?.addEventListener('abort', onOuterAbort, { once: true });
       try {
+        // From this invocation onward the provider has dispatched the network
+        // request. Any subsequent rejection is budget-consuming by contract.
         response = await runFetch(url, {
           method: 'GET',
           headers: { accept: 'application/json', 'x-goog-api-key': key },
           signal: controller.signal,
         });
+      } catch (error) {
+        if (error instanceof YouTubeSearchError) throw error;
+        throw new YouTubeSearchError('network', 'Could not reach the YouTube Data API. Check the connection and try again.', true);
       } finally {
         clearTimeout(timer);
         request.signal?.removeEventListener('abort', onOuterAbort);
       }
     } catch (error) {
-      if (request.signal?.aborted) throw error;
-      throw new YouTubeSearchError('network', 'Could not reach the YouTube Data API. Check the connection and try again.');
+      throw error;
     }
 
     if (!response.ok) {
@@ -192,7 +196,12 @@ export function createYouTubeProvider(options: YouTubeSearchOptions): MediaProvi
       throw classify(response.status, reasonOf(payload));
     }
 
-    const payload: unknown = await response.json();
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch {
+      throw new YouTubeSearchError('network', 'The YouTube response could not be read.', true);
+    }
     const rawItems = isRecord(payload) && Array.isArray(payload.items) ? payload.items : [];
     const items: MediaItem[] = [];
     // `nextPageToken` is deliberately ignored. See the module rules.

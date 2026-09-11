@@ -134,7 +134,16 @@ if (!lockboxSource.includes("name: 'AES-GCM'")) throw new Error('Reliability gat
 if (!lockboxSource.includes('crypto.getRandomValues')) throw new Error('Reliability gate: Lockbox encryption must use random salt and IV material.');
 if (lockboxSource.includes('localStorage.setItem')) throw new Error('Reliability gate: Gemini API credential must never be written to localStorage.');
 if (!lockboxSource.includes('removeLegacyPlaintextKey')) throw new Error('Reliability gate: legacy plaintext Gemini API storage must be explicitly removed.');
-if (!lockboxSource.includes('let unlockedApiKey: string | null = null;')) throw new Error('Reliability gate: decrypted Gemini API key must remain session-memory-only.');
+// The Lockbox holds a keyed set of credentials, so the session store is a
+// module-level Map rather than a single nullable string. The invariant is
+// unchanged and is what these two checks assert: decrypted material lives in
+// module memory for the page session only, and locking clears it.
+if (!lockboxSource.includes('const unlockedSecrets = new Map<LockboxSecretId, string>();')) throw new Error('Reliability gate: decrypted credentials must remain session-memory-only.');
+// Both paths out of an unlocked session — locking and clearing the Lockbox —
+// must wipe the decrypted material. Counting occurrences is a blunt instrument,
+// but it does catch a regression that drops either call site, which a plain
+// presence check cannot.
+if (lockboxSource.split('unlockedSecrets.clear();').length - 1 < 2) throw new Error('Reliability gate: locking and clearing the Lockbox must both clear decrypted credentials from session memory.');
 
 const lockboxTestSource = readFileSync(join(root, 'src/persistence/gemini-api-key.test.ts'), 'utf8');
 if (!lockboxTestSource.includes('Invalid Lockbox password.')) throw new Error('Reliability gate: Lockbox tests must cover wrong-password rejection.');

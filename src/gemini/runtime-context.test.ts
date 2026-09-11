@@ -71,11 +71,11 @@ describe('runtime context', () => {
 describe('runtime context freshness boundary', () => {
   const NOW = 1_786_000_000_000;
 
-  it('sets the stale boundary at 30 continuous minutes of inactivity', () => {
+  it('sets the freshness boundary at 30 minutes since the last refresh', () => {
     expect(RUNTIME_CONTEXT_STALE_AFTER_MS).toBe(30 * 60 * 1000);
   });
 
-  it('refreshes a new thread with no recorded activity', () => {
+  it('refreshes when no runtime-context refresh was ever recorded', () => {
     expect(shouldRefreshRuntimeContext(null, NOW)).toBe(true);
     expect(shouldRefreshRuntimeContext(undefined, NOW)).toBe(true);
     expect(shouldRefreshRuntimeContext(Number.NaN, NOW)).toBe(true);
@@ -87,7 +87,7 @@ describe('runtime context freshness boundary', () => {
     expect(shouldRefreshRuntimeContext(NOW - (29 * 60 * 1000 + 59_999), NOW)).toBe(false);
   });
 
-  it('refreshes on the first invocation at or past exactly 30 minutes of inactivity', () => {
+  it('refreshes on the first invocation at or past exactly 30 minutes since the last refresh', () => {
     expect(shouldRefreshRuntimeContext(NOW - RUNTIME_CONTEXT_STALE_AFTER_MS, NOW)).toBe(true);
     expect(shouldRefreshRuntimeContext(NOW - RUNTIME_CONTEXT_STALE_AFTER_MS - 1, NOW)).toBe(true);
     expect(shouldRefreshRuntimeContext(NOW - 3_600_000, NOW)).toBe(true);

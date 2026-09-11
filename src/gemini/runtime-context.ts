@@ -3,16 +3,18 @@
  * roleplay/world framing.
  *
  * Freshness policy (NOT a generation watchdog — see DEFAULT_IDLE_STALL_TIMEOUT_MS
- * / DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS for those): a NEW thread establishes fresh
- * wall-clock context on its first invocation; an EXISTING thread re-establishes
- * it only on the first invocation after >=30 continuous minutes of thread
- * inactivity. Normal consecutive turns keep the stable guidance but omit the
- * clock. Per-thread last-invocation activity is tracked by
- * runtime-context-activity.ts (session-level localStorage, never durable
- * memory or world state).
+ * / DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS for those): runtime wall-clock context
+ * is refreshed lazily on model invocation. A refresh is required on initial
+ * runtime establishment and whenever >=30 minutes have elapsed since fresh
+ * runtime context was last established for an invocation. Normal invocations
+ * do not reset that
+ * freshness window. The application-level refresh timestamp is tracked by
+ * runtime-context-freshness.ts (localStorage bookkeeping only — never durable
+ * memory, world state, or conversation content), so app suspension/restart is
+ * handled naturally by the persisted timestamp.
  */
 
-/** Continuous thread inactivity after which the next invocation refreshes the clock. */
+/** Freshness lifetime of an established runtime clock; the next invocation at or past it refreshes. */
 export const RUNTIME_CONTEXT_STALE_AFTER_MS = 30 * 60 * 1000;
 
 const RUNTIME_CLOCK_HEADER = 'Application runtime context:';
@@ -39,7 +41,7 @@ export interface RuntimeContextOptions {
   readonly timeZone?: string;
   /**
    * When false, omit the volatile wall-clock block but keep the stable
-   * guidance. Defaults to true (new-thread / stale-thread behaviour).
+   * guidance. Defaults to true (initial establishment / stale freshness).
    */
   readonly includeClock?: boolean;
 }
@@ -72,16 +74,17 @@ export function withRuntimeContext(systemInstruction: string | undefined, option
 }
 
 /**
- * Pure freshness predicate. A thread with no recorded invocation activity is
- * new and always refreshes; otherwise the boundary is `>=` 30 minutes of
- * inactivity. A clock that moved backwards never forces a refresh.
+ * Pure freshness predicate over `nowMs - lastRefreshAt`: no recorded refresh
+ * always refreshes (initial runtime establishment); otherwise the boundary is
+ * `>=` 30 minutes since the last REAL refresh. A clock that moved backwards
+ * never forces a refresh.
  */
 export function shouldRefreshRuntimeContext(
-  lastActivityAt: number | null | undefined,
+  lastRefreshAt: number | null | undefined,
   nowMs: number,
   staleAfterMs: number = RUNTIME_CONTEXT_STALE_AFTER_MS,
 ): boolean {
-  if (typeof lastActivityAt !== 'number' || !Number.isFinite(lastActivityAt)) return true;
+  if (typeof lastRefreshAt !== 'number' || !Number.isFinite(lastRefreshAt)) return true;
   if (!Number.isFinite(nowMs)) return true;
-  return nowMs - lastActivityAt >= staleAfterMs;
+  return nowMs - lastRefreshAt >= staleAfterMs;
 }

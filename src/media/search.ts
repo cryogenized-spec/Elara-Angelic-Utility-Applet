@@ -67,8 +67,8 @@ async function defaultApiKey(): Promise<string> {
   return getYouTubeApiKey();
 }
 
-function defaultProvider(): MediaProvider {
-  cachedProvider ??= createYouTubeProvider({ apiKey: defaultApiKey });
+function defaultProvider(apiKey: () => Promise<string>): MediaProvider {
+  cachedProvider ??= createYouTubeProvider({ apiKey });
   return cachedProvider;
 }
 
@@ -81,7 +81,7 @@ export async function searchMedia(
   request: MediaSearchBatchRequest,
   options: MediaSearchOptions = {},
 ): Promise<MediaSearchBatchResult> {
-  const provider = options.provider ?? defaultProvider();
+  const provider = options.provider ?? defaultProvider(options.apiKey ?? defaultApiKey);
   const cache = options.cache ?? realCache;
   const now = options.now ?? Date.now;
 
@@ -143,9 +143,13 @@ export async function searchMedia(
         // Losing the write costs one future API call; it is not worth failing over.
       }
     } catch (error) {
-      // The call may have failed before it left the browser; give the
-      // reservation back so a configuration error does not burn the budget.
-      releaseSearch();
+      // Only a provider failure that is explicitly known to have occurred before
+      // network dispatch can refund the reservation. Once fetch was invoked, the
+      // remote API may have consumed quota even if the browser later sees an
+      // HTTP error, timeout, or malformed response.
+      if (!(error instanceof YouTubeSearchError) || !error.networkAttempted) {
+        releaseSearch();
+      }
       if (error instanceof YouTubeSearchError) {
         failures.push(Object.freeze({
           query: query.trim(),

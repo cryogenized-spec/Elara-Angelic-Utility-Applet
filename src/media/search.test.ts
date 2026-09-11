@@ -57,7 +57,6 @@ describe('media search orchestration', () => {
       { ...OPTIONS, provider },
     );
 
-    // The whole point: repeated phrasings must not each spend scarce quota.
     expect(calls).toEqual(['Dark Ambient', 'lofi beats']);
     expect(result.networkCalls).toBe(2);
     expect(result.outcomes).toHaveLength(2);
@@ -123,7 +122,7 @@ describe('media search orchestration', () => {
 
   it('reports a provider failure without sinking the rest of the batch', async () => {
     const { provider, calls } = fakeProvider((query) => {
-      if (query === 'broken') throw new YouTubeSearchError('quota-exceeded', 'Quota is gone.');
+      if (query === 'broken') throw new YouTubeSearchError('quota-exceeded', 'Quota is gone.', true);
       return {
         query,
         normalizedQuery: query,
@@ -143,16 +142,28 @@ describe('media search orchestration', () => {
       reason: 'quota-exceeded',
       message: 'Quota is gone.',
     }]);
+    expect(searchBudget().spent).toBe(3);
   });
 
-  it('gives the reservation back when the call fails, so a broken key cannot drain the budget', async () => {
-    resetSearchBudget(2);
+  it('refunds only a failure explicitly proven to occur before dispatch', async () => {
+    resetSearchBudget(1);
     const { provider } = fakeProvider(() => { throw new YouTubeSearchError('no-api-key', 'No key.'); });
+
+    await searchMedia({ queries: ['a', 'b'] }, { ...OPTIONS, provider });
+
+    expect(searchBudget().spent).toBe(0);
+  });
+
+  it('does not refund a post-dispatch HTTP failure', async () => {
+    resetSearchBudget(2);
+    const { provider } = fakeProvider(() => {
+      throw new YouTubeSearchError('rate-limited', 'Rate limited.', true);
+    });
 
     await searchMedia({ queries: ['a', 'b', 'c'] }, { ...OPTIONS, provider });
 
-    // Both allowed searches were attempted and both refunds landed.
-    expect(searchBudget().spent).toBe(0);
+    // Both attempted requests remain spent; the third query is budget-blocked.
+    expect(searchBudget().spent).toBe(2);
   });
 
   it('treats a cache read fault as a miss and still answers from the network', async () => {
@@ -164,7 +175,6 @@ describe('media search orchestration', () => {
 
     const result = await searchMedia({ queries: ['dark ambient'] }, { ...OPTIONS, provider, cache });
 
-    // Losing the cache costs one API call; it must never cost the user an answer.
     expect(calls).toEqual(['dark ambient']);
     expect(result.outcomes.map((outcome) => outcome.query)).toEqual(['dark ambient']);
     expect(result.failures).toEqual([]);

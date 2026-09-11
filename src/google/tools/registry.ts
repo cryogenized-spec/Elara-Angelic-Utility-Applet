@@ -1,4 +1,4 @@
-import type { GoogleToolDescriptor } from './contracts';
+import type { GoogleToolDescriptor, GoogleToolExecutionPlane } from './contracts';
 
 export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'calendar.listEvents', risk: 'read', capability: 'calendar.events.read', exposure: 'gemini', description: 'List calendar events with explicit filters and pagination.' },
@@ -60,4 +60,15 @@ export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'roleplay_setting.update', risk: 'write', capability: 'roleplay.world.local', exposure: 'gemini', description: 'Propose changes to a persistent Roleplay World Canvas entity.' },
   { name: 'roleplay_setting.move', risk: 'write', capability: 'roleplay.world.local', exposure: 'gemini', description: 'Propose moving a persistent Roleplay World Canvas entity.' },
   { name: 'roleplay_setting.delete', risk: 'destructive', capability: 'roleplay.world.local', exposure: 'gemini', description: 'Propose deletion of a persistent Roleplay World Canvas entity and its descendants.' },
+  { name: 'youtube.search', risk: 'read', capability: 'media.youtube.read', exposure: 'gemini', executionPlane: 'browser', description: 'Search YouTube for videos matching one or more queries. Returns resolved videos with titles, channels, and watch URLs. Batch related queries into a single call; results are cached and the per-session allowance is small.' },
 ];
+
+/**
+ * Tools a given execution plane can actually run.
+ *
+ * A tool with no `executionPlane` runs anywhere. The Worker passes `'worker'` so
+ * it never advertises a browser-only tool; the browser passes `'browser'`.
+ */
+export function googleToolsForPlane(plane: GoogleToolExecutionPlane): readonly GoogleToolDescriptor[] {
+  return googleToolRegistry.filter((descriptor) => !descriptor.executionPlane || descriptor.executionPlane === plane);
+}

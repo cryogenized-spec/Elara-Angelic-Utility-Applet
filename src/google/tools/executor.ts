@@ -9,10 +9,26 @@ import { validateDriveSheetsToolArguments, driveSheetsToolArgumentSchemas, type 
 import { validateSemanticToolArguments, semanticToolArgumentSchemas, type SemanticToolName } from './semantic-schemas';
 import { validateGoogleReadToolArguments, googleReadToolArgumentSchemas, type GoogleReadToolName } from './read-schemas';
 import { validateRoleplayWorldToolArguments, roleplayWorldToolArgumentSchemas, type RoleplayWorldToolName } from './roleplay-world-schemas';
+import { validateYouTubeToolArguments, youtubeToolArgumentSchemas, type YouTubeToolName } from '../../media/youtube-schema';
 import { loadRoleplayPreferences } from '../../persistence/preferences';
 
-export type LocalToolCapability = 'documents.local';
+export type LocalToolCapability = 'documents.local' | 'media.youtube.read';
 export type ToolCapability = GoogleCapabilityKey | LocalToolCapability;
+
+/**
+ * Capabilities satisfied inside the application rather than by a Google OAuth
+ * scope. They are not members of `googleCapabilityKeySchema`, so `safeCapability`
+ * must recognize them before it parses.
+ */
+const LOCAL_TOOL_CAPABILITIES: ReadonlySet<string> = new Set<string>(['documents.local', 'media.youtube.read']);
+
+/**
+ * Capabilities that need no OAuth authorization check. This is the local set plus
+ * `roleplay.world.local`, which is a registered capability key but is backed by
+ * local storage rather than a Google scope.
+ */
+const NON_OAUTH_CAPABILITIES: ReadonlySet<string> = new Set<string>([...LOCAL_TOOL_CAPABILITIES, 'roleplay.world.local']);
+
 export interface GoogleToolExecutionContext { readonly tool: GoogleToolName; readonly descriptor: GoogleToolDescriptor; readonly capability: ToolCapability; readonly risk: GoogleToolRisk; readonly arguments: Readonly<Record<string, unknown>>; readonly signal?: AbortSignal; readonly generationId?: string; readonly isGenerationActive?: () => boolean; }
 export type GoogleToolHandler = (context: GoogleToolExecutionContext) => Promise<unknown>;
 export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandler>>;
@@ -24,10 +40,13 @@ export type GoogleToolExecutionResult =
 function correlationId(): string { return crypto.randomUUID(); }
 function findDescriptor(tool: GoogleToolName): GoogleToolDescriptor | undefined { return googleToolRegistry.find((entry) => entry.name === tool); }
 function safeCapability(value: string): ToolCapability {
-  if (value === 'documents.local') return value;
+  if (LOCAL_TOOL_CAPABILITIES.has(value)) return value as LocalToolCapability;
   return googleCapabilityKeySchema.parse(value);
 }
 function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Record<string, unknown>> {
+  // The schema module is Zod plus two constants only; the media provider, cache,
+  // and budget stay behind the handler's dynamic import.
+  if (Object.prototype.hasOwnProperty.call(youtubeToolArgumentSchemas, tool)) return validateYouTubeToolArguments(tool as YouTubeToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(roleplayWorldToolArgumentSchemas, tool)) return validateRoleplayWorldToolArguments(tool as RoleplayWorldToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(semanticToolArgumentSchemas, tool)) return validateSemanticToolArguments(tool as SemanticToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(driveSheetsToolArgumentSchemas, tool)) return validateDriveSheetsToolArguments(tool as DriveSheetsToolName, value) as Readonly<Record<string, unknown>>;
@@ -35,8 +54,15 @@ function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Recor
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Tool arguments must be an object.');
   return Object.freeze({ ...(value as Record<string, unknown>) });
 }
+/**
+ * Narrows a capability to one backed by a Google OAuth scope. Written as a
+ * predicate rather than a set lookup so the compiler narrows at every call site.
+ */
+function isGoogleOAuthCapability(capability: ToolCapability): capability is GoogleCapabilityKey {
+  return !NON_OAUTH_CAPABILITIES.has(capability);
+}
 function authorizationNeeded(status: GoogleOAuthStatus, capability: ToolCapability): boolean {
-  if (capability === 'roleplay.world.local' || capability === 'documents.local') return false;
+  if (!isGoogleOAuthCapability(capability)) return false;
   const stateNeedsRecovery = status.state === 'disconnected' || status.state === 'needs-consent' || status.state === 'revoked' || status.state === 'reauthorization-required';
   return !isCapabilityAuthorized(capability, status.grantedCapabilities) || stateNeedsRecovery;
 }
@@ -117,7 +143,7 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
   const capability = safeCapability(descriptor.capability);
   const isRoleplayTool = validCall.tool.startsWith('roleplay_setting.');
   if (isRoleplayTool && !(await loadRoleplayPreferences()).enabled) return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
-  if (capability !== 'roleplay.world.local' && capability !== 'documents.local') {
+  if (isGoogleOAuthCapability(capability)) {
     let status: GoogleOAuthStatus;
     try { status = await options.oauth.getStatus(); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) }; }
     if (authorizationNeeded(status, capability)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: capability };

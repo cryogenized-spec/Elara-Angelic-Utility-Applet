@@ -1,4 +1,6 @@
-import { googleToolRegistry } from './registry';
+import { googleToolRegistry, googleToolsForPlane } from './registry';
+import type { GoogleToolDescriptor, GoogleToolExecutionPlane } from './contracts';
+import { MAX_MEDIA_QUERIES_PER_CALL } from '../../domain/media';
 
 export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly name: string; readonly description: string; readonly parameters: { readonly type: 'object'; readonly properties: Record<string, unknown>; readonly additionalProperties: boolean; readonly required?: readonly string[]; }; }
 
@@ -66,6 +68,15 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'roleplay_setting.update': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.'), name: stringProperty('Optional replacement name.'), description: stringProperty('Optional replacement description.'), parentId: stringProperty('Optional destination parent id.'), type: { type: 'string', enum: ['building','room','outdoor','place','area','object','world'] } },
   'roleplay_setting.move': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.'), parentId: stringProperty('Optional destination parent id.') },
   'roleplay_setting.delete': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.') },
+  'youtube.search': {
+    queries: {
+      type: 'array',
+      items: stringProperty('A YouTube search query.'),
+      minItems: 1,
+      maxItems: MAX_MEDIA_QUERIES_PER_CALL,
+      description: 'One to eight search queries. Batch related queries into a single call. Do not page: there is no pagination parameter.',
+    },
+  },
 };
 
 const requiredByTool: Record<string, readonly string[]> = {
@@ -78,11 +89,12 @@ const requiredByTool: Record<string, readonly string[]> = {
   'drive.getFile': ['fileId'], 'drive.downloadFile': ['fileId'], 'drive.createFile': ['name'], 'drive.updateFile': ['fileId', 'patch'], 'drive.moveFile': ['fileId', 'parentId'],
   'sheets.getSpreadsheet': ['spreadsheetId'], 'sheets.readRange': ['spreadsheetId', 'range'], 'sheets.writeRange': ['spreadsheetId', 'range', 'values'], 'sheets.appendRows': ['spreadsheetId', 'range', 'values'], 'sheets.updateCell': ['spreadsheetId', 'range'], 'sheets.insertRows': ['spreadsheetId', 'sheetId', 'startIndex', 'count'], 'sheets.batchUpdate': ['spreadsheetId', 'requests'],
   'roleplay_setting.create': ['type', 'name'],
+  'youtube.search': ['queries'],
 };
 
 const geminiVisibleTools = googleToolRegistry.filter((descriptor) => descriptor.exposure === 'gemini');
 
-export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaration[] = geminiVisibleTools.map((descriptor) => {
+function toFunctionDeclaration(descriptor: GoogleToolDescriptor): GeminiFunctionDeclaration {
   const properties = toolProperties[descriptor.name] ?? {};
   const required = requiredByTool[descriptor.name];
   return {
@@ -96,7 +108,29 @@ export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaratio
       ...(required ? { required } : {}),
     },
   };
-});
+}
+
+/**
+ * Every Gemini-visible declaration, regardless of execution plane.
+ *
+ * This is the browser's list, because the browser is the only plane with tool
+ * handlers. Anything that merely proxies a Gemini call — notably the Cloudflare
+ * Worker — must use {@link googleGeminiFunctionDeclarationsForPlane} instead, or
+ * it will advertise tools it cannot execute.
+ */
+export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaration[] = geminiVisibleTools.map(toFunctionDeclaration);
+
+/**
+ * Gemini-visible declarations that `plane` can actually execute.
+ *
+ * Tools with no `executionPlane` are available everywhere; browser-only tools are
+ * excluded from the Worker list so the model never calls into a dead end.
+ */
+export function googleGeminiFunctionDeclarationsForPlane(plane: GoogleToolExecutionPlane): readonly GeminiFunctionDeclaration[] {
+  return googleToolsForPlane(plane)
+    .filter((descriptor) => descriptor.exposure === 'gemini')
+    .map(toFunctionDeclaration);
+}
 
 export function googleGeminiFunctionNames(): readonly string[] {
   return geminiVisibleTools.map((tool) => tool.name);

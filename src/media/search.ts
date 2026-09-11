@@ -32,6 +32,7 @@ export interface MediaSearchBatchRequest {
 export interface MediaSearchBatchResult {
   readonly outcomes: readonly MediaSearchOutcome[];
   readonly failures: readonly MediaSearchFailure[];
+  /** Number of provider network attempts, including attempts that later fail. */
   readonly networkCalls: number;
 }
 
@@ -61,8 +62,6 @@ const realCache: MediaCachePort = {
 let cachedProvider: MediaProvider | undefined;
 
 async function defaultApiKey(): Promise<string> {
-  // Imported lazily so the Lockbox module is not a static dependency of the
-  // media chunk, and so the key is resolved fresh on every search.
   const { getYouTubeApiKey } = await import('../persistence/gemini-api-key');
   return getYouTubeApiKey();
 }
@@ -72,9 +71,13 @@ function defaultProvider(apiKey: () => Promise<string>): MediaProvider {
   return cachedProvider;
 }
 
-/** Test seam: drop the memoized provider so an injected one takes effect. */
 export function resetMediaProvider(): void {
   cachedProvider = undefined;
+}
+
+function networkAttempted(error: unknown): boolean {
+  if (error instanceof YouTubeSearchError) return error.networkAttempted;
+  return typeof error === 'object' && error !== null && (error as { networkAttempted?: unknown }).networkAttempted === true;
 }
 
 export async function searchMedia(
@@ -116,7 +119,6 @@ export async function searchMedia(
       continue;
     }
 
-    // Cache miss: this one would cost a real API call, so gate it on budget.
     if (!hasSearchBudget()) {
       failures.push(Object.freeze({
         query: query.trim(),
@@ -128,9 +130,9 @@ export async function searchMedia(
     }
 
     if (!reserveSearch()) continue;
+    networkCalls += 1;
     try {
       const outcome = await provider.search({ query, limit: request.limit, signal: request.signal });
-      networkCalls += 1;
       outcomes.push(outcome);
       try {
         await cache.write(key, {
@@ -143,13 +145,7 @@ export async function searchMedia(
         // Losing the write costs one future API call; it is not worth failing over.
       }
     } catch (error) {
-      // Only a provider failure that is explicitly known to have occurred before
-      // network dispatch can refund the reservation. Once fetch was invoked, the
-      // remote API may have consumed quota even if the browser later sees an
-      // HTTP error, timeout, or malformed response.
-      if (!(error instanceof YouTubeSearchError) || !error.networkAttempted) {
-        releaseSearch();
-      }
+      if (!networkAttempted(error)) releaseSearch();
       if (error instanceof YouTubeSearchError) {
         failures.push(Object.freeze({
           query: query.trim(),
@@ -159,8 +155,6 @@ export async function searchMedia(
         }));
         continue;
       }
-      // An unexpected fault on one query must not sink the rest of the batch:
-      // the model can still answer with whatever did resolve.
       failures.push(Object.freeze({
         query: query.trim(),
         normalizedQuery,

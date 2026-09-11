@@ -1,26 +1,66 @@
-.conversation__stream { width: min(100%, 620px); margin: 0 auto; padding: 2px 6px 0; }
+/* ==========================================================================
+   CONVERSATION SURFACE
+   --------------------------------------------------------------------------
+   Single owner of the message list and of conversation typography. The shell
+   box model (stream width, gutters, scroll) lives in layout.css.
 
-.message { max-width: min(92%, 560px); margin: 18px 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+   Typography contract
+   -------------------
+   Vertical rhythm is derived from the selected text size, never hardcoded:
+   `--chat-line-height` is a unitless ratio and `--chat-paragraph-gap` is in
+   em, so 10px text is tight and 24px text is proportionally airier, with no
+   fixed pixel spacing anywhere.
+
+   Spacing between blocks is the *renderer's* decision, not the model's:
+   Markdown is free to express paragraphs, and a paragraph is worth exactly
+   one `--chat-paragraph-gap`. That replaces the previous line-height +
+   bottom-margin + top-margin stack that compounded into the oversized gaps.
+
+   Whitespace
+   ----------
+   Assistant output is Markdown, so it gets `normal` — the parser owns the
+   structure and `pre-wrap` would double-count every source newline. User
+   input is literal text, so it keeps `pre-line` to preserve the line breaks
+   the person actually typed.
+   ========================================================================== */
+
+.message { max-width: min(92%, 560px); margin: 16px 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
 .message-user { margin-left: auto; }
-.message-assistant { margin-right: auto; max-width: min(96%, 580px); }
+.message-assistant { margin-right: auto; max-width: min(96%, 620px); }
 .message:last-child { margin-bottom: 0; }
 
 .message-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 14px; margin: 0 8px 6px; color: rgba(255,255,255,.42); font-size: 9px; letter-spacing: .15em; text-transform: uppercase; }
 .message-assistant .message-meta { color: rgba(240,123,220,.72); }
 
-.message-body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.62; }
+.message-body {
+  font-size: var(--body-font-size);
+  line-height: var(--chat-line-height);
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 .message-body > :first-child { margin-top: 0; }
 .message-body > :last-child { margin-bottom: 0; }
-.message-body p { margin: 0 0 .72em; }
-.message-body p + p { margin-top: .12em; }
+.message-body p { margin: 0; }
+.message-body p + p { margin-top: var(--chat-paragraph-gap); }
 .message-body ul, .message-body ol { margin: .2em 0 .72em; padding-inline-start: 1.25em; }
 .message-body li + li { margin-top: .18em; }
 .message-body blockquote { margin: .35em 0 .72em; padding: .15em 0 .15em .9em; border-left: 2px solid rgba(110,168,255,.22); color: rgba(255,255,255,.72); }
-.message-body pre { margin: .45em 0 .72em; padding: .75em; overflow-x: auto; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(0,0,0,.22); }
+.message-body pre { margin: .45em 0 .72em; padding: .75em; overflow-x: auto; border: 1px solid rgba(255,255,255,.08); border-radius: 10px; background: rgba(0,0,0,.22); white-space: pre-wrap; }
 .message-body code { font-size: .92em; }
 .message-body hr { margin: .75em 0; border: 0; border-top: 1px solid rgba(255,255,255,.08); }
-.message-user .message-body { padding: 11px 14px 12px; border: 1px solid rgba(110,168,255,.16); border-radius: 18px 18px 6px 18px; background: linear-gradient(135deg, rgba(60,76,112,.76), rgba(41,34,69,.82)); color: rgba(255,255,255,.9); }
-.message-assistant .message-body { padding: 8px 4px 4px 0; color: rgba(255,255,255,.94); text-shadow: 0 0 22px rgba(110,168,255,.07); }
+
+/* The bubble lives on the body, not on the row: `.message` is a transparent
+   wrapper, so there is exactly one visible surface per message. */
+.message-user .message-body {
+  padding: 11px 14px 12px;
+  border: 1px solid rgba(110,168,255,.18);
+  border-radius: 18px 18px 6px 18px;
+  background: color-mix(in srgb, var(--user-surface-color, #28344F) calc(var(--user-surface-opacity, .78) * 100%), transparent);
+  color: var(--user-text-color, var(--text));
+  white-space: pre-line;
+}
+.message-user.user-surface-frosted .message-body { backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
+.message-assistant .message-body { padding: 8px 4px 4px 0; color: var(--assistant-text-color, var(--text)); text-shadow: 0 0 22px rgba(110,168,255,.07); }
 .message-assistant + .message-assistant { margin-top: 10px; }
 .message-user + .message-user { margin-top: 10px; }
 
@@ -56,11 +96,9 @@
 .execution-summary__thought strong { color: rgba(255,255,255,.82); }
 
 @media (min-width: 720px) {
-  .conversation__stream { padding-inline: 14px; }
   .message-assistant .message-body { max-width: 88%; }
 }
 
-.conversation { position: relative; }
 .conversation__jump { position: sticky; bottom: 12px; display: block; margin: -30px auto 0; padding: 6px 14px; border-radius: 999px; border: 1px solid rgba(110,168,255,.4); background: rgba(11,12,18,.92); color: rgba(231,240,255,.9); font-size: 11px; letter-spacing: .04em; cursor: pointer; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
 .conversation__jump:hover { background: rgba(28,32,48,.95); }
 

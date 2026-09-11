@@ -43,6 +43,7 @@ import { applyPwaUpdate, initPwaUpdater } from '../pwa';
 import { Sidebar } from './components/Sidebar';
 import { SettingsScreen, type SettingsSection } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
+import { MasterPromptWarning } from './components/MasterPromptWarning';
 import { PortraitBanner } from './components/PortraitBanner';
 import { ConversationSurface } from './components/ConversationSurface';
 import { GenerationError } from './components/GenerationError';
@@ -53,7 +54,6 @@ import type { WorkspaceShortcutDefinition } from './quick-actions/shortcuts';
 import { DEFAULT_QUICK_ACTIONS } from './quick-actions/defaults';
 import '../ui/fonts.css';
 import './app.css';
-import './mobile-viewport.css';
 import './quick-action-rail.css';
 import './components/composer-layout.css';
 
@@ -467,10 +467,15 @@ export function App() {
   if (settingsOpen) return <SettingsScreen initialSection={settingsSection} font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value: ChatAppearancePreferences) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} enterToSend={uiSettings.enterToSend} onEnterToSendChange={(value) => handleUiSettingsChange({ enterToSend: value })} onBack={() => setSettingsOpen(false)} />;
   return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}>
     <div className="app-shell__background" aria-hidden="true" />
-    <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button></div>
+    {/* One authoritative control cluster: the hamburger and the Workspace
+        launcher share a column, a control height and a gap (layout.css). */}
+    <div className="control-stack" aria-label="Application controls">
+      <button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button>
+      <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
+    </div>
+    <MasterPromptWarning systemInstruction={character.systemInstruction} />
     <PortraitBanner collapsed={sidebarOpen} scale={uiSettings.portraitScale} background={uiSettings.portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
-    <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} systemInstruction={character.systemInstruction} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
-    <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={uiSettings.chatTextSize} generation={generation} onRegenerate={handleRegenerate} />
+    <ConversationSurface key={conversation.id} messages={visibleMessages} generation={generation} onRegenerate={handleRegenerate} />
     {error && <GenerationError message={error} structured={structuredError} onRetry={canRetry ? () => void retryLastTurn() : null} onOpenLockbox={showLockboxAction ? () => openLockbox() : null} />}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} attachments={draftAttachments} onFilesSelected={(files) => void handleFilesSelected(files)} onRemoveAttachment={(id) => void removeDraftAttachment(id)} enterToSend={uiSettings.enterToSend} />
     {pwaUpdateAvailable && <UpdateToast onRefresh={() => applyPwaUpdate()} onDismiss={() => setPwaUpdateAvailable(false)} />}

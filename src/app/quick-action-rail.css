@@ -1,22 +1,11 @@
-/* Give the Workspace rail an isolated paint layer so the scrolling conversation cannot paint over the controls. */
-.tool-rail { position: relative; z-index: 50; isolation: isolate; flex: 0 0 auto; min-height: 50px; padding-bottom: 6px; }
-.tool-rail::before { content: ''; position: absolute; inset: -6px -12px 0 0; z-index: -1; background: rgba(5,5,7,.96); pointer-events: none; }
+/* The Workspace launcher is a single disclosure button living inside the
+   shell's left control cluster (layout.css), directly under the hamburger.
+   Its size comes from the shared control tokens so the two controls always
+   share one geometry; nothing here invents its own. */
+.tool-rail { position: relative; z-index: 50; isolation: isolate; }
+.tool-rail--workspace { width: 100%; margin: 0; padding: 0; min-height: 0; overflow: visible; }
 
-/* Consolidated single-trigger rail: no horizontal scrolling and no
-   full-width backdrop strip — the trigger carries its own glass surface and
-   the services flyout opens to its right. */
-.tool-rail--workspace { overflow: visible; }
-.tool-rail--workspace::before { display: none; }
-
-/* Portrait presentation keeps the trigger in the open area on the LEFT, clear
-   of the absolute left spine (menu button: left 12px + 42px wide). */
-.app-shell:has(.artwork-mode-portrait) .tool-rail--workspace {
-  margin: 2px auto 4px 62px;
-  overflow: visible;
-  min-height: auto;
-}
-
-.quick-action-surface { margin: 6px 0 0 54px; display: grid; grid-template-columns: 40px minmax(0,1fr) 40px; gap: 10px; align-items: start; padding: 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 17px; background: rgba(17,18,26,.78); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: 0 14px 36px rgba(0,0,0,.24); animation: quick-action-surface-in .18s ease both; }
+.quick-action-surface { margin: 6px 0 0; display: grid; grid-template-columns: 40px minmax(0,1fr) 40px; gap: 10px; align-items: start; padding: 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 17px; background: rgba(17,18,26,.78); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: 0 14px 36px rgba(0,0,0,.24); animation: quick-action-surface-in .18s ease both; }
 .quick-action-surface__icon { width: 40px; height: 40px; display: grid; place-items: center; border: 1px solid rgba(110,168,255,.2); border-radius: 13px; background: rgba(110,168,255,.08); color: var(--blue); }
 .quick-action-surface__body { min-width: 0; }
 .quick-action-surface__eyebrow { margin-bottom: 3px; color: rgba(240,123,220,.76); font-size: 8px; letter-spacing: .17em; }

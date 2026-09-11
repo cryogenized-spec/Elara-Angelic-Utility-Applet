@@ -11,6 +11,7 @@ import { COMPOSER_VISIBLE_LINES } from './components/composer-autosize';
 const composerCss = readFileSync(resolve(process.cwd(), 'src/app/components/composer.css'), 'utf8');
 const layoutCss = readFileSync(resolve(process.cwd(), 'src/app/components/composer-layout.css'), 'utf8');
 const appCss = readFileSync(resolve(process.cwd(), 'src/app/app.css'), 'utf8');
+const layoutCss2 = readFileSync(resolve(process.cwd(), 'src/app/layout.css'), 'utf8');
 
 function columns(css: string, selector: string): string[] {
   const rule = new RegExp(`${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\{([^}]*)\\}`).exec(css)?.[1] ?? '';
@@ -121,7 +122,8 @@ describe('composer autosize bound', () => {
     // the composer reserves its own space (flex: 0 0 auto) and the conversation
     // is the only track allowed to shrink (flex: 1 1 auto; min-height: 0).
     expect(layoutCss).toMatch(/\.app-shell form\.composer \{[^}]*flex:\s*0 0 auto/);
-    const conversation = appCss.match(/\.conversation \{([^}]*)\}/)?.[1] ?? '';
+    // `.conversation` is owned by the authoritative shell geometry sheet.
+    const conversation = layoutCss2.match(/\.conversation \{([^}]*)\}/)?.[1] ?? '';
     expect(conversation).toMatch(/flex:\s*1 1 auto/);
     expect(conversation).toMatch(/min-height:\s*0/);
   });

@@ -1,18 +1,49 @@
+/* ==========================================================================
+   CHARACTER BANNER
+   --------------------------------------------------------------------------
+   The banner is the header band. It shares the shell's geometry tokens
+   (layout.css) and adds exactly one of its own concern: the portrait.
+
+   The portrait is a REAL layout box. Its width IS the selected scale — there
+   is no `transform: scale()`. A transform is applied after layout, so the
+   element lies to the layout engine: it reserves a small rectangle while
+   painting a much larger one, which is what produced artwork overflowing the
+   banner and colliding with the controls. Here the selected scale changes the
+   box the layout engine actually measures, and the banner height follows it.
+   ========================================================================== */
+
 .elara-banner {
+  /* 1 · 1.5 · 2 · 2.5 · 3, selected in Settings → Appearance. */
   --portrait-scale: 2;
+  /* One unit of scale, responsive so a 320px phone and a 412px phone both fit
+     the largest portrait without a separate breakpoint per width. */
+  --portrait-unit: clamp(44px, 14vw, 56px);
+  --portrait-width: calc(var(--portrait-unit) * var(--portrait-scale));
+  --portrait-height: calc(var(--portrait-width) * 1.25); /* 4:5 artwork */
+  /* Distance from the banner's top-right corner. */
+  --banner-inset: 8px;
+  /* Vertical space the left control cluster occupies (layout.css):
+     hamburger + gap + Workspace launcher. The identity copy is pushed below
+     it so the two never overlap. */
+  --cluster-block: calc(var(--control-size) * 2 + var(--control-gap));
+
   position: relative;
-  flex: 0 0 clamp(142px, 24vw, 176px);
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  justify-content: flex-end;
   width: 100%;
-  height: clamp(142px, 24vw, 176px);
   min-width: 0;
   margin: 0;
+  padding: calc(var(--cluster-block) + var(--gutter)) var(--banner-inset) var(--banner-inset);
+  min-height: calc(var(--portrait-height) + var(--banner-inset) * 2);
   border: 1px solid rgba(255,255,255,.09);
   border-radius: 27px;
   overflow: visible;
   background: linear-gradient(120deg, rgba(18,21,31,.96), rgba(22,19,34,.8));
   box-shadow: var(--glow);
   isolation: isolate;
-  transition: height .3s ease, border-radius .3s ease, background .3s ease;
+  transition: min-height .3s ease, border-radius .3s ease, background .3s ease;
 }
 
 .elara-banner::before {
@@ -60,16 +91,17 @@
 
 .elara-banner__landscape-placeholder { width: 100%; height: 100%; }
 
+/* Identity copy: name + presence. In flow, at the bottom-left, always clear of
+   both the control cluster above it and the portrait beside it. */
 .elara-banner__copy {
-  position: absolute;
-  left: 24px;
-  bottom: 20px;
+  position: relative;
   z-index: 3;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
+  align-self: flex-start;
   gap: 5px;
-  max-width: 48%;
+  max-width: calc(100% - var(--portrait-width) - var(--gutter));
   padding: 10px 14px;
   border-radius: 14px;
   background: rgba(5,5,7,.46);
@@ -78,25 +110,28 @@
   transition: opacity .2s ease, transform .3s ease;
 }
 
-.elara-banner h1 { margin: 0; font-size: clamp(28px, 7vw, 38px); letter-spacing: -.05em; }
+/* Landscape presentation has no portrait beside the copy. */
+.elara-banner.artwork-mode-landscape .elara-banner__copy { max-width: 100%; }
+
+.elara-banner h1 { margin: 0; font-size: clamp(28px, 7vw, 38px); letter-spacing: -.05em; line-height: 1.05; }
 .presence { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: rgba(255,255,255,.72); }
 .presence i { width: 7px; height: 7px; border-radius: 50%; background: #78f2b2; box-shadow: 0 0 13px rgba(120,242,178,.8); }
 
+/* The 4:5 portrait, pinned to the top-right corner. `width` is the scale;
+   `aspect-ratio` derives the height. Nothing here is a transform. */
 .elara-banner__portrait-float {
   position: absolute;
-  top: 25px;
-  right: 25px;
+  top: var(--banner-inset);
+  right: var(--banner-inset);
   z-index: 4;
-  width: min(104px, 24vw);
+  width: var(--portrait-width);
   aspect-ratio: 4 / 5;
   overflow: hidden;
   border: 1px solid rgba(255,255,255,.2);
   border-radius: 18px;
   background: radial-gradient(circle at 52% 38%, var(--portrait-glow-a), transparent 40%), radial-gradient(circle at 68% 72%, var(--portrait-glow-b), transparent 45%);
   box-shadow: 0 16px 34px rgba(0,0,0,.34), 0 0 32px rgba(110,168,255,.12);
-  transform: scale(var(--portrait-scale));
-  transform-origin: top right;
-  transition: transform .24s ease, opacity .2s ease;
+  transition: width .24s ease, opacity .2s ease;
 }
 
 .elara-banner__portrait-image {
@@ -126,21 +161,18 @@
 .portrait-background-violet { --portrait-glow-a: rgba(157,116,255,.36); --portrait-glow-b: rgba(240,123,220,.3); }
 .portrait-background-rose { --portrait-glow-a: rgba(255,111,174,.34); --portrait-glow-b: rgba(255,198,103,.18); }
 
-.elara-banner.is-collapsed { flex-basis: 58px; height: 58px; border-radius: 20px; overflow: hidden; }
+/* Sidebar open: the banner reduces to a 58px identity chip. */
+.elara-banner.is-collapsed {
+  justify-content: center;
+  min-height: 58px;
+  padding: 0;
+  border-radius: 20px;
+  overflow: hidden;
+}
 .elara-banner.is-collapsed .elara-banner__landscape { width: 58px; right: auto; }
 .elara-banner.is-collapsed .elara-banner__landscape-image { width: 58px; object-position: center; }
-.elara-banner.is-collapsed .elara-banner__copy { opacity: 0; transform: translateX(8px); pointer-events: none; }
+.elara-banner.is-collapsed .elara-banner__copy { display: none; }
 .elara-banner.is-collapsed .elara-banner__portrait-float { display: none; }
-
-@media (max-width: 560px) {
-  .elara-banner { margin: 0; }
-  .elara-banner__portrait-float { width: 92px; }
-  .elara-banner__copy { left: 16px; bottom: 14px; max-width: 52%; }
-}
-
-@media (max-width: 390px) {
-  .elara-banner__portrait-float { top: 20px; right: 20px; width: 82px; }
-}
 
 @media (prefers-reduced-motion: reduce) {
   .elara-banner, .elara-banner__portrait-float, .elara-banner__landscape-image, .elara-banner__copy { transition: none; }

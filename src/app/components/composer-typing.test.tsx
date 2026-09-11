@@ -48,7 +48,7 @@ function StableHarness({ messages }: { messages: ChatMessage[] }) {
   const [draft, setDraft] = useState('');
   const visible = useMemo(() => messages.filter((message) => message.conversationId === 'primary'), [messages]);
   return <>
-    <ConversationSurface key="c" messages={visible} fontSize={15} generation={null} onRegenerate={() => {}} />
+    <ConversationSurface key="c" messages={visible} generation={null} onRegenerate={() => {}} />
     <Composer draft={draft} status="idle" systemInstruction="" onDraftChange={setDraft} onSend={() => {}} onCancel={() => {}} />
   </>;
 }
@@ -57,7 +57,7 @@ function StableHarness({ messages }: { messages: ChatMessage[] }) {
 function UnstableHarness({ messages }: { messages: ChatMessage[] }) {
   const [draft, setDraft] = useState('');
   return <>
-    <ConversationSurface key="c" messages={messages.filter(() => true)} fontSize={15} generation={null} onRegenerate={() => {}} />
+    <ConversationSurface key="c" messages={messages.filter(() => true)} generation={null} onRegenerate={() => {}} />
     <Composer draft={draft} status="idle" systemInstruction="" onDraftChange={setDraft} onSend={() => {}} onCancel={() => {}} />
   </>;
 }

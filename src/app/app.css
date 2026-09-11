@@ -1,4 +1,10 @@
+@import './layout.css';
 @import './components/portrait-banner.css';
+
+/* Theme tokens and global element treatments only. Every measurement that
+   positions a shell region lives in layout.css; message and conversation
+   treatments live in components/conversation-surface.css. Nothing here may
+   re-declare a selector those sheets own. */
 
 :root {
   color-scheme: dark;
@@ -19,45 +25,34 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #root { min-height: 100%; margin: 0; }
 html { background: var(--bg); }
-body { min-width: 320px; min-height: 100dvh; background: #050507; }
+body { min-width: 320px; background: #050507; }
 button, textarea, input, select { font: inherit; }
 button { cursor: pointer; color: inherit; }
 button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
-.app-shell { position: relative; width: min(100%, 520px); min-height: 100dvh; margin: 0 auto; display: flex; flex-direction: column; padding: max(10px, env(safe-area-inset-top)) 12px max(8px, env(safe-area-inset-bottom)); overflow: hidden; isolation: isolate; }
+/* Shell box model and the control cluster live in layout.css. Only the shared
+   "glass control" surface treatment belongs here, for the controls that are
+   *not* shell geometry (sidebar icons and the composer rail). */
 .app-shell__background { position: absolute; inset: 0; z-index: -2; background: var(--chat-background, #050507); background-position: center; background-size: cover; background-repeat: no-repeat; opacity: var(--chat-background-opacity, 1); filter: blur(var(--chat-blur, 0px)); transform: scale(1.02); pointer-events: none; }
 .app-shell__background::after { content: ""; position: absolute; inset: -2%; background: rgba(5,5,7,var(--chat-overlay,.58)); pointer-events: none; }
 
-.left-spine { position: absolute; top: max(12px, env(safe-area-inset-top)); left: 12px; bottom: max(10px, env(safe-area-inset-bottom)); z-index: 20; display: flex; flex-direction: column; align-items: center; gap: 10px; pointer-events: none; }
-.left-spine > * { pointer-events: auto; }
-.left-spine__settings { margin-top: auto; }
-.glass-menu-button, .icon-button, .composer__icon, .composer__send { display: grid; place-items: center; border: 1px solid var(--line); background: rgba(21, 22, 31, .68); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: var(--glow); transition: transform .18s ease, border-color .18s ease, background .18s ease; }
-.glass-menu-button { width: 42px; height: 42px; border-radius: 15px; }
-.glass-menu-button:hover, .icon-button:hover, .composer__icon:hover, .composer__send:hover { transform: translateY(-1px); border-color: rgba(110,168,255,.36); background: rgba(29,31,43,.86); }
+.icon-button, .composer__icon, .composer__send { display: grid; place-items: center; border: 1px solid var(--line); background: rgba(21, 22, 31, .68); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); box-shadow: var(--glow); transition: transform .18s ease, border-color .18s ease, background .18s ease; }
+.icon-button:hover, .composer__icon:hover, .composer__send:hover { transform: translateY(-1px); border-color: rgba(110,168,255,.36); background: rgba(29,31,43,.86); }
 
-.tool-rail { margin: 10px 0 4px 54px; overflow-x: auto; overscroll-behavior-x: contain; scrollbar-width: none; }
-.tool-rail::-webkit-scrollbar { display: none; }
-.tool-notice { margin: 4px 0 0 54px; padding: 8px 11px; border-left: 1px solid var(--pink); color: var(--muted); font-size: 10px; }
-
-.conversation { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 14px 7px 14px 54px; overscroll-behavior: contain; scroll-behavior: smooth; }
 .empty-state { min-height: 100%; display: grid; place-content: center; text-align: center; padding: 16vh 20px 24vh; }
+.empty-state__kicker { color: rgba(240,123,220,.78); font-size: 9px; font-weight: 700; letter-spacing: .22em; }
 .empty-state h2 { margin: 7px 0 9px; font-size: clamp(23px, 6vw, 32px); letter-spacing: -.04em; }
-.empty-state p { max-width: 360px; margin: 0 auto; color: var(--muted); font-size: var(--body-font-size); line-height: 1.55; }
-.message { max-width: 88%; margin: 12px 0; padding: 12px 14px 13px; border-radius: 18px; border: 1px solid var(--line); box-shadow: 0 10px 28px rgba(0,0,0,.2); }
-.message-user { margin-left: auto; background: color-mix(in srgb, var(--user-surface-color, #28344F) calc(var(--user-surface-opacity, .78) * 100%), transparent); border-color: rgba(110,168,255,.18); }
-.message-user .message-body { color: var(--user-text-color, var(--text)); }
-.message-user.user-surface-frosted { background: rgba(24,30,45,var(--user-surface-opacity,.78)); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px); }
-.message-assistant { margin-right: auto; background: linear-gradient(135deg, rgba(21,22,32,.86), rgba(31,20,37,.78)); border-left-color: rgba(240,123,220,.34); }
-.message-assistant .message-body { color: var(--assistant-text-color, var(--text)); }
-.message-assistant.assistant-glow { box-shadow: 0 10px 30px rgba(0,0,0,.2), 0 0 24px rgba(240,123,220,.08); }
-.message-meta { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 5px; color: rgba(255,255,255,.42); font-size: 9px; letter-spacing: .1em; text-transform: uppercase; }
-.message-body { white-space: pre-wrap; line-height: 1.55; font-size: var(--body-font-size); }
+.empty-state p { max-width: 360px; margin: 0 auto; color: var(--muted); font-size: var(--body-font-size); line-height: var(--chat-line-height); }
 
-.error { margin: 0 0 8px 54px; padding: 10px 12px; border-radius: 13px; background: rgba(82,24,48,.48); border: 1px solid rgba(240,123,220,.18); color: #ffdfe9; font-size: 12px; }
-.composer { position: sticky; bottom: 0; display: grid; grid-template-columns: 40px minmax(0,1fr) 40px 42px; gap: 7px; margin-left: 54px; padding: 9px 0 max(8px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent 0, rgba(5,5,7,.92) 28%, #050507 58%); z-index: 4; }
-/* Height bounds live in composer.css: they are derived from the editor's line-height (see the autosize contract there). */
+/* Small uppercase label used by the sidebar and settings headers. */
+.eyebrow { display: block; color: var(--muted); font-size: 9px; font-weight: 700; letter-spacing: .2em; }
+
+.error { margin: 0 0 8px; padding: 10px 12px; border-radius: 13px; background: rgba(82,24,48,.48); border: 1px solid rgba(240,123,220,.18); color: #ffdfe9; font-size: 12px; }
+/* The composer grid is owned by components/composer.css and
+   components/composer-layout.css; the height bounds live in composer.css,
+   derived from the editor's line-height (see the autosize contract there). */
+.composer { display: grid; padding: 9px 0 max(8px, env(safe-area-inset-bottom)); background: linear-gradient(180deg, transparent 0, rgba(5,5,7,.92) 28%, #050507 58%); z-index: 4; }
 .composer textarea { width: 100%; resize: none; overflow-y: auto; border: 1px solid var(--line); border-radius: 16px; padding: 10px 12px; background: rgba(15,16,23,.82); color: inherit; line-height: 1.35; outline: none; }
 .composer textarea:focus { border-color: rgba(110,168,255,.42); }
 .composer__icon, .composer__send { width: 40px; height: 42px; border-radius: 14px; }
@@ -74,7 +69,6 @@ button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-
 .thread { display: flex; flex-direction: column; gap: 4px; padding: 12px; text-align: left; border: 1px solid transparent; border-radius: 15px; background: transparent; }
 .thread:hover, .thread.is-active { background: rgba(255,255,255,.055); border-color: rgba(255,255,255,.08); }
 .thread__title { font-weight: 600; font-size: 13px; }
-.thread__preview { color: var(--muted); font-size: 11px; }
 .sidebar__footer { margin-top: auto; padding-top: 14px; border-top: 1px solid var(--line); }
 .sidebar-action { width: 100%; display: flex; align-items: center; gap: 10px; padding: 12px; border: 1px solid transparent; border-radius: 14px; background: transparent; color: rgba(255,255,255,.78); text-align: left; }
 .sidebar-action:hover { background: rgba(255,255,255,.055); border-color: rgba(255,255,255,.08); }

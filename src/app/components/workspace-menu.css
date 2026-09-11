@@ -1,14 +1,16 @@
 /* Consolidated Workspace entry: one rounded-rectangle trigger with a rightward
    chevron. The services flyout opens to the right of the trigger. */
-.workspace-trigger-wrap { position: relative; display: inline-flex; }
+.workspace-trigger-wrap { position: relative; display: flex; width: 100%; }
 
 .workspace-trigger {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: space-between;
+  /* Shares the shell control cluster's geometry (layout.css): the launcher is
+     always exactly the same height as the hamburger above it. */
+  width: 100%;
+  height: var(--control-size);
   gap: 10px;
-  min-width: 118px;
-  min-height: 40px;
   padding: 0 10px 0 13px;
   border: 1px solid var(--line);
   border-radius: 13px;
@@ -41,14 +43,14 @@
   top: 0;
   z-index: 60;
   width: max-content;
-  /* Keep the right edge inside the viewport at every width: the worst-case
-     flyout left edge is ~212px (12px shell padding + 62px portrait rail
-     margin + ~130px trigger + 8px gap); 224px leaves a >=12px right gutter.
+  /* Keep the right edge inside the viewport at every width. The flyout's left
+     edge is fixed by the control cluster: --gutter (14) + --control-width
+     (132) + the 8px gap = 154px, so 168px reserves the matching right gutter.
      min-width is clamped by the same budget so it can never defeat max-width
      (in CSS, min-width beats max-width) and push the panel off-screen.
      Content wraps/ellipsizes inside the bound; controls stay whole. */
-  min-width: min(184px, calc(100vw - 224px));
-  max-width: min(248px, calc(100vw - 224px));
+  min-width: min(184px, calc(100vw - 168px));
+  max-width: min(248px, calc(100vw - 168px));
   max-height: min(60vh, 440px);
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -80,10 +82,6 @@
 .workspace-menu__item:hover, .workspace-menu__item:focus-visible { background: rgba(255,255,255,.06); border-color: rgba(255,255,255,.08); outline: none; }
 .workspace-menu__item span { font-size: 13px; line-height: 1.2; }
 .workspace-menu__item small { font-size: 11px; line-height: 1.35; color: rgba(255,255,255,.48); }
-
-@media (pointer: coarse) {
-  .workspace-trigger { min-height: 44px; }
-}
 
 /* Below ~400px the side flyout would be squeezed under ~180px, so it drops
    below the trigger where the full viewport width is available again. Above it,

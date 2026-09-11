@@ -27,8 +27,6 @@ let root: Root;
 
 async function renderLockbox(): Promise<void> {
   await act(async () => { root.render(<GeminiApiLockbox />); });
-  // refresh() resolves over IndexedDB macrotasks, which a single act() flush
-  // does not cover. Poll until the screen leaves its loading state.
   for (let attempt = 0; attempt < 80 && container.textContent?.includes('Loading…'); attempt += 1) {
     await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 10); }); });
   }
@@ -43,8 +41,6 @@ function credentialInput(): HTMLInputElement | null {
   return container.querySelector<HTMLInputElement>('input[aria-label="Current Lockbox credential for the YouTube key"]');
 }
 
-/** Pump macrotasks until the rendered output stops changing, so no async
- *  handler is still in flight when the test asserts or tears down. */
 async function quiesce(): Promise<void> {
   let previous = container.textContent ?? '';
   for (let stable = 0, attempt = 0; attempt < 120 && stable < 3; attempt += 1) {
@@ -55,7 +51,6 @@ async function quiesce(): Promise<void> {
   }
 }
 
-/** Wait for an expected outcome that the async handler produces later. */
 async function waitFor(message: string, predicate: () => boolean): Promise<void> {
   for (let attempt = 0; attempt < 200 && !predicate(); attempt += 1) {
     await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 10); }); });
@@ -118,8 +113,6 @@ describe('YouTube credential in the Lockbox screen', () => {
 
     await renderLockbox();
 
-    // The control must be write-only: a configured credential is reported by
-    // status text alone, never echoed into an input value or the document.
     expect(youtubeInput()!.value).toBe('');
     expect(container.textContent).not.toContain(YOUTUBE_KEY);
     expect(container.innerHTML).not.toContain(YOUTUBE_KEY);
@@ -139,10 +132,9 @@ describe('YouTube credential in the Lockbox screen', () => {
     await press('Save YouTube Key');
 
     await waitFor('the saved YouTube key did not show as configured', () => container.textContent!.includes('YouTube Data API · configured · unlocked'));
+    await waitFor('the write-only YouTube key field was not cleared', () => youtubeInput()?.value === '');
+    await waitFor('the write-only credential field was not cleared', () => credentialInput()?.value === '');
     expect(container.textContent).toContain('YouTube Data API · configured · unlocked');
-    expect(youtubeInput()!.value).toBe('');
-    expect(credentialInput()!.value).toBe('');
-    // Write-only: the form never repopulates the value it just stored.
     expect(container.innerHTML).not.toContain(YOUTUBE_KEY);
   });
 

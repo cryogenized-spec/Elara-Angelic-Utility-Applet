@@ -167,7 +167,7 @@ test.describe('Android portrait reliability', () => {
   });
 });
 test.describe('Portrait artwork layout', () => {
-  test('places the Workspace tool cluster in the left opening, clear of the spine, at phone and narrow widths', async ({ page }) => {
+  test('stacks the Workspace launcher under the hamburger in one left control cluster', async ({ page }) => {
     await page.goto('');
     await openSettings(page);
     await page.getByRole('button', { name: 'Character' }).click();
@@ -178,19 +178,38 @@ test.describe('Portrait artwork layout', () => {
     for (const width of [412, 360, 320]) {
       await page.setViewportSize({ width, height: 800 });
       const rail = page.getByRole('navigation', { name: 'Quick actions' });
-      const spine = page.getByRole('button', { name: 'Open sidebar' });
+      const hamburger = page.getByRole('button', { name: 'Open sidebar' });
       const trigger = rail.getByRole('button', { name: 'Workspace', exact: true });
+      const portrait = page.locator('.elara-banner__portrait-float');
+      const banner = page.locator('.elara-banner');
       await expect(trigger).toBeVisible();
-      const railBox = await rail.boundingBox();
-      const spineBox = await spine.boundingBox();
+
+      const stackBox = await page.locator('.control-stack').boundingBox();
+      const hamburgerBox = await hamburger.boundingBox();
       const triggerBox = await trigger.boundingBox();
-      expect(railBox && spineBox && triggerBox).toBeTruthy();
-      // Left-anchored: starts to the right of the spine button, and its right
-      // edge leaves free space (it is not pushed against the right edge).
-      expect(triggerBox!.x).toBeGreaterThanOrEqual(spineBox!.x + spineBox!.width);
-      expect(triggerBox!.x).toBeLessThan(width / 3);
-      expect(triggerBox!.x + triggerBox!.width).toBeLessThan(width - 24);
-      expect(triggerBox!.x + triggerBox!.width).toBeLessThanOrEqual(width);
+      const portraitBox = await portrait.boundingBox();
+      const bannerBox = await banner.boundingBox();
+      expect(stackBox && hamburgerBox && triggerBox && portraitBox && bannerBox).toBeTruthy();
+
+      // One column: the launcher sits directly under the hamburger, sharing
+      // its left edge and its control height.
+      expect(Math.abs(triggerBox!.x - hamburgerBox!.x)).toBeLessThan(2);
+      expect(triggerBox!.y).toBeGreaterThan(hamburgerBox!.y + hamburgerBox!.height - 2);
+      expect(Math.abs(triggerBox!.height - hamburgerBox!.height)).toBeLessThan(2);
+      expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
+
+      // The cluster stays in the left third and never reaches the right gutter.
+      expect(stackBox!.x).toBeLessThan(width / 3);
+      expect(stackBox!.x + stackBox!.width).toBeLessThan(width - 24);
+
+      // The portrait keeps its 4:5 ratio, hugs the top-right corner, and stays
+      // inside the banner now that its scale is a real layout width.
+      expect(Math.abs(portraitBox!.height / portraitBox!.width - 1.25)).toBeLessThan(0.02);
+      expect(bannerBox!.x + bannerBox!.width - (portraitBox!.x + portraitBox!.width)).toBeLessThanOrEqual(9);
+      expect(portraitBox!.y - bannerBox!.y).toBeLessThanOrEqual(9);
+      expect(portraitBox!.y + portraitBox!.height).toBeLessThanOrEqual(bannerBox!.y + bannerBox!.height + 1);
+      // …and it never overlaps the control cluster.
+      expect(portraitBox!.x).toBeGreaterThanOrEqual(stackBox!.x + stackBox!.width);
     }
   });
 });

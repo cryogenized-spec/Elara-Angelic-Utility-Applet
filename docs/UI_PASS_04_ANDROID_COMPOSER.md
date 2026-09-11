@@ -27,7 +27,7 @@ The implementation retains the existing `viewport-fit=cover` mobile viewport dec
 - `src/app/components/Composer.tsx`
 - `src/app/components/composer.css`
 - `src/ui/useVisualViewport.ts`
-- `src/app/mobile-viewport.css`
+- `src/app/mobile-viewport.css` (since removed — its rules now live with their owners; see `docs/UI_SHELL_GEOMETRY.md`)
 - `src/app/App.tsx`
 - `src/app/components/ConversationSurface.tsx`
 - `src/gemini/provider.ts`

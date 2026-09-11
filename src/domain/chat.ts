@@ -1,3 +1,5 @@
+import type { MediaItem } from './media';
+
 export type ChatRole = 'user' | 'assistant' | 'system';
 export type ProviderStatus = 'idle' | 'streaming' | 'failed';
 
@@ -42,6 +44,12 @@ export interface ChatMessage {
   /** Stable artifact IDs; binary payloads live in the artifact repository. */
   attachments?: string[];
   artifacts?: string[];
+  /**
+   * Resolved media from a media tool call, kept with the message so a media card
+   * survives a reload. Optional and unindexed, so adding it needs no Dexie
+   * version bump. Never contains credential material.
+   */
+  media?: MediaItem[];
   executionSummary?: ExecutionSummary;
   providerTurn?: ProviderTurnMetadata;
 }

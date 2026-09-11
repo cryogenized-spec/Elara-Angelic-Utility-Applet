@@ -1,7 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import { googleToolNameSchema } from '../../src/google/tools/contracts';
-import { googleGeminiFunctionDeclarations } from '../../src/google/tools/gemini-declarations';
+import { googleGeminiFunctionDeclarationsForPlane } from '../../src/google/tools/gemini-declarations';
 import { ELARA_INTERNAL_HEADER, deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { autonomyPreflight, handleAutonomyRoute } from './autonomy/routes';
 
@@ -121,10 +121,18 @@ function sse(eventName: string, data: SafeEvent): string {
   return `event: ${eventName}\ndata: ${JSON.stringify(data)}\n\n`;
 }
 
+/**
+ * The declarations this Worker is able to back. Computed once at module scope:
+ * the registry is static, so there is nothing to recompute per request.
+ */
+const workerToolDeclarations = googleGeminiFunctionDeclarationsForPlane('worker');
+
 function selectedTools(toolNames: readonly string[] | undefined) {
   if (!toolNames?.length) return undefined;
   const allowed = new Set(toolNames);
-  return googleGeminiFunctionDeclarations.filter((tool) => allowed.has(tool.name));
+  // Plane-filtered: the Worker has no tool executor, so it must never advertise a
+  // browser-only tool. See `executionPlane` in src/google/tools/contracts.ts.
+  return workerToolDeclarations.filter((tool) => allowed.has(tool.name));
 }
 
 function toGenerationConfig(config: z.infer<typeof requestSchema>['generationConfig']) {

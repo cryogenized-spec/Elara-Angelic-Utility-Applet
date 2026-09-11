@@ -1,0 +1,82 @@
+/* Media results resolved by a media tool call.
+   Owns only .media-rail / .media-card selectors; no other sheet touches them. */
+
+.media-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.media-card {
+  position: relative;
+  display: block;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,.035);
+  color: var(--text);
+  text-decoration: none;
+  overflow: hidden;
+  transition: border-color 120ms ease, background 120ms ease;
+}
+
+.media-card:hover,
+.media-card:focus-visible {
+  border-color: rgba(255,255,255,.24);
+  background: rgba(255,255,255,.07);
+}
+
+.media-card:focus-visible { outline: 2px solid rgba(255,255,255,.5); outline-offset: 2px; }
+
+.media-card__thumb {
+  display: block;
+  width: 100%;
+  /* Thumbnails arrive 4:3; reserve the box so nothing shifts as they load. */
+  aspect-ratio: 4 / 3;
+  height: auto;
+  object-fit: cover;
+  background: rgba(10,11,16,.62);
+}
+
+.media-card__thumb--empty { aspect-ratio: 4 / 3; }
+
+.media-card__meta { display: grid; gap: 2px; padding: 8px 10px 10px; }
+
+.media-card__title {
+  font-size: 12px;
+  line-height: 1.35;
+  font-weight: 600;
+  /* Two lines, then an ellipsis: a long title must not stretch the rail. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.media-card__channel {
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.media-card__badge {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(10,11,16,.78);
+  color: rgba(255,255,255,.82);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .media-card { transition: none; }
+}

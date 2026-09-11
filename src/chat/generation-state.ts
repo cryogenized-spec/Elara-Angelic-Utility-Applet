@@ -1,6 +1,7 @@
 import type { GeminiStreamEvent, GeminiUsage } from '../gemini/contracts';
 import { normalizeGeminiError, type NormalizedProviderError } from '../gemini/errors';
 import type { ExecutionSummary } from '../domain/chat';
+import type { MediaItem } from '../domain/media';
 
 // ---------------------------------------------------------------------------
 // Generation state: the chat-owned lifecycle of one assistant turn.
@@ -69,6 +70,8 @@ export interface GenerationState {
   /** Full assistant transcript accumulated across all interactions. */
   transcript: string;
   artifactIds: string[];
+  /** Media resolved during this turn, deduplicated by provider:id. */
+  mediaItems: MediaItem[];
   steps: GenerationStep[];
   activeTool?: { name: string; callId: string; stepId: string };
   statusMessage?: string;
@@ -109,6 +112,7 @@ export function createGenerationState(
     startedAt: options.startedAt,
     transcript: '',
     artifactIds: [],
+    mediaItems: [],
     steps: [],
     nextStepSequence: 0,
   };
@@ -301,6 +305,12 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
     }
     case 'artifact-created': {
       return next.artifactIds.includes(event.artifactId) ? next : { ...next, artifactIds: [...next.artifactIds, event.artifactId] };
+    }
+    case 'media-resolved': {
+      // Two queries in one batch can resolve the same video; keep one card.
+      const seen = new Set(next.mediaItems.map((item) => `${item.provider}:${item.id}`));
+      const added = event.items.filter((item) => !seen.has(`${item.provider}:${item.id}`));
+      return added.length ? { ...next, mediaItems: [...next.mediaItems, ...added] } : next;
     }
     case 'completed': {
       const seen = next.interactionIds.includes(event.interactionId);

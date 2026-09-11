@@ -20,9 +20,9 @@ import { shortcutsForService, type WorkspaceShortcutDefinition } from '../quick-
 let container: HTMLDivElement;
 let root: Root;
 
-function render(systemInstruction = 'You are Elara.'): void {
+function render(): void {
   act(() => {
-    root.render(<TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} systemInstruction={systemInstruction} onAction={(shortcut) => actions.push(shortcut)} />);
+    root.render(<TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => actions.push(shortcut)} />);
   });
 }
 
@@ -175,8 +175,8 @@ describe('flyout geometry (CSS contract)', () => {
   const css = readFileSync(resolve(process.cwd(), 'src/app/components/workspace-menu.css'), 'utf8');
   const rule = css.match(/\.workspace-menu \{([^}]*)\}/)?.[1] ?? '';
   const narrow = css.match(/@media \(max-width: (\d+)px\) \{\s*\.workspace-menu \{([^}]*)\}/)?.[0] ?? '';
-  /** Worst-case left edge documented in the stylesheet: 12px shell padding + 62px rail margin + ~130px trigger + 8px gap. */
-  const WORST_CASE_LEFT_PX = 212;
+  /** Worst-case left edge documented in the stylesheet: --gutter (14) + --control-width (132) + the 8px flyout gap. */
+  const WORST_CASE_LEFT_PX = 154;
 
   const clamp = (property: 'min-width' | 'max-width', viewport: number): number => {
     const declaration = rule.match(new RegExp(`${property}: min\\((\\d+)px, calc\\(100vw - (\\d+)px\\)\\)`));

@@ -6,6 +6,8 @@ import { googleToolRegistry } from '../google/tools/registry';
 import { googleServiceToolHandlers } from '../google/tools/service-handlers';
 import { googleReadToolHandlers } from '../google/tools/read-handlers';
 import { roleplayWorldToolHandlers } from '../google/tools/roleplay-world-handlers';
+import { mediaToolHandlers } from '../media/tool-handler';
+import { isMediaItem, isMediaProviderId } from '../domain/media';
 import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
 import { requestGoogleCapabilityGrant } from '../google/oauth/request-broker';
 import { googleOAuthAuthority } from '../google/oauth/authority';
@@ -85,7 +87,7 @@ function normalizeTools(tools: readonly GoogleToolName[] | undefined, allowEmpty
 function executorOptions(options: GoogleToolLoopOptions, request: GeminiTurnRequest, signal?: AbortSignal): GoogleToolExecutorOptions {
   return {
     oauth: options.executor?.oauth ?? googleOAuthAuthority,
-    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...documentToolHandlers, ...options.executor?.handlers },
+    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...documentToolHandlers, ...mediaToolHandlers, ...options.executor?.handlers },
     confirm: options.executor?.confirm,
     now: options.executor?.now,
     signal,
@@ -103,6 +105,25 @@ function artifactEvent(toolName: string, value: unknown): GeminiStreamEvent | un
   const result = value as Record<string, unknown>;
   if (typeof result.artifactId !== 'string' || typeof result.status !== 'string' || typeof result.mimeType !== 'string') return undefined;
   return { type: 'artifact-created', artifactId: result.artifactId, status: result.status, mimeType: result.mimeType, toolName, ...(typeof result.operationId === 'string' ? { operationId: result.operationId } : {}) };
+}
+
+/**
+ * Derive a `media-resolved` event from a media tool result.
+ *
+ * Mirrors {@link artifactEvent}: the event is a projection of structured tool
+ * output, so the media card never depends on reading the assistant's prose. A
+ * result with no usable items yields no event — an empty search is not a card.
+ */
+function mediaEvent(value: unknown): GeminiStreamEvent | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const result = value as Record<string, unknown>;
+  if (!isMediaProviderId(result.mediaProvider) || !Array.isArray(result.items)) return undefined;
+  const items = (result.items as unknown[]).filter(isMediaItem);
+  if (!items.length) return undefined;
+  const queries = Array.isArray(result.queries)
+    ? (result.queries as unknown[]).filter((query): query is string => typeof query === 'string')
+    : [];
+  return { type: 'media-resolved', provider: result.mediaProvider, queries, items };
 }
 
 function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandlers): boolean {
@@ -228,6 +249,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           results.push({ callId: call.callId, name: call.name, result: result.result });
           const created = artifactEvent(call.name, result.result);
           if (created) yield created;
+          const media = mediaEvent(result.result);
+          if (media) yield media;
         } else results.push(errorToolResult(call, result.code));
       }
     }
@@ -293,6 +316,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push({ callId: entry.call.callId, name: entry.call.name, result: result.result });
         const created = artifactEvent(entry.call.name, result.result);
         if (created) yield created;
+        const media = mediaEvent(result.result);
+        if (media) yield media;
       } else results.push(errorToolResult(entry.call, result.code));
     }
 

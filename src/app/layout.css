@@ -1,0 +1,142 @@
+/* ==========================================================================
+   SHELL GEOMETRY — THE SINGLE AUTHORITATIVE LAYOUT CONTRACT
+   --------------------------------------------------------------------------
+   This sheet owns every measurement that *positions* a shell region. No other
+   stylesheet may re-declare a selector defined here; that is enforced in CI by
+   src/app/layout-authority.test.ts. Component sheets style the inside of their
+   own component and consume these tokens instead of inventing offsets.
+
+   The 9:16 Android portrait viewport is the canonical target. Desktop is a
+   widening of the same contract, not a separate design.
+
+   Region map
+   --------------------------------------------------------------------------
+     .app-shell                    flex column; padding: top --gutter bottom
+     ├── .control-stack            absolute overlay, top-left of the header
+     │     ├── .glass-menu-button  --control-size square
+     │     └── .tool-rail          Workspace launcher, --control-size tall
+     ├── .elara-banner             header band (portrait-banner.css)
+     ├── .conversation             flex: 1 1 auto
+     │     └── .conversation__stream
+     ├── .error
+     └── form.composer
+
+   Nothing indents itself to clear the control cluster: it is an overlay, so
+   the conversation gets the full content width and its left and right gutters
+   are the shell's — identical by construction.
+   ========================================================================== */
+
+:root {
+  /* Horizontal contract ---------------------------------------------------
+     One gutter for every region. Because the shell owns the padding and no
+     region adds its own, left and right breathing room can never drift
+     apart. */
+  --gutter: 14px;
+
+  /* Left control cluster --------------------------------------------------
+     The hamburger and the Workspace launcher share one column, one control
+     height and one gap. Nothing else may invent a control size.
+
+     44px, not 42px: this is a touch target, and the Android portrait suite
+     asserts a >=44px minimum (e2e/mobile-reliability.spec.ts). One token
+     keeps the hamburger and the launcher identical. */
+  --control-size: 44px;
+  --control-gap: 10px;
+  --control-width: 132px;
+
+  /* Conversation typography -----------------------------------------------
+     Both values are proportional — a unitless line ratio and an em gap — so
+     the entire vertical rhythm scales with --body-font-size. 10px text reads
+     tight, 24px text reads proportionally airier, and no part of the rhythm
+     is a fixed pixel constant. */
+  --chat-line-height: 1.45;
+  --chat-paragraph-gap: .55em;
+}
+
+/* The app is a fixed-viewport shell: the conversation scrolls, the page
+   does not. */
+html, body, #root { min-height: 100%; margin: 0; overflow: hidden; }
+
+.app-shell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  isolation: isolate;
+  width: min(100%, 520px);
+  height: var(--elara-visual-viewport-height, 100dvh);
+  min-height: 0;
+  max-height: 100dvh;
+  margin: 0 auto;
+  padding: max(12px, env(safe-area-inset-top)) var(--gutter) max(8px, env(safe-area-inset-bottom));
+  overflow: hidden;
+}
+
+/* Left control cluster ------------------------------------------------------
+   hamburger
+   Workspace
+   Both are --control-size tall and left-aligned in one column. The cluster
+   overlays the header; it is never a layout ruler. */
+.control-stack {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: var(--gutter);
+  z-index: 20;
+  display: grid;
+  grid-template-columns: var(--control-width);
+  gap: var(--control-gap);
+  justify-items: start;
+  /* The cluster is a sparse overlay: only the controls take pointer events,
+     so the banner underneath stays tappable between them. */
+  pointer-events: none;
+}
+
+.control-stack > .glass-menu-button,
+.control-stack > .tool-rail { pointer-events: auto; }
+
+/* The hamburger is a shell control, so layout.css owns it completely — the
+   shared glass recipe appears here rather than in app.css's grouped primitive
+   precisely so this selector keeps a single owner. */
+.glass-menu-button {
+  display: grid;
+  place-items: center;
+  width: var(--control-size);
+  height: var(--control-size);
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: rgba(21, 22, 31, .68);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: var(--glow);
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.glass-menu-button:hover { transform: translateY(-1px); border-color: rgba(110,168,255,.36); background: rgba(29,31,43,.86); }
+
+/* Conversation --------------------------------------------------------------
+   Horizontal padding is zero because the shell already provides the gutter.
+   Adding padding here is what previously produced the asymmetric 54px left
+   indent. */
+.conversation {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--gutter) 0;
+  overflow-y: auto;
+  scroll-padding-bottom: 18px;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+}
+
+/* A readable measure on wide screens; on a phone this is simply 100%. */
+.conversation__stream { width: min(100%, 680px); margin: 0 auto; }
+
+@media (max-width: 560px) {
+  /* On a phone the composer owns the bottom safe area (see
+     components/composer-layout.css); a second inset here would render as a
+     dead strip above the IME. */
+  .app-shell { padding-bottom: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .conversation { scroll-behavior: auto; }
+}

@@ -1,5 +1,6 @@
 import type { NormalizedProviderError } from './errors';
 import type { EffectiveGeminiSettings } from './settings-engine';
+import type { MediaItem, MediaProviderId } from '../domain/media';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
@@ -13,6 +14,11 @@ export type GeminiStreamEvent =
   | { type: 'thought-signature'; index: number; signature: string }
   | { type: 'step-stop'; index: number }
   | { type: 'artifact-created'; artifactId: string; status: string; mimeType: string; toolName?: string; operationId?: string }
+  /**
+   * Resolved media from a media tool call. Carries the structured items directly
+   * so the card is driven by data, never by parsing the assistant's prose.
+   */
+  | { type: 'media-resolved'; provider: MediaProviderId; queries: readonly string[]; items: readonly MediaItem[] }
   | { type: 'completed'; interactionId: string; status: string; durationMs: number; usage?: GeminiUsage }
   | { type: 'cancelled'; interactionId?: string }
   | { type: 'failed'; error: NormalizedProviderError }

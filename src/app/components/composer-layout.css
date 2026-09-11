@@ -22,14 +22,29 @@
   align-self: end;
 }
 
-.app-shell .conversation {
-  padding-bottom: 8px;
-}
-
 .app-shell form.composer > .composer__vtt-control {
   min-width: 0;
   width: 40px;
   justify-self: center;
+}
+
+@media (max-width: 560px) {
+  /* WhatsApp-style flush composer: the input row sits directly against the
+     keyboard with no dark spacer strip. The desktop-only gradient fade and
+     bottom margin are removed here because the flex layout never overlaps
+     the conversation, so they only rendered as a black bar above the IME. */
+  .app-shell form.composer {
+    margin-bottom: 0;
+    padding-top: 6px;
+    padding-bottom: calc(6px + env(safe-area-inset-bottom));
+    background: transparent;
+  }
+
+  /* Keyboard open: drop the safe-area inset too so the input row lands flush
+     on the keyboard toolbar, exactly like WhatsApp. */
+  :root.keyboard-open .app-shell form.composer {
+    padding-bottom: 6px;
+  }
 }
 
 @media (min-width: 561px) {

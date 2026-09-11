@@ -158,6 +158,7 @@ export function syncGenerationEvent(
       ...assistantMessage,
       text: generation.transcript,
       artifacts: generation.artifactIds.length ? [...generation.artifactIds] : undefined,
+      media: generation.mediaItems.length ? [...generation.mediaItems] : undefined,
       executionSummary: buildExecutionSummary(generation),
       providerTurn: {
         provider: 'gemini' as const,

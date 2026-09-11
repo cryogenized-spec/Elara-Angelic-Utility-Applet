@@ -194,3 +194,72 @@ test.describe('Portrait artwork layout', () => {
     }
   });
 });
+
+test.describe('Composer geometry and resume reconciliation', () => {
+  test('keeps rail controls bottom-anchored as the editor grows', async ({ page }) => {
+    await page.goto('');
+    const editor = page.getByRole('textbox', { name: 'Message Elara' });
+    const send = page.getByRole('button', { name: 'Send message' });
+    const attach = page.getByRole('button', { name: 'Composer tools' });
+    const mic = page.getByRole('button', { name: 'VTT voice input' });
+    const wrap = page.locator('.composer__input-wrap');
+    const expand = page.getByRole('button', { name: 'Expand message editor' });
+    await expect(editor).toBeVisible();
+
+    const bottomOf = (box: { y: number; height: number }) => box.y + box.height;
+    const sendBefore = (await send.boundingBox())!;
+    const attachBefore = (await attach.boundingBox())!;
+    const micBefore = (await mic.boundingBox())!;
+    const editorBefore = (await editor.boundingBox())!;
+    const wrapBefore = (await wrap.boundingBox())!;
+    const expandBefore = (await expand.boundingBox())!;
+    expect(sendBefore && attachBefore && micBefore && editorBefore && wrapBefore && expandBefore).toBeTruthy();
+    const expandGapBefore = bottomOf(wrapBefore) - bottomOf(expandBefore);
+
+    await editor.fill('one\ntwo\nthree\nfour\nfive\nsix');
+    await expect.poll(async () => (await editor.boundingBox())?.height ?? 0).toBeGreaterThan(editorBefore.height + 20);
+
+    // The row grows upward; the rail controls do not float with the text.
+    const sendAfter = (await send.boundingBox())!;
+    const attachAfter = (await attach.boundingBox())!;
+    const micAfter = (await mic.boundingBox())!;
+    expect(Math.abs(bottomOf(sendAfter) - bottomOf(sendBefore))).toBeLessThan(2);
+    expect(Math.abs(bottomOf(attachAfter) - bottomOf(attachBefore))).toBeLessThan(2);
+    expect(Math.abs(bottomOf(micAfter) - bottomOf(micBefore))).toBeLessThan(2);
+
+    // The expand control stays bottom-anchored inside the growing editor.
+    const wrapAfter = (await wrap.boundingBox())!;
+    const expandAfter = (await expand.boundingBox())!;
+    const expandGapAfter = bottomOf(wrapAfter) - bottomOf(expandAfter);
+    expect(Math.abs(expandGapAfter - expandGapBefore)).toBeLessThan(3);
+  });
+
+  test('suppresses the platform tap highlight on the send control', async ({ page }) => {
+    await page.goto('');
+    const send = page.getByRole('button', { name: 'Send message' });
+    await expect(send).toBeVisible();
+    const highlight = await send.evaluate(
+      (element) => (getComputedStyle(element) as unknown as { webkitTapHighlightColor?: string }).webkitTapHighlightColor,
+    );
+    expect(highlight).toBe('rgba(0, 0, 0, 0)');
+  });
+
+  test('reconciles viewport metrics on app resume signals', async ({ page }) => {
+    await page.goto('');
+    const composer = page.getByRole('textbox', { name: 'Message Elara' });
+    await expect(composer).toBeVisible();
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await page.evaluate(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+      window.dispatchEvent(new Event('pageshow'));
+      window.dispatchEvent(new Event('focus'));
+    });
+    await expect(composer).toBeVisible();
+    const viewportVar = await page.evaluate(() => document.documentElement.style.getPropertyValue('--elara-visual-viewport-height'));
+    expect(viewportVar).toMatch(/^\d+px$/);
+  });
+});

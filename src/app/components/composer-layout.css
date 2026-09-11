@@ -4,13 +4,22 @@
   flex: 0 0 auto;
   grid-template-columns: 36px minmax(0, 1fr) 40px 42px;
   /* The row grows with the autosized editor; the fixed-height icon buttons
-     stay anchored to its bottom edge. */
+     stay anchored to its bottom edge. Default row flow keeps the four
+     children in this single row. */
   grid-template-rows: minmax(42px, auto);
   align-items: end;
   gap: 8px;
-  grid-auto-flow: column;
   margin-top: 0;
   padding-top: 0;
+}
+
+/* Bottom constraint: the rail controls align to the row's end edge
+   independently of the editor's height — editor growth never lifts them.
+   Scoped to the compact form so the expanded composer's footer is untouched. */
+.app-shell form.composer > .composer__attachment-control,
+.app-shell form.composer > .composer__vtt-control,
+.app-shell form.composer > .composer__send {
+  align-self: end;
 }
 
 .app-shell .conversation {

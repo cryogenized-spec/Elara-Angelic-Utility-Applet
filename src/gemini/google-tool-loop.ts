@@ -11,6 +11,7 @@ import { requestGoogleCapabilityGrant } from '../google/oauth/request-broker';
 import { googleOAuthAuthority } from '../google/oauth/authority';
 import type { GoogleCapabilityKey } from '../google/oauth/contracts';
 import { withRuntimeContext } from './runtime-context';
+import { consumeRuntimeContextRefresh } from './runtime-context-freshness';
 import { documentToolHandlers } from '../documents/tool-handler';
 
 export interface GoogleToolLoopOptions {
@@ -126,7 +127,13 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     }
   }
 
-  const systemInstruction = options.suppressRuntimeContext === true ? request.systemInstruction?.trim() : withRuntimeContext(request.systemInstruction);
+  // One freshness decision per turn, after validation (a rejected turn is not a
+  // model invocation and records no refresh) and skipped entirely for
+  // headless callers that suppress interactive runtime context. Freshness is
+  // application-level, not per-thread. Tool continuations within the turn
+  // reuse this same instruction.
+  const refreshRuntimeContext = options.suppressRuntimeContext === true ? false : consumeRuntimeContextRefresh(Date.now());
+  const systemInstruction = options.suppressRuntimeContext === true ? request.systemInstruction?.trim() : withRuntimeContext(request.systemInstruction, { includeClock: refreshRuntimeContext });
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
   let executedCalls = 0;
   let toolBudgetExhausted = false;

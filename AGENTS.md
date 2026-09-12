@@ -5,17 +5,19 @@ This repository is maintained for repeated AI-assisted development. Minimize arc
 ## Documentation routing
 
 1. Read `documents/manifest.json`.
-2. Load the document for the system you are changing. If its manifest state is `planned`, use `documents/architecture.md` plus the owning source and tests until Phase 4 creates the canonical document.
+2. Load the canonical document for the system you are changing; every registered system is active under `/documents`.
 3. Treat authority as: source/tests → canonical `/documents` → legacy `/docs` → Git history.
 4. Update the owning canonical system document whenever a durable contract changes.
 
 Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, milestone or implementation-log documents. Do not add new documentation under `/docs`. Chronology belongs in Git; current technical truth belongs in the owning `/documents/<system>.md` file.
 
+Legacy `/docs` and the remaining old pass/status files are temporary Phase 5 migration inputs, not architectural authority. Do not repair them in parallel with canonical docs unless the task is explicitly the migration/deletion pass.
+
 ## Engineering boundaries
 
 Use the current implementation, not old design prose, to determine runtime truth. Keep one canonical interactive Gemini path. Keep credentials behind their owning authority. UI must not own raw provider requests, OAuth internals, secrets or database implementation. Validate external/trust-boundary data. Preserve one authoritative state owner per domain rather than creating parallel stores.
 
-Normal interactive Gemini is browser-direct through `src/gemini/provider.ts` and the local Lockbox. Google Workspace authorization is browser-side GIS through `src/google/oauth/`. Cloud Worker/autonomy execution is a separate runtime plane. See `SYS-ARCH / documents/architecture.md` before changing those boundaries.
+Normal interactive Gemini is browser-direct through `src/gemini/provider.ts` and the local Lockbox. Google Workspace authorization is browser-side GIS through `src/google/oauth/`. Cloud Worker/autonomy execution is a separate runtime plane. VTT is an input modality and must not create a competing chat provider/persona. See `SYS-ARCH / documents/architecture.md` before changing those boundaries.
 
 ## Change discipline
 

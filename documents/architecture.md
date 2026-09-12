@@ -1,127 +1,107 @@
 ---
 id: SYS-ARCH
 status: active
-verified_commit: 5db7ccc8ea6276d41f20973f012c4c43b3e2ffdf
+verified_commit: cab20253ef448dd96e4feb82bf917729b27404a3
 scope: repository-wide
 keywords: [architecture, systems, boundaries, source-map, runtime, persistence]
 ---
 
 # Elara architecture
 
-This is the code-verified system map for Elara. It describes the repository as implemented at the verified commit above. Source and tests outrank prose if this file later drifts. Historical pass notes, roadmap prose, and implementation logs are not architectural authority.
+This is the code-verified repository map. Source and tests outrank prose if documentation later drifts. Historical pass/status files, roadmaps and implementation logs are migration evidence only.
 
 ## 1. Runtime spine
 
-The browser entry point is `src/main.tsx`, which mounts `FolderProvider` and `App`. `src/app/App.tsx` is the current application composition root: it loads persisted state, coordinates conversations and attachments, resolves the character instruction, invokes Gemini, runs the tool loop, manages generation lifecycle, exposes Settings and quick actions, and starts local/cloud autonomy synchronization.
+`src/main.tsx` mounts the React application; `src/app/App.tsx` is the current composition root. Normal conversation execution is browser-first:
 
 ```text
 React UI
-  -> App orchestration
-  -> conversation / artifact / preference repositories
-  -> Gemini turn port
-  -> Gemini Interactions stream
-  -> optional tool calls
-  -> validated application services
-  -> normalized chat state
-  -> durable browser state
+-> App orchestration
+-> chat/artifact/preference repositories
+-> Gemini turn port + tool loop
+-> Gemini Interactions API
+-> validated application/Google tools when requested
+-> normalized chat state
+-> browser persistence
 ```
 
-The primary interactive Gemini path is browser-side `src/gemini/provider.ts` using `@google/genai` and the Gemini API key recovered from the local Lockbox. The Cloudflare Worker has a separate Gemini endpoint for cloud/autonomy use; it is not the interactive browser provider used by `App`.
+Interactive Gemini is direct from `src/gemini/provider.ts` using the local Lockbox credential. The Cloudflare Worker is a separate cloud/autonomy execution plane, not the browser chat provider. Google Workspace authorization is separately browser-side GIS.
 
 ## 2. System registry
 
-| ID | System | Owns | Primary source | Durable state / external boundary |
-| --- | --- | --- | --- | --- |
-| `SYS-UI` | Application + UI | composition, screen state, settings surfaces, quick actions, responsive presentation | `src/app/`, `src/ui/`, `src/main.tsx` | delegates persistence/provider work |
-| `SYS-CHAT` | Conversation | messages, threads, generation state, retries, turn lineage, title generation | `src/chat/`, `src/domain/chat.ts` | central Dexie database through `src/persistence/conversation.ts` |
-| `SYS-GEM` | Gemini | request contract, model/settings gates, Interactions streaming, errors, memory projection, tool continuation | `src/gemini/` | Google Gemini Interactions API; Lockbox credential |
-| `SYS-VTT` | Voice-to-text | microphone capture, transcription, optional transcript transformation, draft insertion | `src/vtt/`, composer integration | microphone/browser media APIs; direct Gemini transcription/transform calls through Lockbox-backed paths |
-| `SYS-MEM` | Durable memory | memory schema, normalization, permissions, observations, ranking, retrieval, lifecycle, integrity inspection | `src/memory/`, `src/gemini/memory-context.ts` | `db.memories` in the central Dexie database |
-| `SYS-ART` | Artifacts | attachments, generated/derived artifacts, validation, preprocessing, transformations, operation guards | `src/artifacts/`, `src/domain/artifact.ts` | artifact metadata/blobs in the central Dexie database; Gemini Files API when required |
-| `SYS-DOC` | Local documents | validated document generation, PDF compilation, OCR support | `src/documents/`, `src/ocr/` | browser workers; generated output enters `SYS-ART` |
-| `SYS-CHAR` | Character + roleplay | master character instruction, profile, portrait data, roleplay preferences/world model | `src/character/`, character/roleplay domain and persistence modules | local persistence; roleplay world has its own bounded Dexie store |
-| `SYS-GAUTH` | Google authorization | capability-to-scope mapping, GIS token acquisition, account identity, authorization state, approved API hosts | `src/google/oauth/` | browser GIS; capability metadata in `localStorage`; access token in memory |
-| `SYS-GWS` | Google Workspace | Calendar, Tasks, Gmail, Docs, Drive, Sheets service boundaries; tool validation/execution; confirmation | `src/google/{calendar,tasks,gmail,docs,drive,sheets,tools,confirmation}/` | Google REST APIs through `SYS-GAUTH` |
-| `SYS-MEDIA` | Media / YouTube | search contract, quota budget, normalization, cache, result handoff | `src/media/`, `src/app/components/media/` | YouTube Data API; Lockbox secondary credential; dedicated media-cache Dexie DB |
-| `SYS-AUTO` | Autonomy | routines, context projection, authority, scheduling contracts, local/cloud synchronization | `src/autonomy/`, `src/persistence/autonomy.ts`, `worker/src/autonomy/` | local Dexie + Cloudflare Durable Object/Workflow when paired |
-| `SYS-SEC` | Lockbox + local secrets | Gemini primary credential, secondary credentials, PIN/passkey modes, encryption/rotation | `src/persistence/gemini-api-key.ts`, `src/persistence/gemini-passkey.ts` | IndexedDB/Dexie; secrets never belong in tool schemas |
-| `SYS-PERSIST` | Persistence | central schema/migrations, repositories, preferences, folders and bounded subsystem stores | `src/persistence/` plus subsystem-owned stores | Dexie/IndexedDB and small coordination records in `localStorage` |
-| `SYS-PWA` | PWA + deployment | service-worker update lifecycle, installable shell, Pages build/deploy | `src/pwa.ts`, `vite.config.ts`, `.github/workflows/` | GitHub Pages deployment; browser service worker |
-| `SYS-WORKER` | Cloud runtime | health, protected Gemini streaming endpoint, transcription support, autonomy Durable Object/Workflow routes | `worker/src/` | Cloudflare Worker bindings and secrets |
-| `SYS-REL` | Reliability | architecture invariants, diagnostics/aggregate health boundaries, lint/typecheck/tests/build/E2E gates | `scripts/reliability-gate.mjs`, test suites, `.github/workflows/ci.yml` | CI |
+| ID | System | Owns | Primary source |
+| --- | --- | --- | --- |
+| `SYS-UI` | UI | composition, shell/layout, Settings, composer, presentation | `src/app/`, `src/ui/` |
+| `SYS-CHAT` | Chat | messages/threads, generation state, lineage, recovery | `src/chat/`, `src/domain/chat.ts` |
+| `SYS-GEM` | Gemini | Interactions requests/streaming, models/settings, errors, tool continuation | `src/gemini/` |
+| `SYS-VTT` | Voice-to-text | recording, transcription, draft transformation/insertion | `src/vtt/` |
+| `SYS-MEM` | Memory | durable-memory schema, lifecycle, ranking/retrieval, integrity | `src/memory/` |
+| `SYS-ART` | Artifacts | attachments/generated/derived files, blobs, validation/transforms | `src/artifacts/` |
+| `SYS-DOC` | Documents | local PDF compilation and OCR | `src/documents/`, `src/ocr/` |
+| `SYS-CHAR` | Character | Character Master, profile/portrait, roleplay/world state | `src/character/`, roleplay domain/persistence |
+| `SYS-GAUTH` | Google auth | GIS, capabilities/scopes, token/account state | `src/google/oauth/` |
+| `SYS-GWS` | Workspace/tools | Google services, executable registry, confirmations | `src/google/` excluding OAuth |
+| `SYS-MEDIA` | Media | YouTube search, cache/budget, normalized handoff | `src/media/` |
+| `SYS-AUTO` | Autonomy | routines, schedules, authority/context, cloud sync | `src/autonomy/`, `worker/src/autonomy/` |
+| `SYS-SEC` | Lockbox | browser API credentials, encryption/unlock session | Lockbox modules under `src/persistence/` |
+| `SYS-PERSIST` | Persistence | Dexie/local state authorities and migrations | `src/persistence/` plus bounded stores |
+| `SYS-PWA` | PWA | service-worker lifecycle and Pages deployment | `src/pwa.ts`, Vite/workflows |
+| `SYS-WORKER` | Cloud Worker | protected cloud routes, Worker Gemini/autonomy runtime | `worker/src/` |
+| `SYS-REL` | Reliability | CI, tests, invariant checks, safe diagnostics | `scripts/`, `.github/workflows/ci.yml`, `e2e/` |
+| `SYS-LEGAL` | Third-party | dependency/runtime-asset notices and release obligations | lockfile + asset notices |
+
+Detailed current contracts live in the matching `/documents/<system>.md` file and are routed by `manifest.json`.
 
 ## 3. Dependency boundaries
 
-UI components are presentation surfaces. They receive data and callbacks; provider credentials, Google OAuth mechanics, memory storage, and raw IndexedDB tables should remain outside presentation code. `App.tsx` currently coordinates these domains and is therefore the composition root, not a reusable domain service.
+UI is presentation. It may invoke typed application callbacks but must not own raw provider requests, OAuth mechanics, secret storage or raw database tables. `App.tsx` composes systems; its size does not make it a domain authority.
 
-`SYS-GEM` may consume character instructions, bounded memory context, artifacts prepared for a turn, model settings, and model-visible tool declarations. It must not become the owner of Google service logic, artifact persistence, or memory persistence.
+`SYS-GEM` may consume the Character Master, bounded memory context, prepared artifact IDs/settings and model-visible tool declarations. It does not own Google service logic, artifact persistence or memory persistence.
 
-`SYS-VTT` is not a second chat provider. Recording/transcription produces text for the composer. Optional polish/roleplay transformation reuses the canonical Gemini turn port and receives the active Character Master instruction; raw mode performs no model transformation.
+`SYS-GWS` separates model declaration from execution. The registry assigns capability/risk/exposure/execution plane; service schemas validate arguments; mutation confirmation is a separate consent boundary.
 
-`SYS-GWS` separates model-visible declarations from execution. The tool registry assigns each operation a capability, risk class, exposure, and where necessary an execution plane. Service-specific schemas validate arguments before provider execution. Confirmation policy is a separate boundary for consequential operations.
+`SYS-MEM` owns durable semantics. Normal Gemini receives a bounded contextual projection; records remain in the memory store. No live Gemini-visible `memory.*` mutation tool exists at this verified commit.
 
-`SYS-MEM` owns durable-memory semantics. Interactive Gemini receives a bounded projection through `src/gemini/memory-context.ts`; the canonical records remain in the memory store. At this verified commit there is no Gemini-visible `memory.*` tool in the live tool registry, so retrieval is operational while autonomous model mutation is not.
+`SYS-VTT` is an input modality. Direct transcription and optional transformation do not establish a second chat provider/persona; transformed text returns to the composer for user review.
 
-`SYS-ART` owns file identity and lifecycle. Gemini adapts ready artifacts to inline data or uploaded file references, but the provider does not become the artifact database.
-
-`SYS-AUTO` is deliberately a separate execution mode. Cloud routine execution can use the Worker and its scheduler while normal chat remains local-first and browser-driven.
+`SYS-AUTO` is a separate execution mode. Cloud routines may execute through the Worker while normal chat stays browser-driven.
 
 ## 4. Persistence map
 
-The main browser database is `ElaraDatabase` in `src/persistence/conversation.ts`. Its current schema includes messages, threads, Gemini settings, Workspace shortcuts, folders, folder assignments, durable memories, artifact metadata, and artifact blobs. This database is the authoritative store for those domains.
+The central `ElaraDatabase` in `src/persistence/conversation.ts` currently contains messages, threads, Gemini settings, Workspace shortcuts, folders/assignments, durable memories and artifact metadata/blobs. Other bounded stores intentionally exist, including Lockbox, media cache, autonomy and roleplay-world persistence. Google access tokens are memory-only while small authorization metadata may use localStorage.
 
-Not all browser state lives in that single database. The source currently contains bounded additional stores, including the media cache (`elara-media-cache`), autonomy persistence, roleplay-world persistence, and passkey credential persistence. Google authorization metadata is stored in `localStorage`, while its access token exists only in memory. Therefore old documentation that describes one literal IndexedDB database for every client-owned domain is too broad; the invariant is one authoritative store per domain, not one physical database for the whole application.
+Therefore the invariant is **one authoritative store per domain**, not one physical IndexedDB database for every browser feature.
 
-`localStorage` is also used for small coordination state such as the active conversation and Google authorization metadata. It is not the conversation or memory database.
+## 5. Execution planes
 
-## 5. Gemini execution planes
+### 5.1 Interactive Gemini
 
-### 5.1 Interactive browser path
+`App -> streamGoogleToolLoop() -> geminiTurnPort -> src/gemini/provider.ts -> GoogleGenAI.interactions.create()`.
 
-`App` -> `streamGoogleToolLoop()` -> `geminiTurnPort` -> `src/gemini/provider.ts` -> `GoogleGenAI.interactions.create()`.
+The provider obtains the Lockbox key, composes thread memory unless disabled by the caller, resolves artifact inputs, streams normalized events and supports grouped tool-result continuation.
 
-The browser provider checks Lockbox state, reads the Gemini API key, composes thread-scoped memory context, adapts attachments, sends the Interactions request, normalizes streaming events, and returns explicit terminal states. Provider retries are intentionally bounded outside the SDK's automatic retry path.
+### 5.2 VTT
 
-### 5.2 VTT paths
+Microphone capture is browser-local. Transcription currently calls Gemini directly using the Lockbox key and a transcription model; polish/roleplay draft transformation goes through the canonical Gemini turn port. Neither path bypasses the user's final Send action.
 
-`src/vtt/transcription.ts` uses the Lockbox credential to call Gemini transcription directly for captured audio. `src/vtt/transformation.ts` uses `geminiTurnPort` for optional text transformation. VTT therefore has distinct task-specific entry points without becoming an alternate conversational provider architecture.
+### 5.3 Cloud Worker/autonomy
 
-### 5.3 Cloud Worker path
+`worker/src/index.ts` exposes protected cloud/health/transcription/Gemini/autonomy boundaries using Worker-side secrets. Worker tool exposure is execution-plane filtered. This plane does not replace browser Google OAuth or interactive chat.
 
-`worker/src/index.ts` exposes health, Gemini streaming, transcription support, and autonomy routes. The Worker owns its `GEMINI_API_KEY` secret and filters model-visible declarations by execution plane. The Worker can surface tool calls but does not replace the browser application's service executors.
+## 6. Google and model tool boundary
 
-These planes share contracts and declarations where useful but serve different runtime purposes. Documentation must not describe the Worker as the current interactive-chat credential authority.
+Live Google authorization is browser GIS. There is no current durable server refresh-token authority. Workspace adapters cover Calendar, Tasks, Gmail, Docs, Drive and Sheets; Google Chat adapter/scope foundations exist but model exposure remains deferred/internal.
 
-## 6. Google boundary
+The generic model tool registry also carries application-local tools (`document.create_pdf`, roleplay world operations) and browser-only `youtube.search`. Treat it as the executable model capability surface, not as proof that every tool is a Google API.
 
-The live Google authorization authority is browser-side. `src/google/oauth/authority.ts` acquires GIS access tokens, persists enabled capabilities/provider-scope evidence/account metadata, holds the access token only in memory, restricts requests to approved Google API hosts, and reauthorizes when the browser session can no longer silently recover access.
+## 7. Media, character and memory context
 
-There is no durable server-side Google refresh-token authority in the current runtime. Documents that present such a server as implemented are historical or aspirational.
+YouTube search returns structured media and hands playback to an external HTTPS/platform destination; Elara does not embed playback in the current architecture.
 
-Workspace services are independent service boundaries behind the authorization authority. The current model-visible registry includes Calendar, Tasks, Gmail, Docs, Drive, Sheets, local PDF creation, roleplay-world operations, and YouTube search. The registry filename is Google-oriented for historical reasons but the registry now contains several application-local/non-Google tools; future documentation should describe it as the model tool surface rather than implying every entry is a Google Workspace API.
+The Character Master is user-owned and ships empty by default. Durable memory is separate from conversation history and appended as bounded contextual notes, never as a competing instruction. Roleplay World Canvas is persistent setting data with confirmation-gated mutations, not personal memory.
 
-## 7. Media boundary
+## 8. Documentation ownership
 
-YouTube search is a browser-execution tool. Search results are normalized and cached locally; credentials never enter the media cache. Playback is not embedded in Elara: media cards resolve to external HTTPS destinations and hand them to the platform/browser. The application may express `watch` or `listen` intent, but does not claim that media is playing, queued, liked, or saved.
+`/documents` is the only future canonical technical-documentation root. Filenames/system IDs are stable routing keys; chapter numbers are local navigation. Do not create `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap or implementation-log files. Git owns chronology.
 
-This system belongs under a general `media` document. YouTube is the current provider implementation, not the architectural name of the subsystem.
-
-## 8. Documentation migration findings
-
-The code audit identifies the following facts as migration anchors for the documentation rewrite:
-
-1. The interactive Gemini path is browser-direct and Lockbox-backed; Worker-only credential narratives are stale for normal chat.
-2. Google authorization is the browser GIS token-client design; a durable server refresh-token authority is not implemented.
-3. Durable memory retrieval is live and thread/folder scoped, but no model-visible memory mutation tool is live on `main` at the verified commit.
-4. Persistence is domain-authoritative but physically split across the central Elara database plus a small number of bounded subsystem stores.
-5. The model tool registry now spans Google Workspace and non-Google/local capabilities, so documentation should separate the generic tool boundary from provider-specific services.
-6. Media playback is an external handoff, not an embedded player.
-7. VTT is a real bounded subsystem with capture, transcription, transformation, and draft insertion; it must not disappear into generic UI notes.
-8. `App.tsx` is currently the application composition root and contains substantial orchestration; documents should describe that reality rather than inventing a separate manager layer.
-9. Historical pass/status documents are evidence only. Current contracts must be reconstructed from source, tests, and the consolidated system documents.
-
-## 9. Documentation ownership target
-
-This system map is the repository-level architecture reference. Detailed contracts should be moved into one document per bounded system under `/documents` and referenced by stable system ID: `SYS-UI`, `SYS-CHAT`, `SYS-GEM`, `SYS-VTT`, `SYS-MEM`, `SYS-ART`, `SYS-DOC`, `SYS-CHAR`, `SYS-GAUTH`, `SYS-GWS`, `SYS-MEDIA`, `SYS-AUTO`, `SYS-SEC`, `SYS-PERSIST`, `SYS-PWA`, `SYS-WORKER`, and `SYS-REL`.
-
-Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, or implementation-log documents. Temporary work belongs in Git history; durable facts belong in the owning system document.
+During the current migration, `/docs` and old status/pass files remain non-authoritative extraction inputs until Phase 5 removes them and rewrites their hard-coded references.

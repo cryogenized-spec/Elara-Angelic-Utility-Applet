@@ -20,7 +20,7 @@ Use implementation and tests, not old design prose, to determine runtime truth. 
 
 Normal interactive Gemini is browser-direct through `src/gemini/provider.ts` and the local Lockbox. Google Workspace authorization is browser-side GIS through `src/google/oauth/`. Cloud Worker/autonomy execution is a separate runtime plane. VTT is an input modality and must not create a competing chat provider/persona. See `SYS-ARCH / documents/architecture.md` before changing those boundaries.
 
-A green test that passes for the wrong reason is a defect. Strengthen the assertion or fixture until it proves the intended invariant; do not weaken product or test contracts merely to make a gate green.
+A green test that passes for the wrong reason is a defect. Strengthen the assertion or fixture until it proves the intended invariant; do not weaken product or test contracts merely to make a gate green. E2E may stub external provider/browser boundaries, but ordinary feature tests must not forge app-owned state behind the UI/runtime path they claim to prove. `npm run verify:gates` enforces the cheap mechanical parts of this rule.
 
 ## Change discipline
 
@@ -28,12 +28,15 @@ Prefer narrow changes in the owning subsystem. Reuse existing schemas, repositor
 
 Before writing directly to `main`, check open PRs and recent `main` movement. If another active workstream depends on a stable base or touches the same files, use a short-lived branch and do not move, close or rewrite that work. Direct `main` writes remain acceptable when no such conflict exists. Do not leave stale or superseded pull requests open.
 
+**Merge authority belongs to the user. Do not merge a pull request unless the user explicitly instructs you to merge it.** Committing to a work branch, opening/updating a PR and running CI do not imply merge permission.
+
 ## Verification
 
 Before calling repository work complete, run the broad gate in this order:
 
 ```text
 npm run docs:check
+npm run verify:gates
 npm run lint
 npm run typecheck
 npm test
@@ -44,3 +47,5 @@ npm run reliability:check
 ```
 
 CI is the release authority. If the current environment cannot execute Playwright, state that explicitly and rely on CI for browser evidence; `playwright --list` proves discovery/parsing only, not execution. Never claim an unrun gate passed.
+
+A green lint command is not currently evidence of TypeScript lint cleanliness because the present ESLint configuration excludes application/E2E TypeScript. See `SYS-REL / documents/reliability.md`; do not describe that debt as resolved until a TypeScript-aware lint configuration is actually in force.

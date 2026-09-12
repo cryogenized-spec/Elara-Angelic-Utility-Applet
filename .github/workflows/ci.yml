@@ -40,16 +40,20 @@ jobs:
         run: |
           set -euo pipefail
           test -f README.md
-          test -f docs/REPOSITORY_FORENSICS.md
-          test -f docs/PRODUCT_BOUNDARY.md
-          test -f docs/ARCHITECTURE_DECISION.md
-          test -f docs/SYSTEM_BOUNDARIES.md
+          test -f AGENTS.md
+          test -f documents/INDEX.md
+          test -f documents/manifest.json
+          test -f documents/architecture.md
+          test -f documents/ui.md
+          test -f documents/gemini.md
+          test -f documents/reliability.md
           test -f .nvmrc
           test -f package.json
+          node -e "JSON.parse(require('node:fs').readFileSync('documents/manifest.json', 'utf8'))"
           grep -q "One canonical Gemini execution path" README.md
-          grep -q "Android portrait" docs/PRODUCT_BOUNDARY.md
-          grep -q "One canonical Gemini provider implementation" docs/PRODUCT_BOUNDARY.md
-          grep -q "Node.js 24 LTS" docs/ARCHITECTURE_DECISION.md
+          grep -q "Android portrait" documents/ui.md
+          grep -q "id: SYS-GEM" documents/gemini.md
+          grep -q "Node 24" documents/reliability.md
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund

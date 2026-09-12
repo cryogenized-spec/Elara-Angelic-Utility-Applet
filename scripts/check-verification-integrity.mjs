@@ -14,6 +14,22 @@ const read = (relative) => {
 };
 const count = (source, pattern) => (source.match(pattern) ?? []).length;
 
+function walkFiles(relativeRoot) {
+  const start = join(root, relativeRoot);
+  if (!existsSync(start)) return [];
+  const output = [];
+  const stack = [start];
+  while (stack.length) {
+    const current = stack.pop();
+    for (const entry of readdirSync(current, { withFileTypes: true })) {
+      const full = join(current, entry.name);
+      if (entry.isDirectory()) stack.push(full);
+      else if (entry.isFile()) output.push(full);
+    }
+  }
+  return output;
+}
+
 const expectedSpecs = [
   'artwork.spec.ts',
   'autonomy-cloud.spec.ts',
@@ -39,7 +55,15 @@ const actualSpecs = existsSync(e2eDir)
   : [];
 for (const expected of expectedSpecs) if (!actualSpecs.includes(expected)) fail(`expected E2E spec is missing: e2e/${expected}`);
 
-const forbiddenTestControl = /\b(?:test|describe|test\.describe)\.(?:skip|only|fixme|fail|todo)\s*\(/;
+const forbiddenTestControl = /\b(?:test|it|describe|test\.describe)\.(?:skip|only|fixme|fail|todo)\s*\(/;
+for (const testFile of [...walkFiles('src'), ...walkFiles('worker/test'), ...walkFiles('e2e')]) {
+  if (!/(?:\.test\.(?:ts|tsx)|\.spec\.ts)$/.test(testFile)) continue;
+  const relative = testFile.slice(root.length + 1).replaceAll('\\', '/');
+  if (forbiddenTestControl.test(readFileSync(testFile, 'utf8'))) {
+    fail(`${relative} contains a disabled/focused/expected-failure test control`);
+  }
+}
+
 const forbiddenSourceImport = /(?:['"`](?:\.\.\/)+src\/|['"`]\/(?:Elara-Angelic-Utility-Applet\/)?src\/)/;
 const obsoleteBrowserProvider = /\*\*\/api\/gemini/;
 const directWritableIndexedDb = /['"]readwrite['"]/;
@@ -53,7 +77,6 @@ const allowedLocalStorageWriters = new Map([
 for (const name of [...actualSpecs, 'global-setup.ts']) {
   const relative = `e2e/${name}`;
   const source = read(relative);
-  if (forbiddenTestControl.test(source)) fail(`${relative} contains a disabled/focused/expected-failure test control`);
   if (forbiddenSourceImport.test(source)) fail(`${relative} imports application source directly instead of driving a public/user boundary`);
   if (obsoleteBrowserProvider.test(source)) fail(`${relative} intercepts the retired browser /api/gemini path`);
   if (directWritableIndexedDb.test(source) || directDatabaseDeletion.test(source)) fail(`${relative} mutates IndexedDB directly; E2E may inspect storage but must not forge application state`);
@@ -100,6 +123,21 @@ if (!playwright.includes('testMatch: /(?:mobile-reliability|vtt|media-handoff)\\
 if (!playwright.includes('testMatch: /onboarding\\.spec\\.ts/')) fail('Onboarding project must remain isolated');
 if (!playwright.includes('storageState: { cookies: [], origins: [] }')) fail('Onboarding project must start from clean browser storage');
 if (!playwright.includes('reuseExistingServer: !process.env.CI')) fail('CI must not reuse a pre-existing Playwright web server');
+
+const vitest = read('vitest.config.ts');
+if (!vitest.includes("environment: 'jsdom'")) fail('main Vitest suite must retain its jsdom environment');
+if (!vitest.includes("exclude: ['e2e/**', 'worker/**', '**/node_modules/**', '**/.git/**']")) fail('main Vitest exclusions changed; review test discovery explicitly');
+if (/\b(?:include|testNamePattern|passWithNoTests)\s*:/.test(vitest)) fail('main Vitest config may not narrow discovery or allow an empty suite');
+
+const workerVitest = read('vitest.workers.config.ts');
+if (!workerVitest.includes("main: 'worker/src/index.test-entry.ts'")) fail('Worker tests must enter through the production worker test entry');
+if (!workerVitest.includes("include: ['worker/test/**/*.test.ts']")) fail('Worker Vitest must include the complete worker/test tree');
+if (!workerVitest.includes('isolatedStorage: true')) fail('Worker tests must retain per-test storage isolation');
+if (/\b(?:testNamePattern|passWithNoTests)\s*:/.test(workerVitest)) fail('Worker Vitest may not narrow named tests or allow an empty suite');
+const workerTestEntry = read('worker/src/index.test-entry.ts');
+if (!workerTestEntry.includes("export { default, AutonomyEngine, RoutineRunWorkflow } from './index';")) {
+  fail('Worker test entry must re-export the production worker and runtime classes');
+}
 
 const packageSource = read('package.json');
 let packageJson = null;
@@ -156,4 +194,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Verification integrity passed: ${actualSpecs.length} E2E specs checked; no skip/focus controls, direct app-state imports, obsolete browser provider route, writable IndexedDB fixtures, CI bypass markers, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${actualSpecs.length} E2E specs plus unit/worker test controls checked; no skip/focus controls, direct app-state imports, obsolete browser provider route, writable IndexedDB fixtures, CI bypass markers, or reviewed-script drift detected.\n`);

@@ -332,6 +332,8 @@ This file is the durable implementation handoff record for completed roadmap pro
 
 **Verification:** local lint/typecheck (incl. e2e project)/units/workers/build/reliability green; CI (chromium project) is the authority for the rewritten spec.
 
+**Found by the honest spec, fixed in this pass:** once the flow test ran for real, it caught a genuine component defect the forged-state version could never see — `GoogleOAuthSettings.connect()` cleared its busy flag only on error, so after a *successful* connect every button in the panel (Disconnect, Enable writes, other Connects) stayed disabled until a full page reload. Fixed by clearing it in `finally`.
+
 ## Deployment decision
 
 Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7

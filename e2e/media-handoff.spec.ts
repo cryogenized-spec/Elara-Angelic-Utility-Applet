@@ -88,29 +88,38 @@ async function ask(page: import('@playwright/test').Page, text: string): Promise
 test.describe('YouTube media results', () => {
   test('a searched result becomes a card, and only one billed call is made for both intents', async ({ page }) => {
     const modelRequests: Array<Record<string, unknown>> = [];
-    let generation = 0;
     const providerRequests: Array<{ url: string; apiKeyHeader: string | undefined }> = [];
 
+    // Driven off the request content rather than a counter. The app is free to
+    // make more model calls per turn than "one call, one continuation", and a
+    // counter would quietly retarget which reply belongs to which turn.
     await page.route('**/v1/interactions*', async (route) => {
       const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
       modelRequests.push(payload);
-      generation += 1;
-      // Generations 1 and 3 ask for a search; 2 and 4 answer after seeing it.
-      if (generation % 2 === 1) {
-        const intent = generation === 1 ? 'listen' : 'watch';
+      const wire = JSON.stringify(payload);
+      const alreadySearched = wire.includes('lofiVid1');
+      const asks = {
+        listen: wire.includes('put on some lofi'),
+        watch: wire.includes('show me that lofi video'),
+      };
+
+      // Every non-search turn answers with the same text. Numbering the replies
+      // would make the assertions depend on how many model calls a turn happens
+      // to make, which is the app's business and not this feature's.
+      if (alreadySearched || (!asks.listen && !asks.watch)) {
         await route.fulfill({
           status: 200,
           contentType: 'text/event-stream',
-          body: sse(`interaction-${generation}`, [
-            toolCallStep(`call-${generation}`, { queries: ['lofi beats'], intent }),
-          ]),
+          body: sse('interaction-answer', [textStep('Here is what I found.')]),
         });
         return;
       }
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
-        body: sse(`interaction-${generation}`, [textStep(`Found it for generation ${generation}.`)]),
+        body: sse('interaction-search', [
+          toolCallStep('call-search', { queries: ['lofi beats'], intent: asks.listen ? 'listen' : 'watch' }),
+        ]),
       });
     });
 
@@ -128,11 +137,16 @@ test.describe('YouTube media results', () => {
     await ask(page, 'put on some lofi');
     const card = page.getByRole('link', { name: /Lo-Fi Roadtrip/ });
     await expect(card).toBeVisible();
-    await expect(page.getByText('Found it for generation 2.')).toBeVisible();
+    // One completed assistant turn, whichever call count produced it.
+    await expect(page.locator('.message-assistant')).toHaveCount(1);
 
     // The tool was actually offered to the model, with the intent argument
     // declared — without this the model could never ask for a hand-off.
-    const declarations = (modelRequests[0]?.tools ?? []) as Array<Record<string, any>>;
+    // The first request that carries tools, not merely the first request: a turn
+    // can start with a model call that declares none.
+    const chatRequest = modelRequests.find((entry) => Array.isArray(entry.tools) && (entry.tools as unknown[]).length > 0);
+    expect(chatRequest).toBeTruthy();
+    const declarations = (chatRequest!.tools ?? []) as Array<Record<string, any>>;
     const youtube = declarations.find((entry) => entry.function?.name === 'youtube.search' || entry.name === 'youtube.search');
     expect(youtube).toBeTruthy();
     const parameters = (youtube.function ?? youtube).parameters as Record<string, any>;
@@ -161,6 +175,8 @@ test.describe('YouTube media results', () => {
     await ask(page, 'show me that lofi video');
     const secondCard = page.getByRole('link', { name: /Lo-Fi Roadtrip/ }).nth(1);
     await expect(secondCard).toBeVisible();
+    await expect(page.locator('.message-assistant')).toHaveCount(2);
+    await expect(page.getByText('Here is what I found.')).toHaveCount(2);
     await expect(providerRequests).toHaveLength(1);
     await expect(secondCard).toHaveAttribute('href', 'https://www.youtube.com/watch?v=lofiVid1');
     await expect(secondCard).toContainText('Watch');

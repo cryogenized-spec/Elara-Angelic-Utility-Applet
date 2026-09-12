@@ -1,7 +1,7 @@
 ---
 id: SYS-REL
 status: active
-verified_commit: 52a37aa242d97012b67d2e8b50fd07a94a1857e2
+verified_commit: 985f27639201beefeb51d50bc9803af0b67f23be
 scope: CI, automated verification, diagnostics and release-quality gates
 paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/reliability-gate.mjs, .github/workflows/ci.yml, e2e]
 keywords: [reliability, testing, ci, diagnostics, analytics, performance, e2e, lint, typecheck, documentation, verification-integrity, anti-cheat]
@@ -21,7 +21,7 @@ A green command is evidence only for the surface it actually checks. In particul
 change
 -> documentation integrity
 -> verification-integrity guard
--> dependency install
+-> lockfile-strict dependency install
 -> lint
 -> typecheck
 -> unit tests
@@ -65,9 +65,9 @@ npx playwright test --project=chromium --project=android-portrait --project=onbo
 npm run reliability:check
 ```
 
-`npm run docs:check` is dependency-free. It validates the manifest, active system docs/frontmatter/chapter shape, declared source paths, the closed canonical `/documents` file set, local Markdown links, and the absence of the retired `/docs`/historical filename/reference conventions. Retired `docs/*.md` references are rejected even when they appear as plain text or source comments rather than clickable Markdown links.
+`npm run docs:check` is dependency-free. It validates the manifest, active system docs/frontmatter/chapter shape, declared source paths, the closed canonical `/documents` file set, local Markdown links **and their fragments**, canonical GitHub documentation links/anchors used from source, and the absence of the retired `/docs`/historical filename/reference conventions. Retired `docs/*.md` references are rejected even when they appear as plain text or source comments rather than clickable Markdown links.
 
-`npm run verify:gates` is also dependency-free and runs before dependency installation in CI. It pins the reviewed npm gate commands and CI command order, rejects CI bypass markers, verifies the expected Playwright project routing and E2E TypeScript coverage, rejects disabled/focused/expected-failure E2E controls, rejects the retired browser `/api/gemini` path, and rejects E2E code that directly imports application source or directly writes IndexedDB. Local-storage writes in E2E are limited to the explicit onboarding setup and legacy-migration fixtures. CI also refuses to reuse a pre-existing Playwright web server.
+`npm run verify:gates` is also dependency-free and runs before dependency installation in CI. It pins the reviewed npm gate commands and CI command order, requires lockfile-strict `npm ci`, rejects CI bypass markers, verifies the expected Playwright project routing and E2E TypeScript coverage, rejects disabled/focused/expected-failure E2E controls, rejects the retired browser `/api/gemini` path, and rejects E2E code that directly imports application source or directly mutates IndexedDB. Local-storage writes in E2E are limited to the explicit onboarding setup and legacy-migration fixtures. CI also refuses to reuse a pre-existing Playwright web server.
 
 `npm run reliability:check` chains documentation integrity and verification integrity before the architecture invariant gate. This makes common in-repository weakening visible, but it is not a cryptographic trust anchor: a writer who can alter the workflow and every guard together can still change policy. Repository/branch protection must provide that external governance boundary.
 
@@ -101,13 +101,13 @@ When changing one subsystem, run focused tests first, then the broad ordered gat
 
 Playwright fixtures are classified by what they replace. External boundaries such as Gemini responses, Google Identity Services/userinfo, YouTube responses, microphone APIs and visibility state may be deterministic test doubles. App-owned state should be produced by the app itself; the explicit onboarding baseline and legacy-storage migration cases are the narrow exceptions and are pinned by `verify:gates`.
 
+The thread-isolation regression test must first prove a request entered the canonical browser-direct `/v1/interactions` path, then switch threads while that response is deliberately held, and only then release it. This prevents a missing Lockbox key or an obsolete intercepted endpoint from making isolation appear green without testing the race.
+
 Physical Android behavior that browser automation cannot reproduce is reported as a validation gap rather than inferred from green desktop or emulated-browser CI.
 
 ## 8. Known gaps
 
 `eslint.config.js` currently ignores `src/**/*.ts`, `src/**/*.tsx` and `e2e/**/*.ts`. Therefore `npm run lint` being green proves that the lint command executed, but **does not prove application or E2E TypeScript lint cleanliness**. This is genuine verification debt and requires a TypeScript-aware ESLint configuration before lint can be treated as a full source-quality gate.
-
-CI currently installs dependencies with `npm install` rather than lockfile-strict `npm ci`. The committed lockfile is available, so switching CI to `npm ci` is a separate reproducibility hardening opportunity; it is not silently treated as completed here.
 
 At the verified repository state, `main` is not protected by a GitHub branch protection rule. Repo-contained checks therefore cannot stop a sufficiently privileged writer from replacing the checks themselves; external branch/ruleset governance remains the trust boundary for deliberate tampering.
 

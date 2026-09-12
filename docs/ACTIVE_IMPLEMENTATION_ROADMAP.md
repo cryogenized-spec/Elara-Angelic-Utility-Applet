@@ -71,6 +71,8 @@ What is still missing:
 
 > Correction (2026-09-12): Prior claim "Account identity, which is not implemented at all" is superseded — writer now exists in `authority.ts` via userinfo fetch. Prior claim that E2E seeds `version:2` plus hand-written account is fixed — E2E now seeds v3 with `enabledCapabilities` + `grantedProviderScopes` + `account`. Server-side persistence remains intentionally out of scope per freeze.
 
+> Correction (2026-09-12, Pass 5): the correction above left the E2E still forging the app's own stored state (a hand-written v3 `account` in localStorage), which tests the reader without the writer. `e2e/google-oauth-settings.spec.ts` now drives the real flow: the GIS token client and userinfo endpoints are stubbed as external provider responses, and every persisted record — including `account` — is produced by the canonical writer in `authority.ts`. Seeding survives only as an explicit legacy-migration test using the genuine v2 shape (`version: 2` + `grantedCapabilities`, no scope manifest). The freeze doc now records the best-effort nature of userinfo-derived identity.
+
 ### Pass 4 — Audit and correct every Google scope
 
 **Status: 🟡 SUBSTANTIAL FOUNDATION; RE-AUDIT REQUIRED.**

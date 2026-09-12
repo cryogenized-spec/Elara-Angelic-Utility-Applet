@@ -322,6 +322,16 @@ This file is the durable implementation handoff record for completed roadmap pro
 
 **Verification:** local lint/typecheck/units/build/reliability green; CI (including the three Playwright projects) is the authority for E2E.
 
+## 2026-09-12 — Pass 5: honest Google OAuth E2E + account-identity writer audit
+
+**Change:** `e2e/google-oauth-settings.spec.ts` no longer forges the app's persisted authorization state. It stubs only the external Google boundary (the GIS token-client script and the userinfo endpoint via `page.route`) and lets the real authority in `src/google/oauth/authority.ts` write every stored field; assertions then check the app's own localStorage record (version 3, account from userinfo, enabled capabilities, current-token scopes) and the UI a signed-in user sees, across a reload. Seeding remains only in an explicit legacy-migration test using the genuine v2 shape (`version: 2` + `grantedCapabilities`); it also proves a real acquisition supersedes legacy evidence with scope truth. `playwright.config.ts` now gives the dev server a test `VITE_GOOGLE_CLIENT_ID` (client IDs are public browser configuration), without which `ensureClientId()` refuses to run and no honest flow test is possible.
+
+**Writer audit (criterion: every v3 field has exactly one writer):** all in `src/google/oauth/authority.ts` — `version`/`updatedAt` forced by `saveStored()`; `enabledCapabilities` unioned only in `acquireToken()` success; `grantedProviderScopes` replaced only in `acquireToken()` success; `account` written/cleared only in `acquireToken()` from `fetchGoogleAccount()` (userinfo); `needsReauthorization` set on silent-refresh failure (acquireToken catch, authorizedFetch 401 paths) and cleared on success; `disconnect()` is the sole deletion path. `e2e/` forging audit: smoke.spec's legacy key seed is an explicit migration test; vtt.spec mocks browser APIs only; workspace-shortcuts reads stores without writing them. No other spec forges auth state.
+
+**Docs:** freeze doc gains a dated note recording that identity is best-effort userinfo-derived and never fabricated; roadmap correction supersedes the interim "E2E now seeds v3" claim.
+
+**Verification:** local lint/typecheck (incl. e2e project)/units/workers/build/reliability green; CI (chromium project) is the authority for the rewritten spec.
+
 ## Deployment decision
 
 Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7

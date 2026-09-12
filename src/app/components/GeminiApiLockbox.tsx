@@ -138,7 +138,7 @@ export function GeminiApiLockbox() {
       setYoutubeValidation('idle');
       setYoutubeValidationMessage('');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runYouTubeValidation is re-created every render; listing it would re-run validation on every render. The only intended trigger is a youtubeStatus change.
   }, [youtubeStatus]);
 
   function read(ref: RefObject<HTMLInputElement | null>): string {

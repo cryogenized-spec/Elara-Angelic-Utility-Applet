@@ -4,9 +4,18 @@
   "inventory_commit": "c006922e3e98cde544e54008b5723d6c058d19cc",
   "canonicalization_commit": "4dc7951318593afde6797676b15123824324c267",
   "rule": "Canonical extraction is complete. Repoint live references/gates, then delete legacy sources. Git retains implementation history.",
-  "legacy_patterns": ["docs/**", "documents/*PASS*.md", "documents/*STATUS*.md"],
-  "preserve_in_place": ["public/core/README.md"],
-  "source_only_targets": ["documents.md"],
+  "legacy_patterns": [
+    "docs/**",
+    "documents/*PASS*.md",
+    "documents/*STATUS*.md",
+    "documents/VTT_IMPLEMENTATION_PLAN.md"
+  ],
+  "preserve_in_place": [
+    "public/core/README.md"
+  ],
+  "source_only_targets": [
+    "documents.md"
+  ],
   "targets": {
     "architecture.md": [
       "docs/ARCHITECTURE_DECISION.md",
@@ -114,7 +123,9 @@
       "docs/GOOGLE_WORKSPACE_SHORTCUTS.md",
       "docs/GOOGLE_WRITE_CONFIRMATION.md"
     ],
-    "media.md": ["docs/MEDIA_INTEGRATION.md"],
+    "media.md": [
+      "docs/MEDIA_INTEGRATION.md"
+    ],
     "autonomy.md": [
       "docs/AUTONOMOUS_ELARA.md",
       "docs/AUTONOMOUS_ELARA_DESIGN.md",
@@ -125,8 +136,12 @@
       "docs/GEMINI_CREDENTIAL_ARCHITECTURE.md",
       "docs/LOCKBOX_WORKER_HEALTH.md"
     ],
-    "persistence.md": ["docs/LOCAL_PERSISTENCE.md"],
-    "pwa.md": ["docs/PRODUCTION_DEPLOYMENT_PASS.md"],
+    "persistence.md": [
+      "docs/LOCAL_PERSISTENCE.md"
+    ],
+    "pwa.md": [
+      "docs/PRODUCTION_DEPLOYMENT_PASS.md"
+    ],
     "worker.md": [
       "docs/GEMINI_WORKER_BOUNDARY.md",
       "docs/PRODUCTION_WORKER_BOUNDARY_VERIFICATION.md"
@@ -141,7 +156,9 @@
       "docs/PERFORMANCE_BUDGET.md",
       "docs/TESTING_STRATEGY.md"
     ],
-    "third-party-notices.md": ["docs/THIRD_PARTY_NOTICES.md"]
+    "third-party-notices.md": [
+      "docs/THIRD_PARTY_NOTICES.md"
+    ]
   },
   "delete_after_extraction": [
     "docs/ACTIVE_IMPLEMENTATION_ROADMAP.md",
@@ -150,7 +167,9 @@
     "docs/README.md",
     "docs/implementation-plan.md"
   ],
-  "completed_replacements": ["README.md"],
+  "completed_replacements": [
+    "README.md"
+  ],
   "hardcoded_doc_links": {
     "src/app/components/MarkdownReference.tsx": "documents/chat.md#markdown",
     "src/app/components/RoleplaySettings.tsx": "documents/character.md#roleplay-world",

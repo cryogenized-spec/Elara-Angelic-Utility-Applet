@@ -6,7 +6,7 @@ import { ToggleSwitch } from './ToggleSwitch';
 import './roleplay-settings.css';
 
 const WORLD_UPDATED_EVENT = 'elara-roleplay-world-updated';
-const ROLEPLAY_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/docs/ROLEPLAY_WORLD_CANVAS_GUIDE.md';
+const ROLEPLAY_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/documents/character.md#roleplay-world';
 
 export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferences; onChange: (value: RoleplayPreferences) => void }) {
   const [world, setWorld] = useState<RoleplayWorld | null>(null);

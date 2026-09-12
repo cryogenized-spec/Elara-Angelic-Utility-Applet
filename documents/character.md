@@ -41,8 +41,10 @@ The runtime may append application context such as durable memory after the Char
 | Roleplay domain | `src/domain/roleplay-world.ts` |
 | Roleplay persistence | `src/persistence/roleplay-world.ts` |
 | Roleplay model tools | `src/google/tools/roleplay-world-*.ts` |
-| Confirmation | `src/google/confirmation/roleplay-broker.ts` |
+| Shared confirmation | `src/google/confirmation/broker.ts`, `src/gemini/google-tool-loop.ts` |
 | Roleplay Settings | `src/app/components/RoleplaySettings.tsx` |
+
+`src/google/confirmation/roleplay-broker.ts` is a deprecated compatibility wrapper over the shared broker; it is not a separate confirmation authority.
 
 ## 4. Data and contracts
 

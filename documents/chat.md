@@ -1,7 +1,7 @@
 ---
 id: SYS-CHAT
 status: active
-verified_commit: cab20253ef448dd96e4feb82bf917729b27404a3
+verified_commit: c9650583b813b6914d8f3f11161e646215330421
 scope: conversation state and generation lifecycle
 paths: [src/chat, src/domain/chat.ts, src/persistence/conversation.ts]
 keywords: [chat, conversation, thread, generation, retry, lineage, markdown]
@@ -54,6 +54,7 @@ Assistant text uses `MarkdownText.tsx`: GFM is enabled, raw HTML is skipped, the
 ## 5. Invariants
 
 - Persist user intent before provider execution when durability matters.
+- Provider `input` that represents a user turn must match user-visible/user-authored intent; app-authored shortcut text must not masquerade as a hidden user message.
 - One active generation lineage may win; stale/superseded completions must not overwrite newer state.
 - Tool/media/artifact output is structured data, never reconstructed by parsing assistant prose.
 - Raw provider event streams are not conversation storage.
@@ -69,4 +70,8 @@ Use `src/chat/*.test.ts`, persistence tests, `MarkdownText.test.tsx`, conversati
 
 ## 8. Known gaps
 
-Search is title-oriented rather than full transcript search. `App.tsx` still coordinates significant chat orchestration. Keep future branching/search/archive UX inside this boundary without creating a second conversation store.
+Search is title-oriented rather than full transcript search. `App.tsx` still coordinates significant chat orchestration.
+
+At the verified commit, `App.runWorkspaceShortcut` synthesizes a `hiddenTask` string and passes it to `streamAssistantTurn()` although the user did not author that text. This is a known provenance violation, not a sanctioned instruction channel; remove it while preserving shortcut behavior rather than hiding or normalizing the synthetic turn.
+
+Keep future branching/search/archive UX inside this boundary without creating a second conversation store.

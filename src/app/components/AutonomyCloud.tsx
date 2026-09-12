@@ -75,7 +75,6 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
     const existing = loadPairing();
     setPairing(existing);
     if (existing) void runFullSync(existing);
-    // Local autonomy configuration changed → mirror it (debounced by the event itself).
     const handler = () => { if (loadPairing()) void runConfigSync(loadPairing()!); };
     window.addEventListener(CONFIG_CHANGED_EVENT, handler);
     return () => window.removeEventListener(CONFIG_CHANGED_EVENT, handler);
@@ -103,9 +102,6 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
       savePairing(pairing);
       setPairing(pairing);
       setToken('');
-      // Pairing declares this app's configuration authoritative: the local
-      // generation advances, so the first sync (and every later change) can
-      // never be treated as older than whatever the worker already holds.
       bumpConfigGeneration();
       await runFullSync(pairing);
     } catch (error) {
@@ -131,7 +127,7 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
   const refreshContext = useCallback(async () => {
     const current = loadPairing();
     if (!current) return;
-    await runFullSync(current); // rebuild + hash-guarded replace + stats
+    await runFullSync(current);
     const projection = await inspectContextProjection();
     const eligible = (await listMemories()).filter((memory) => isAutonomyContextEligible(memory, Date.now()));
     setInspect({ projection, eligible });
@@ -162,9 +158,6 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
 
   const contextSummary = useMemo(() => state?.context ?? null, [state]);
 
-  // ---------------------------------------------------------------------
-  // Not configured: honest setup state — no fake "connected" anywhere.
-  // ---------------------------------------------------------------------
   if (!pairing) {
     return (
       <div className="autonomy-policy-card autonomy-cloud">
@@ -185,15 +178,12 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
           <button type="button" className="autonomy-button autonomy-button--primary" disabled={verifying || !workerUrl.trim() || !token.trim()} onClick={() => { void verify(); }}>
             {verifying ? 'Verifying…' : 'Verify & pair'}
           </button>
-          <a className="autonomy-policy-note" href="https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/docs/AUTONOMOUS_ELARA.md" target="_blank" rel="noreferrer">Read the setup guide</a>
+          <a className="autonomy-policy-note" href="https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/documents/autonomy.md#cloud-setup" target="_blank" rel="noreferrer">Read the setup guide</a>
         </div>
       </div>
     );
   }
 
-  // ---------------------------------------------------------------------
-  // Paired: scheduler state + Autonomy Context, truthfully labeled.
-  // ---------------------------------------------------------------------
   return (
     <div className="autonomy-policy-card autonomy-cloud is-paired">
       <div className="autonomy-cloud__head">

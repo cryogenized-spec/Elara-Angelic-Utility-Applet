@@ -287,7 +287,12 @@ test.describe('YouTube media results', () => {
       const href = await card.getAttribute('href');
       expect(href).toContain('intent://music.youtube.com/watch?v=lofiVid1#Intent;');
       expect(href).toContain('scheme=https;');
-      expect(href).toContain('S.browser_fallback_url=https%3A%2F%2Fmusic.youtube.com%2Fwatch%3Fv%3BlofiVid1');
+      // Decoded rather than compared as a literal: what matters is that the
+      // fallback round-trips to the destination the tap will open. Note that
+      // `%3D` here is not cosmetic - an unencoded `=` inside the parameter would
+      // collide with the `;`-separated intent syntax and truncate the fallback.
+      const fallback = /S\.browser_fallback_url=([^;]*)/.exec(href ?? '')?.[1];
+      expect(fallback ? decodeURIComponent(fallback) : null).toBe('https://music.youtube.com/watch?v=lofiVid1');
       expect(href).toContain('category=android.intent.category.BROWSABLE');
       expect(href).toContain('action=android.intent.action.VIEW');
       expect(href).not.toContain(';package=');

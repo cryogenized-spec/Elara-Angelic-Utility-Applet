@@ -10,7 +10,7 @@ import type { GoogleCapabilityKey } from '../google/oauth/contracts';
 // `src/google/tools/contracts.ts`). No browser APIs, no provider SDK, no
 // persistence imports.
 //
-// Core invariants (see docs/AUTONOMOUS_ELARA_DESIGN.md):
+// Core invariants (see SYS-AUTO / documents/autonomy.md):
 // - A Routine is user intent. Structured permissions are the only authority.
 // - Google-backed routines are device-native until a server-side
 //   authorization authority exists. `deriveExecutionLocus` encodes that rule.

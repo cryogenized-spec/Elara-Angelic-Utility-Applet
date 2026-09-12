@@ -15,7 +15,7 @@ import Dexie, { type Table } from 'dexie';
  *
  * Nothing here exposes a general-purpose getSecret(). Each credential has a
  * named, narrow accessor, matching the boundary described in
- * docs/API_LOCKBOX.md.
+ * SYS-SEC / documents/security.md.
  */
 
 const DB_NAME = 'elara-gemini-lockbox';

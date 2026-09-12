@@ -115,6 +115,7 @@ const textExtensions = new Set(['.md', '.json', '.mjs', '.js', '.ts', '.tsx', '.
 const legacyLinkPatterns = [
   /github\.com\/cryogenized-spec\/Elara-Angelic-Utility-Applet\/(?:blob|raw)\/[^/]+\/docs\//,
   /\]\((?:\.\/|\/)?docs\//,
+  /\bdocs\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.md\b/,
 ];
 
 for (const file of walk(root, ignoredDirectories)) {

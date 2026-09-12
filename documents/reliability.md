@@ -1,7 +1,7 @@
 ---
 id: SYS-REL
 status: active
-verified_commit: 8833818cafaca07d04552ead41c250bc9c4e9a1a
+verified_commit: f2d564c01314b7b35c76382e6bec61f55241f6a9
 scope: CI, automated verification, diagnostics and release-quality gates
 paths: [scripts/check-docs.mjs, scripts/reliability-gate.mjs, .github/workflows/ci.yml, e2e]
 keywords: [reliability, testing, ci, diagnostics, analytics, performance, e2e, lint, typecheck, documentation]
@@ -59,7 +59,7 @@ npx playwright test --project=chromium --project=android-portrait --project=onbo
 npm run reliability:check
 ```
 
-`npm run docs:check` is dependency-free. It validates the manifest, active system docs/frontmatter/chapter shape, declared source paths, the closed canonical `/documents` file set, local Markdown links, and the absence of the retired `/docs`/historical filename/reference conventions. CI runs it before dependency installation. `npm run reliability:check` chains it again before the runtime invariant gate, so the final gate cannot pass while canonical documentation integrity is broken.
+`npm run docs:check` is dependency-free. It validates the manifest, active system docs/frontmatter/chapter shape, declared source paths, the closed canonical `/documents` file set, local Markdown links, and the absence of the retired `/docs`/historical filename/reference conventions. Retired `docs/*.md` references are rejected even when they appear as plain text or source comments rather than clickable Markdown links. CI runs the guard before dependency installation. `npm run reliability:check` chains it again before the runtime invariant gate, so the final gate cannot pass while canonical documentation integrity is broken.
 
 `npm run typecheck` covers the web source project, Worker project and the full `e2e/` Playwright project. Focused checks include `typecheck:e2e`, `verify:artifact-assets`, `verify:worker` and subsystem tests. Focused checks are iteration aids; they do not replace the broad gate when claiming repository-level completion.
 

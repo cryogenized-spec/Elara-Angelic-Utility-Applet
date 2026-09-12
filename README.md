@@ -58,7 +58,7 @@ Additional focused verification includes `npm run verify:artifact-assets` and `n
 
 ## Core invariants
 
-The interactive chat architecture has one canonical Gemini provider path; do not add a legacy `generateContent` fallback or a competing chat provider. Model settings must remain capability-driven. UI components do not own raw provider requests, OAuth mechanics, credentials or database implementation. External data is validated at trust boundaries. Provider/network failures become explicit states rather than endless loading. Each domain has one authoritative state owner even when the application uses more than one physical IndexedDB/Dexie database.
+One canonical Gemini execution path: interactive chat uses the browser Interactions provider; do not add a legacy `generateContent` fallback or a competing chat provider. Model settings must remain capability-driven. UI components do not own raw provider requests, OAuth mechanics, credentials or database implementation. External data is validated at trust boundaries. Provider/network failures become explicit states rather than endless loading. Each domain has one authoritative state owner even when the application uses more than one physical IndexedDB/Dexie database.
 
 Credentials stay behind their owning security boundary. Tool schemas never contain secrets. Google Workspace operations pass through the centralized capability/OAuth boundary and consequential mutations use the shared confirmation policy. Cloud/autonomy execution must not silently redefine the normal browser-chat architecture.
 

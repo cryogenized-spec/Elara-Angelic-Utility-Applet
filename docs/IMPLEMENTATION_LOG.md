@@ -334,6 +334,14 @@ This file is the durable implementation handoff record for completed roadmap pro
 
 **Found by the honest spec, fixed in this pass:** once the flow test ran for real, it caught a genuine component defect the forged-state version could never see — `GoogleOAuthSettings.connect()` cleared its busy flag only on error, so after a *successful* connect every button in the panel (Disconnect, Enable writes, other Connects) stayed disabled until a full page reload. Fixed by clearing it in `finally`.
 
+## 2026-09-12 — Pass 6: Android device validation protocol
+
+**Change:** added `docs/ANDROID_DEVICE_VALIDATION.md` (2026-09-12) — a dated, under-10-minute on-device checklist covering: install from the shipped GitHub Pages deployment (noting the applet had no physical-device contact before this document), Lockbox key survival across a full app close/reopen, the Listen/Watch card hand-offs with a four-way expected-vs-actual record (chooser / one app / browser / nothing) in both Chrome and the installed PWA, the cache re-tap proven by exactly one `youtube/v3/search` request for two identical asks over USB devtools, the missing-key and no-results failure states, and the 12-search per-session quota guard. Its "Not verified before this document existed" section honestly states that no device run has happened yet. `docs/MEDIA_INTEGRATION.md` → "Verified where" now splits CI-verified (URI shape, card, cache, failures on desktop + Android UA) from device-verified (nothing yet), replacing the bare outstanding sentence; the roadmap's current-position block points at the protocol as the evidence artifact.
+
+**No product code changed.** This pass deliberately builds only the protocol: the one thing it validates — whether Android shows its chooser or a single default handler — is decided by the phone, not by any test environment. If the run records a single app opening directly, the accepted response is documenting the platform behaviour in MEDIA_INTEGRATION → Hand-off, never pinning a package name.
+
+**Verification:** gates green; CI green. Device results pending the user's run; they get transcribed into the protocol dated when they arrive.
+
 ## Deployment decision
 
 Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7

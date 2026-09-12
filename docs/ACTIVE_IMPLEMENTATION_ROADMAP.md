@@ -155,6 +155,8 @@ Two consequences:
 
 The next substantive implementation pass is **Pass 4 (scope re-audit)**, with Pass 5 (real runtime proof) following. Pass 2 is closed, Pass 3's cheap follow-ons are done: account identity writer exists and E2E seeding is fixed. Remaining open items are scope re-audit against live authority and hardening of real Workspace interactions.
 
+> Outstanding (2026-09-12): **physical Android validation of the media hand-off** is the one item blocking an honest "the YouTube feature is complete". The protocol and evidence artifact is `docs/ANDROID_DEVICE_VALIDATION.md` (2026-09-12) — a dated on-device checklist whose result fields are blank until a person runs it on a phone. Until that run is recorded, the feature's correct status is: implemented and CI-verified (unit + Playwright on desktop and an Android user-agent), device behaviour unverified. `docs/MEDIA_INTEGRATION.md` → "Verified where" carries the same split.
+
 ## Evidence anchors
 
 - `README.md` records Prompts 1–50 as completed milestones.

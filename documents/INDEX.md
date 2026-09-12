@@ -1,8 +1,8 @@
 # Elara documentation index
 
-`/documents` is the canonical technical-documentation root. Every bounded system has an active current-state reference. Legacy `/docs` and remaining `*_PASS_*`, `*_STATUS.*` and implementation-plan files are migration-only inputs pending reference migration and deletion.
+`/documents` is the canonical technical-documentation root. Every bounded system has an active current-state reference. Historical pass/status/roadmap material has been retired; use Git history only when chronology is required.
 
-For machine routing, start with [`manifest.json`](./manifest.json). For repository-wide boundaries, use [`architecture.md`](./architecture.md). [`migration-map.json`](./migration-map.json) is temporary cleanup scaffolding and is not technical authority.
+For machine routing, start with [`manifest.json`](./manifest.json). For repository-wide boundaries, use [`architecture.md`](./architecture.md).
 
 ## 1. Minimal load protocol
 
@@ -25,7 +25,7 @@ source code + tests
 canonical /documents system document
 ```
 
-Legacy documents and Git history are evidence/history only. When prose conflicts with implementation, verify the implementation and repair the canonical document.
+Git history is evidence/history only. When prose conflicts with implementation, verify the implementation and repair the canonical document.
 
 ## 3. Routing table
 
@@ -93,6 +93,6 @@ A change that modifies a durable contract updates the owning system document in 
 
 `manifest.json` is the low-token router. Load only the mapped system document(s) for the task unless a real cross-system dependency or route tie requires more context.
 
-## 7. Legacy cleanup state
+## 7. Repository state
 
-Canonical extraction is complete. Remaining cleanup is mechanical: rewrite application documentation links, move CI/reliability assertions to canonical paths, delete legacy `/docs` plus old pass/status/implementation-plan files, and remove `migration-map.json` after no legacy references remain. `public/core/README.md` is an operational BusyTeX deployment note and is intentionally preserved in place.
+The legacy `/docs` tree and old pass/status/implementation-plan files were removed after verified current facts were consolidated here. `public/core/README.md` remains intentionally outside `/documents` because it is an operational BusyTeX runtime-asset note, not general project documentation. Superseded implementation narratives remain available through Git history.

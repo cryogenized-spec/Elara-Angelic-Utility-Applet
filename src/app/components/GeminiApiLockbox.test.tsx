@@ -8,12 +8,15 @@ import {
   clearGeminiApiKey,
   clearYouTubeApiKey,
   disableGeminiLockboxSecurity,
+  getGeminiApiKey,
+  getYouTubeLockboxStatus,
   lockGeminiApiKey,
   saveGeminiApiKey,
   saveYouTubeApiKey,
   unlockGeminiApiKey,
   unlockGeminiApiKeyWithPin,
 } from '../../persistence/gemini-api-key';
+import { writeUnopenableSecondaryRecord } from '../../persistence/lockbox-test-fixtures';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -189,8 +192,10 @@ describe('YouTube credential in the Lockbox screen', () => {
 
   it('reports a credential mismatch without exposing the stored value', async () => {
     await saveGeminiApiKey(GEMINI_KEY, PASSWORD);
-    await saveYouTubeApiKey(YOUTUBE_KEY, 'a-completely-different-passphrase');
     lockGeminiApiKey();
+    // Seeded directly: a mismatch can no longer be created through the public
+    // API, because secondary writes now verify the Lockbox credential.
+    await writeUnopenableSecondaryRecord();
     await unlockGeminiApiKey(PASSWORD);
 
     await renderLockbox();
@@ -198,6 +203,33 @@ describe('YouTube credential in the Lockbox screen', () => {
     expect(container.textContent).toContain('saved under a different credential');
     expect(container.textContent).toContain('Replace YouTube Key');
     expect(container.innerHTML).not.toContain(YOUTUBE_KEY);
+  });
+
+  it('refuses a YouTube key saved under a credential that is not the Lockbox', async () => {
+    // The Settings screen used to be the only thing preventing a mistyped
+    // credential from silently producing an unreadable key. The store refuses it
+    // now, and the refusal must stay free of secret material.
+    await saveGeminiApiKey(GEMINI_KEY, PASSWORD);
+    await unlockGeminiApiKey(PASSWORD);
+    await renderLockbox();
+
+    expect(youtubeInput()).toBeTruthy();
+    expect(credentialInput()).toBeTruthy();
+    youtubeInput()!.value = YOUTUBE_KEY;
+    credentialInput()!.value = 'a-completely-different-passphrase';
+
+    await press('Save YouTube Key');
+
+    // The store verifies the credential by decrypting the authority record, so
+    // the refusal arrives after a real key derivation rather than synchronously.
+    await waitFor('the mismatched-credential refusal did not appear', () => container.textContent!.includes('does not match the current Lockbox credential'));
+
+    // The refusal must not echo either secret.
+    expect(container.textContent).not.toContain('a-completely-different-passphrase');
+    expect(container.innerHTML).not.toContain(YOUTUBE_KEY);
+    expect(await getYouTubeLockboxStatus()).toBe('empty');
+    // And it must not disturb the authority it was made against.
+    expect(await getGeminiApiKey()).toBe(GEMINI_KEY);
   });
 
   it('confirms before removing the YouTube credential', async () => {

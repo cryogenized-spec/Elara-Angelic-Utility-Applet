@@ -1,15 +1,17 @@
 # UI Pass 06 — Quick-action rail
 
 ## Status
-Implemented on `main` as the Workspace quick-action UI/application boundary. CI remains the completion gate.
+Implemented on `main` as the Workspace quick-action UI/application boundary.
 
 ## Scope
 
 Pass 6 implements the Android-first horizontal utility rail for Calendar, Tasks, and Gmail. The rail is typed and configurable through a `QuickActionDescriptor` list rather than hard-coding button behavior into JSX.
 
-Each shortcut dispatches an application-level `QuickActionPort`. It does not mutate conversation state, synthesize a canned user message, or insert hidden instructions into the chat. The current adapter is deliberately a deterministic demo boundary because the production OAuth-backed Workspace runtime is not yet wired into the executable vertical slice.
+Each shortcut dispatches through the application's Workspace shortcut boundary and runs as a normal generation turn restricted to the registered tools that shortcut names — `TopToolRail` → `WorkspaceMenu` → `App.runWorkspaceShortcut` → the Gemini tool loop with `tools` narrowed to the shortcut's registry entries. It does not mutate conversation state directly, and no adapter fabricates Workspace data.
 
-The result is presented through a dedicated `QuickActionSurface`, which makes the required capability explicit and reports that authorization is required rather than fabricating Workspace data.
+> Correction (2026-09-11): this pass originally described the rail as sitting behind "a deterministic demo boundary" because the production OAuth-backed Workspace runtime was not yet reachable. That is no longer true. `demoQuickActionPort` and the `QuickActionPort` seam in `src/app/quick-actions/` are now unreferenced residue from that design — the rail is live, and whether a shortcut returns real data depends on the Google authorization runtime (see `docs/ACTIVE_IMPLEMENTATION_ROADMAP.md`), not on a demo adapter in the UI.
+
+The shortcut affordance is rendered by `WorkspaceMenu`; the `QuickActionSurface` component that displayed a per-action "authorization required" panel belonged to the demo boundary and is likewise no longer mounted.
 
 ## Files
 

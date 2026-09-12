@@ -128,19 +128,17 @@ describe('YouTube credential in the shared Lockbox', () => {
     expect(await getYouTubeLockboxStatus()).toBe('unlocked');
   });
 
-  it('reports a mismatch instead of failing the unlock when the YouTube key used another credential', async () => {
+  it('refuses a secondary write sealed under a credential that is not the Lockbox', async () => {
+    // The persistence boundary enforces this, not the Settings UI: accepting an
+    // arbitrary string would let a mistyped credential silently produce a
+    // record nothing can ever open again.
     await saveGeminiApiKey(GEMINI_KEY, PASSWORD);
-    await saveYouTubeApiKey(YOUTUBE_KEY, OTHER_PASSWORD);
-    lockGeminiApiKey();
 
-    await unlockGeminiApiKey(PASSWORD);
-
-    // The primary credential stays usable; the secondary is honestly reported
-    // as unusable rather than silently returning an empty key.
-    expect(await getGeminiApiKey()).toBe(GEMINI_KEY);
-    expect(await getYouTubeApiKey()).toBe('');
-    expect(await getYouTubeLockboxStatus()).toBe('mismatch');
+    await expect(saveYouTubeApiKey(YOUTUBE_KEY, OTHER_PASSWORD)).rejects.toThrow(/does not match/i);
+    expect(await getYouTubeLockboxStatus()).toBe('empty');
+    expect(await readRecord('youtube-api-key')).toBeUndefined();
   });
+
 
   it('moves every credential to device-local protection when security is turned off', async () => {
     await saveGeminiApiKey(GEMINI_KEY, PASSWORD);

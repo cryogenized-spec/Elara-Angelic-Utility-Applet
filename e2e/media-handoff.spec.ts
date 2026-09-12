@@ -29,16 +29,24 @@ const YOUTUBE_VIDEO = {
   },
 };
 
-function sse(interactionId: string, body: readonly string[]): string {
+/**
+ * Builds one SSE turn.
+ *
+ * `terminal` matters and is not interchangeable: a turn that hands work to a tool
+ * pauses on `requires_action`, and only an answer turn ends with
+ * `interaction.completed`. Emitting `completed` after a function call is a shape
+ * the real API does not produce, so this suite must not rely on the loop
+ * tolerating it.
+ */
+function sseTurn(interactionId: string, body: readonly string[], terminal: 'requires_action' | 'completed' = 'completed'): string {
   const created = `event: interaction.created\ndata: ${JSON.stringify({
     event_type: 'interaction.created',
     interaction: { id: interactionId, status: 'in_progress', model: 'gemini-3.8-flash' },
   })}\n\n`;
-  const completed = `event: interaction.completed\ndata: ${JSON.stringify({
-    event_type: 'interaction.completed',
-    interaction: { id: interactionId, status: 'completed' },
-  })}\n\n`;
-  return created + body.join('') + completed;
+  const end = terminal === 'completed'
+    ? `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: interactionId, status: 'completed' } })}\n\n`
+    : `event: interaction.requires_action\ndata: ${JSON.stringify({ event_type: 'interaction.requires_action', interaction_id: interactionId, status: 'requires_action' })}\n\n`;
+  return created + body.join('') + end;
 }
 
 function toolCallStep(id: string, args: Record<string, unknown>): string {
@@ -80,6 +88,29 @@ async function unlockTestLockbox(page: import('@playwright/test').Page): Promise
   await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 
+/**
+ * A snapshot of the turn, for use as an assertion message.
+ *
+ * Cheap and string-only, because it has to be safe to build while a run is
+ * already failing. These counts separate the three ways this chain can break -
+ * the model never called the tool, the tool ran but never reached YouTube, or
+ * the result never became a card - which matters because the CI logs and the
+ * Playwright report are not readable from every environment this repo is worked
+ * in, so the annotation has to carry the diagnosis itself.
+ */
+function traceFor(page: import('@playwright/test').Page, modelRequests: readonly unknown[], providerRequests: readonly unknown[]): () => Promise<string> {
+  return async () => {
+    const dom = await page.locator('.conversation').innerText().catch(() => '<conversation unavailable>');
+    const payloads = JSON.stringify(modelRequests);
+    return [
+      `model requests=${modelRequests.length}`,
+      `YouTube calls=${providerRequests.length}`,
+      `tool result reached the model=${payloads.includes('lofiVid1')}`,
+      `conversation: ${dom.replace(/\s+/g, ' ').slice(0, 400)}`,
+    ].join(' | ');
+  };
+}
+
 async function ask(page: import('@playwright/test').Page, text: string): Promise<void> {
   await page.getByRole('textbox', { name: 'Message Elara' }).fill(text);
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -88,7 +119,7 @@ async function ask(page: import('@playwright/test').Page, text: string): Promise
 test.describe('YouTube media results', () => {
   test('a searched result becomes a card, and only one billed call is made for both intents', async ({ page }) => {
     const modelRequests: Array<Record<string, unknown>> = [];
-    const providerRequests: Array<{ url: string; apiKeyHeader: string | undefined }> = [];
+    const providerRequests: Array<{ url: string; apiKeyHeader: string | null }> = [];
 
     // Driven off the request content rather than a counter. The app is free to
     // make more model calls per turn than "one call, one continuation", and a
@@ -110,23 +141,28 @@ test.describe('YouTube media results', () => {
         await route.fulfill({
           status: 200,
           contentType: 'text/event-stream',
-          body: sse('interaction-answer', [textStep('Here is what I found.')]),
+          body: sseTurn('interaction-answer', [textStep('Here is what I found.')]),
         });
         return;
       }
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
-        body: sse('interaction-search', [
+        body: sseTurn('interaction-search', [
           toolCallStep('call-search', { queries: ['lofi beats'], intent: asks.listen ? 'listen' : 'watch' }),
-        ]),
+        ], 'requires_action'),
       });
     });
 
     await page.route('**/youtube/v3/search**', async (route) => {
       providerRequests.push({
         url: route.request().url(),
-        apiKeyHeader: route.request().header('x-goog-api-key'),
+        // `headerValue`, not `header`: the latter does not exist on Request, and
+        // an exception thrown in a route handler fails the intercepted request
+        // rather than the assertion, which reads as "the app never called
+        // YouTube". e2e specs are outside `npm run typecheck`, so nothing else
+        // catches this class of typo until a run.
+        apiKeyHeader: await route.request().headerValue('x-goog-api-key'),
       });
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [YOUTUBE_VIDEO] }) });
     });
@@ -135,28 +171,34 @@ test.describe('YouTube media results', () => {
     await unlockTestLockbox(page);
 
     await ask(page, 'put on some lofi');
+    const trace = traceFor(page, modelRequests, providerRequests);
+    // The card is the signal that the whole chain ran, and asserting it first is
+    // deliberate: the assistant bubble exists from the start of the turn, so any
+    // count taken against it can be read before the tool has had a chance to
+    // fetch. Everything below is therefore sampled after the card appeared, and
+    // compared as a settled value rather than polled.
     const card = page.getByRole('link', { name: /Lo-Fi Roadtrip/ });
-    await expect(card).toBeVisible();
-    // One completed assistant turn, whichever call count produced it.
-    await expect(page.locator('.message-assistant')).toHaveCount(1);
+    await expect(card, await trace()).toBeVisible();
+    expect(providerRequests.length, await trace()).toBe(1);
 
     // The tool was actually offered to the model, with the intent argument
-    // declared — without this the model could never ask for a hand-off.
+    // declared - without this the model could never ask for a hand-off.
     // The first request that carries tools, not merely the first request: a turn
     // can start with a model call that declares none.
     const chatRequest = modelRequests.find((entry) => Array.isArray(entry.tools) && (entry.tools as unknown[]).length > 0);
     expect(chatRequest).toBeTruthy();
     const declarations = (chatRequest!.tools ?? []) as Array<Record<string, any>>;
     const youtube = declarations.find((entry) => entry.function?.name === 'youtube.search' || entry.name === 'youtube.search');
-    expect(youtube).toBeTruthy();
-    const parameters = (youtube.function ?? youtube).parameters as Record<string, any>;
+    if (!youtube) {
+      throw new Error(`youtube.search was not declared to the model. Declared: ${JSON.stringify(declarations.map((entry) => entry.name ?? entry.function?.name))}`);
+    }
+    const parameters = ((youtube as Record<string, any>).function ?? youtube).parameters as Record<string, any>;
     expect(Object.keys(parameters.properties)).toContain('intent');
     expect(parameters.properties.intent.enum).toEqual(['watch', 'listen']);
     expect(parameters.required).toEqual(['queries']);
 
     // The key travels as a header only. A URL-borne key lands in history and logs.
-    expect(providerRequests).toHaveLength(1);
-    expect(providerRequests[0].apiKeyHeader).toBeTruthy();
+    expect(providerRequests[0]!.apiKeyHeader).toBeTruthy();
     expect(providerRequests[0].url).not.toMatch(/[?&]key=/);
 
     // A link, never a player. Scoped to the rail: the app has other surfaces, and
@@ -176,8 +218,9 @@ test.describe('YouTube media results', () => {
     const secondCard = page.getByRole('link', { name: /Lo-Fi Roadtrip/ }).nth(1);
     await expect(secondCard).toBeVisible();
     await expect(page.locator('.message-assistant')).toHaveCount(2);
-    await expect(page.getByText('Here is what I found.')).toHaveCount(2);
-    await expect(providerRequests).toHaveLength(1);
+    // One billed call for two intents is the design's central promise, so it is
+    // asserted as a settled count once the second card is on screen.
+    expect(providerRequests.length, await trace()).toBe(1);
     await expect(secondCard).toHaveAttribute('href', 'https://www.youtube.com/watch?v=lofiVid1');
     await expect(secondCard).toContainText('Watch');
 
@@ -211,18 +254,22 @@ test.describe('YouTube media results', () => {
     test.use({ userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36' });
 
     test('a tap is handed to the platform as an app picker, not to a player in the page', async ({ page }) => {
+      const androidModelRequests: Record<string, unknown>[] = [];
+      const androidProviderCalls: string[] = [];
       await page.route('**/v1/interactions*', async (route) => {
         const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+        androidModelRequests.push(payload);
         const hasToolResult = JSON.stringify(payload).includes('lofiVid1');
         await route.fulfill({
           status: 200,
           contentType: 'text/event-stream',
           body: hasToolResult
-            ? sse('interaction-2', [textStep('Picked one for you.')])
-            : sse('interaction-1', [toolCallStep('call-1', { queries: ['lofi beats'], intent: 'listen' })]),
+            ? sseTurn('interaction-2', [textStep('Picked one for you.')])
+            : sseTurn('interaction-1', [toolCallStep('call-1', { queries: ['lofi beats'], intent: 'listen' })], 'requires_action'),
         });
       });
       await page.route('**/youtube/v3/search**', async (route) => {
+        androidProviderCalls.push(route.request().url());
         await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ items: [YOUTUBE_VIDEO] }) });
       });
 
@@ -231,7 +278,8 @@ test.describe('YouTube media results', () => {
       await ask(page, 'put on some lofi');
 
       const card = page.getByRole('link', { name: /Lo-Fi Roadtrip/ });
-      await expect(card).toBeVisible();
+      await expect(card, await traceFor(page, androidModelRequests, androidProviderCalls)()).toBeVisible();
+      expect(androidProviderCalls, await traceFor(page, androidModelRequests, androidProviderCalls)()).toHaveLength(1);
 
       // An `intent://` URI is what makes Android resolve the link across every
       // installed handler rather than the default browser, and the absence of a

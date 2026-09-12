@@ -127,11 +127,20 @@ Consequences to weigh:
 - Rules the code style visibly depends on — unused variables, explicit `any`, effect dependency correctness in a React 19 codebase with memoised surfaces — have never been enforced automatically.
 - Adding a real TypeScript lint configuration is a prerequisite to trusting "lint green" as a completion criterion. It will surface a backlog and should be planned as its own pass, not adopted as a side effect.
 
+**`npm run typecheck` does not check `e2e/`.** `tsconfig.json` includes `src` only, so every Playwright spec is typechecked by nothing at all. This is not theoretical: the media hand-off suite shipped calling `route.request().header(...)`, a method that does not exist on Playwright's `Request`. An exception thrown inside a `page.route` handler fails the *intercepted request*, not the assertion, so the applet simply never received its fake YouTube response and every test in the file failed on a missing card. Local gates were all green. CI found it, and `--log` and artifact downloads were both unreachable from the working environment, so diagnosis came from check annotations plus reading the loop.
+
+Two consequences:
+
+- A spec can be confidently wrong in exactly the way application code cannot be caught being. Until `e2e/` is typechecked, the only feedback on a misused Playwright API is a failed CI run several minutes later.
+- Three pre-existing errors are already in `e2e/`: `autonomy-cloud.spec.ts` reads `enabled` off `{ id, name }`, and `character-runtime.spec.ts` plus `workspace-shortcuts.spec.ts` import `/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts` by a path TypeScript cannot resolve. Wiring `e2e/` into the typecheck gate means clearing those three first, which is its own small pass and should not be done as a side effect of feature work. A `tsconfig` scoped to `e2e` reproduces all three with `strict` plus `types: ["node"]`.
+
 ## Current position
 
 **Historical foundation: 50/50 prompts complete.**
 
 **Active implementation: Pass 0 complete; Pass 1 complete (verified); the Lockbox credential-authority prerequisite complete; Passes 2–5 are the remaining architecture/runtime work; Pass 6 is substantially implemented; Pass 7 is partially implemented.**
+
+> Decision (2026-09-12): the Pass 2 question above is closed by direction rather than by analysis. The applet stays self-contained — no exterior Worker, no server component, no durable refresh-token store. Authorization remains the browser-side Google Identity Services token client that `GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` already specifies, and cross-reload recovery keeps relying on the Google session plus `prompt: 'none'`. A refresh token held in browser storage would be security theatre; the freeze document is now the live contract, not a deferred alternative. Account identity still has no writer, and the Google Settings E2E still seeds `version: 2` plus a hand-written `account`, so both items remain open and are no longer blocked on this decision.
 
 The next substantive implementation pass is **Pass 2**, and it begins with a documented decision rather than with code: reconcile this tracker with `docs/GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` on whether the durable authorization-code + PKCE authority is being built now, and where it is deployed. Two follow-on items are cheap and should ride along, because both are currently invisible to the suite: account identity has no writer (Pass 3), and the Google Settings E2E seeds `version: 2` plus a hand-written `account` into `localStorage`, so it exercises the legacy-migration branch and an unreachable UI state instead of the v3 runtime format.
 

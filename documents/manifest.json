@@ -1,17 +1,18 @@
 {
-  "schema": 1,
+  "schema": 2,
   "root": "documents",
-  "authority": ["source", "tests", "documents", "legacy-docs"],
-  "legacy_root": "docs",
+  "authority": ["source", "tests", "documents"],
+  "routing": {"path_match":"most-specific-prefix","default":"architecture","load":"one-system"},
+  "legacy": {"status":"migration-only","patterns":["docs/**","documents/*PASS*.md","documents/*STATUS*.md"]},
   "systems": {
-    "architecture": {"id":"SYS-ARCH","doc":"architecture.md","status":"active","paths":["src","worker/src"],"keywords":["architecture","boundary","runtime","system-map"]},
+    "architecture": {"id":"SYS-ARCH","doc":"architecture.md","status":"active","paths":[],"keywords":["architecture","boundary","runtime","system-map"]},
     "ui": {"id":"SYS-UI","doc":"ui.md","status":"active","paths":["src/app","src/ui","src/main.tsx"],"keywords":["ui","layout","settings","composer","portrait","android","appearance"]},
-    "chat": {"id":"SYS-CHAT","doc":"chat.md","status":"active","paths":["src/chat","src/domain/chat.ts","src/persistence/conversation.ts"],"keywords":["chat","conversation","thread","generation","retry","markdown"]},
+    "chat": {"id":"SYS-CHAT","doc":"chat.md","status":"active","paths":["src/chat","src/domain/chat.ts","src/persistence/conversation.ts"],"keywords":["chat","conversation","thread","generation","retry","lineage","markdown"]},
     "gemini": {"id":"SYS-GEM","doc":"gemini.md","status":"active","paths":["src/gemini"],"keywords":["gemini","interactions","provider","streaming","model","tool-call","thinking"]},
     "vtt": {"id":"SYS-VTT","doc":"vtt.md","status":"active","paths":["src/vtt","src/app/components/Composer.tsx"],"keywords":["voice","vtt","microphone","transcription","polish","roleplay"]},
     "memory": {"id":"SYS-MEM","doc":"memory.md","status":"active","paths":["src/memory","src/gemini/memory-context.ts"],"keywords":["memory","recall","observation","retrieval","consolidation","memory-bank"]},
     "artifacts": {"id":"SYS-ART","doc":"artifacts.md","status":"active","paths":["src/artifacts","src/domain/artifact.ts"],"keywords":["artifact","attachment","image","document-input","blob","generated"]},
-    "documents": {"id":"SYS-DOC","doc":"documents.md","status":"active","paths":["src/documents","src/ocr"],"keywords":["pdf","latex","busytex","ocr","compiler","document-create"]},
+    "documents": {"id":"SYS-DOC","doc":"documents.md","status":"active","paths":["src/documents","src/ocr","public/core/README.md"],"keywords":["pdf","latex","busytex","ocr","compiler","document-create"]},
     "character": {"id":"SYS-CHAR","doc":"character.md","status":"active","paths":["src/character","src/domain/character.ts","src/domain/roleplay-world.ts","src/persistence/character.ts","src/persistence/roleplay-world.ts"],"keywords":["character","master-prompt","portrait","roleplay","world-canvas"]},
     "google-auth": {"id":"SYS-GAUTH","doc":"google-auth.md","status":"active","paths":["src/google/oauth"],"keywords":["google","oauth","gis","scope","capability","token","account"]},
     "google-workspace": {"id":"SYS-GWS","doc":"google-workspace.md","status":"active","paths":["src/google/calendar","src/google/tasks","src/google/gmail","src/google/docs","src/google/drive","src/google/sheets","src/google/chat","src/google/tools","src/google/confirmation"],"keywords":["workspace","calendar","tasks","gmail","docs","drive","sheets","tools","confirmation"]},
@@ -22,6 +23,6 @@
     "pwa": {"id":"SYS-PWA","doc":"pwa.md","status":"active","paths":["src/pwa.ts","vite.config.ts",".github/workflows/deploy.yml"],"keywords":["pwa","service-worker","pages","deployment","update"]},
     "worker": {"id":"SYS-WORKER","doc":"worker.md","status":"active","paths":["worker/src","worker/wrangler.toml"],"keywords":["worker","cloudflare","gemini-endpoint","autonomy","health"]},
     "reliability": {"id":"SYS-REL","doc":"reliability.md","status":"active","paths":["scripts/reliability-gate.mjs",".github/workflows/ci.yml","e2e"],"keywords":["reliability","testing","ci","diagnostics","analytics","performance","e2e"]},
-    "third-party": {"id":"SYS-LEGAL","doc":"third-party-notices.md","status":"active","paths":["package.json","package-lock.json","public/core/README.md"],"keywords":["license","notice","third-party","attribution"]}
+    "third-party": {"id":"SYS-LEGAL","doc":"third-party-notices.md","status":"active","paths":["package.json","package-lock.json","src/ui/generated-fonts/LICENSE.txt"],"keywords":["license","notice","third-party","attribution"]}
   }
 }

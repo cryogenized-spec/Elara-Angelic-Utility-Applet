@@ -1,12 +1,12 @@
 {
-  "schema": 1,
-  "status": "migration-only",
+  "schema": 2,
+  "status": "extraction-complete-reference-migration-pending",
   "inventory_commit": "c006922e3e98cde544e54008b5723d6c058d19cc",
-  "rule": "Extract code-verified current facts into the target document, then delete the legacy source. Git history retains implementation history.",
-  "legacy_roots": ["docs", "documents/*PASS*", "documents/*STATUS*", "README.md"],
-  "preserve_in_place": [
-    "public/core/README.md"
-  ],
+  "canonicalization_commit": "4dc7951318593afde6797676b15123824324c267",
+  "rule": "Canonical extraction is complete. Repoint live references/gates, then delete legacy sources. Git retains implementation history.",
+  "legacy_patterns": ["docs/**", "documents/*PASS*.md", "documents/*STATUS*.md"],
+  "preserve_in_place": ["public/core/README.md"],
+  "source_only_targets": ["documents.md"],
   "targets": {
     "architecture.md": [
       "docs/ARCHITECTURE_DECISION.md",
@@ -150,7 +150,7 @@
     "docs/README.md",
     "docs/implementation-plan.md"
   ],
-  "replace": ["README.md"],
+  "completed_replacements": ["README.md"],
   "hardcoded_doc_links": {
     "src/app/components/MarkdownReference.tsx": "documents/chat.md#markdown",
     "src/app/components/RoleplaySettings.tsx": "documents/character.md#roleplay-world",

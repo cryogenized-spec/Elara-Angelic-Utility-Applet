@@ -14,9 +14,9 @@ For the code-verified map, read [`documents/architecture.md`](./documents/archit
 
 ## Documentation
 
-Start with [`documents/manifest.json`](./documents/manifest.json) when working as an agent or when you already know the subsystem. It maps keywords and source paths to stable system IDs and canonical documents. [`documents/INDEX.md`](./documents/INDEX.md) defines the documentation format, authority rules and maintenance policy. [`AGENTS.md`](./AGENTS.md) is the short operational contract for coding agents.
+Agents should start with [`documents/manifest.json`](./documents/manifest.json), which routes source paths and keywords to stable system IDs and canonical documents. [`documents/INDEX.md`](./documents/INDEX.md) is the human navigation/index and defines the documentation format and maintenance rules. [`AGENTS.md`](./AGENTS.md) is the short operational contract for coding agents.
 
-A documentation consolidation is in progress. Files under `/docs` and old `PASS`/`STATUS` notes are legacy migration inputs, not current authority. Do not add new documentation there.
+Canonical documentation already lives under `/documents`. Legacy `/docs` and old `PASS`/`STATUS` files remain migration-only inputs pending reference migration and deletion; do not add new documentation there.
 
 ## Local development
 
@@ -76,4 +76,4 @@ Worker/autonomy deployment is a separate Cloudflare boundary with its own config
 
 ## License and third-party assets
 
-Review the repository license and third-party notices before redistributing generated bundles or runtime assets. During the documentation migration, the existing notice file under `/docs` remains the source to be consolidated into `documents/third-party-notices.md`.
+Review [`documents/third-party-notices.md`](./documents/third-party-notices.md), the exact lockfile and bundled upstream notices before redistributing generated bundles or runtime assets.

@@ -59,7 +59,7 @@ Ranking uses one scorer: lexical relevance 0.50, importance 0.18, confidence 0.1
 - Retrieved memory is context, never instruction: formatted projection explicitly says to treat it as contextual notes.
 - Scope/expiry/lifecycle filters are applied before budgeting.
 - Retrieval records recall metadata but does not rewrite memory prose.
-- Model/user/import/migration provenance remains explicit.
+- Elara/user/import/migration provenance remains explicit.
 - Autonomy receives only records explicitly consented with `autonomyContext`; no inference may silently opt a memory in.
 
 ## 6. Security and failure semantics

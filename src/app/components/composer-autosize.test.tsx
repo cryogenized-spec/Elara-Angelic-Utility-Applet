@@ -49,12 +49,15 @@ function mount(): HTMLTextAreaElement {
 function stubScrollHeight(element: HTMLTextAreaElement, read: () => number, counter?: { count: number }): void {
   Object.defineProperty(element, 'scrollHeight', {
     configurable: true,
-    get() { counter && (counter.count += 1); return read(); },
+    get() { if (counter) counter.count += 1; return read(); },
   });
 }
 
 function type(textarea: HTMLTextAreaElement, value: string): void {
   act(() => {
+    // jsdom has no layout; the DOM accessor setter (bound explicitly below)
+    // is the only way to drive a React-controlled value.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- DOM accessor setter, explicitly bound to the element via the .call below
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
     setter.call(textarea, value);
     textarea.dispatchEvent(new Event('input', { bubbles: true }));

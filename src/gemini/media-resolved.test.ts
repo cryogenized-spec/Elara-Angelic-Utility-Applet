@@ -55,7 +55,9 @@ const oauth = {
   disconnect: async () => undefined,
 };
 
-async function run(queries: unknown): Promise<GeminiStreamEvent[]> {
+// `_queries` is accepted for call-site shape: the loop input is fixed per
+// test, and the argument documents which search the caller intended.
+async function run(_queries: unknown): Promise<GeminiStreamEvent[]> {
   const collected: GeminiStreamEvent[] = [];
   for await (const event of streamGoogleToolLoop(
     { model: 'gemini-3.8-flash', input: 'Play some dark ambient music.', systemInstruction: 'You are Elara.', tools: ['youtube.search'] },

@@ -9,7 +9,8 @@ describe('document.create_pdf semantic tool', () => {
     expect(validateSemanticToolArguments('document.create_pdf', { source: '\\documentclass{article}' })).toEqual({ source: '\\documentclass{article}' });
     const declaration = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'document.create_pdf');
     expect(declaration?.parameters.required).toEqual(['source']);
-    expect(declaration?.parameters.properties).toEqual(expect.objectContaining({ source: expect.any(Object), title: expect.any(Object) }));
+    // Both parameters are declared as string properties (see gemini-declarations).
+    expect(declaration?.parameters.properties).toEqual(expect.objectContaining({ source: expect.objectContaining({ type: 'string' }) as { type: string }, title: expect.objectContaining({ type: 'string' }) as { type: string } }));
     expect(JSON.stringify(googleGeminiFunctionDeclarations)).not.toMatch(/run_command|spawn|shell|exec/);
   });
 });

@@ -32,8 +32,6 @@ const PAIRING: AutonomyPairing = {
   lastPulledEventsId: '',
 };
 
-const CONTEXT_NOW = 1_700_000_000_000;
-
 interface CapturedRequest {
   method: string;
   path: string;
@@ -129,7 +127,7 @@ describe('fullSync', () => {
       }),
       'POST /autonomy/context': () => {
         contextReplacements += 1;
-        storedContextHash = JSON.parse(requests.at(-1)!.body).contentHash;
+        storedContextHash = (JSON.parse(requests.at(-1)!.body) as { contentHash: string }).contentHash;
         return jsonResponse({ accepted: true, metadata: { recordCount: 1, byteSize: 120 } });
       },
       'GET /autonomy/runs': () => jsonResponse({ runs: [run], next: null, limit: 200 }),

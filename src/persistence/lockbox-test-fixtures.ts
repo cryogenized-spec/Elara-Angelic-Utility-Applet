@@ -46,7 +46,9 @@ function copy(source: Uint8Array): ArrayBuffer {
 function withStore<T>(mode: 'readonly' | 'readwrite', run: (store: IDBObjectStore) => IDBRequest): Promise<T> {
   return new Promise((resolve, reject) => {
     const open = indexedDB.open(DB_NAME);
-    open.onerror = () => reject(open.error);
+    // IDB reports a non-null DOMException in onerror; the fallback only
+    // satisfies the type contract for the impossible null case.
+    open.onerror = () => reject(open.error ?? new DOMException('IndexedDB open failed.', 'Error'));
     open.onsuccess = () => {
       const db = open.result;
       const request = run(db.transaction('secrets', mode).objectStore('secrets'));
@@ -57,7 +59,7 @@ function withStore<T>(mode: 'readonly' | 'readwrite', run: (store: IDBObjectStor
       };
       request.onerror = () => {
         db.close();
-        reject(request.error);
+        reject(request.error ?? new DOMException('IndexedDB request failed.', 'Error'));
       };
     };
   });

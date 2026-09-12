@@ -80,10 +80,11 @@ describe('read-only tool loop — call-time enforcement', () => {
     expect(executeGoogleTool).toHaveBeenCalledTimes(1);
     // The refusal is a structured tool result, so the loop continued and completed.
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      // vitest types asymmetric matchers as any; the cast pins the asserted type.
       results: expect.arrayContaining([
         expect.objectContaining({ callId: 'call-write', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } }),
         expect.objectContaining({ callId: 'call-read' }),
-      ]),
+      ]) as unknown[],
     }), undefined);
   });
 
@@ -133,7 +134,8 @@ describe('read-only tool loop — call-time enforcement', () => {
       expect(writeHandler, `${roleplayWrite} handler must never run`).not.toHaveBeenCalled();
       expect(collected.at(-1)).toMatchObject({ type: 'completed' });
       expect(streamToolResult, `${roleplayWrite} must be refused structurally`).toHaveBeenCalledWith(expect.objectContaining({
-        results: expect.arrayContaining([expect.objectContaining({ callId: `call-${roleplayWrite}`, result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]),
+        // vitest types asymmetric matchers as any; the cast pins the asserted type.
+        results: expect.arrayContaining([expect.objectContaining({ callId: `call-${roleplayWrite}`, result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]) as unknown[],
       }), undefined);
     }
   });
@@ -157,7 +159,8 @@ describe('read-only tool loop — call-time enforcement', () => {
 
     expect(spyHandler).not.toHaveBeenCalled();
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
-      results: expect.arrayContaining([expect.objectContaining({ callId: 'call-rp-list', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]),
+      // vitest types asymmetric matchers as any; the cast pins the asserted type.
+      results: expect.arrayContaining([expect.objectContaining({ callId: 'call-rp-list', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]) as unknown[],
     }), undefined);
   });
 
@@ -180,7 +183,8 @@ describe('read-only tool loop — call-time enforcement', () => {
 
     expect(sendHandler).not.toHaveBeenCalled();
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
-      results: expect.arrayContaining([expect.objectContaining({ callId: 'call-send', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]),
+      // vitest types asymmetric matchers as any; the cast pins the asserted type.
+      results: expect.arrayContaining([expect.objectContaining({ callId: 'call-send', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })]) as unknown[],
     }), undefined);
   });
 

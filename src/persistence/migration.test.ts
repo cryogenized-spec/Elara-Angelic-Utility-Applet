@@ -37,7 +37,7 @@ describe('Dexie v6 to v7 migration', () => {
       { id: 'malformed-legacy', role: 'user', text: null as never, conversationId: 'legacy-thread', createdAt: 12 },
     ]);
     await legacy.settings.put({ id: 'gemini', model: 'gemini-3.8-flash', perModel: {}, updatedAt: 13 });
-    await legacy.close();
+    legacy.close(); // Dexie close() is synchronous and returns void.
 
     const upgraded = new ElaraDatabase(name);
     await upgraded.open();

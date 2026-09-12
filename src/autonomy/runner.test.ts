@@ -532,6 +532,7 @@ describe('executeRoutineRun — lastResult stamping across every terminal path',
 
   it('stamps lastResult for: failed engine exception', async () => {
     await saveRoutine(makeRoutine());
+    // eslint-disable-next-line require-yield -- the stub must be a generator (RoutineEngine) that throws BEFORE yielding so the test exercises the engine stream-failure path
     const exploding: RoutineEngine = async function* () { throw new Error('transport collapsed'); };
     const { run } = await executeRoutineRun(makeRoutine(), settings, 'manual', runOptions(exploding));
     expect(run).toMatchObject({ state: 'failed', outcome: 'error', errorCode: 'RUN_INTERNAL' });

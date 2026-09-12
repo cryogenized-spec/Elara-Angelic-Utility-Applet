@@ -33,7 +33,6 @@ export function createOCRService(createWorker: () => WorkerLike = workerFactory)
     const timeoutMs = timeoutFor(options);
     return new Promise<OCRResult>((resolve, reject) => {
       let settled = false;
-      let timer: number | undefined;
       const abort = () => finish(() => reject(new DOMException('OCR was cancelled.', 'AbortError')));
       const finish = (callback: () => void) => {
         if (settled) return;
@@ -45,7 +44,7 @@ export function createOCRService(createWorker: () => WorkerLike = workerFactory)
         worker.terminate();
         callback();
       };
-      timer = window.setTimeout(() => finish(() => reject(new ArtifactError('OCR_TIMEOUT', 'OCR took too long and was stopped.'))), timeoutMs);
+      const timer = window.setTimeout(() => finish(() => reject(new ArtifactError('OCR_TIMEOUT', 'OCR took too long and was stopped.'))), timeoutMs);
       options.signal?.addEventListener('abort', abort, { once: true });
       if (options.signal?.aborted) { abort(); return; }
       worker.onmessage = (event) => {

@@ -73,7 +73,9 @@ async function installVttBrowserMocks(page: Page, interactionMode: 'default' | '
   });
 
   await page.route('**/v1/interactions*', async (route) => {
-    const body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
+    // Parsed (but unused) so a malformed body still fails the intercepted
+    // request, matching real-server behavior.
+    const _body = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     const output = interactionMode === 'transform' ? 'A clear, straightforward message.' : 'voice inserted';
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: transformationSse(output) });
   });

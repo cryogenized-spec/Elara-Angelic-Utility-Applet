@@ -18,7 +18,7 @@ export interface OCRResult {
   language?: string;
 }
 
-export interface OCRRegion extends OCRBounds {}
+export type OCRRegion = OCRBounds;
 
 export interface OCRRecognizeOptions {
   language?: string;

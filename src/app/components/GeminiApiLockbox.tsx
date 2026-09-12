@@ -14,7 +14,6 @@ import {
   saveYouTubeApiKey,
   isGeminiLockboxPin,
   lockGeminiApiKey,
-  saveGeminiApiKey,
   unlockGeminiApiKey,
   unlockGeminiApiKeyWithPin,
   type LockboxSecretStatus,
@@ -139,7 +138,7 @@ export function GeminiApiLockbox() {
       setYoutubeValidation('idle');
       setYoutubeValidationMessage('');
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runYouTubeValidation is re-created every render; listing it would re-run validation on every render. The only intended trigger is a youtubeStatus change.
   }, [youtubeStatus]);
 
   function read(ref: RefObject<HTMLInputElement | null>): string {
@@ -163,24 +162,6 @@ export function GeminiApiLockbox() {
       setStatus('unlocked');
       setMode('pin');
       setDetail('Encrypted Gemini API key stored in the local Lockbox. PIN is active for this session.');
-    } catch (error) {
-      setDetail(error instanceof Error ? error.message : 'Could not create the Gemini API Lockbox.');
-    }
-  }
-
-  async function createPasswordLockbox() {
-    const key = read(keyRef);
-    const password = read(passwordRef);
-    const confirmation = read(confirmPasswordRef);
-    if (!key) return setDetail('Enter the Gemini API key first.');
-    if (password.length < 8) return setDetail('Use a Lockbox password of at least 8 characters.');
-    if (password !== confirmation) return setDetail('The Lockbox passwords do not match.');
-    try {
-      await saveGeminiApiKey(key, password);
-      clearInputs(keyRef, passwordRef, confirmPasswordRef);
-      setStatus('unlocked');
-      setMode('password');
-      setDetail('Encrypted Gemini API key stored in the local Lockbox.');
     } catch (error) {
       setDetail(error instanceof Error ? error.message : 'Could not create the Gemini API Lockbox.');
     }

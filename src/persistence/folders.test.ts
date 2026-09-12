@@ -7,7 +7,6 @@ import {
   deleteFolder,
   loadFolderState,
   moveFolder,
-  renameFolder,
   setFolderContextScope,
 } from './folders';
 
@@ -28,7 +27,7 @@ describe('conversation folder persistence', () => {
   it('prevents cycles and duplicate sibling names while moving', async () => {
     const root = await createFolderPath('Projects');
     const child = await createFolderPath('Projects/Elara');
-    const archive = await createFolderPath('Archive');
+    await createFolderPath('Archive');
     const archiveChild = await createFolderPath('Archive/Elara');
     const other = await createFolderPath('Other');
 

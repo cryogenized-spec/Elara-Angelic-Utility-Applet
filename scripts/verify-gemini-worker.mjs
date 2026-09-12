@@ -8,7 +8,7 @@ async function request(url, init = {}) {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Worker request failed: ${detail}`);
+    throw new Error(`Worker request failed: ${detail}`, { cause: error });
   } finally {
     clearTimeout(timeout);
   }

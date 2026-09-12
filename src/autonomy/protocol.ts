@@ -48,8 +48,8 @@ export function constantTimeEqual(a: string, b: string): boolean {
   const right = encoder.encode(b);
   if (left.length !== right.length) {
     // Still burn a comparison so length differences do not leak via timing.
-    let dummy = 0;
-    for (let index = 0; index < Math.max(left.length, right.length); index += 1) dummy |= (left[index] ?? 0) ^ (right[index] ?? 0);
+    let _dummy = 0;
+    for (let index = 0; index < Math.max(left.length, right.length); index += 1) _dummy |= (left[index] ?? 0) ^ (right[index] ?? 0);
     return false;
   }
   let diff = 0;

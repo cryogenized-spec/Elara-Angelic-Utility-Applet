@@ -3,7 +3,6 @@ import { z } from 'zod';
 const idSchema = z.string().trim().min(1).max(500);
 const pageTokenSchema = z.string().trim().min(1).max(2048);
 const querySchema = z.string().trim().max(2000);
-const optionalText = z.string().trim().max(200).optional();
 const timestampSchema = z.string().trim().min(1).max(128).optional();
 const metadataHeadersSchema = z.array(z.string().trim().min(1).max(200)).max(50).optional();
 

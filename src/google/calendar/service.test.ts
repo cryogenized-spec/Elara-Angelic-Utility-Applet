@@ -20,9 +20,8 @@ describe('GoogleCalendarService', () => {
   };
 
   it('requires the registered calendar read capability and maps events', async () => {
-    let requestedCapability: string | undefined;
     const access = await oauth.authorize('calendar.events.read');
-    requestedCapability = access.capability;
+    const requestedCapability = access.capability;
     const service = new GoogleCalendarService({ ...oauth, authorize: async (capability) => ({ capability, fetch: access.fetch }) });
 
     await expect(service.listEvents()).resolves.toEqual([

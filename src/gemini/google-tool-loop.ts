@@ -230,7 +230,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
           const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
-          let granted = false;
+          // Assigned on the only loop exit (break) before any read.
+          let granted: boolean;
           for (;;) {
             const outcome = await Promise.race([
               pendingGrant.then((value) => ({ settled: true as const, value })),
@@ -297,7 +298,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
         yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
         const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
-        let granted = false;
+        // Assigned on the only loop exit (break) before any read.
+        let granted: boolean;
         for (;;) {
           const outcome = await Promise.race([
             pendingGrant.then((value) => ({ settled: true as const, value })),

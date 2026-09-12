@@ -3,7 +3,6 @@ import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus
 import type { Attachment } from '../domain/artifact';
 import { artifactRepository } from '../artifacts/repository';
 import { createAttachmentFromFile } from '../artifacts/intake';
-import { ArtifactError } from '../artifacts/errors';
 import { ARTIFACT_LIMITS } from '../artifacts/limits';
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';

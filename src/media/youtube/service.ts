@@ -137,7 +137,8 @@ function reasonOf(payload: unknown): string | undefined {
   if (!isRecord(error)) return undefined;
   const errors = error.errors;
   if (!Array.isArray(errors) || !errors.length) return undefined;
-  const first = errors[0];
+  // Array.isArray narrows `unknown` to any[]; pin the element to unknown.
+  const first: unknown = errors[0];
   return isRecord(first) ? boundedText(first.reason, 64) : undefined;
 }
 

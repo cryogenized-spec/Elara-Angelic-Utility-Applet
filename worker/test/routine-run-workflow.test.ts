@@ -107,12 +107,27 @@ describe('Phase C0 — durable claim and Workflow identity', () => {
     await doFetch(await internalDo('/heartbeat', { method: 'POST' }));
     const runKey = `routine-cloud-1:catch-up:${dueAt}`;
     const workflowInstanceId = await workflowInstanceIdForRunKey(runKey);
+    // Invariant: a run cannot be completed before its frozen envelope exists
+    // and before a structured C1 result is supplied. The previous predicate
+    // waited only for the RUN ROW, which can appear before the envelope is
+    // persisted and before the Workflow would have a result, causing
+    // engine.ts:679 missing-envelope / :686 missing-result to return 500.
+    // We now wait for the real precondition: envelope present, then complete
+    // with a valid result. Second completion is idempotent even without a
+    // result because the engine returns already-completed for terminal runs.
+    const engine = await stub();
     await waitUntil(async () => {
       const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
-      return runs.some((run) => run.runKey === runKey);
+      return runs.some((run) => run.runKey === runKey) && (await engine.envelopePresent(runKey));
     });
-    const first = await doFetch(await internalDo('/run/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runKey, workflowInstanceId }) }));
+    const first = await doFetch(await internalDo('/run/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runKey, workflowInstanceId, result: { disposition: 'noop' } }),
+    }));
     expect(first.status).toBe(200);
+    const firstBody = await first.json() as { status: string };
+    expect(['completed', 'already-completed']).toContain(firstBody.status);
     const second = await doFetch(await internalDo('/run/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runKey, workflowInstanceId }) }));
     expect(second.status).toBe(200);
     const secondBody = await second.json() as { alreadyCompleted: boolean; status: string };

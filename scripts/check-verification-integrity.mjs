@@ -40,9 +40,10 @@ const actualSpecs = existsSync(e2eDir)
 for (const expected of expectedSpecs) if (!actualSpecs.includes(expected)) fail(`expected E2E spec is missing: e2e/${expected}`);
 
 const forbiddenTestControl = /\b(?:test|describe|test\.describe)\.(?:skip|only|fixme|fail|todo)\s*\(/;
-const forbiddenSourceImport = /(?:\/Elara-Angelic-Utility-Applet\/src\/|(?:^|['"`])\.\.\/src\/)/m;
+const forbiddenSourceImport = /(?:['"`](?:\.\.\/)+src\/|['"`]\/(?:Elara-Angelic-Utility-Applet\/)?src\/)/;
 const obsoleteBrowserProvider = /\*\*\/api\/gemini/;
 const directWritableIndexedDb = /['"]readwrite['"]/;
+const directDatabaseDeletion = /indexedDB\.deleteDatabase\s*\(/;
 const allowedLocalStorageWriters = new Map([
   ['global-setup.ts', 1],
   ['google-oauth-settings.spec.ts', 1],
@@ -55,7 +56,7 @@ for (const name of [...actualSpecs, 'global-setup.ts']) {
   if (forbiddenTestControl.test(source)) fail(`${relative} contains a disabled/focused/expected-failure test control`);
   if (forbiddenSourceImport.test(source)) fail(`${relative} imports application source directly instead of driving a public/user boundary`);
   if (obsoleteBrowserProvider.test(source)) fail(`${relative} intercepts the retired browser /api/gemini path`);
-  if (directWritableIndexedDb.test(source)) fail(`${relative} writes IndexedDB directly; E2E may inspect storage but must not forge application state`);
+  if (directWritableIndexedDb.test(source) || directDatabaseDeletion.test(source)) fail(`${relative} mutates IndexedDB directly; E2E may inspect storage but must not forge application state`);
 
   const writes = count(source, /localStorage\.setItem\s*\(/g);
   const allowedWrites = allowedLocalStorageWriters.get(name) ?? 0;

@@ -93,6 +93,8 @@ A change that modifies a durable contract updates the owning system document in 
 
 `manifest.json` is the low-token router. Load only the mapped system document(s) for the task unless a real cross-system dependency or route tie requires more context.
 
+Run `npm run docs:check` after changing documentation, routing metadata or documented source paths. The dependency-free guard validates manifest structure, active system documents, routed source paths, canonical filenames/chapters, local Markdown links and the absence of the retired `/docs`/pass-status conventions. CI runs it before dependency installation and the final reliability command chains it again.
+
 ## 7. Repository state
 
 The legacy `/docs` tree and old pass/status/implementation-plan files were removed after verified current facts were consolidated here. `public/core/README.md` remains intentionally outside `/documents` because it is an operational BusyTeX runtime-asset note, not general project documentation. Superseded implementation narratives remain available through Git history.

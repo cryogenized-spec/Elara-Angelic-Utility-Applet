@@ -16,7 +16,7 @@ For the code-verified map, read [`documents/architecture.md`](./documents/archit
 
 Agents should start with [`documents/manifest.json`](./documents/manifest.json), which routes source paths and keywords to stable system IDs and canonical documents. [`documents/INDEX.md`](./documents/INDEX.md) is the human navigation/index and defines the documentation format and maintenance rules. [`AGENTS.md`](./AGENTS.md) is the short operational contract for coding agents.
 
-Canonical technical documentation lives under `/documents`. Historical pass/status/roadmap material was retired after current facts were consolidated; use Git history when implementation chronology is genuinely needed. Do not create a second documentation root.
+Canonical technical documentation lives under `/documents`. Historical pass/status/roadmap material was retired after current facts were consolidated; use Git history when implementation chronology is genuinely needed. Do not create a second documentation root. `npm run docs:check` validates the manifest, canonical tree, routed source paths, local documentation links and legacy-documentation exclusions.
 
 ## Local development
 
@@ -45,6 +45,7 @@ The runtime asset policy for that compiler is documented locally in [`public/cor
 Use focused checks while iterating. Before repository work is called complete, run the broad gate in this order:
 
 ```sh
+npm run docs:check
 npm run lint
 npm run typecheck
 npm test
@@ -54,7 +55,7 @@ npx playwright test --project=chromium --project=android-portrait --project=onbo
 npm run reliability:check
 ```
 
-CI is the release authority. If the current environment cannot execute Playwright, report that limitation explicitly rather than treating discovery or static inspection as browser execution. Additional focused verification includes `npm run verify:artifact-assets` and `npm run verify:worker`.
+CI is the release authority. If the current environment cannot execute Playwright, report that limitation explicitly rather than treating discovery or static inspection as browser execution. Additional focused verification includes `npm run verify:artifact-assets`, `npm run verify:worker` and `npm run typecheck:e2e`.
 
 ## Core invariants
 

@@ -310,6 +310,18 @@ This file is the durable implementation handoff record for completed roadmap pro
 
 **Related debt (not fixed, one line):** `typecheck` excludes e2e (`include ["src"]`) allowing `route.request().header(...)` non-existent Playwright method to reach CI; needs tsconfig scoped to e2e with ES2022, ESNext, bundler, strict, types node — Pass 3. Also considered `if: always()` for E2E job so flaky worker suite cannot hide absence, but decided not to add just to make green and never mark E2E non-blocking; with deterministic worker suite E2E now runs.
 
+## 2026-09-12 — Workspace shortcuts: no hidden model turns
+
+**Change:** `src/app/App.tsx` — removed the synthesized `hiddenTask` user turn behind the Workspace shortcut buttons and replaced it with `prefillWorkspaceShortcut`, which puts the shortcut's saved intent into the composer as the user's own visible, editable draft. Sending it is an ordinary message turn (standard tool set, standard OAuth and mutation gates). Also removed the now-unused `workspaceShortcutDefinition` import in `App.tsx`.
+
+**Why:** the previous path streamed `Execute the saved Workspace shortcut "{label}"…` to the provider as the user turn with no persisted user message — a hidden chat prompt implementing a UI shortcut, violating the standing architecture rule, and leaving the provider holding input the transcript never recorded (on failure, nothing appeared at all; retry could replay the hidden text). Direct tool invocation (option 1) was rejected as the largest change and a worse feature (it breaks conversational shortcuts like `gmail-recent-from-sender`, whose intent asks the model to request the sender); the app-instruction channel (option 3) is barred for user intent by contract.
+
+**Accepted trade:** the per-shortcut restricted tool set is gone — a prefilled message runs with the same tools as typed text. `WorkspaceShortcutDefinition.tools` and `requiredCapabilities` remain stored metadata; `requiredCapabilities` currently has no consumer (recorded finding, untouched).
+
+**Tests:** `e2e/workspace-shortcuts.spec.ts` — the two tests that asserted the hidden prompt now assert the invariant: prefill puts the exact intent in the composer with zero provider requests and no transcript change; sending produces exactly one provider `input` string-equal to the visible user message, which appears in the transcript. New guard `src/app/workspace-shortcut-guard.test.ts` fails `npm test` if any call site passes a string literal as `streamAssistantTurn` input, if a shortcut entry point streams, or if the removed prompt text returns. `docs/GOOGLE_WORKSPACE_SHORTCUTS.md` carries a dated correction of the old "internal agent-task request" wording.
+
+**Verification:** local lint/typecheck/units/build/reliability green; CI (including the three Playwright projects) is the authority for E2E.
+
 ## Deployment decision
 
 Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7

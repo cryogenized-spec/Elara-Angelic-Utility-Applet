@@ -9,7 +9,7 @@ keywords: [architecture, systems, boundaries, source-map, runtime, persistence]
 
 # Elara architecture
 
-This is the code-verified repository map. Source and tests outrank prose if documentation later drifts. Legacy pass/status files, roadmaps and implementation logs are migration evidence only.
+This is the code-verified repository map. Source and tests outrank prose if documentation later drifts. Superseded implementation narratives belong to Git history rather than a parallel documentation tree.
 
 ## 1. Runtime spine
 
@@ -120,4 +120,4 @@ The Character Master is user-owned and ships empty by default. Durable memory is
 
 `/documents` is the canonical technical-documentation root. Filenames/system IDs are stable routing keys; chapter numbers are local navigation. Do not create `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap or implementation-log files. Git owns chronology.
 
-Legacy `/docs` and old pass/status files remain migration-only inputs until hard-coded links and CI assertions are repointed; then they should be deleted rather than maintained in parallel.
+The legacy `/docs` tree and pass/status migration files were removed after canonical extraction and reference migration. `public/core/README.md` remains intentionally outside `/documents` as an operational BusyTeX asset note.

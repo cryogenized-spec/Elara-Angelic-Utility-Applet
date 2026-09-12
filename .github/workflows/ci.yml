@@ -44,7 +44,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Lint
+      - name: Lint (JS/MJS/CJS only; TypeScript lint pending)
         run: npm run lint
 
       - name: Typecheck

@@ -53,6 +53,8 @@ Durable (later, separate subsystem — not the Gemini Worker): authorization cod
 
 The capability model is independent of transport.
 
+> Note (2026-09-12): account identity in the interactive transport is real but best-effort. The GIS token client exposes no signed-in account object, so `authority.ts` requests `userinfo.email openid` alongside every capability scope and fetches a userinfo endpoint with the access token to populate the stored `account` (email, displayName). If userinfo is unavailable, authorization still succeeds and the record simply carries no account rather than an invented one; a silent `prompt: 'none'` refresh keeps the previous account on userinfo failure, while an interactive failure clears a stale account so the UI never shows a wrong email. No field is fabricated to fill this gap.
+
 ## Risk policy (v1)
 
 ```

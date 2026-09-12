@@ -8,7 +8,7 @@ import { ARTIFACT_LIMITS } from '../artifacts/limits';
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 import { archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
-import { ensureWorkspaceShortcuts, storedShortcutFromDefinition, workspaceShortcutDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
+import { ensureWorkspaceShortcuts, storedShortcutFromDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
 import { completeOnboarding, hasCompletedOnboarding, loadAppUiPreferences, loadChatAppearance, loadRoleplayPreferences, saveAppUiPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
 import { localThreadTitlePort } from '../chat/thread-title-port';
@@ -271,25 +271,12 @@ export function App() {
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
-  async function runWorkspaceShortcut(shortcutRecord: StoredWorkspaceShortcut) {
-    if (status === 'streaming') return;
-    const shortcut = workspaceShortcutDefinition(shortcutRecord);
+  // A Workspace shortcut is a visible, editable draft the user sends
+  // themselves — never a synthesized model turn. The transcript must always
+  // match what the provider actually receives (2026-09-12 decision, PR #22).
+  function prefillWorkspaceShortcut(shortcutRecord: StoredWorkspaceShortcut) {
     if (!shortcutRecord.enabled) return;
-    setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
-    const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
-    const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
-    const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
-    const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut.`;
-    let turnId: string | null = null;
-    try {
-      turnId = await streamAssistantTurn(hiddenTask, regenerateBaseFor(conversation, failedAttempt), conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
-    } catch (cause) {
-      if (activeConversationIdRef.current !== conversationId) return;
-      if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
-      if (controller.signal.aborted || (cause instanceof DOMException && cause.name === 'AbortError')) { setStatus('idle'); return; }
-      setStatus('failed'); setError(cause instanceof Error ? cause.message : `The ${shortcut.label} shortcut failed.`);
-    } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
+    setDraft(shortcutRecord.intent);
   }
 
   async function streamAssistantTurn(input: string, baseConversation: ConversationState, conversationId: string, controller: AbortController, options: { systemInstruction: string; generationConfig: Record<string, unknown>; tools?: readonly GoogleToolName[]; attachments?: readonly string[]; inputMessageId?: string; previousInteractionId?: string; responseGroupId?: string; responseVariant?: number; supersedesGenerationId?: string; watchdog?: { idleStallMs?: number; absoluteMs?: number } }): Promise<string | null> {
@@ -436,9 +423,9 @@ export function App() {
   async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
   async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
   async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } } }
-  async function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) {
+  function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) {
     const record = workspaceShortcuts.find((item) => item.id === shortcut.id) ?? storedShortcutFromDefinition(shortcut, workspaceShortcuts.length);
-    await runWorkspaceShortcut(record);
+    prefillWorkspaceShortcut(record);
   }
   async function handleModelChange(model: string) { const definition = getGeminiModel(model); const settings = normalizeGeminiSettings(model, geminiPerModelSettings[model] ?? defaultsForModel(model)); const nextMap = { ...geminiPerModelSettings, [definition.id]: settings }; setGeminiModel(definition.id); setGeminiPerModelSettings(nextMap); try { const saved: StoredGeminiSettings = await saveGeminiSettings(definition.id, settings, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini model settings.'); } }
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }

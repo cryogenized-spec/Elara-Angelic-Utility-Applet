@@ -252,6 +252,18 @@ Not verifiable from a browser: whether Android shows its app chooser or opens a
 single default handler. That is the platform's decision. It needs a physical-device
 check, which is listed as outstanding and is not claimed here.
 
+> Correction (2026-09-12): the paragraph above remains true; this adds where the
+> check lives and sharpens the claim split. **CI-verified:** the intent URI shape,
+> the intent-aware card, cache stamping, and the failure paths, on both desktop
+> and an Android user-agent (`e2e/media-handoff.spec.ts`, executed by CI on the
+> chromium and android-portrait projects). **Device-verified: nothing yet.** The
+> physical run — install-from-Pages, chooser-vs-direct observation, cache re-tap
+> over USB devtools, failure states, and the 12-search quota guard — is the
+> dated checklist in `docs/ANDROID_DEVICE_VALIDATION.md`, whose result fields
+> are blank until a person fills them from a phone. Until that run is recorded,
+> the YouTube feature must be described as complete at the unit/CI level, with
+> Android hand-off behaviour on real hardware unverified.
+
 Correction (2026-09-12): CI now executes `e2e/media-handoff.spec.ts` on chromium and
 android-portrait. The prior CI run aborted at the worker-test flake before the E2E
 step ran, so this was re-triggered to obtain a full verification.

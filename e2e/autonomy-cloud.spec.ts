@@ -16,7 +16,7 @@ interface CapturedConfig {
   generation: number;
   enabled: boolean;
   maxEventsPerDay: number;
-  routines: Array<{ id: string; name: string }>;
+  routines: Array<{ id: string; name: string; enabled: boolean }>;
 }
 
 // Faithful to the real engine's /autonomy/state and /autonomy/context GET

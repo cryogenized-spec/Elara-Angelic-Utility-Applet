@@ -32,8 +32,6 @@ const PAIRING: AutonomyPairing = {
   lastPulledEventsId: '',
 };
 
-const CONTEXT_NOW = 1_700_000_000_000;
-
 interface CapturedRequest {
   method: string;
   path: string;

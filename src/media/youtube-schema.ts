@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { isMediaIntent, MAX_MEDIA_QUERIES_PER_CALL, MEDIA_INTENTS } from '../domain/media';
+import { MAX_MEDIA_QUERIES_PER_CALL, MEDIA_INTENTS } from '../domain/media';
 
 /**
  * Reads the shapes a model emits for "not provided".

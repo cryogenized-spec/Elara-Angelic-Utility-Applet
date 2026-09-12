@@ -698,8 +698,8 @@ async function unlockWithCredential(credential: string, requirePinMode: boolean)
     if (error instanceof Error && error.message === 'The encrypted Gemini API key is empty.') throw error;
     const updatedSecurity = await recordPinFailure(record);
     const retry = remainingPinLockMs(updatedSecurity);
-    if (retry > 0) throw new Error(`Invalid PIN. Try again in ${Math.ceil(retry / 1000)} seconds.`);
-    throw new Error('Invalid PIN.');
+    if (retry > 0) throw new Error(`Invalid PIN. Try again in ${Math.ceil(retry / 1000)} seconds.`, { cause: error });
+    throw new Error('Invalid PIN.', { cause: error });
   }
 }
 

@@ -100,6 +100,7 @@ function id(): string {
 }
 
 function safeName(name: string): string {
+  // eslint-disable-next-line no-control-regex -- the regex exists to strip control characters from filenames
   const cleaned = name.replace(/[\u0000-\u001f\u007f]/g, '').trim();
   return (cleaned || 'Untitled artifact').slice(0, ARTIFACT_LIMITS.maxFilenameLength);
 }

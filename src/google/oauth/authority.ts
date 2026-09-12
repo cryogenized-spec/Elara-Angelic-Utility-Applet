@@ -248,7 +248,7 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
       session = null;
       saveStored();
     }
-    throw new Error(raw || 'Google authorization failed.');
+    throw new Error(raw || 'Google authorization failed.', { cause: error });
   }
 }
 

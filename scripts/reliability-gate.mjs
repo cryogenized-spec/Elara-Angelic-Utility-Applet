@@ -27,7 +27,7 @@ for (const relative of requiredFiles) if (!existsSync(join(root, relative))) thr
 const packageSource = readFileSync(join(root, 'package.json'), 'utf8');
 const packageJson = JSON.parse(packageSource);
 for (const script of ['lint', 'typecheck', 'test', 'test:workers', 'build', 'e2e', 'reliability:check', 'verify:artifact-assets']) if (typeof packageJson.scripts?.[script] !== 'string') throw new Error(`Reliability gate: missing npm script ${script}`);
-if ((packageSource.match(/\"dexie\"\s*:/g) ?? []).length !== 1) throw new Error('Reliability gate: package.json must contain exactly one dexie dependency entry.');
+if ((packageSource.match(/"dexie"\s*:/g) ?? []).length !== 1) throw new Error('Reliability gate: package.json must contain exactly one dexie dependency entry.');
 if (packageSource.includes('BLOCK_NONE')) throw new Error('Reliability gate: provider safety override marker BLOCK_NONE must not be present.');
 for (const font of ['Inter-latin.woff2', 'Manrope-latin.woff2', 'Outfit-latin.woff2']) {
   if (!existsSync(join(root, 'src', 'ui', 'generated-fonts', font))) throw new Error(`Reliability gate: missing bundled font asset ${font}.`);
@@ -203,7 +203,7 @@ if (!engineSource.includes('decideRunClaim')) throw new Error('Reliability gate:
 
 // The cron handler is a heartbeat only: no agent execution, no provider calls.
 const workerEntrySource = readFileSync(join(root, 'worker', 'src', 'index.ts'), 'utf8');
-const scheduledMatch = workerEntrySource.match(/async scheduled\([\s\S]*?\n  \},/);
+const scheduledMatch = workerEntrySource.match(/async scheduled\([\s\S]*?\n {2}\},/);
 if (!scheduledMatch) throw new Error('Reliability gate: the worker must export a scheduled() cron handler.');
 const scheduledBody = scheduledMatch[0];
 for (const forbidden of ['gemini', 'Gemini', 'streamGoogleToolLoop', 'GoogleGenAI', 'routine', 'engine.fetch']) {

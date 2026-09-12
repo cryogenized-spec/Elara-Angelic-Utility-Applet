@@ -60,6 +60,7 @@ function extensionOf(name: string): string {
 }
 
 function normalizedName(name: string): string {
+  // eslint-disable-next-line no-control-regex -- the regex exists to strip control characters from filenames
   const cleaned = name.replace(/[\u0000-\u001f\u007f]/g, '').trim();
   return (cleaned || 'untitled-file').slice(0, ARTIFACT_LIMITS.maxFilenameLength);
 }

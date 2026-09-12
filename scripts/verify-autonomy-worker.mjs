@@ -40,7 +40,7 @@ async function request(path, init = {}) {
   try {
     return await fetch(`${workerUrl}${path}`, { ...init, signal: controller.signal, headers: { Origin: origin, ...(init.headers ?? {}) } });
   } catch (error) {
-    throw new Error(`Worker request failed: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Worker request failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error });
   } finally {
     clearTimeout(timeout);
   }

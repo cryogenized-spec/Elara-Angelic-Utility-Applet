@@ -1,4 +1,4 @@
-import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiTurnPort, type GeminiTurnRequest } from '../gemini/contracts';
+import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiTurnRequest } from '../gemini/contracts';
 import { geminiTurnPort } from '../gemini/provider';
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
 import type { GoogleToolName } from '../google/tools/contracts';

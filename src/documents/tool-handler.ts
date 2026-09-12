@@ -5,7 +5,7 @@ import { ArtifactError } from '../artifacts/errors';
 import { compilePdf, validateLatexSource } from './compiler';
 
 function escapeLatex(value: string): string {
-  return value.replace(/[\\%&#_$\{\}~^]/g, (character) => ({
+  return value.replace(/[\\%&#_${}~^]/g, (character) => ({
     '\\': '\\textbackslash{}',
     '%': '\\%',
     '&': '\\&',

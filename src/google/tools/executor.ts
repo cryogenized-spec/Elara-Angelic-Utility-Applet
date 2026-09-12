@@ -153,7 +153,8 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
     const requestedAt = (options.now?.() ?? new Date()).toISOString();
     const confirmation: WriteConfirmationRequest = { tool: descriptor.name, risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>, resourceSummary: confirmationSummary(validCall.tool, args, descriptor.description), requestedAt };
     const confirm = options.confirm ?? requestGoogleToolConfirmation;
-    let approved = false;
+    // try and catch both assign before any read.
+    let approved: boolean;
     let confirmationInvoked = false;
     try { confirmationInvoked = true; approved = await confirm(confirmation) && isConfirmationFresh(requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
     if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: confirmationInvoked ? 'USER_DECLINED' : 'CONFIRMATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };

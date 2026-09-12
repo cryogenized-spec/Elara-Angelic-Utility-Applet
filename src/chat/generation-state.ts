@@ -205,7 +205,7 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
   if (isTerminalPhase(state.phase)) return state;
 
   const { event, receivedAt } = envelope;
-  let next: GenerationState =
+  const next: GenerationState =
     state.timeToFirstEventMs === undefined
       ? { ...state, timeToFirstEventMs: Math.max(0, receivedAt - state.startedAt) }
       : state;

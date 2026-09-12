@@ -52,7 +52,7 @@ describe('parseRoutineOutcome', () => {
   });
 
   it('accepts cannot_act as a successful structured refusal', () => {
-    expect(parseRoutineOutcome('{\"outcome\":\"cannot_act\",\"reason\":\"frozen context is empty\"}')).toEqual({
+    expect(parseRoutineOutcome('{"outcome":"cannot_act","reason":"frozen context is empty"}')).toEqual({
       ok: true,
       outcome: { outcome: 'cannot_act', reason: 'frozen context is empty' },
     });

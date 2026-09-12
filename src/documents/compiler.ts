@@ -54,7 +54,6 @@ export async function compilePdf(source: string, options: { timeoutMs?: number; 
   const basePath = options.basePath ?? (import.meta.env.VITE_BUSYTEX_BASE_PATH as string | undefined) ?? '/core/busytex';
   return new Promise<CompilePdfResult>((resolve, reject) => {
     let settled = false;
-    let timer: number | undefined;
     const abort = () => finish(() => reject(new DOMException('PDF generation was cancelled.', 'AbortError')));
     const finish = (callback: () => void) => {
       if (settled) return;
@@ -66,7 +65,7 @@ export async function compilePdf(source: string, options: { timeoutMs?: number; 
       worker.terminate();
       callback();
     };
-    timer = window.setTimeout(() => finish(() => reject(new ArtifactError('DOCUMENT_COMPILATION_TIMEOUT', 'PDF generation timed out.'))), timeoutMs);
+    const timer = window.setTimeout(() => finish(() => reject(new ArtifactError('DOCUMENT_COMPILATION_TIMEOUT', 'PDF generation timed out.'))), timeoutMs);
     options.signal?.addEventListener('abort', abort, { once: true });
     if (options.signal?.aborted) { abort(); return; }
     worker.onmessage = (event) => {

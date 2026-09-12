@@ -1,4 +1,3 @@
-import { z } from 'zod';
 import { googleCapabilityKeySchema, type GoogleCapabilityKey } from './contracts';
 
 export type GoogleScopeSensitivity = 'non-sensitive' | 'sensitive' | 'restricted';

@@ -49,7 +49,7 @@ function mount(): HTMLTextAreaElement {
 function stubScrollHeight(element: HTMLTextAreaElement, read: () => number, counter?: { count: number }): void {
   Object.defineProperty(element, 'scrollHeight', {
     configurable: true,
-    get() { counter && (counter.count += 1); return read(); },
+    get() { if (counter) counter.count += 1; return read(); },
   });
 }
 

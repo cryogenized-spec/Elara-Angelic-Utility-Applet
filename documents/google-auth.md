@@ -1,7 +1,7 @@
 ---
 id: SYS-GAUTH
 status: active
-verified_commit: c9650583b813b6914d8f3f11161e646215330421
+verified_commit: 2113653bc007cbd8d3a877fd09a3242c163b8009
 scope: Google identity, OAuth capability and scope authority
 paths: [src/google/oauth]
 keywords: [google, oauth, gis, scope, capability, token, account]
@@ -60,7 +60,7 @@ Core connection state is based on the required v1 capability set; optional capab
 - OAuth tokens and provider scope strings never appear in model-visible tool schemas.
 - Provider grants never auto-promote application write/send capabilities.
 - Access tokens live in memory; small connection/capability/account metadata may persist separately.
-- Account identity has one production writer: successful browser authorization in `authority.ts`; tests may stub provider responses but must not treat forged stored identity as evidence that the writer works.
+- Account identity has one production writer: successful browser authorization in `authority.ts`; tests may stub the external provider boundary but must exercise that writer rather than forge stored identity.
 - Requests are restricted to approved Google API hosts.
 - Reauthorization is explicit when browser state can no longer silently satisfy a capability.
 - Local capabilities such as Roleplay World do not require a fake Google scope.
@@ -73,10 +73,8 @@ Token acquisition failures, denied scopes, account mismatch and reauthorization 
 
 Use `src/google/oauth/*.test.ts`, scope/capability registry tests, Google service contract tests and relevant Settings/E2E flows. Any scope change must be rechecked against current Google OAuth documentation and production verification requirements.
 
-At the verified commit, `e2e/google-oauth-settings.spec.ts` seeds a version-3 local authorization record directly. That proves Settings can read/render normalized stored state, but it does **not** prove the real GIS -> userinfo -> account writer path. Keep writer coverage separate and honest.
+`e2e/google-oauth-settings.spec.ts` stubs the external GIS token and userinfo responses, drives the real Settings connection flow, and asserts the account identity written by `authority.ts`. This proves the application writer boundary without using production credentials.
 
 ## 8. Known gaps
 
 Durable offline refresh-token authorization is intentionally outside the active self-contained architecture unless a future explicit decision reopens it. Do not describe `code-flow.ts` or old server-refresh designs as live capability.
-
-The Settings E2E should eventually drive or stub the real external GIS/userinfo boundary rather than forging production app state when claiming end-to-end account-identity coverage.

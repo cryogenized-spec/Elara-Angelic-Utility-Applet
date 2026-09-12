@@ -1,7 +1,7 @@
 ---
 id: SYS-CHAT
 status: active
-verified_commit: c9650583b813b6914d8f3f11161e646215330421
+verified_commit: 2113653bc007cbd8d3a877fd09a3242c163b8009
 scope: conversation state and generation lifecycle
 paths: [src/chat, src/domain/chat.ts, src/persistence/conversation.ts]
 keywords: [chat, conversation, thread, generation, retry, lineage, markdown]
@@ -46,6 +46,8 @@ user submit
 
 Threads are durable records with title/timestamps/archive state. The `primary` thread cannot be archived or deleted. Thread titles are validated to 1–80 characters. Search currently matches thread titles.
 
+Workspace shortcut selection is a visible drafting action, not provider execution: selecting a saved shortcut pre-fills editable composer text. Nothing is sent to Gemini until the user explicitly submits that visible text through the ordinary chat/tool path.
+
 <a id="markdown"></a>
 ### Markdown
 
@@ -54,7 +56,7 @@ Assistant text uses `MarkdownText.tsx`: GFM is enabled, raw HTML is skipped, the
 ## 5. Invariants
 
 - Persist user intent before provider execution when durability matters.
-- Provider `input` that represents a user turn must match user-visible/user-authored intent; app-authored shortcut text must not masquerade as a hidden user message.
+- Provider `input` representing a user turn must match visible/user-authored intent; app-authored shortcut text must never masquerade as a hidden user message.
 - One active generation lineage may win; stale/superseded completions must not overwrite newer state.
 - Tool/media/artifact output is structured data, never reconstructed by parsing assistant prose.
 - Raw provider event streams are not conversation storage.
@@ -66,12 +68,8 @@ Provider errors are normalized before presentation. Cancellation and timeout are
 
 ## 7. Verification and tests
 
-Use `src/chat/*.test.ts`, persistence tests, `MarkdownText.test.tsx`, conversation component tests and E2E chat/regeneration flows. Cross-system provider behavior is verified by `SYS-GEM`; storage migrations by `SYS-PERSIST`.
+Use `src/chat/*.test.ts`, persistence tests, `MarkdownText.test.tsx`, conversation component tests and E2E chat/regeneration flows. `e2e/workspace-shortcuts.spec.ts` additionally proves shortcut selection remains visible/editable and does not trigger a hidden generation. Cross-system provider behavior is verified by `SYS-GEM`; storage migrations by `SYS-PERSIST`.
 
 ## 8. Known gaps
 
-Search is title-oriented rather than full transcript search. `App.tsx` still coordinates significant chat orchestration.
-
-At the verified commit, `App.runWorkspaceShortcut` synthesizes a `hiddenTask` string and passes it to `streamAssistantTurn()` although the user did not author that text. This is a known provenance violation, not a sanctioned instruction channel; remove it while preserving shortcut behavior rather than hiding or normalizing the synthetic turn.
-
-Keep future branching/search/archive UX inside this boundary without creating a second conversation store.
+Search is title-oriented rather than full transcript search. `App.tsx` still coordinates significant chat orchestration. Keep future branching/search/archive UX inside this boundary without creating a second conversation store.

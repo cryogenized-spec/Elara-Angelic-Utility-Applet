@@ -21,7 +21,7 @@
     "persistence": {"id":"SYS-PERSIST","doc":"persistence.md","status":"active","paths":["src/persistence","src/persistence/conversation.ts"],"keywords":["dexie","indexeddb","persistence","migration","repository","localstorage"]},
     "pwa": {"id":"SYS-PWA","doc":"pwa.md","status":"active","paths":["src/pwa.ts","vite.config.ts",".github/workflows/deploy.yml","src/app/components/UpdateToast.tsx"],"keywords":["pwa","service-worker","pages","deployment","update"]},
     "worker": {"id":"SYS-WORKER","doc":"worker.md","status":"active","paths":["worker/src","worker/wrangler.toml","worker/src/autonomy"],"keywords":["worker","cloudflare","gemini-endpoint","autonomy","health"]},
-    "reliability": {"id":"SYS-REL","doc":"reliability.md","status":"active","paths":["scripts/reliability-gate.mjs",".github/workflows/ci.yml","e2e",".nvmrc","package.json","eslint.config.js","tsconfig.json","worker/tsconfig.json","playwright.config.ts","vitest.config.ts","vitest.workers.config.ts"],"keywords":["reliability","testing","ci","diagnostics","analytics","performance","e2e","lint","typecheck"]},
+    "reliability": {"id":"SYS-REL","doc":"reliability.md","status":"active","paths":["scripts/reliability-gate.mjs",".github/workflows/ci.yml","e2e",".nvmrc","package.json","eslint.config.js","tsconfig.json","worker/tsconfig.json","tsconfig.e2e.json","playwright.config.ts","vitest.config.ts","vitest.workers.config.ts"],"keywords":["reliability","testing","ci","diagnostics","analytics","performance","e2e","lint","typecheck"]},
     "third-party": {"id":"SYS-LEGAL","doc":"third-party-notices.md","status":"active","paths":["package.json","package-lock.json","src/ui/generated-fonts/LICENSE.txt"],"keywords":["license","notice","third-party","attribution"]}
   }
 }

@@ -67,6 +67,9 @@ export function GoogleOAuthSettings() {
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Google authorization could not be completed.');
+    } finally {
+      // Cleared on success too: a stuck busy flag disabled Disconnect and
+      // every other action until reload (found by the real-flow E2E).
       setBusyCapability(null);
     }
   }

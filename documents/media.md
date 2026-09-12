@@ -1,7 +1,7 @@
 ---
 id: SYS-MEDIA
 status: active
-verified_commit: cab20253ef448dd96e4feb82bf917729b27404a3
+verified_commit: 2113653bc007cbd8d3a877fd09a3242c163b8009
 scope: media search, normalization, cache and platform handoff
 paths: [src/media, src/domain/media.ts, src/app/components/media]
 keywords: [media, youtube, search, video, music, handoff, cache]
@@ -66,7 +66,9 @@ Handoff always retains a valid HTTPS destination. On supported Android flows an 
 
 ## 7. Verification and tests
 
-Use `src/media/*.test.ts`, YouTube service/validation tests, tool declaration/handler tests and MediaCard tests. Physical Android chooser/handoff behavior requires handset validation; unit tests can only prove URL/fallback construction.
+Use `src/media/*.test.ts`, YouTube service/validation tests, tool declaration/handler tests, MediaCard tests and `e2e/media-handoff.spec.ts`. CI proves the structured media/cache/handoff construction and browser behavior, including the corrected request-header assertion.
+
+Physical Android app dispatch remains handset-only evidence: verify Lockbox key persistence, Watch/Listen launch behavior, repeat-result cache behavior and HTTPS fallback on a real installed PWA/device. Browser emulation cannot prove chooser/default-handler behavior or that Android actually accepted the external intent.
 
 ## 8. Known gaps
 

@@ -1,7 +1,7 @@
 ---
 id: SYS-REL
 status: active
-verified_commit: c9650583b813b6914d8f3f11161e646215330421
+verified_commit: 2113653bc007cbd8d3a877fd09a3242c163b8009
 scope: CI, automated verification, diagnostics and release-quality gates
 paths: [scripts/reliability-gate.mjs, .github/workflows/ci.yml, e2e]
 keywords: [reliability, testing, ci, diagnostics, analytics, performance, e2e, lint, typecheck]
@@ -35,7 +35,7 @@ CI targets Node 24 and currently runs Chromium, Android-portrait and onboarding 
 | CI pipeline | `.github/workflows/ci.yml` |
 | Architecture invariant gate | `scripts/reliability-gate.mjs` |
 | Browser E2E | `e2e/`, `playwright.config.ts` |
-| Typecheck configuration | `tsconfig.json`, `worker/tsconfig.json`, package scripts |
+| Typecheck configuration | `tsconfig.json`, `worker/tsconfig.json`, `tsconfig.e2e.json`, package scripts |
 | Lint configuration | `eslint.config.js` |
 | Unit/integration | colocated `*.test.ts(x)` |
 | Worker tests | `worker/test/`, `vitest.workers.config.ts` |
@@ -56,7 +56,7 @@ npx playwright test --project=chromium --project=android-portrait --project=onbo
 npm run reliability:check
 ```
 
-Focused checks include `verify:artifact-assets`, `verify:worker` and subsystem tests. Focused checks are iteration aids; they do not replace the broad gate when claiming repository-level completion.
+`npm run typecheck` covers the web source project, Worker project and the full `e2e/` Playwright project. Focused checks include `typecheck:e2e`, `verify:artifact-assets`, `verify:worker` and subsystem tests. Focused checks are iteration aids; they do not replace the broad gate when claiming repository-level completion.
 
 The invariant gate currently protects, among other things: no legacy Gemini `generateContent`; direct browser Interactions provider with Lockbox credential and stable `v1`; no empty-character prompt injection; registry-derived tool declarations; explicit Google confirmation controls; safe Markdown; artifact integrity; BusyTeX shell escape disabled; VTT provider boundaries; and selected autonomy/roleplay invariants.
 
@@ -84,8 +84,6 @@ When changing one subsystem, run focused tests first, then the broad ordered gat
 Physical Android behavior that browser automation cannot reproduce is reported as a validation gap rather than inferred from green desktop or emulated-browser CI.
 
 ## 8. Known gaps
-
-At the verified commit, `npm run typecheck` covers the web `src` project and Worker project but not `e2e/`; an open change is addressing that gap, so re-check current `main` before modifying this area.
 
 At the verified commit, `eslint.config.js` explicitly ignores `src/**/*.ts`, `src/**/*.tsx` and `e2e/**/*.ts`. Therefore `npm run lint` being green does not yet prove application TypeScript lint cleanliness. Treat that as verification debt until a TypeScript-aware ESLint configuration lands.
 

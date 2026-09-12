@@ -1,7 +1,7 @@
 ---
 id: SYS-REL
 status: active
-verified_commit: 8833818cafaca07d04552ead41c250bc9c4e9a1a
+verified_commit: 14263a46095024fc37d0ac940daac430848e8dac
 scope: CI, automated verification, diagnostics and release-quality gates
 paths: [scripts/check-docs.mjs, scripts/reliability-gate.mjs, .github/workflows/ci.yml, e2e]
 keywords: [reliability, testing, ci, diagnostics, analytics, performance, e2e, lint, typecheck, documentation]
@@ -92,5 +92,7 @@ Physical Android behavior that browser automation cannot reproduce is reported a
 ## 8. Known gaps
 
 At the verified commit, `eslint.config.js` explicitly ignores `src/**/*.ts`, `src/**/*.tsx` and `e2e/**/*.ts`. Therefore `npm run lint` being green does not yet prove application TypeScript lint cleanliness. Treat that as verification debt until a TypeScript-aware ESLint configuration lands.
+
+Correction (2026-09-12): the paragraph above described the state at its own verified commit and is preserved for the record. A TypeScript-aware ESLint configuration has since landed, and `npm run lint` now lints all of `src/**`, `e2e/**`, the root config files and `scripts/*.mjs`. Non-type-aware rules (`typescript-eslint` recommended plus the React hooks preset) apply to all of them; type-aware rules (via `projectService`) apply to `src/**` only, because the project service auto-discovers only a file named `tsconfig.json`, so `tsconfig.e2e.json` is invisible to it. `worker/**` is deliberately ignored with its measured backlog recorded in the config. The gate is proven capable of failing: an unused variable injected into `src/**/*.ts`, and an `await` of a non-Promise, each made `npm run lint` exit 1 and were reverted. Remaining gaps: type-aware lint for `e2e/` (needs its own project mechanism) and a dedicated `worker/**` lint pass.
 
 The documentation guard validates local structure/references and source-path existence; it intentionally does not judge whether prose is semantically current. Source/tests still outrank prose, and durable behavior changes must update the owning system document in the same change.

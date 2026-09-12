@@ -129,9 +129,11 @@ const workflow = read('.github/workflows/ci.yml');
 for (const bypass of ['continue-on-error', 'if: always()', '|| true']) {
   if (workflow.includes(bypass)) fail(`CI workflow contains forbidden bypass marker: ${bypass}`);
 }
+if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci, not npm install, so package-lock.json is authoritative');
 const orderedCommands = [
   'npm run docs:check',
   'npm run verify:gates',
+  'npm ci --no-audit --no-fund',
   'npm run lint',
   'npm run typecheck',
   'npm test',

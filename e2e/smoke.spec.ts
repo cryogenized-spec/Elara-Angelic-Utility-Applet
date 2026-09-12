@@ -1,5 +1,10 @@
 import { expect, test } from '@playwright/test';
 
+// TEMPORARY gate proof (reverted in the next commit): a deliberate type error
+// that only tsconfig.e2e.json can see. This commit must fail CI at the
+// Typecheck step — that is what proves the e2e typecheck gate is live.
+const gateProof: number = 'this is not a number';
+
 const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const pngFile = (name: string) => ({ name, mimeType: 'image/png', buffer: tinyPng });
 

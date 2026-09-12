@@ -26,6 +26,33 @@ export function isMediaProviderId(value: unknown): value is MediaProviderId {
 
 export type MediaKind = 'video' | 'playlist';
 
+/**
+ * What the user asked Elara to *do* with the result.
+ *
+ * This is a presentation and hand-off directive, never a provider parameter:
+ * the YouTube request is byte-identical for both intents, which is what lets
+ * one cache entry serve a "watch" lookup and a "listen" lookup of the same query
+ * without spending a second quota-billed call.
+ *
+ * - `watch`  — the user wants to see it. Rendered as a playable-looking card.
+ * - `listen` — the user wants to hear it. Handed off to the platform's own
+ *   audio player and never played inside Elara.
+ *
+ * Declared as a const array so the type, the Zod contract, and the runtime
+ * membership check cannot drift apart.
+ */
+export const MEDIA_INTENTS = ['watch', 'listen'] as const;
+
+export type MediaIntent = (typeof MEDIA_INTENTS)[number];
+
+export function isMediaIntent(value: unknown): value is MediaIntent {
+  return typeof value === 'string' && (MEDIA_INTENTS as readonly string[]).includes(value);
+}
+
+/** The intent assumed when a result predates this field or the caller omitted it. */
+export const DEFAULT_MEDIA_INTENT: MediaIntent = 'watch';
+
+
 export interface MediaThumbnail {
   readonly url: string;
   readonly width: number;
@@ -55,6 +82,22 @@ export interface MediaItem {
    * is asserted by test rather than by convention.
    */
   readonly embedUrl: string;
+  /**
+   * How this result should be acted on. Optional because media items are
+   * persisted with conversation messages: a result stored before this field
+   * existed must still validate and render, falling back to `watch`.
+   */
+  readonly intent?: MediaIntent;
+}
+
+/**
+ * Resolves the intent a media item should be rendered with.
+ *
+ * One function so the card, the hand-off builder, and any later surface agree
+ * on the fallback instead of each inventing `?? 'watch'`.
+ */
+export function mediaIntentOf(item: Pick<MediaItem, 'intent'>): MediaIntent {
+  return isMediaIntent(item.intent) ? item.intent : DEFAULT_MEDIA_INTENT;
 }
 
 /** Why a search produced nothing. Surfaced to the model as plain language. */
@@ -112,10 +155,15 @@ export const MAX_MEDIA_ITEMS_PER_QUERY = 5;
 export function isMediaItem(value: unknown): value is MediaItem {
   if (typeof value !== 'object' || value === null) return false;
   const item = value as Record<string, unknown>;
+  const intent = item.intent;
   return isMediaProviderId(item.provider)
     && typeof item.id === 'string' && item.id.length > 0
     && (item.kind === 'video' || item.kind === 'playlist')
     && typeof item.title === 'string' && item.title.length > 0
     && typeof item.webUrl === 'string' && item.webUrl.length > 0
-    && typeof item.embedUrl === 'string' && item.embedUrl.length > 0;
+    && typeof item.embedUrl === 'string' && item.embedUrl.length > 0
+    // Absent is valid (a result persisted before `intent` existed). Present but
+    // unrecognised is not: an intent that silently degraded to a default could
+    // turn a hand-off card into an in-app player, or the reverse.
+    && (intent === undefined || isMediaIntent(intent));
 }

@@ -1,10 +1,11 @@
 import type {
+  MediaIntent,
   MediaItem,
   MediaProvider,
   MediaSearchFailure,
   MediaSearchOutcome,
 } from '../domain/media';
-import { MAX_MEDIA_QUERIES_PER_CALL } from '../domain/media';
+import { DEFAULT_MEDIA_INTENT, isMediaIntent, MAX_MEDIA_QUERIES_PER_CALL } from '../domain/media';
 import { dedupeMediaQueries, mediaCacheKey, normalizeMediaQuery } from './normalize';
 import { hasSearchBudget, reserveSearch, releaseSearch } from './budget';
 import { readMediaCache, writeMediaCache, type ReadMediaCacheResult } from './cache';
@@ -27,6 +28,13 @@ export interface MediaSearchBatchRequest {
   readonly queries: readonly string[];
   readonly limit?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Hand-off directive for the rendered results. It changes nothing about the
+   * provider request, which is why it is deliberately absent from the cache key:
+   * the same query searched for listening and then for watching is one network
+   * call and one cache entry, not two.
+   */
+  readonly intent?: MediaIntent;
 }
 
 export interface MediaSearchBatchResult {
@@ -75,6 +83,17 @@ export function resetMediaProvider(): void {
   cachedProvider = undefined;
 }
 
+/**
+ * Stamps a hand-off intent onto resolved items.
+ *
+ * A no-op for the default intent, so the overwhelmingly common path allocates
+ * nothing and cached items keep flowing through untouched.
+ */
+function applyIntent(items: readonly MediaItem[], intent: MediaIntent | undefined): readonly MediaItem[] {
+  if (!intent || intent === DEFAULT_MEDIA_INTENT) return items;
+  return Object.freeze(items.map((item) => Object.freeze({ ...item, intent })));
+}
+
 function networkAttempted(error: unknown): boolean {
   if (error instanceof YouTubeSearchError) return error.networkAttempted;
   return typeof error === 'object' && error !== null && (error as { networkAttempted?: unknown }).networkAttempted === true;
@@ -87,6 +106,9 @@ export async function searchMedia(
   const provider = options.provider ?? defaultProvider(options.apiKey ?? defaultApiKey);
   const cache = options.cache ?? realCache;
   const now = options.now ?? Date.now;
+  // A caller that did not ask for a hand-off intent explicitly is not trusted to
+  // have meant one: an unrecognised value is dropped rather than guessed at.
+  const intent = isMediaIntent(request.intent) ? request.intent : undefined;
 
   if (!Array.isArray(request.queries)) {
     throw new YouTubeSearchError('invalid-request', 'Search queries must be provided as a list.');
@@ -112,7 +134,7 @@ export async function searchMedia(
       outcomes.push(Object.freeze({
         query: query.trim(),
         normalizedQuery,
-        items: cached.items,
+        items: applyIntent(cached.items, intent),
         source: 'cache' as const,
         truncated: false,
       }));
@@ -133,17 +155,25 @@ export async function searchMedia(
     networkCalls += 1;
     try {
       const outcome = await provider.search({ query, limit: request.limit, signal: request.signal });
-      outcomes.push(outcome);
       try {
+        // Cached without intent on purpose. The provider answer is the same
+        // object regardless of what the user intends to do with it, so storing
+        // one intent-free copy is what keeps a later opposite-intent search of
+        // the same query free instead of spending a second billed call.
         await cache.write(key, {
           provider: provider.id,
           query: outcome.query,
           normalizedQuery: outcome.normalizedQuery,
-          items: outcome.items,
+          items: [...outcome.items],
         }, now());
       } catch {
         // Losing the write costs one future API call; it is not worth failing over.
       }
+      // Rebuilt rather than mutated, and re-frozen: the provider hands back a
+      // frozen outcome, and returning a mutable copy only when an intent was
+      // asked for would be a stranger contract than always returning a frozen one.
+      const stamped = applyIntent(outcome.items, intent);
+      outcomes.push(stamped === outcome.items ? outcome : Object.freeze({ ...outcome, items: stamped }));
     } catch (error) {
       if (!networkAttempted(error)) releaseSearch();
       if (error instanceof YouTubeSearchError) {

@@ -14,7 +14,9 @@ export default defineConfig({
     },
     {
       name: 'android-portrait',
-      testMatch: /(?:mobile-reliability|vtt)\.spec\.ts/,
+      // media-handoff is included because the media card is thumb-sized UI whose
+      // tap targets and single-column rail only exist at a phone viewport.
+      testMatch: /(?:mobile-reliability|vtt|media-handoff)\.spec\.ts/,
       use: {
         browserName: 'chromium',
         viewport: { width: 412, height: 915 },

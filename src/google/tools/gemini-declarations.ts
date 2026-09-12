@@ -76,6 +76,15 @@ const toolProperties: Record<string, Record<string, unknown>> = {
       maxItems: MAX_MEDIA_QUERIES_PER_CALL,
       description: 'One to eight search queries. Batch related queries into a single call. Do not page: there is no pagination parameter.',
     },
+    // Deliberately not in `requiredByTool`: omitting it is a valid call, and the
+    // app supplies the default. The model only needs to state an intent when it
+    // differs from the default.
+    intent: {
+      type: 'string',
+      enum: ['watch', 'listen'],
+      description:
+        "How the results will be used: 'listen' when the user asked for music or audio ('play some jazz', 'put on the album'), 'watch' for video. The app never plays media itself; it hands results to the platform, and this selects which surface is asked. Defaults to 'watch'. Applies to the whole call.",
+    },
   },
 };
 

@@ -10,11 +10,9 @@ This repository is maintained for repeated AI-assisted development. Minimize arc
 4. Fetch only the exact source/tests needed to verify or change that contract.
 5. Load `documents/architecture.md` or another system document only when the task crosses a declared boundary.
 
-Authority is `source + tests -> canonical /documents`. Legacy `/docs`, old pass/status files and Git history are evidence/history only; they are not current technical authority.
+Authority is `source + tests -> canonical /documents`. Git history is evidence/history only; it is not current technical authority.
 
-Update the owning canonical system document whenever a durable contract changes. Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, milestone or implementation-log documents. Do not add new documentation under `/docs`. Chronology belongs in Git.
-
-Legacy `/docs` and remaining pass/status/implementation-plan files are migration-only inputs pending reference migration and deletion. Do not repair them in parallel with canonical docs.
+Update the owning canonical system document whenever a durable contract changes. Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, milestone or implementation-log documents. Do not create a second documentation root. Chronology belongs in Git.
 
 ## Engineering boundaries
 

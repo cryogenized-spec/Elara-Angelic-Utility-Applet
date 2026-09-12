@@ -240,3 +240,7 @@ cache row carries no `intent`.
 Not verifiable from a browser: whether Android shows its app chooser or opens a
 single default handler. That is the platform's decision. It needs a physical-device
 check, which is listed as outstanding and is not claimed here.
+
+Correction (2026-09-12): CI now executes `e2e/media-handoff.spec.ts` on chromium and
+android-portrait. The prior CI run aborted at the worker-test flake before the E2E
+step ran, so this was re-triggered to obtain a full verification.

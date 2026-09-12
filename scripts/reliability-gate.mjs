@@ -3,10 +3,12 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const requiredFiles = [
-  'README.md', '.nvmrc', 'package.json',
-  'docs/ARCHITECTURE_DECISION.md', 'docs/SYSTEM_BOUNDARIES.md', 'docs/GEMINI_INTEGRATION_STRATEGY.md', 'docs/GEMINI_REQUEST_CONTRACT.md', 'docs/PROVIDER_ERROR_NORMALIZATION.md',
-  'docs/GOOGLE_OAUTH_ARCHITECTURE.md', 'docs/GOOGLE_SCOPE_REGISTRY.md', 'docs/GOOGLE_CALENDAR_SERVICE.md', 'docs/GOOGLE_TASKS_SERVICE.md', 'docs/GOOGLE_GMAIL_SERVICE.md', 'docs/GOOGLE_TOOL_BOUNDARY.md', 'docs/GOOGLE_WRITE_CONFIRMATION.md', 'docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md', 'docs/GEMINI_BACKGROUND_EXECUTION.md',
-  'docs/NEXT_FEATURE_PHASE_PLAN.md', 'docs/MARKDOWN_FORMAT.md', 'docs/ROLEPLAY_WORLD_CANVAS_PLAN.md', 'docs/ARTIFACT_SYSTEM.md', 'public/core/README.md',
+  'README.md', 'AGENTS.md', '.nvmrc', 'package.json',
+  'documents/INDEX.md', 'documents/manifest.json', 'documents/architecture.md',
+  'documents/ui.md', 'documents/chat.md', 'documents/gemini.md', 'documents/vtt.md', 'documents/memory.md',
+  'documents/artifacts.md', 'documents/documents.md', 'documents/character.md', 'documents/google-auth.md', 'documents/google-workspace.md',
+  'documents/media.md', 'documents/autonomy.md', 'documents/security.md', 'documents/persistence.md', 'documents/pwa.md', 'documents/worker.md',
+  'documents/reliability.md', 'documents/third-party-notices.md', 'public/core/README.md',
   'src/artifacts/repository.ts', 'src/artifacts/validation.ts', 'src/artifacts/image-preprocessing.ts', 'src/artifacts/intake.ts', 'src/artifacts/transformations.ts', 'src/artifacts/repository.test.ts', 'src/gemini/multimodal.test.ts', 'src/app/components/artifacts/GeneratedTextCard.tsx', 'src/app/components/artifacts/GeneratedTextCard.test.tsx', 'src/ocr/service.ts', 'src/ocr/worker.ts', 'src/documents/compiler.ts', 'src/documents/compiler.worker.ts', 'scripts/verify-artifact-assets.mjs',
   'src/app/components/MarkdownText.tsx', 'src/app/components/MarkdownText.test.tsx', 'src/app/components/RoleplaySettings.tsx',
   'src/character/system-instruction.ts', 'src/persistence/character.ts', 'src/persistence/character.test.ts', 'src/persistence/gemini-api-key.ts', 'src/persistence/gemini-api-key.test.ts', 'src/persistence/preferences.ts', 'src/persistence/roleplay-world.ts',
@@ -16,7 +18,7 @@ const requiredFiles = [
   'src/autonomy/scheduler.ts', 'src/autonomy/scheduler.test.ts', 'src/autonomy/context.ts', 'src/autonomy/context.test.ts', 'src/autonomy/protocol.ts', 'src/autonomy/protocol.test.ts',
   'src/autonomy/cloud/pairing.ts', 'src/autonomy/cloud/pairing.test.ts', 'src/autonomy/cloud/client.ts', 'src/autonomy/cloud/sync.ts', 'src/autonomy/cloud/sync.test.tsx', 'src/app/components/AutonomyCloud.tsx',
   'worker/src/autonomy/ports.ts', 'worker/src/autonomy/store.ts', 'worker/src/autonomy/engine.ts', 'worker/src/autonomy/routes.ts', 'worker/src/autonomy/workflow.ts', 'worker/src/autonomy/cloud-execute.ts', 'src/autonomy/history-page.ts', 'src/autonomy/history-page.test.ts', 'src/autonomy/config-identity.ts', 'src/autonomy/config-identity.test.ts', 'src/autonomy/cloud-result.ts', 'src/autonomy/workflow-identity.ts', 'src/autonomy/envelope.ts', 'worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts', 'worker/test/helpers.ts', 'vitest.workers.config.ts',
-  'scripts/verify-autonomy-worker.mjs', 'docs/AUTONOMOUS_ELARA.md', 'e2e/autonomy-cloud.spec.ts',
+  'scripts/verify-autonomy-worker.mjs', 'e2e/autonomy-cloud.spec.ts',
   'e2e/roleplay-world.spec.ts', 'e2e/autonomy.spec.ts',
 ];
 

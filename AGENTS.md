@@ -5,16 +5,16 @@ This repository is maintained for repeated AI-assisted development. Minimize arc
 ## Load protocol
 
 1. Read `documents/manifest.json`.
-2. Route by the most-specific matching source path; use keywords when the task is conceptual rather than path-scoped.
+2. Route by the longest matching source-path prefix. If equally specific routes tie, load all tied system documents. Use keywords for conceptual tasks without a clear path.
 3. Load one canonical system document by default.
 4. Fetch only the exact source/tests needed to verify or change that contract.
-5. Load `documents/architecture.md` or a second system document only when the task crosses a declared boundary.
+5. Load `documents/architecture.md` or another system document only when the task crosses a declared boundary.
 
 Authority is `source + tests -> canonical /documents`. Legacy `/docs`, old pass/status files and Git history are evidence/history only; they are not current technical authority.
 
 Update the owning canonical system document whenever a durable contract changes. Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, milestone or implementation-log documents. Do not add new documentation under `/docs`. Chronology belongs in Git.
 
-Legacy `/docs` and remaining pass/status files are migration-only inputs pending reference migration and deletion. Do not repair them in parallel with canonical docs.
+Legacy `/docs` and remaining pass/status/implementation-plan files are migration-only inputs pending reference migration and deletion. Do not repair them in parallel with canonical docs.
 
 ## Engineering boundaries
 
@@ -26,7 +26,7 @@ Normal interactive Gemini is browser-direct through `src/gemini/provider.ts` and
 
 Prefer narrow changes in the owning subsystem. Reuse existing schemas, repositories, registries and state machines before introducing another authority. Prefer exact symbols, paths, compact flows and invariants over repeated explanatory prose. When a task exposes stale documentation, fix the canonical document rather than adding a compensating note.
 
-Direct commits to `main` are normal for this repository. Do not leave stale or superseded pull requests open.
+Before writing directly to `main`, check open PRs and recent `main` movement. If another active workstream depends on a stable base or touches the same files, use a short-lived branch and do not move, close or rewrite that work. Direct `main` writes remain acceptable when no such conflict exists. Do not leave stale or superseded pull requests open.
 
 ## Verification
 

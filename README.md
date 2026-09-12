@@ -62,7 +62,7 @@ One canonical Gemini execution path: interactive chat uses the browser Interacti
 
 Credentials stay behind their owning security boundary. Tool schemas never contain secrets. Google Workspace operations pass through the centralized capability/OAuth boundary and consequential mutations use the shared confirmation policy. Cloud/autonomy execution must not silently redefine the normal browser-chat architecture.
 
-Documentation follows [`AGENTS.md`](./AGENTS.md): durable current facts belong in the owning `/documents/<system>.md`; chronology belongs in Git. Direct commits to `main` are normal for this repository and stale/superseded pull requests should not be left open.
+Documentation follows [`AGENTS.md`](./AGENTS.md): durable current facts belong in the owning `/documents/<system>.md`; chronology belongs in Git. Direct `main` writes are allowed when no concurrent workstream depends on a stable base. During concurrent agent/PR work, use a short-lived branch and do not move, close or rewrite another workstream. Stale or superseded pull requests should not be left open.
 
 ## Deployment
 

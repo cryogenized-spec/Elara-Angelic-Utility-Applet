@@ -44,7 +44,7 @@ Both paths are local browser capabilities. They do not require Google Workspace 
 
 ## 4. Data and contracts
 
-The model-visible PDF tool is `document.create_pdf`; inputs are bounded source text plus optional title metadata, not paths, shell flags or compiler arguments. The compiler runs in a dedicated Worker using BusyTeX/LuaLaTeX assets. Runtime assets are prepared with `npm run busytex:prepare` and are expected from the configured same-origin `/core/busytex` path unless a safe build-time path is supplied.
+The model-visible PDF tool is `document.create_pdf`; inputs are bounded source text plus optional title metadata, not paths, shell flags or compiler arguments. The compiler runs in a dedicated Worker using BusyTeX/LuaLaTeX assets. Runtime assets are prepared with `npm run busytex:prepare`. The default base path is `/core/busytex`; deployments may set `VITE_BUSYTEX_BASE_PATH`, which must remain trusted and non-user-controlled.
 
 OCR is opt-in. It consumes an existing image artifact and produces derived text through `SYS-ART`; images are not automatically OCR'd as part of normal Gemini attachment handling.
 

@@ -4,6 +4,9 @@
   "inventory_commit": "c006922e3e98cde544e54008b5723d6c058d19cc",
   "rule": "Extract code-verified current facts into the target document, then delete the legacy source. Git history retains implementation history.",
   "legacy_roots": ["docs", "documents/*PASS*", "documents/*STATUS*", "README.md"],
+  "preserve_in_place": [
+    "public/core/README.md"
+  ],
   "targets": {
     "architecture.md": [
       "docs/ARCHITECTURE_DECISION.md",

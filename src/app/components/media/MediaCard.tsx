@@ -1,6 +1,13 @@
 import type { MediaItem } from '../../../domain/media';
 import { mediaIntentOf } from '../../../domain/media';
-import { detectHandoffPlatform, mediaHandoffHref, mediaHandoffLabel, type HandoffPlatform } from '../../../media/handoff';
+import {
+  detectHandoffPlatform,
+  mediaDestinationUrl,
+  mediaHandoffHref,
+  mediaHandoffIntentHref,
+  mediaHandoffLabel,
+  type HandoffPlatform,
+} from '../../../media/handoff';
 import './media-card.css';
 
 /**
@@ -28,13 +35,40 @@ export function MediaCard({ item, platform }: {
   // linked to the watch page would be worse than either.
   const resolved = platform ?? detectHandoffPlatform();
   const href = mediaHandoffHref(item, resolved);
+  const destination = mediaDestinationUrl(item);
+  const intentHref = mediaHandoffIntentHref(item, resolved);
   const label = mediaHandoffLabel(item);
   // A full phrase rather than a bare name, because the preposition is part of the
   // promise: on Android the tap leaves the browser for a chooser, and the user
   // should not discover that after the fact.
-  const destination = listen
+  const targetLabel = listen
     ? (resolved.isAndroid ? 'in your music app' : 'in YouTube Music')
     : 'on YouTube';
+
+  function handleClick(event: React.MouseEvent<HTMLAnchorElement>): void {
+    if (!resolved.isAndroid || !intentHref) return;
+    // On Android Chrome, try the intent:// URI first to get the system chooser.
+    // The href itself is always https, so if intent is not supported we have a
+    // guaranteed fallback. We prevent the default https navigation and attempt
+    // intent via location.href; if the intent cannot be handled, Chrome will
+    // use S.browser_fallback_url to go to https, and our timeout provides a
+    // second fallback for browsers that show ERR_UNKNOWN_URL_SCHEME instead.
+    event.preventDefault();
+    try {
+      window.location.href = intentHref;
+    } catch {
+      window.open(destination, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    // Fallback for browsers that do not understand intent:// at all — they will
+    // stay on the page and show ERR_UNKNOWN_URL_SCHEME if we do nothing. After a
+    // short delay, if the page is still visible, open the https destination.
+    window.setTimeout(() => {
+      if (document.visibilityState === 'visible') {
+        window.open(destination, '_blank', 'noopener,noreferrer');
+      }
+    }, 700);
+  }
 
   return (
     <a
@@ -42,7 +76,9 @@ export function MediaCard({ item, platform }: {
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      title={`Open “${item.title}” ${destination}`}
+      title={`Open “${item.title}” ${targetLabel}`}
+      data-intent-href={intentHref}
+      onClick={handleClick}
     >
       <span className="media-card__thumb-wrap">
         {item.thumbnail ? (

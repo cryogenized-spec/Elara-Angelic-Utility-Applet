@@ -8,6 +8,7 @@ import {
   enableGeminiLockboxWithPin,
   getGeminiLockboxMetadata,
   getGeminiLockboxStatus,
+  getYouTubeApiKey,
   getYouTubeLockboxStatus,
   clearYouTubeApiKey,
   saveYouTubeApiKey,
@@ -27,10 +28,13 @@ import {
   removeGeminiPasskey,
   unlockGeminiApiKeyWithPasskey,
 } from '../../persistence/gemini-passkey';
+import { validateYouTubeApiKey, type YouTubeKeyValidationResult } from '../../media/youtube/validate';
 import './worker-health.css';
 
 type LockboxState = 'loading' | 'empty' | 'locked' | 'unlocked';
 type LockboxMode = 'password' | 'pin' | 'passkey' | 'off';
+
+type YouTubeValidationState = 'idle' | 'validating' | 'valid' | 'quota-exhausted' | 'invalid' | 'network-error';
 
 export function GeminiApiLockbox() {
   const [status, setStatus] = useState<LockboxState>('loading');
@@ -39,6 +43,8 @@ export function GeminiApiLockbox() {
   const [passkeyAvailable, setPasskeyAvailable] = useState(false);
   const [detail, setDetail] = useState('');
   const [youtubeStatus, setYoutubeStatus] = useState<LockboxSecretStatus>('empty');
+  const [youtubeValidation, setYoutubeValidation] = useState<YouTubeValidationState>('idle');
+  const [youtubeValidationMessage, setYoutubeValidationMessage] = useState('');
   const keyRef = useRef<HTMLInputElement>(null);
   const youtubeKeyRef = useRef<HTMLInputElement>(null);
   const youtubeCredentialRef = useRef<HTMLInputElement>(null);
@@ -87,6 +93,54 @@ export function GeminiApiLockbox() {
   useEffect(() => {
     if (status === 'locked' && (mode === 'pin' || mode === 'passkey')) pinRef.current?.focus();
   }, [status, mode]);
+
+  async function runYouTubeValidation(): Promise<void> {
+    if (youtubeStatus !== 'unlocked') {
+      setYoutubeValidation('idle');
+      setYoutubeValidationMessage('');
+      return;
+    }
+    setYoutubeValidation('validating');
+    setYoutubeValidationMessage('Checking key with YouTube… (1 quota unit, not your search budget)');
+    try {
+      const key = await getYouTubeApiKey();
+      if (!key) {
+        setYoutubeValidation('idle');
+        setYoutubeValidationMessage('');
+        return;
+      }
+      const result: YouTubeKeyValidationResult = await validateYouTubeApiKey({ apiKey: key });
+      if (result.valid && result.quotaExhausted) {
+        setYoutubeValidation('quota-exhausted');
+        setYoutubeValidationMessage('Key accepted — quota exhausted (resets midnight Pacific). Search will resume tomorrow.');
+      } else if (result.valid) {
+        setYoutubeValidation('valid');
+        setYoutubeValidationMessage('Key accepted and working — YouTube responded successfully.');
+      } else if (result.reason === 'invalid-key') {
+        setYoutubeValidation('invalid');
+        setYoutubeValidationMessage(result.message);
+      } else if (result.reason === 'network') {
+        setYoutubeValidation('network-error');
+        setYoutubeValidationMessage(result.message + ' Key is stored, but live check failed.');
+      } else {
+        setYoutubeValidation('invalid');
+        setYoutubeValidationMessage(result.message);
+      }
+    } catch {
+      setYoutubeValidation('network-error');
+      setYoutubeValidationMessage('Could not validate key — network error. Key remains stored.');
+    }
+  }
+
+  useEffect(() => {
+    if (youtubeStatus === 'unlocked') {
+      void runYouTubeValidation();
+    } else {
+      setYoutubeValidation('idle');
+      setYoutubeValidationMessage('');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [youtubeStatus]);
 
   function read(ref: RefObject<HTMLInputElement | null>): string {
     return ref.current?.value.trim() ?? '';
@@ -292,6 +346,11 @@ export function GeminiApiLockbox() {
       clearInputs(youtubeKeyRef, youtubeCredentialRef);
       await refresh();
       setDetail('YouTube Data API key encrypted in the Lockbox.');
+      // Trigger validation immediately; refresh will also trigger via useEffect.
+      setYoutubeValidation('validating');
+      setYoutubeValidationMessage('Key saved — checking with YouTube…');
+      // Small delay to allow unlock to settle, then validate.
+      window.setTimeout(() => { void runYouTubeValidation(); }, 300);
     } catch (error) {
       setDetail(error instanceof Error ? error.message : 'Could not save the YouTube API key.');
     }
@@ -302,11 +361,18 @@ export function GeminiApiLockbox() {
     try {
       await clearYouTubeApiKey();
       clearInputs(youtubeKeyRef, youtubeCredentialRef);
+      setYoutubeValidation('idle');
+      setYoutubeValidationMessage('');
       await refresh();
       setDetail('YouTube Data API key removed from this browser.');
     } catch (error) {
       setDetail(error instanceof Error ? error.message : 'Could not remove the YouTube API key.');
     }
+  }
+
+  async function revalidateYouTubeKey() {
+    setDetail('Re-checking YouTube key…');
+    await runYouTubeValidation();
   }
 
   const dataState = status === 'unlocked' ? 'healthy' : status === 'empty' ? 'degraded' : 'unknown';
@@ -414,13 +480,89 @@ export function GeminiApiLockbox() {
 
       {status === 'unlocked' && (
         <>
-          <div className="worker-health__endpoint">{youtubeStatus === 'unlocked'
-            ? 'YouTube Data API · configured · unlocked'
-            : youtubeStatus === 'mismatch'
-              ? 'YouTube Data API · saved under a different credential · re-save'
-              : youtubeStatus === 'locked'
-                ? 'YouTube Data API · configured · locked'
-                : 'YouTube Data API · not configured'}</div>
+          <div
+            className="worker-health__endpoint"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              borderColor:
+                youtubeStatus === 'unlocked' && (youtubeValidation === 'valid' || youtubeValidation === 'quota-exhausted')
+                  ? 'rgba(75,190,105,.35)'
+                  : youtubeStatus === 'unlocked' && youtubeValidation === 'invalid'
+                    ? 'rgba(255,90,90,.35)'
+                    : undefined,
+              background:
+                youtubeStatus === 'unlocked' && (youtubeValidation === 'valid' || youtubeValidation === 'quota-exhausted')
+                  ? 'rgba(75,190,105,.07)'
+                  : youtubeStatus === 'unlocked' && youtubeValidation === 'invalid'
+                    ? 'rgba(255,90,90,.07)'
+                    : undefined,
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: '9px',
+                height: '9px',
+                borderRadius: '50%',
+                flex: '0 0 auto',
+                background:
+                  youtubeStatus === 'unlocked' && (youtubeValidation === 'valid' || youtubeValidation === 'quota-exhausted')
+                    ? '#4fc26f'
+                    : youtubeStatus === 'unlocked' && youtubeValidation === 'validating'
+                      ? '#ffd37a'
+                      : youtubeStatus === 'unlocked'
+                        ? '#9be6b0'
+                        : youtubeStatus === 'locked'
+                          ? 'rgba(255,255,255,.35)'
+                          : youtubeStatus === 'mismatch'
+                            ? '#ffbe4b'
+                            : 'rgba(255,255,255,.25)',
+                boxShadow:
+                  youtubeStatus === 'unlocked' && (youtubeValidation === 'valid' || youtubeValidation === 'quota-exhausted')
+                    ? '0 0 0 3px rgba(79,194,111,.12)'
+                    : '0 0 0 3px rgba(255,255,255,.05)',
+              }}
+            />
+            <span>
+              {youtubeStatus === 'unlocked'
+                ? youtubeValidation === 'valid'
+                  ? 'YouTube Data API · configured · unlocked · key accepted and working'
+                  : youtubeValidation === 'quota-exhausted'
+                    ? 'YouTube Data API · configured · unlocked · key accepted (quota exhausted)'
+                    : youtubeValidation === 'validating'
+                      ? 'YouTube Data API · configured · unlocked · validating key…'
+                      : youtubeValidation === 'invalid'
+                        ? 'YouTube Data API · configured · unlocked · key rejected'
+                        : 'YouTube Data API · configured · unlocked'
+                : youtubeStatus === 'mismatch'
+                  ? 'YouTube Data API · saved under a different credential · re-save'
+                  : youtubeStatus === 'locked'
+                    ? 'YouTube Data API · configured · locked'
+                    : 'YouTube Data API · not configured'}
+            </span>
+          </div>
+          {youtubeStatus === 'unlocked' && youtubeValidationMessage && (
+            <div
+              className="worker-health__endpoint"
+              role="status"
+              aria-live="polite"
+              style={{
+                whiteSpace: 'normal',
+                lineHeight: '1.4',
+                color:
+                  youtubeValidation === 'valid' || youtubeValidation === 'quota-exhausted'
+                    ? '#9be6b0'
+                    : youtubeValidation === 'invalid'
+                      ? '#ff9d9d'
+                      : undefined,
+              }}
+            >
+              {youtubeValidationMessage}
+              {youtubeValidation === 'valid' || youtubeValidation === 'quota-exhausted' ? ' ✓' : ''}
+            </div>
+          )}
           <label className="character-field"><span>YouTube API key</span><input ref={youtubeKeyRef} type="password" aria-label="YouTube API key" placeholder="Paste your YouTube Data API v3 key" autoComplete="off" spellCheck={false} /></label>
           {mode !== 'off' && (
             <label className="character-field"><span>{pinCapable ? 'Current Lockbox PIN' : 'Current Lockbox password'}</span><input ref={youtubeCredentialRef} type="password" aria-label="Current Lockbox credential for the YouTube key" placeholder={pinCapable ? 'Current PIN' : 'Current password'} inputMode={pinCapable ? 'numeric' : undefined} maxLength={pinCapable ? GEMINI_LOCKBOX_PIN_MAX_LENGTH : undefined} autoComplete="current-password" onKeyDown={(event) => { if (event.key === 'Enter') void saveYouTubeKey(); }} /></label>
@@ -428,6 +570,7 @@ export function GeminiApiLockbox() {
           <div className="worker-health__actions">
             <button className="model-settings__button worker-health__button" type="button" onClick={() => void saveYouTubeKey()}>{youtubeStatus === 'empty' ? 'Save YouTube Key' : 'Replace YouTube Key'}</button>
             {youtubeStatus !== 'empty' && <button className="model-settings__button worker-health__button" type="button" onClick={() => void clearYouTube()}>Remove YouTube Key</button>}
+            {youtubeStatus === 'unlocked' && <button className="model-settings__button worker-health__button" type="button" onClick={() => void revalidateYouTubeKey()}>Test Key</button>}
           </div>
         </>
       )}

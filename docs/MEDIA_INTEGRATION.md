@@ -131,8 +131,8 @@ that is ever decided otherwise.
 
 | Condition | Result |
 | --- | --- |
-| Android | `intent://host/path?query#Intent;scheme=https;S.browser_fallback_url=…;action=…VIEW;category=…BROWSABLE;end` |
-| Anywhere else | the destination URL verbatim |
+| Anywhere | the https destination verbatim (`https://www.youtube.com/...` or `https://music.youtube.com/...`) |
+| Android Chrome (intent-capable) | the same https href, plus a `data-intent-href` attribute carrying `intent://host/path?query#Intent;scheme=https;S.browser_fallback_url=…;action=…VIEW;category=…BROWSABLE;end` that is attempted on click via a user gesture, with https as guaranteed fallback |
 | Unparseable or non-https link | the item's `webUrl` verbatim, never an intent |
 
 Android needs the `intent://` form because it is the only mechanism a web app has
@@ -142,6 +142,17 @@ the requested behaviour for "let me choose my music player". Two details are
 load-bearing and both are asserted: the `;end` terminator (without it the URI is
 inert) and the **absence** of a `package=` component (pinning a handler would
 suppress the chooser, which is the one thing this must not do).
+
+Correction (2026-09-12): The previous table listed Android href as intent://
+directly. That caused `ERR_UNKNOWN_URL_SCHEME` on desktop, on Firefox on Android,
+and in PWA standalone contexts where intent:// is not recognised — the browser
+shows a dead page instead of using `S.browser_fallback_url`. The href is now
+always https, so the link is never dead. On Android Chrome, the card's click
+handler attempts the intent URI via `window.location.href` (user gesture) and
+falls back to opening the https destination after 700 ms if the page is still
+visible. This preserves the chooser where supported and guarantees a working
+YouTube page everywhere else. `mediaHandoffIntentHref` still builds the intent URI
+and is asserted in unit and E2E tests via `data-intent-href`.
 
 `listen` additionally routes a single video to `music.youtube.com`, preserving any
 start offset, so a music request is not handed to a video watch page. A playlist, a
@@ -244,3 +255,11 @@ check, which is listed as outstanding and is not claimed here.
 Correction (2026-09-12): CI now executes `e2e/media-handoff.spec.ts` on chromium and
 android-portrait. The prior CI run aborted at the worker-test flake before the E2E
 step ran, so this was re-triggered to obtain a full verification.
+
+Correction (2026-09-12): Fixed `ERR_UNKNOWN_URL_SCHEME` when tapping a YouTube card.
+The href is now always https; Android intent handling is attempted via a click
+handler with https fallback. Added `mediaHandoffIntentHref` and `data-intent-href`
+for testing. Added lightweight YouTube API key validation (`videos.list` with
+`part=id`, 1 quota unit from the shared 10k pool, not the 100-call search bucket)
+so the Lockbox can show a green light and "Key accepted and working" without
+wasting search allowance. See `src/media/youtube/validate.ts`.

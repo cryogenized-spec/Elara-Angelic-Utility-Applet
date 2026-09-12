@@ -45,10 +45,14 @@ test('Google settings render independent Workspace authorization states', async 
   await expect(page.getByText('Google Docs', { exact: true })).toBeVisible();
   await expect(page.getByText('Google Sheets', { exact: true })).toBeVisible();
   await expect(page.getByText('Read ready').first()).toBeVisible();
+  // Gmail is not authorized, so Connect. Docs and Sheets share the drive.file
+  // scope with Drive, so enabling Drive infers their reads (note in UI:
+  // "Enabling Docs, Drive, or Sheets read can satisfy the others’ reads").
   await expect(page.locator('.google-oauth-service').filter({ hasText: 'Gmail' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
-  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Docs' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
-  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Sheets' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'Enable writes' })).toHaveCount(3);
+  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Docs' }).getByRole('button', { name: 'Connect' })).toHaveCount(0);
+  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Sheets' }).getByRole('button', { name: 'Connect' })).toHaveCount(0);
+  // Read ready for calendar, tasks, drive, docs (inferred), sheets (inferred) => 5 Enable writes
+  await expect(page.getByRole('button', { name: 'Enable writes' })).toHaveCount(5);
 });
 
 test('Google settings can disconnect and refresh normalized status', async ({ page }) => {

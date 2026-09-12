@@ -23,7 +23,7 @@ React UI
   -> optional tool calls
   -> validated application services
   -> normalized chat state
-  -> IndexedDB persistence
+  -> durable browser state
 ```
 
 The primary interactive Gemini path is browser-side `src/gemini/provider.ts` using `@google/genai` and the Gemini API key recovered from the local Lockbox. The Cloudflare Worker has a separate Gemini endpoint for cloud/autonomy use; it is not the interactive browser provider used by `App`.
@@ -32,27 +32,31 @@ The primary interactive Gemini path is browser-side `src/gemini/provider.ts` usi
 
 | ID | System | Owns | Primary source | Durable state / external boundary |
 | --- | --- | --- | --- | --- |
-| `SYS-APP` | Application + UI | composition, screen state, generation orchestration, settings surfaces, quick actions | `src/app/`, `src/ui/`, `src/main.tsx` | delegates persistence/provider work |
+| `SYS-UI` | Application + UI | composition, screen state, settings surfaces, quick actions, responsive presentation | `src/app/`, `src/ui/`, `src/main.tsx` | delegates persistence/provider work |
 | `SYS-CHAT` | Conversation | messages, threads, generation state, retries, turn lineage, title generation | `src/chat/`, `src/domain/chat.ts` | central Dexie database through `src/persistence/conversation.ts` |
 | `SYS-GEM` | Gemini | request contract, model/settings gates, Interactions streaming, errors, memory projection, tool continuation | `src/gemini/` | Google Gemini Interactions API; Lockbox credential |
+| `SYS-VTT` | Voice-to-text | microphone capture, transcription, optional transcript transformation, draft insertion | `src/vtt/`, composer integration | microphone/browser media APIs; direct Gemini transcription/transform calls through Lockbox-backed paths |
 | `SYS-MEM` | Durable memory | memory schema, normalization, permissions, observations, ranking, retrieval, lifecycle, integrity inspection | `src/memory/`, `src/gemini/memory-context.ts` | `db.memories` in the central Dexie database |
 | `SYS-ART` | Artifacts | attachments, generated/derived artifacts, validation, preprocessing, transformations, operation guards | `src/artifacts/`, `src/domain/artifact.ts` | artifact metadata/blobs in the central Dexie database; Gemini Files API when required |
-| `SYS-DOC` | Local documents | validated document generation and PDF compilation | `src/documents/`, `src/ocr/` | browser workers; generated output enters `SYS-ART` |
-| `SYS-CHAR` | Character + roleplay | master character instruction, profile, portrait data, roleplay preferences/world model | `src/character/`, `src/domain/character.ts`, roleplay persistence/components | local persistence; roleplay world has its own bounded Dexie store |
+| `SYS-DOC` | Local documents | validated document generation, PDF compilation, OCR support | `src/documents/`, `src/ocr/` | browser workers; generated output enters `SYS-ART` |
+| `SYS-CHAR` | Character + roleplay | master character instruction, profile, portrait data, roleplay preferences/world model | `src/character/`, character/roleplay domain and persistence modules | local persistence; roleplay world has its own bounded Dexie store |
 | `SYS-GAUTH` | Google authorization | capability-to-scope mapping, GIS token acquisition, account identity, authorization state, approved API hosts | `src/google/oauth/` | browser GIS; capability metadata in `localStorage`; access token in memory |
 | `SYS-GWS` | Google Workspace | Calendar, Tasks, Gmail, Docs, Drive, Sheets service boundaries; tool validation/execution; confirmation | `src/google/{calendar,tasks,gmail,docs,drive,sheets,tools,confirmation}/` | Google REST APIs through `SYS-GAUTH` |
 | `SYS-MEDIA` | Media / YouTube | search contract, quota budget, normalization, cache, result handoff | `src/media/`, `src/app/components/media/` | YouTube Data API; Lockbox secondary credential; dedicated media-cache Dexie DB |
 | `SYS-AUTO` | Autonomy | routines, context projection, authority, scheduling contracts, local/cloud synchronization | `src/autonomy/`, `src/persistence/autonomy.ts`, `worker/src/autonomy/` | local Dexie + Cloudflare Durable Object/Workflow when paired |
 | `SYS-SEC` | Lockbox + local secrets | Gemini primary credential, secondary credentials, PIN/passkey modes, encryption/rotation | `src/persistence/gemini-api-key.ts`, `src/persistence/gemini-passkey.ts` | IndexedDB/Dexie; secrets never belong in tool schemas |
+| `SYS-PERSIST` | Persistence | central schema/migrations, repositories, preferences, folders and bounded subsystem stores | `src/persistence/` plus subsystem-owned stores | Dexie/IndexedDB and small coordination records in `localStorage` |
 | `SYS-PWA` | PWA + deployment | service-worker update lifecycle, installable shell, Pages build/deploy | `src/pwa.ts`, `vite.config.ts`, `.github/workflows/` | GitHub Pages deployment; browser service worker |
-| `SYS-WORKER` | Cloud runtime | health, protected Gemini streaming endpoint, transcription, autonomy Durable Object/Workflow routes | `worker/src/` | Cloudflare Worker bindings and secrets |
-| `SYS-REL` | Reliability | architecture invariants, lint/typecheck/tests/build/E2E gates | `scripts/reliability-gate.mjs`, test suites, `.github/workflows/ci.yml` | CI |
+| `SYS-WORKER` | Cloud runtime | health, protected Gemini streaming endpoint, transcription support, autonomy Durable Object/Workflow routes | `worker/src/` | Cloudflare Worker bindings and secrets |
+| `SYS-REL` | Reliability | architecture invariants, diagnostics/aggregate health boundaries, lint/typecheck/tests/build/E2E gates | `scripts/reliability-gate.mjs`, test suites, `.github/workflows/ci.yml` | CI |
 
 ## 3. Dependency boundaries
 
 UI components are presentation surfaces. They receive data and callbacks; provider credentials, Google OAuth mechanics, memory storage, and raw IndexedDB tables should remain outside presentation code. `App.tsx` currently coordinates these domains and is therefore the composition root, not a reusable domain service.
 
 `SYS-GEM` may consume character instructions, bounded memory context, artifacts prepared for a turn, model settings, and model-visible tool declarations. It must not become the owner of Google service logic, artifact persistence, or memory persistence.
+
+`SYS-VTT` is not a second chat provider. Recording/transcription produces text for the composer. Optional polish/roleplay transformation reuses the canonical Gemini turn port and receives the active Character Master instruction; raw mode performs no model transformation.
 
 `SYS-GWS` separates model-visible declarations from execution. The tool registry assigns each operation a capability, risk class, exposure, and where necessary an execution plane. Service-specific schemas validate arguments before provider execution. Confirmation policy is a separate boundary for consequential operations.
 
@@ -78,11 +82,15 @@ Not all browser state lives in that single database. The source currently contai
 
 The browser provider checks Lockbox state, reads the Gemini API key, composes thread-scoped memory context, adapts attachments, sends the Interactions request, normalizes streaming events, and returns explicit terminal states. Provider retries are intentionally bounded outside the SDK's automatic retry path.
 
-### 5.2 Cloud Worker path
+### 5.2 VTT paths
 
-`worker/src/index.ts` exposes health, Gemini streaming, transcription, and autonomy routes. The Worker owns its `GEMINI_API_KEY` secret and filters model-visible declarations by execution plane. The Worker can surface tool calls but does not replace the browser application's service executors.
+`src/vtt/transcription.ts` uses the Lockbox credential to call Gemini transcription directly for captured audio. `src/vtt/transformation.ts` uses `geminiTurnPort` for optional text transformation. VTT therefore has distinct task-specific entry points without becoming an alternate conversational provider architecture.
 
-These two planes share contracts and declarations where useful but serve different runtime purposes. Documentation must not describe the Worker as the current interactive-chat credential authority.
+### 5.3 Cloud Worker path
+
+`worker/src/index.ts` exposes health, Gemini streaming, transcription support, and autonomy routes. The Worker owns its `GEMINI_API_KEY` secret and filters model-visible declarations by execution plane. The Worker can surface tool calls but does not replace the browser application's service executors.
+
+These planes share contracts and declarations where useful but serve different runtime purposes. Documentation must not describe the Worker as the current interactive-chat credential authority.
 
 ## 6. Google boundary
 
@@ -108,11 +116,12 @@ The code audit identifies the following facts as migration anchors for the docum
 4. Persistence is domain-authoritative but physically split across the central Elara database plus a small number of bounded subsystem stores.
 5. The model tool registry now spans Google Workspace and non-Google/local capabilities, so documentation should separate the generic tool boundary from provider-specific services.
 6. Media playback is an external handoff, not an embedded player.
-7. `App.tsx` is currently the application composition root and contains substantial orchestration; documents should describe that reality rather than inventing a separate manager layer.
-8. Historical pass/status documents are evidence only. Current contracts must be reconstructed from source, tests, and the consolidated system documents.
+7. VTT is a real bounded subsystem with capture, transcription, transformation, and draft insertion; it must not disappear into generic UI notes.
+8. `App.tsx` is currently the application composition root and contains substantial orchestration; documents should describe that reality rather than inventing a separate manager layer.
+9. Historical pass/status documents are evidence only. Current contracts must be reconstructed from source, tests, and the consolidated system documents.
 
 ## 9. Documentation ownership target
 
-This system map is the repository-level architecture reference. Detailed contracts should be moved into one document per bounded system under `/documents` and referenced by stable system ID: `SYS-UI`, `SYS-CHAT`, `SYS-GEM`, `SYS-MEM`, `SYS-ART`, `SYS-DOC`, `SYS-CHAR`, `SYS-GAUTH`, `SYS-GWS`, `SYS-MEDIA`, `SYS-AUTO`, `SYS-SEC`, `SYS-PWA`, and `SYS-REL`.
+This system map is the repository-level architecture reference. Detailed contracts should be moved into one document per bounded system under `/documents` and referenced by stable system ID: `SYS-UI`, `SYS-CHAT`, `SYS-GEM`, `SYS-VTT`, `SYS-MEM`, `SYS-ART`, `SYS-DOC`, `SYS-CHAR`, `SYS-GAUTH`, `SYS-GWS`, `SYS-MEDIA`, `SYS-AUTO`, `SYS-SEC`, `SYS-PERSIST`, `SYS-PWA`, `SYS-WORKER`, and `SYS-REL`.
 
-Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, or implementation-log documents. Temporary work belongs in Git commits/PRs; durable facts belong in the owning system document.
+Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, or implementation-log documents. Temporary work belongs in Git history; durable facts belong in the owning system document.

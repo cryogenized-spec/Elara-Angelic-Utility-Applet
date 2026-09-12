@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { executeGoogleTool } from './executor';
+import { executeGoogleTool, type GoogleToolExecutionContext } from './executor';
 import type { GoogleCapabilityKey, GoogleOAuthAuthority } from '../oauth/contracts';
 
 function oauthFor(...capabilities: GoogleCapabilityKey[]): GoogleOAuthAuthority {
@@ -44,7 +44,7 @@ describe('executeGoogleTool', () => {
   });
 
   it('runs a write only after a fresh approval', async () => {
-    const handler = vi.fn(async ({ arguments: args }) => args);
+    const handler = vi.fn(async ({ arguments: args }: GoogleToolExecutionContext) => args);
     const confirm = vi.fn(async () => true);
     const result = await executeGoogleTool(
       { tool: 'sheets.writeRange', arguments: { spreadsheetId: 'sheet-1', range: 'Sheet1!A1', values: [['x']] } },

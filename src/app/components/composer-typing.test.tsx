@@ -64,6 +64,9 @@ function UnstableHarness({ messages }: { messages: ChatMessage[] }) {
 
 function typeInto(textarea: HTMLTextAreaElement, value: string): void {
   act(() => {
+    // jsdom has no layout; the DOM accessor setter (bound explicitly below)
+    // is the only way to drive a React-controlled value.
+    // eslint-disable-next-line @typescript-eslint/unbound-method -- DOM accessor setter, explicitly bound to the element via the .call below
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
     setter.call(textarea, value);
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
@@ -126,6 +129,6 @@ describe('typing stays synchronous', () => {
     typeInto(textarea(), 'h');
     typeInto(textarea(), 'he');
     typeInto(textarea(), 'hey');
-    expect(onDraftChange.mock.calls.map((call) => call[0])).toEqual(['h', 'he', 'hey']);
+    expect(onDraftChange.mock.calls.map((call: unknown[]) => call[0])).toEqual(['h', 'he', 'hey']);
   });
 });

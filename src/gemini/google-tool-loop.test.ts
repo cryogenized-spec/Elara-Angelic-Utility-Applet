@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { WriteConfirmationRequest } from '../google/confirmation/policy';
 
 const { streamReply, streamToolResult } = vi.hoisted(() => ({
   streamReply: vi.fn(),
@@ -50,7 +51,8 @@ describe('streamGoogleToolLoop', () => {
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gemini-3.8-flash',
       previousInteractionId: 'interaction-1',
-      systemInstruction: expect.stringContaining(systemInstruction),
+      // vitest types asymmetric matchers as any; the cast pins the asserted type.
+      systemInstruction: expect.stringContaining(systemInstruction) as string,
       results: [expect.objectContaining({
         callId: 'call-1',
         name: 'calendar.listEvents',
@@ -98,7 +100,7 @@ describe('streamGoogleToolLoop', () => {
 
   it('routes a Google write through explicit confirmation before the handler executes', async () => {
     const handler = vi.fn(async () => ({ id: 'task-1' }));
-    const confirm = vi.fn(async (request) => request.risk === 'write');
+    const confirm = vi.fn(async (request: WriteConfirmationRequest) => request.risk === 'write');
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-write-1', model: 'gemini-3.8-flash' },
       { type: 'tool-call', interactionId: 'interaction-write-1', index: 0, callId: 'call-write-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', task: { title: 'Buy milk' } } },
@@ -146,10 +148,11 @@ describe('streamGoogleToolLoop', () => {
     expect(taskHandler).not.toHaveBeenCalled();
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
       previousInteractionId: 'interaction-batch-1',
+      // vitest types asymmetric matchers as any; the cast pins the asserted type.
       results: expect.arrayContaining([
         expect.objectContaining({ callId: 'call-event-1', result: { id: 'event-1', htmlLink: 'https://calendar.google.com/event-1' } }),
         expect.objectContaining({ callId: 'call-task-1', result: { ok: false, error: 'USER_DECLINED' } }),
-      ]),
+      ]) as unknown[],
     }), undefined);
   });
 

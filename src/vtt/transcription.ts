@@ -65,7 +65,9 @@ export async function transcribeVttCapture(capture: VttCapture, signal?: AbortSi
     });
 
     const callerAbort = new Promise<never>((_, reject) => {
-      abortListener = () => reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+      // Reject with an Error (reason preserved as cause): the catch below
+      // normalizes via signal.aborted, so the exact reason never leaks out.
+      abortListener = () => reject(new Error('VTT transcription aborted.', { cause: signal?.reason ?? new DOMException('Aborted', 'AbortError') }));
       signal?.addEventListener('abort', abortListener, { once: true });
     });
 

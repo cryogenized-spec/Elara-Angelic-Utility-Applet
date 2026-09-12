@@ -86,7 +86,9 @@ function unmount(): void {
 }
 
 beforeEach(() => {
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- global save/restore: the extracted DOM method is put back on window, where it is invoked with window as its receiver
   originalRaf = window.requestAnimationFrame;
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- global save/restore: the extracted DOM method is put back on window, where it is invoked with window as its receiver
   originalCancelRaf = window.cancelAnimationFrame;
   originalInnerHeight = window.innerHeight;
   originalVisibilityState = document.visibilityState;

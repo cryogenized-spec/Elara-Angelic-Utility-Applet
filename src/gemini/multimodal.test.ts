@@ -69,7 +69,8 @@ describe('Gemini multimodal artifact adapter', () => {
     const request = createInteraction.mock.calls[0][0] as { input: unknown };
     expect(request.input).toEqual([
       { type: 'text', text: 'What is here?' },
-      expect.objectContaining({ type: 'image', mime_type: 'image/png', data: expect.any(String) }),
+      // vitest types expect.any as any; the cast pins the asserted type.
+      expect.objectContaining({ type: 'image', mime_type: 'image/png', data: expect.any(String) as string }),
     ]);
     expect(JSON.stringify(request.input)).not.toContain(artifact.id);
   });

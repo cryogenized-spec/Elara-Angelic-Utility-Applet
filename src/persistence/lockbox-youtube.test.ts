@@ -34,12 +34,12 @@ beforeEach(async () => {
 async function readRecord(id: string): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME);
-    request.onerror = () => reject(request.error);
+    request.onerror = () => reject(request.error ?? new DOMException('IndexedDB open failed.', 'Error'));
     request.onsuccess = () => {
       const db = request.result;
       const transaction = db.transaction('secrets', 'readonly');
       const getRequest = transaction.objectStore('secrets').get(id);
-      getRequest.onerror = () => reject(getRequest.error);
+      getRequest.onerror = () => reject(getRequest.error ?? new DOMException('IndexedDB request failed.', 'Error'));
       getRequest.onsuccess = () => {
         resolve(getRequest.result);
         db.close();

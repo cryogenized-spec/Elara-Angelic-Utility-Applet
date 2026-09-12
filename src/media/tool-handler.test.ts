@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaSearchOutcome } from '../domain/media';
+import type { MediaSearchBatchResult } from './search';
 
 // The handler loads `./search` dynamically on purpose, so the whole provider
 // graph is mocked here rather than reaching IndexedDB or the network.
 const searchMedia = vi.fn();
-vi.mock('./search', () => ({ searchMedia: (request: unknown, options: unknown) => searchMedia(request, options) }));
+vi.mock('./search', () => ({ searchMedia: (request: unknown, options: unknown) => searchMedia(request, options) as Promise<MediaSearchBatchResult> }));
 
 const { mediaToolHandlers } = await import('./tool-handler');
 

@@ -28,11 +28,12 @@ describe('VTT transformation', () => {
     await expect(transformVttTranscript('  um I mean this message, basically  ', 'polish', { model: 'gemini-test', systemInstruction: masterPrompt })).resolves.toBe('A clear message.');
     expect(streamReply).toHaveBeenCalledWith(expect.objectContaining({
       model: 'gemini-test',
-      input: expect.stringContaining('VOICE INPUT TRANSFORMATION TASK'),
+      // vitest types asymmetric matchers as any; the cast pins the asserted type.
+      input: expect.stringContaining('VOICE INPUT TRANSFORMATION TASK') as string,
       systemInstruction: masterPrompt,
       generationConfig: { maxOutputTokens: 500 },
     }), undefined);
-    expect(streamReply.mock.calls[0][0].input).toContain('um I mean this message, basically');
+    expect((streamReply.mock.calls[0][0] as { input: string }).input).toContain('um I mean this message, basically');
   });
 
   it('allows VTT to run without a Character Master System Instruction', async () => {
@@ -43,7 +44,8 @@ describe('VTT transformation', () => {
 
     await expect(transformVttTranscript('hello', 'polish')).resolves.toBe('Hello.');
     expect(streamReply).toHaveBeenCalledWith(expect.objectContaining({
-      input: expect.stringContaining('VOICE INPUT TRANSFORMATION TASK'),
+      // vitest types asymmetric matchers as any; the cast pins the asserted type.
+      input: expect.stringContaining('VOICE INPUT TRANSFORMATION TASK') as string,
       systemInstruction: undefined,
     }), undefined);
   });

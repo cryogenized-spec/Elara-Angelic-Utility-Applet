@@ -14,7 +14,9 @@ function formatThreadTime(timestamp: number): string {
 }
 
 type DragPayload = `${'thread' | 'folder'}:${string}`;
-type DropTarget = string | 'root' | null;
+// Folder ids and the literal 'root' (the unnamed sidebar drop zone) are both
+// plain strings; 'root' is compared with === where a target is matched.
+type DropTarget = string | null;
 
 function dragPayload(kind: 'thread' | 'folder', id: string): DragPayload {
   return `${kind}:${id}`;

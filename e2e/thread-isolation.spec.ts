@@ -21,11 +21,16 @@ async function unlockTestGemini(page: import('@playwright/test').Page): Promise<
 }
 
 test('starting a new thread isolates it from a still-running previous response', async ({ page }) => {
+  let releaseResponse!: () => void;
+  const responseGate = new Promise<void>((resolve) => { releaseResponse = resolve; });
   let interactionRequests = 0;
+  let responseDelivered = false;
+
   await page.route('**/v1/interactions*', async (route) => {
     interactionRequests += 1;
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await responseGate;
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse('old-thread-interaction') });
+    responseDelivered = true;
   });
 
   await page.goto('');
@@ -47,7 +52,11 @@ test('starting a new thread isolates it from a still-running previous response',
   const newConversation = page.getByRole('region', { name: 'Conversation' });
   await expect(newConversation).not.toContainText('This belongs only to the old thread.');
   await expect(newConversation).not.toContainText('Old thread response.');
-  await page.waitForTimeout(1800);
+
+  // Release the response only after the new thread is active. This is a
+  // deterministic race: no sleep controls whether the old response arrives.
+  releaseResponse();
+  await expect.poll(() => responseDelivered).toBe(true);
   await expect(interactionRequests).toBe(1);
   await expect(newConversation).not.toContainText('This belongs only to the old thread.');
   await expect(newConversation).not.toContainText('Old thread response.');

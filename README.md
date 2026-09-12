@@ -46,6 +46,7 @@ Use focused checks while iterating. Before repository work is called complete, r
 
 ```sh
 npm run docs:check
+npm run verify:gates
 npm run lint
 npm run typecheck
 npm test
@@ -55,7 +56,11 @@ npx playwright test --project=chromium --project=android-portrait --project=onbo
 npm run reliability:check
 ```
 
+`verify:gates` protects the verification harness itself against common false-positive shortcuts: disabled/focused E2E tests, direct app-state imports or IndexedDB writes from browser tests, use of the retired browser provider route, reviewed npm-script drift, CI bypass markers and unexpected Playwright project routing. It does not make repo-owned CI cryptographically tamper-proof; protected-branch/ruleset policy remains the external trust boundary.
+
 CI is the release authority. If the current environment cannot execute Playwright, report that limitation explicitly rather than treating discovery or static inspection as browser execution. Additional focused verification includes `npm run verify:artifact-assets`, `npm run verify:worker` and `npm run typecheck:e2e`.
+
+One important limitation remains: the current ESLint configuration excludes application and E2E TypeScript. Until TypeScript-aware linting is implemented, a green `npm run lint` proves the configured lint command ran, not that the TypeScript application is lint-clean. See [`documents/reliability.md`](./documents/reliability.md).
 
 ## Core invariants
 
@@ -63,7 +68,7 @@ One canonical Gemini execution path: interactive chat uses the browser Interacti
 
 Credentials stay behind their owning security boundary. Tool schemas never contain secrets. Google Workspace operations pass through the centralized capability/OAuth boundary and consequential mutations use the shared confirmation policy. Cloud/autonomy execution must not silently redefine the normal browser-chat architecture.
 
-Documentation follows [`AGENTS.md`](./AGENTS.md): durable current facts belong in the owning `/documents/<system>.md`; chronology belongs in Git. Direct `main` writes are allowed when no concurrent workstream depends on a stable base. During concurrent agent/PR work, use a short-lived branch and do not move, close or rewrite another workstream. Stale or superseded pull requests should not be left open.
+Documentation follows [`AGENTS.md`](./AGENTS.md): durable current facts belong in the owning `/documents/<system>.md`; chronology belongs in Git. During concurrent agent/PR work, use a short-lived branch and do not move, close or rewrite another workstream. A pull request is not merged without explicit user instruction.
 
 ## Deployment
 

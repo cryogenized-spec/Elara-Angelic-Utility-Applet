@@ -31,6 +31,33 @@ function walk(path, ignored = new Set()) {
   return output;
 }
 
+function markdownHeadingSlug(text) {
+  return text
+    .replace(/<[^>]*>/g, '')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/[`*_~]/g, '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s-]/gu, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-');
+}
+
+function hasMarkdownAnchor(source, rawFragment) {
+  let fragment;
+  try {
+    fragment = decodeURIComponent(rawFragment).trim().toLowerCase();
+  } catch {
+    return false;
+  }
+  if (!fragment) return true;
+  const explicit = source.matchAll(/<a\s+[^>]*id=["']([^"']+)["'][^>]*>/gi);
+  for (const match of explicit) if (match[1].trim().toLowerCase() === fragment) return true;
+  const headings = source.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gm);
+  for (const match of headings) if (markdownHeadingSlug(match[1]) === fragment) return true;
+  return false;
+}
+
 if (!existsSync(manifestPath)) fail('missing documents/manifest.json');
 if (!existsSync(join(documentsRoot, 'INDEX.md'))) fail('missing documents/INDEX.md');
 if (existsSync(join(root, 'docs'))) fail('legacy /docs documentation root must not exist');
@@ -117,6 +144,7 @@ const legacyLinkPatterns = [
   /\]\((?:\.\/|\/)?docs\//,
   /\bdocs\/(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+\.md\b/,
 ];
+const canonicalGithubLink = /https:\/\/github\.com\/cryogenized-spec\/Elara-Angelic-Utility-Applet\/blob\/main\/documents\/([a-z0-9]+(?:-[a-z0-9]+)*\.md)(?:#([A-Za-z0-9_-]+))?/g;
 
 for (const file of walk(root, ignoredDirectories)) {
   const rel = relative(root, file).split(sep).join('/');
@@ -126,6 +154,22 @@ for (const file of walk(root, ignoredDirectories)) {
   if (!textExtensions.has(extname(file).toLowerCase()) || rel === 'package-lock.json') continue;
   const source = readFileSync(file, 'utf8');
   if (legacyLinkPatterns.some((pattern) => pattern.test(source))) fail(`legacy /docs reference remains in ${rel}`);
+
+  for (const match of source.matchAll(canonicalGithubLink)) {
+    const [, docName, fragment] = match;
+    if (!allowedCanonical.has(docName)) {
+      fail(`unregistered canonical GitHub documentation link in ${rel}: documents/${docName}`);
+      continue;
+    }
+    const target = join(documentsRoot, docName);
+    if (!existsSync(target)) {
+      fail(`broken canonical GitHub documentation link in ${rel}: documents/${docName}`);
+      continue;
+    }
+    if (fragment && !hasMarkdownAnchor(readFileSync(target, 'utf8'), fragment)) {
+      fail(`broken canonical GitHub documentation anchor in ${rel}: documents/${docName}#${fragment}`);
+    }
+  }
 }
 
 const markdownFiles = [join(root, 'README.md'), join(root, 'AGENTS.md'), ...walk(documentsRoot).filter((file) => extname(file) === '.md')];
@@ -136,11 +180,17 @@ for (const file of markdownFiles) {
   for (const match of links) {
     const rawTarget = match[1].trim();
     if (!rawTarget || /^(?:https?:|mailto:|tel:|data:|#)/i.test(rawTarget)) continue;
-    const pathPart = rawTarget.split('#', 1)[0].split('?', 1)[0];
+    const [targetWithQuery, rawFragment] = rawTarget.split('#', 2);
+    const pathPart = targetWithQuery.split('?', 1)[0];
     if (!pathPart) continue;
     const target = pathPart.startsWith('/') ? join(root, pathPart.slice(1)) : resolve(dirname(file), pathPart);
-    if (!target.startsWith(root + sep) && target !== root) fail(`link escapes repository in ${relative(root, file)}: ${rawTarget}`);
-    else if (!existsSync(target)) fail(`broken local documentation link in ${relative(root, file)}: ${rawTarget}`);
+    if (!target.startsWith(root + sep) && target !== root) {
+      fail(`link escapes repository in ${relative(root, file)}: ${rawTarget}`);
+    } else if (!existsSync(target)) {
+      fail(`broken local documentation link in ${relative(root, file)}: ${rawTarget}`);
+    } else if (rawFragment && extname(target).toLowerCase() === '.md' && !hasMarkdownAnchor(readFileSync(target, 'utf8'), rawFragment)) {
+      fail(`broken local documentation anchor in ${relative(root, file)}: ${rawTarget}`);
+    }
   }
 }
 

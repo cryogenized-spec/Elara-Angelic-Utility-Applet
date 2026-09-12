@@ -17,9 +17,17 @@ const GOOGLE_API_HOSTS = new Set([
   'chat.googleapis.com',
   'gmail.googleapis.com',
   'sheets.googleapis.com',
+  'openidconnect.googleapis.com',
 ]);
 const STORAGE_KEY = 'elara.google.authorization.v2';
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
+const GOOGLE_USERINFO_EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email';
+const GOOGLE_OPENID_SCOPE = 'openid';
+const GOOGLE_USERINFO_ENDPOINTS = [
+  'https://www.googleapis.com/oauth2/v2/userinfo',
+  'https://www.googleapis.com/oauth2/v1/userinfo?alt=json',
+  'https://openidconnect.googleapis.com/v1/userinfo',
+] as const;
 
 type StoredAuthorization = {
   version: 3;
@@ -164,11 +172,36 @@ function currentAccessToken(): string | undefined {
   return session?.accessToken;
 }
 
+async function fetchGoogleAccount(accessToken: string): Promise<{ email: string; displayName?: string } | null> {
+  for (const endpoint of GOOGLE_USERINFO_ENDPOINTS) {
+    try {
+      const response = await fetch(endpoint, {
+        headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+      });
+      if (!response.ok) continue;
+      const data = (await response.json()) as { email?: string; name?: string };
+      if (data && typeof data.email === 'string' && data.email.trim()) {
+        const email = data.email.trim();
+        const displayName = typeof data.name === 'string' && data.name.trim() ? data.name.trim() : undefined;
+        return { email, ...(displayName ? { displayName } : {}) };
+      }
+    } catch {
+      // Best-effort: try next endpoint, never fail the authorization itself.
+    }
+  }
+  return null;
+}
+
 async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'): Promise<void> {
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   try {
-    const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: descriptor.scope, prompt });
+    // Always request the email scope alongside the capability scope so we can
+    // populate `account.email` without a second consent round. The email scope
+    // is filtered out of `grantedProviderScopes` by `parseProviderScopes`
+    // (https://-only), but the token still carries it for userinfo.
+    const requestedScope = [descriptor.scope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].join(' ');
+    const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: requestedScope, prompt });
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
     const current = loadStored();
     // Stored provider scopes describe the CURRENT Google token, never a
@@ -187,12 +220,26 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
     };
+    // Best-effort account identity: a successful interactive acquisition that
+    // can resolve userinfo populates `account`; a silent refresh keeps the
+    // previous account on failure, while an interactive failure clears a stale
+    // account so the UI never shows the wrong email.
+    let nextAccount = current.account;
+    try {
+      const fetched = await fetchGoogleAccount(response.access_token);
+      if (fetched) nextAccount = fetched;
+      else if (prompt === '') nextAccount = undefined;
+    } catch {
+      if (prompt === '') nextAccount = undefined;
+    }
     // A fresh provider response is the current truth: it supersedes any
     // scope-less legacy capability evidence.
     legacyGrantedCapabilities = [];
     stored.enabledCapabilities = enabledCapabilities;
     stored.grantedProviderScopes = grantedProviderScopes;
     stored.needsReauthorization = false;
+    if (nextAccount) stored.account = nextAccount;
+    else delete (stored as { account?: unknown }).account;
     saveStored();
   } catch (error) {
     const raw = error instanceof Error ? error.message : undefined;

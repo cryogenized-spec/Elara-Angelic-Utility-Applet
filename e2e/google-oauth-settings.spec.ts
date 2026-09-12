@@ -3,11 +3,24 @@ import { expect, test } from '@playwright/test';
 const GOOGLE_STORAGE_KEY = 'elara.google.authorization.v2';
 
 async function seedGoogleAuthorization(page: import('@playwright/test').Page, capabilities: string[], email = 'test@example.com'): Promise<void> {
+  const scopeMap: Record<string, string> = {
+    'calendar.events.read': 'https://www.googleapis.com/auth/calendar.events.readonly',
+    'tasks.read': 'https://www.googleapis.com/auth/tasks.readonly',
+    'drive.files.app.read': 'https://www.googleapis.com/auth/drive.file',
+    'gmail.read': 'https://www.googleapis.com/auth/gmail.readonly',
+  };
+  const scopes = capabilities.map((cap) => scopeMap[cap] ?? '').filter(Boolean);
   await page.addInitScript(({ key, value }) => {
     window.localStorage.setItem(key, JSON.stringify(value));
   }, {
     key: GOOGLE_STORAGE_KEY,
-    value: { version: 2, grantedCapabilities: capabilities, account: { email }, updatedAt: new Date().toISOString() },
+    value: {
+      version: 3,
+      enabledCapabilities: capabilities,
+      grantedProviderScopes: scopes,
+      account: { email, displayName: 'Test User' },
+      updatedAt: new Date().toISOString(),
+    },
   });
 }
 

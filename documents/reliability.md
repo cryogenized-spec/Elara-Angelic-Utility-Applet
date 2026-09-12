@@ -71,7 +71,7 @@ Diagnostics and analytics are distinct. Diagnostics explain bounded individual f
 - Architecture invariants should be executable when a cheap stable assertion exists.
 - E2E failure artifacts may contain app state; keep retention bounded and never deliberately log credentials.
 - Performance/accessibility/mobile reliability are product constraints, not decorative post-processing.
-- Documentation checks must converge on canonical `/documents`; legacy path assertions are temporary migration debt.
+- Foundation-document checks target canonical `/documents`; removed `/docs` assertions must not return.
 
 ## 6. Security and failure semantics
 
@@ -89,4 +89,4 @@ At the verified commit, `npm run typecheck` covers the web `src` project and Wor
 
 At the verified commit, `eslint.config.js` explicitly ignores `src/**/*.ts`, `src/**/*.tsx` and `e2e/**/*.ts`. Therefore `npm run lint` being green does not yet prove application TypeScript lint cleanliness. Treat that as verification debt until a TypeScript-aware ESLint configuration lands.
 
-CI/reliability still names several legacy `/docs` files as required foundation documents. Repoint those assertions before deleting the legacy tree. A dedicated documentation-integrity guard is not yet present; it should validate the manifest, canonical file/path references and forbidden legacy documentation patterns.
+Legacy foundation-document assertions were retired with the `/docs` tree. A dedicated documentation-integrity guard is not yet present; it should validate the manifest, canonical file/path references and forbidden legacy documentation patterns.

@@ -1,0 +1,161 @@
+{
+  "schema": 1,
+  "status": "migration-only",
+  "inventory_commit": "c006922e3e98cde544e54008b5723d6c058d19cc",
+  "rule": "Extract code-verified current facts into the target document, then delete the legacy source. Git history retains implementation history.",
+  "legacy_roots": ["docs", "documents/*PASS*", "documents/*STATUS*", "README.md"],
+  "targets": {
+    "architecture.md": [
+      "docs/ARCHITECTURE_DECISION.md",
+      "docs/MODULAR_CODE_RULES.md",
+      "docs/PRODUCT_BOUNDARY.md",
+      "docs/REPOSITORY_FORENSICS.md",
+      "docs/SYSTEM_BOUNDARIES.md"
+    ],
+    "ui.md": [
+      "docs/APPEARANCE_SYSTEM.md",
+      "docs/MOBILE_FIRST_SHELL.md",
+      "docs/UI_IMPLEMENTATION_PLAN.md",
+      "docs/UI_PASS_02_PORTRAIT_SYSTEM.md",
+      "docs/UI_PASS_04_ANDROID_COMPOSER.md",
+      "docs/UI_PASS_05_SIDEBAR_THREADS.md",
+      "docs/UI_PASS_06_QUICK_ACTION_RAIL.md",
+      "docs/UI_PASS_07_IMPLEMENTATION_LOG.md",
+      "docs/UI_PASS_07_VISUAL_POLISH_AND_MOTION.md",
+      "docs/UI_PASS_08_ANDROID_PORTRAIT_RELIABILITY.md",
+      "docs/UI_SHELL_GEOMETRY.md",
+      "documents/UI_PASS_08_COMPOSER_LONG_PRESS_IME.md"
+    ],
+    "chat.md": [
+      "docs/CHAT_COMPOSER.md",
+      "docs/CONVERSATION_DATA_MODEL.md",
+      "docs/MARKDOWN_FORMAT.md",
+      "docs/RESPONSE_VARIANTS.md"
+    ],
+    "gemini.md": [
+      "docs/GEMINI_BACKGROUND_EXECUTION.md",
+      "docs/GEMINI_INTEGRATION_STRATEGY.md",
+      "docs/GEMINI_MODEL_REGISTRY.md",
+      "docs/GEMINI_PASS_10_MODEL_SETTINGS_IMPLEMENTATION.md",
+      "docs/GEMINI_REQUEST_CONTRACT.md",
+      "docs/GEMINI_SAFETY_POLICY.md",
+      "docs/GEMINI_SETTINGS_ENGINE.md",
+      "docs/GEMINI_STREAMING_ARCHITECTURE.md",
+      "docs/GEMINI_THINKING_DISPLAY.md",
+      "docs/PROVIDER_ERROR_NORMALIZATION.md",
+      "docs/REQUEST_LIFECYCLE_STATE_MACHINE.md",
+      "docs/REQUEST_TIMING_AND_TIMEOUTS.md",
+      "docs/RETRY_POLICY.md"
+    ],
+    "vtt.md": [
+      "docs/VOICE_TO_TEXT.md",
+      "documents/VTT_IMPLEMENTATION_PLAN.md",
+      "documents/VTT_PASS_04_STATUS.md",
+      "documents/VTT_PASS_05_STATUS.md",
+      "documents/VTT_PASS_06_STATUS.md",
+      "documents/VTT_PASS_07_STATUS.md"
+    ],
+    "memory.md": [
+      "docs/MEMORY_ARCHITECTURE.md",
+      "docs/MEMORY_README.md",
+      "documents/MEMORY_PASS_01_STATUS.md",
+      "documents/MEMORY_PASS_02_STATUS.md",
+      "documents/MEMORY_PASS_03_STATUS.md",
+      "documents/MEMORY_PASS_04_STATUS.md",
+      "documents/MEMORY_PASS_05_STATUS.md",
+      "documents/MEMORY_PASS_06_STATUS.md",
+      "documents/MEMORY_PASS_07_STATUS.md",
+      "documents/MEMORY_PASS_08_STATUS.md",
+      "documents/UI_PASS_09_FOLDERS_AND_MEMORY_SCOPE.md",
+      "documents/UI_PASS_10_DURABLE_MEMORY_ENGINE.md"
+    ],
+    "artifacts.md": [
+      "docs/ARTIFACT_SYSTEM.md",
+      "docs/ATTACHMENT_SYSTEM.md",
+      "docs/GEMINI_DOCUMENT_INPUT.md",
+      "docs/GEMINI_IMAGE_INPUT.md"
+    ],
+    "character.md": [
+      "docs/CHARACTER_PORTRAIT.md",
+      "docs/CREATIVE_CONTEXT_SYSTEM_INSTRUCTION.md",
+      "docs/ROLEPLAY_WORLD_CANVAS_GUIDE.md",
+      "docs/ROLEPLAY_WORLD_CANVAS_PLAN.md",
+      "documents/CHARACTER_MASTER_PASS_01_STATUS.md"
+    ],
+    "google-auth.md": [
+      "docs/GOOGLE_OAUTH_ARCHITECTURE.md",
+      "docs/GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md",
+      "docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md",
+      "docs/GOOGLE_OAUTH_SETTINGS_UI.md",
+      "docs/GOOGLE_SCOPE_REGISTRY.md",
+      "docs/INCREMENTAL_AUTHORIZATION.md",
+      "docs/STAY_CONNECTED_SEMANTICS.md",
+      "docs/oauth/README.md",
+      "docs/oauth/PASS_01_STATUS.md",
+      "docs/oauth/PASS_02_STATUS.md",
+      "docs/oauth/PASS_03_STATUS.md",
+      "docs/oauth/PASS_04_STATUS.md",
+      "docs/oauth/PASS_05_STATUS.md",
+      "docs/oauth/PASS_06_STATUS.md"
+    ],
+    "google-workspace.md": [
+      "docs/GOOGLE_CALENDAR_SERVICE.md",
+      "docs/GOOGLE_CHAT_SERVICE.md",
+      "docs/GOOGLE_DOCS_SERVICE.md",
+      "docs/GOOGLE_DRIVE_SERVICE.md",
+      "docs/GOOGLE_GMAIL_SERVICE.md",
+      "docs/GOOGLE_SHEETS_SERVICE.md",
+      "docs/GOOGLE_TASKS_SERVICE.md",
+      "docs/GOOGLE_TOOL_BOUNDARY.md",
+      "docs/GOOGLE_TOOL_EXECUTION.md",
+      "docs/GOOGLE_WORKSPACE_SHORTCUTS.md",
+      "docs/GOOGLE_WRITE_CONFIRMATION.md"
+    ],
+    "media.md": ["docs/MEDIA_INTEGRATION.md"],
+    "autonomy.md": [
+      "docs/AUTONOMOUS_ELARA.md",
+      "docs/AUTONOMOUS_ELARA_DESIGN.md",
+      "docs/future-implementation/README.md"
+    ],
+    "security.md": [
+      "docs/API_LOCKBOX.md",
+      "docs/GEMINI_CREDENTIAL_ARCHITECTURE.md",
+      "docs/LOCKBOX_WORKER_HEALTH.md"
+    ],
+    "persistence.md": ["docs/LOCAL_PERSISTENCE.md"],
+    "pwa.md": ["docs/PRODUCTION_DEPLOYMENT_PASS.md"],
+    "worker.md": [
+      "docs/GEMINI_WORKER_BOUNDARY.md",
+      "docs/PRODUCTION_WORKER_BOUNDARY_VERIFICATION.md"
+    ],
+    "reliability.md": [
+      "docs/ANALYTICS_ARCHITECTURE.md",
+      "docs/ANALYTICS_DASHBOARD.md",
+      "docs/CI_RECOVERY_NOTE.md",
+      "docs/DEVELOPER_DIAGNOSTICS_UI.md",
+      "docs/END_TO_END_RELIABILITY.md",
+      "docs/HTTP_DIAGNOSTIC_CONSOLE.md",
+      "docs/PERFORMANCE_BUDGET.md",
+      "docs/TESTING_STRATEGY.md"
+    ],
+    "third-party-notices.md": ["docs/THIRD_PARTY_NOTICES.md"]
+  },
+  "delete_after_extraction": [
+    "docs/ACTIVE_IMPLEMENTATION_ROADMAP.md",
+    "docs/IMPLEMENTATION_LOG.md",
+    "docs/NEXT_FEATURE_PHASE_PLAN.md",
+    "docs/README.md",
+    "docs/implementation-plan.md"
+  ],
+  "replace": ["README.md"],
+  "hardcoded_doc_links": {
+    "src/app/components/MarkdownReference.tsx": "documents/chat.md#markdown",
+    "src/app/components/RoleplaySettings.tsx": "documents/character.md#roleplay-world",
+    "src/app/components/AutonomyCloud.tsx": "documents/autonomy.md#cloud-setup",
+    "src/app/components/DurableMemorySettings.tsx": "documents/memory.md#memory-bank"
+  },
+  "legacy_gate_refs": [
+    ".github/workflows/ci.yml",
+    "scripts/reliability-gate.mjs"
+  ]
+}

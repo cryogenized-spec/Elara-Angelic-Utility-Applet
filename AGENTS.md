@@ -12,7 +12,7 @@ This repository is maintained for repeated AI-assisted development. Minimize arc
 
 Authority is `source + tests -> canonical /documents`. Git history is evidence/history only; it is not current technical authority.
 
-Update the owning canonical system document whenever a durable contract changes. Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, milestone or implementation-log documents. Do not create a second documentation root. Chronology belongs in Git.
+Update the owning canonical system document whenever a durable contract changes. Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, milestone or implementation-log documents. Do not create a second documentation root. Chronology belongs in Git. `npm run docs:check` enforces the canonical manifest/tree/link contract and must remain green.
 
 ## Engineering boundaries
 
@@ -33,6 +33,7 @@ Before writing directly to `main`, check open PRs and recent `main` movement. If
 Before calling repository work complete, run the broad gate in this order:
 
 ```text
+npm run docs:check
 npm run lint
 npm run typecheck
 npm test

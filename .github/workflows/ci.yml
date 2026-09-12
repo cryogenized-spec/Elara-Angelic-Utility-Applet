@@ -35,25 +35,8 @@ jobs:
           npm --version
           test "$(node -p 'process.versions.node.split(".")[0]')" = "24"
 
-      - name: Verify required foundation documents
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f README.md
-          test -f AGENTS.md
-          test -f documents/INDEX.md
-          test -f documents/manifest.json
-          test -f documents/architecture.md
-          test -f documents/ui.md
-          test -f documents/gemini.md
-          test -f documents/reliability.md
-          test -f .nvmrc
-          test -f package.json
-          node -e "JSON.parse(require('node:fs').readFileSync('documents/manifest.json', 'utf8'))"
-          grep -q "One canonical Gemini execution path" README.md
-          grep -q "Android portrait" documents/ui.md
-          grep -q "id: SYS-GEM" documents/gemini.md
-          grep -q "Node 24" documents/reliability.md
+      - name: Documentation integrity
+        run: npm run docs:check
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund

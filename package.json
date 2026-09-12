@@ -14,6 +14,7 @@
     "fonts:prepare": "node scripts/prepare-fonts.mjs",
     "busytex:prepare": "texlyre-busytex download-assets ./public/core",
     "verify:artifact-assets": "node scripts/verify-artifact-assets.mjs",
+    "docs:check": "node scripts/check-docs.mjs",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "typecheck:web": "tsc -p tsconfig.json --noEmit",
@@ -25,7 +26,7 @@
     "worker:dev": "wrangler dev --config worker/wrangler.toml",
     "worker:types": "wrangler types --config worker/wrangler.toml worker/worker-configuration.d.ts",
     "verify:worker": "node scripts/verify-gemini-worker.mjs",
-    "reliability:check": "node scripts/reliability-gate.mjs",
+    "reliability:check": "npm run docs:check && node scripts/reliability-gate.mjs",
     "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {

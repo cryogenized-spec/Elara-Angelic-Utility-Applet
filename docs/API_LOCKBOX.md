@@ -20,16 +20,21 @@ Consumers receive the minimum capability required for an operation. No component
 
 The Lockbox stores a keyed set of encrypted credential records rather than a single key. Each record has a fixed, compile-time identity — currently `gemini-api-key` and `youtube-api-key` — and is read and written only through that credential's own named accessors. There is no runtime lookup by arbitrary identifier, so generalizing the store does not weaken the access model above.
 
-The `gemini-api-key` record is the security authority. It alone carries the security metadata: the mode (`off`, `password`, `pin`, `passkey`), the failed-attempt counter, and the lockout deadline. Secondary records inherit the mode from it and are encrypted with the same unlock credential, so one unlock opens every credential in the Lockbox.
+The `gemini-api-key` record is the security authority. It alone carries the security metadata: the mode (`off`, `password`, `pin`, `passkey`), the failed-attempt counter, and the lockout deadline. Secondary records are encrypted with the same unlock credential, so one unlock opens every credential in the Lockbox.
 
-Because a secondary record can have been written under a credential that no longer matches the primary, an unlock decrypts the primary first — with full backoff accounting — and then decrypts secondaries best effort. A secondary that fails to open is recorded and surfaced as its own `mismatch` status instead of failing the unlock. The user is told to save it again under the current credential; the undecryptable value is never displayed or echoed.
+The authority's mode is the only one that governs access. A secondary record stores a copy of that mode, but the copy is treated as advisory: read paths resolve the *effective* mode from the Gemini record. This matters because a stored copy goes stale whenever the authority changes through a path the secondary was not migrated by, and honouring the copy — as an earlier revision did — left a secondary stamped `off` (sealed with a device-local key, therefore readable with no credential at all) readable indefinitely after the Lockbox had been re-armed with a PIN.
 
-Two invariants follow from the shared authority and are covered by tests:
+A secondary write must prove the caller holds the authority's actual current credential: the store decrypts the Gemini record with the supplied secret and fails closed otherwise. Verifying is only permitted from an already-unlocked session, so this path cannot become a credential-guessing oracle beside the primary's backoff. A secondary also cannot be created while the Gemini record is absent — with no authority there is nothing to inherit protection from, and the record would report itself usable while being impossible to re-arm. Previously the store accepted any non-empty string, which made the Settings screen the only thing between a mistyped credential and a permanently unreadable key.
 
-- Changing the Lockbox PIN re-encrypts every secondary record, not just the Gemini key. Otherwise a rotation would permanently orphan them.
-- Clearing the Lockbox removes every credential record. An orphaned secondary inherits its mode from the primary, so with the primary gone it would report itself unlocked while being impossible to decrypt.
+Because a secondary record can still exist from legacy or damaged storage under a credential that no longer matches, an unlock decrypts the primary first — with full backoff accounting — and then decrypts secondaries best effort. A secondary that fails to open is recorded and surfaced as its own `mismatch` status instead of failing the unlock. The user is told to save it again under the current credential; the undecryptable value is never displayed or echoed.
 
-A credential added while security mode is `off` is encrypted with a device-local key generated for that purpose; it is not stored in plaintext, and it remains readable while security stays off.
+Three invariants follow from the shared authority and are covered by tests:
+
+- Changing the Lockbox credential re-seals every secondary record, not just the Gemini key — on PIN rotation, on password re-save, and on security re-arm. Otherwise a rotation permanently orphans them. This includes a secondary whose protection class has gone stale, which is migrated rather than skipped.
+- Security mode transitions move every secondary the store can open onto the new protection, in both directions. A secondary it cannot open is left sealed under its existing credential and reported as `mismatch`; it is never weakened to match the authority.
+- Clearing the Lockbox removes every credential record. An orphaned secondary would report itself unlocked while being impossible to decrypt.
+
+A credential added while security mode is `off` is encrypted with a device-local key generated for that purpose; it is not stored in plaintext, and it remains readable only while the *authority* stays `off`.
 
 The stored value of any credential is write-only. The Settings surface reports a credential as configured, locked, or mismatched, and never renders the saved value back into the page.
 

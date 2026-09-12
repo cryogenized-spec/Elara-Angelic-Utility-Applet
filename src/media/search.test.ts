@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { resetMediaProvider, searchMedia } from './search';
 import { resetSearchBudget, searchBudget } from './budget';
 import { clearMediaCache, readMediaCache, writeMediaCache } from './cache';
+import { mediaCacheKey } from './normalize';
 import { YouTubeSearchError } from './youtube/service';
 import { MAX_MEDIA_QUERIES_PER_CALL } from '../domain/media';
 import type { MediaItem, MediaProvider, MediaSearchOutcome } from '../domain/media';
@@ -227,5 +228,118 @@ describe('media search orchestration', () => {
 
     expect(Object.isFrozen(result)).toBe(true);
     expect(Object.isFrozen(result.outcomes)).toBe(true);
+  });
+});
+
+describe('media hand-off intent', () => {
+  it('stamps the requested intent onto results fetched from the network', async () => {
+    const { provider } = fakeProvider();
+
+    const result = await searchMedia({ queries: ['lofi beats'], intent: 'listen' }, { ...OPTIONS, provider });
+
+    expect(result.outcomes[0].items.map((entry) => entry.intent)).toEqual(['listen']);
+  });
+
+  it('leaves results untagged when the caller asked for nothing', async () => {
+    const { provider } = fakeProvider();
+
+    const result = await searchMedia({ queries: ['lofi beats'] }, { ...OPTIONS, provider });
+
+    expect('intent' in result.outcomes[0].items[0]).toBe(false);
+  });
+
+  it('stamps the intent onto a result served from cache', async () => {
+    const { provider, calls } = fakeProvider();
+    await searchMedia({ queries: ['lofi beats'] }, { ...OPTIONS, provider });
+
+    const later = await searchMedia({ queries: ['lofi beats'], intent: 'listen' }, { ...OPTIONS, provider });
+
+    expect(calls).toEqual(['lofi beats']);
+    expect(later.outcomes[0].source).toBe('cache');
+    expect(later.outcomes[0].items[0].intent).toBe('listen');
+  });
+
+  it('costs one network call and one budget unit for the same query under both intents', async () => {
+    // The invariant that keeps an intent from becoming a quota leak: the cached
+    // answer is intent-free, so the second request is served without dispatch.
+    const { provider, calls } = fakeProvider();
+
+    const watch = await searchMedia({ queries: ['lofi beats'], intent: 'watch' }, { ...OPTIONS, provider });
+    const listen = await searchMedia({ queries: ['lofi beats'], intent: 'listen' }, { ...OPTIONS, provider });
+
+    expect(calls).toEqual(['lofi beats']);
+    expect(searchBudget().spent).toBe(1);
+    expect(watch.outcomes[0].source).toBe('network');
+    expect(listen.outcomes[0].source).toBe('cache');
+  });
+
+  it('does not persist the intent into the cache entry', async () => {
+    // Deliberate: writing the stamped item would freeze whichever intent asked
+    // first onto every later reader of the same query.
+    const { provider } = fakeProvider();
+
+    await searchMedia({ queries: ['lofi beats'], intent: 'listen' }, { ...OPTIONS, provider });
+
+    // Read at the same clock the write used: the fixture pins `now`, so asking
+    // the real Date.now() would report the entry as long expired.
+    const cached = await readMediaCache(mediaCacheKey('youtube', 'lofi beats'), NOW);
+    expect(cached.hit).toBe(true);
+    expect(cached.items).toHaveLength(1);
+    expect('intent' in cached.items[0]).toBe(false);
+  });
+
+  it('does not mutate the provider result while stamping', async () => {
+    const { provider } = fakeProvider();
+    const seen: MediaItem[][] = [];
+    const wrapped: MediaProvider = {
+      id: 'youtube',
+      async search(request) {
+        const outcome = await provider.search(request);
+        seen.push([...outcome.items]);
+        return outcome;
+      },
+    };
+
+    const result = await searchMedia({ queries: ['lofi beats'], intent: 'listen' }, { ...OPTIONS, provider: wrapped });
+
+    expect(seen[0][0].intent).toBeUndefined();
+    expect(result.outcomes[0].items[0].intent).toBe('listen');
+  });
+
+  it('keeps a stamped outcome frozen, exactly as the provider returned it', async () => {
+    // The network path rebuilds the outcome to restamp its items. If that build
+    // dropped the freeze, a stamped result would be mutable where an unstamped
+    // one is not, and mutation would go unnoticed until two screens disagreed.
+    const frozenProvider: MediaProvider = {
+      id: 'youtube',
+      async search(request) {
+        return Object.freeze({
+          query: request.query,
+          normalizedQuery: request.query,
+          items: Object.freeze([item(request.query)]),
+          source: 'network' as const,
+          truncated: false,
+        });
+      },
+    };
+
+    const stamped = await searchMedia({ queries: ['lofi beats'], intent: 'listen' }, { ...OPTIONS, provider: frozenProvider });
+    expect(Object.isFrozen(stamped.outcomes[0])).toBe(true);
+    expect(Object.isFrozen(stamped.outcomes[0].items)).toBe(true);
+    expect(Object.isFrozen(stamped.outcomes[0].items[0])).toBe(true);
+
+    const untouched = await searchMedia({ queries: ['lofi beats'], intent: 'watch' }, { ...OPTIONS, provider: frozenProvider });
+    expect(Object.isFrozen(untouched.outcomes[0])).toBe(true);
+  });
+
+  it('drops an unrecognised intent instead of guessing one', async () => {
+    const { provider } = fakeProvider();
+
+    const result = await searchMedia(
+      { queries: ['lofi beats'], intent: 'gaming' as 'watch' },
+      { ...OPTIONS, provider },
+    );
+
+    expect('intent' in result.outcomes[0].items[0]).toBe(false);
   });
 });

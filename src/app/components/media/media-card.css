@@ -1,5 +1,9 @@
 /* Media results resolved by a media tool call.
-   Owns only .media-rail / .media-card selectors; no other sheet touches them. */
+   Owns only .media-rail / .media-card selectors; no other sheet touches them.
+
+   Sized for a phone first: the rail is a single column on narrow viewports so a
+   card is wide enough to read, and every card is at least 44px tall at every
+   part that can be tapped, because this control is operated with a thumb. */
 
 .media-rail {
   display: grid;
@@ -29,17 +33,23 @@
 
 .media-card:focus-visible { outline: 2px solid rgba(255,255,255,.5); outline-offset: 2px; }
 
+.media-card__thumb-wrap { position: relative; display: block; }
+
 .media-card__thumb {
   display: block;
   width: 100%;
-  /* Thumbnails arrive 4:3; reserve the box so nothing shifts as they load. */
-  aspect-ratio: 4 / 3;
+  /* 16:9 is the video's ratio; the `high` snippet thumbnail is a 4:3 frame with
+     the picture letterboxed inside it. Cover-cropping the bars away is therefore
+     both correct and what this used to get wrong: reserving 4:3 here made the
+     card show the bars, and any later attempt to "match the source" would just
+     reintroduce them. Do not change this to 4 / 3. */
+  aspect-ratio: 16 / 9;
   height: auto;
   object-fit: cover;
   background: rgba(10,11,16,.62);
 }
 
-.media-card__thumb--empty { aspect-ratio: 4 / 3; }
+.media-card__thumb--empty { aspect-ratio: 16 / 9; }
 
 .media-card__meta { display: grid; gap: 2px; padding: 8px 10px 10px; }
 
@@ -79,4 +89,50 @@
 
 @media (prefers-reduced-motion: reduce) {
   .media-card { transition: none; }
+}
+
+.media-card__cta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  /* 44px minimum: the whole card is one control, so this row is part of the
+     tappable area and must not be a sliver to hit. */
+  min-height: 44px;
+  padding: 0 10px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .02em;
+}
+
+.media-card__action { display: inline-flex; align-items: center; gap: 5px; }
+
+.media-card__action::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 4px 0 4px 7px;
+  border-color: transparent transparent transparent currentColor;
+}
+
+.media-card__target { font-size: 12px; line-height: 1; }
+
+/* Both intents are styled identically on purpose: they are the same control and
+   differ only in which verb and destination apply. `--blue` is the link accent
+   already used app-wide, so the action reads as navigable without inventing a
+   second visual language for media cards. */
+.media-card__action { color: var(--blue); }
+
+.media-card:active {
+  /* Press feedback on touch, where there is no hover state to confirm a tap
+     landed on the card rather than the message behind it. */
+  transform: scale(.985);
+  background: rgba(255,255,255,.1);
+}
+
+@media (max-width: 560px) {
+  .media-rail { grid-template-columns: 1fr; }
 }

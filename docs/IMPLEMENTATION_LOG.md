@@ -223,17 +223,78 @@ This file is the durable implementation handoff record for completed roadmap pro
 **Changed:** final reliability-check script, npm reliability command, CI enforcement, reliability gate documentation, and final README roadmap/status update.
 **Result:** CI now covers Node 24, foundation-document verification, install, lint, typecheck, unit tests, build, Playwright E2E, and the final architecture reliability gate. The final gate rejects accidental legacy `generateContent()` calls in production source and verifies the required architecture documents remain present.
 
+## 2026-09-11 — Forensic re-baseline and Lockbox credential authority
+
+### Pass 0 — Re-baseline against `bc6cfc9`
+
+**Scope:** reconcile every status claim in `docs/` against source, tests, and CI before any further implementation; produce a contract/runtime/proof matrix for the Google authorization, Workspace tooling, media, Lockbox, autonomy, artifact, and UI surfaces.
+
+**Why:** the roadmap, the parallel `docs/oauth/` pass series, and the handoff prose disagreed about what had been built. Three specific claims were wrong in ways that would have misdirected the next pass.
+
+**Findings (verified, not inferred):**
+
+- `docs/ACTIVE_IMPLEMENTATION_ROADMAP.md` marked Pass 1 (remove the abandoned Cloudflare OAuth architecture) as NOT STARTED. The Worker exposes only `/health`, `/autonomy/*`, `/api/gemini`, and `/api/transcribe` — there was never a Worker OAuth path in this tree to delete. `docs/oauth/PASS_01_STATUS.md` had it right.
+- The handoff stated the quick-action rail still runs on a deterministic demo adapter. `demoQuickActionPort`, the `QuickActionPort` seam, and `QuickActionSurface` have **zero** consumers; `TopToolRail` → `WorkspaceMenu` → `App.runWorkspaceShortcut` dispatches a real generation turn narrowed to the shortcut's registered tools. The rail is live.
+- `docs/oauth/PASS_02_STATUS.md` recorded the authorization-code boundary as implemented. `src/google/oauth/code-flow.ts` exists and is unit-tested but is imported only by its own test; the live authority still uses the GIS token client, and no exchange endpoint exists.
+- Google account identity is unreachable. `GoogleOAuthStatus.account` is read and rendered, but no code path writes it — no ID token, no `enableGsi`, no `userinfo`. `e2e/google-oauth-settings.spec.ts` seeds `version: 2` plus a hand-written `account` into `localStorage`, so it exercises the legacy-migration branch and asserts a UI state production cannot produce. This is a test passing for the wrong reason.
+- The active roadmap and `docs/GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` conflict on the authorization transport. The freeze declares itself the authoritative contract, sanctions the GIS token client as the current transport, and defers a durable authority to a later separate subsystem; the roadmap requires building it as the next pass. Unresolved — recorded as Pass 2's first decision rather than settled by whoever writes code.
+
+**Verification:** `npm run typecheck`, `npm test` (114 files / 964 tests), `npm run test:workers` (88 tests), `npm run build`, and `npm run reliability:check` all green locally. GitHub CI green on `bc6cfc9` including all Playwright projects. `npm run lint` also exits 0, but see **Verification integrity** in `docs/ACTIVE_IMPLEMENTATION_ROADMAP.md`: that command ignores every TypeScript file and lints only the `.mjs` scripts, so it is not evidence about this change. Playwright could not be executed in this environment — Chromium download is blocked — so no local E2E claim is made.
+
+### API Lockbox — secondary credential authority
+
+**Scope:** targeted security audit of the generalized multi-credential Lockbox introduced by PR #19, followed by the smallest change that closes the persistence boundary. `src/persistence/gemini-api-key.ts` plus regression coverage.
+
+**Why:** the roadmap makes durable refresh-token storage a later pass, and that store is this same Lockbox. Auditing it before building on top of it turned up three live defects, one of which leaked a credential.
+
+**Defects found (each reproduced against unmodified `bc6cfc9` before fixing):**
+
+1. **Secondary writes did not verify the Lockbox credential.** `saveYouTubeApiKey(value, credential)` accepted any non-empty string and encrypted the record with it. `docs/API_LOCKBOX.md` claimed saving a secondary "requires the current Lockbox credential"; only the Settings UI enforced anything. A mistyped credential silently produced a permanently unreadable record. `src/persistence/lockbox-youtube.test.ts` had a test asserting the resulting `mismatch` was honestly *reported* — which documented the symptom while legitimising the write that caused it.
+2. **Re-arming security left a secondary permanently readable with no credential.** `off` → `enableGeminiLockboxWithPin` migrated the Gemini record but skipped the secondary, whose stale `off` stamp made every read path decrypt it with a device-local key held inside the same record. Observed directly: `gemini-api-key {mode: "pin"}` alongside `youtube-api-key {mode: "off", hasLocalKey: true}`, key returned in plaintext after `lockGeminiApiKey()`, surviving reload. Cause: `reencryptSecondarySecrets()` skipped records stamped `off`, and both `readSecret()` and `getSecretStatus()` consulted the record's own copy of the mode instead of the authority's.
+3. **A secondary could be created with no security authority.** With no Gemini record, `mode` defaulted to `password` and the write still succeeded, producing an orphan with nothing to inherit protection from and nothing able to re-arm it.
+
+**Architectural decision:** the Gemini record's mode becomes the only mode that governs access. A secondary's stored mode copy is advisory — never a grant of weaker protection. One writer (`storeSecondary`) produces every secondary record in both protection classes, so the stamp cannot diverge from the protection by construction. Secondary writes require proof of possession of the current credential, verified by decrypting the authority record, and only from an already-unlocked session: an unthrottled verification call would otherwise become a PIN-guessing oracle beside the primary's deliberate backoff. Records that cannot be opened are left byte-for-byte alone and reported as `mismatch` rather than re-encrypted under a credential nobody can re-derive — fail closed, destroy nothing.
+
+**Also fixed in passing:** `saveGeminiApiKey()` replaced the authority credential without re-sealing secondaries, orphaning them against the old passphrase; it now rotates them like the PIN path does. `disableGeminiLockboxSecurity()`'s comment claimed "either all are `off` or none are", which was false for an unopenable secondary; the code is unchanged there (sealing is the safe direction) and the comment now describes what actually happens.
+
+**Files changed:** `src/persistence/gemini-api-key.ts`; new `src/persistence/lockbox-credential-authority.test.ts` and `src/persistence/lockbox-test-fixtures.ts` (test-only raw-storage fixtures, since the public API can no longer create these states); `src/persistence/lockbox-youtube.test.ts` and `src/app/components/GeminiApiLockbox.test.tsx` updated to reach `mismatch` through damaged storage instead of through the hole; `docs/API_LOCKBOX.md` rewritten to state the enforced contract.
+
+**Test evidence:** 10 new tests. **6 fail against unmodified `bc6cfc9` and pass after the fix** — the four that pass in both states pin behaviour the fix must not regress. New UI test asserts the refusal message reaches the user without echoing either secret and leaves the authority intact.
+
+**Result:** lint, typecheck, and `npm test` green — 115 files / 975 tests. `npm run build`, `npm run test:workers`, and `npm run reliability:check` were green at baseline and the change is confined to persistence and tests.
+
+**Unresolved risks:** no E2E coverage was added, because the browser cannot run in this environment; CI is the authority for the Playwright projects. `clearYouTubeApiKey()` deliberately remains callable from a locked session, so a user is never stuck unable to remove a credential.
+
+**Next recommended work:** resolve the Pass 2 transport conflict, then build the durable authority on this boundary so it inherits credential verification and authority-derived protection instead of adding a second store.
+
+## 2026-09-12 — YouTube results handed off to the platform
+
+**Scope:** the media feature made operable end to end — `src/domain/media.ts`, `src/media/{search,tool-handler,youtube-schema,handoff}.ts`, `src/app/components/media/`, the Gemini tool declaration and registry description, `e2e/media-handoff.spec.ts`, `docs/MEDIA_INTEGRATION.md`.
+
+**Why:** the graph could already search and render a card, and every layer had tests. What it did not do was what was asked for: tapping a result had to hand playback to the user's own app — Android's picker for music, never audio inside the applet — and the model had to be able to say which kind of result it meant.
+
+**What changed:**
+- `intent: 'watch' | 'listen'` on `MediaItem` and on the tool call, optional and defaulting to `watch`. It is an explicit argument because `search.list` carries no duration and no topic id, and the quota forbids the `videos.list` call that would supply one; the model that read the user's sentence is the only reliable classifier. Absent-on-old-data is valid (items are persisted inside messages, so requiring it would erase the cards of every existing conversation), wrong-but-present is rejected.
+- New pure `src/media/handoff.ts`. Android gets an `intent://` URI with a browser fallback, the `;end` terminator, and deliberately no `package=` component — pinning a handler would suppress the chooser, which is the one behaviour this must not do. Every other platform gets the canonical URL verbatim. `listen` routes a single video to YouTube Music, preserving a start offset, and passes through playlists, unfamiliar hosts, and unparseable or non-https links untouched.
+- No iframe and no inline player for video either, chosen rather than deferred: an embed imports roughly a megabyte of provider JavaScript to deliver a worse version of what the user's own apps already do, and traps playback in a chat window on Android.
+- The intent is stamped **after** the cache write and never enters the cache key, so one billed `search.list` answer serves both intents. This is the quota-relevant ordering; without it the feature would double its own cost.
+- Card: verb and destination derive from one shared platform read so the tooltip cannot promise something the `href` does not do; the whole card stays a single anchor. Fixed the thumbnail frame, which had reserved 4:3 and therefore rendered the provider's letterbox bars. 44px minimum action row. Dropped the duration overlay before shipping it — the provider never returns a duration, so it could only ever have shown a fabricated or permanently absent number.
+
+**Verification:** `npm run lint`, `typecheck`, `test` (118 files / 1 035 tests), `test:workers`, `build`, `reliability:check` green locally; 60 tests added and mutation-checked at 14/14, i.e. each invariant was confirmed to fail when broken. Playwright cannot run in this environment (browser download blocked), so E2E is CI-only. First CI run **failed** on all four new tests; the cause was the suite, not the feature — see the `headerValue` finding in `ACTIVE_IMPLEMENTATION_ROADMAP.md` → Verification integrity.
+
+**Not claimed:** whether Android shows its app chooser or opens a single default handler. That is the platform's decision, needs a physical device, and is listed as outstanding.
+
 ## Deployment decision
 
 Elara is intended for GitHub Pages using GitHub Actions: `main` → build → `dist` → Pages. The repository root and `/docs` are source/documentation, not the published site. The Vite production base must match the eventual project-site URL path. Cloudflare Pages remains a viable alternative but is not the primary roadmap deployment. GitHub currently recommends Actions workflows for custom build pipelines, and Vite's current deployment guide instructs users to select GitHub Actions and build the site before publishing. citeturn275656search0turn275656search1turn275656search7
 
 ## Current runtime/CI status
 
-The executable runtime scaffold is present in `main`. CI is configured for install → lint → typecheck → unit tests → build → Playwright E2E → final reliability gate. A generated `package-lock.json` is not fabricated; until a genuine lockfile is created and committed, CI uses `npm install`.
+The executable runtime scaffold is present in `main`. CI is configured for install → lint → typecheck → unit tests → Worker/DO tests → build → Playwright E2E → final reliability gate, and a genuine generated `package-lock.json` is committed. CI still installs with `npm install`; `npm ci` is the reproducible choice now that the lockfile exists, and is worth changing as a standalone infrastructure pass rather than bundled with product work.
 
-The final 50-prompt foundation is considered complete only after the latest `main` commit has a completed green CI run covering every gate above.
+The final 50-prompt foundation is considered complete: `main` carries a completed green CI run covering every gate above. Green CI demonstrates that automated contracts hold. It does not demonstrate that Google Workspace capabilities are operationally complete — see `docs/ACTIVE_IMPLEMENTATION_ROADMAP.md`.
 
-No pull requests are used for this work. Changes are committed directly to `main`.
+> Correction (2026-09-11): this section previously recorded that no pull requests were used and that changes were committed directly to `main`. Post-foundation work has been delivered through reviewed pull requests into `main` (PR #18, PR #19).
 
 ## Future-self requirements preserved
 

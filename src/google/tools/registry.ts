@@ -60,7 +60,7 @@ export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'roleplay_setting.update', risk: 'write', capability: 'roleplay.world.local', exposure: 'gemini', description: 'Propose changes to a persistent Roleplay World Canvas entity.' },
   { name: 'roleplay_setting.move', risk: 'write', capability: 'roleplay.world.local', exposure: 'gemini', description: 'Propose moving a persistent Roleplay World Canvas entity.' },
   { name: 'roleplay_setting.delete', risk: 'destructive', capability: 'roleplay.world.local', exposure: 'gemini', description: 'Propose deletion of a persistent Roleplay World Canvas entity and its descendants.' },
-  { name: 'youtube.search', risk: 'read', capability: 'media.youtube.read', exposure: 'gemini', executionPlane: 'browser', description: 'Search YouTube for videos matching one or more queries. Returns resolved videos with titles, channels, and watch URLs. Batch related queries into a single call; results are cached and the per-session allowance is small.' },
+  { name: 'youtube.search', risk: 'read', capability: 'media.youtube.read', exposure: 'gemini', executionPlane: 'browser', description: 'Search YouTube for videos and music matching one or more queries. Returns resolved items with titles, channels, durations, and links. Set intent to "listen" when the user asked for music or audio and "watch" (the default) for video. Results render as cards the user taps to hand playback to their own apps; Elara never plays media itself, so do not claim anything is playing, queued, liked, or saved — describe what was found. Batch related queries into a single call; results are cached and the per-session allowance is small.' },
 ];
 
 /**

@@ -107,6 +107,32 @@ function sessionUnlocked(): boolean {
   return unlockedSecrets.size > 0;
 }
 
+/**
+ * Reads a record together with the security mode that actually governs access
+ * to it. For the Gemini record that is its own mode; for a secondary it is the
+ * Gemini authority's, because the stored copy is only ever a copy.
+ *
+ * A secondary record stores a mode stamp of its own, but that stamp is only
+ * ever a copy of the authority's. It goes stale whenever the authority changes
+ * through a path the secondary was not migrated by, and honoring the copy is
+ * what previously let a secondary stay readable with a device-local key after
+ * the Lockbox had been re-armed with a PIN. Read paths therefore resolve the
+ * *effective* mode from the authority and treat a disagreement as a record that
+ * needs repair, never as permission to use the weaker protection.
+ *
+ * With no primary record at all there is no authority to inherit, so a lone
+ * record falls back to its own stamp; new secondary records cannot be created
+ * in that state.
+ */
+async function recordWithGoverningMode(id: LockboxSecretId): Promise<{ record: EncryptedLockboxSecret; mode: GeminiLockboxSecurityMode } | null> {
+  const record = await db.secrets.get(id);
+  if (!record) return null;
+  const stamped = normalizeSecurityMetadata(record).mode;
+  if (id === GEMINI_RECORD_ID) return { record, mode: stamped };
+  const authority = await db.secrets.get(GEMINI_RECORD_ID);
+  return { record, mode: authority ? normalizeSecurityMetadata(authority).mode : stamped };
+}
+
 function toBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 8_192;
@@ -328,12 +354,11 @@ export type LockboxSecretStatus = GeminiLockboxStatus | 'mismatch';
 async function getSecretStatus(id: LockboxSecretId): Promise<LockboxSecretStatus> {
   enforceGeminiApiKeyIdleTimeout();
   if (unlocked(id) !== null) return 'unlocked';
-  const record = await db.secrets.get(id);
-  if (!record) return 'empty';
-  const security = normalizeSecurityMetadata(record);
-  if (security.mode === 'off') {
+  const entry = await recordWithGoverningMode(id);
+  if (!entry) return 'empty';
+  if (entry.mode === 'off') {
     try {
-      unlockedSecrets.set(id, await decryptWithLocalKey(record));
+      unlockedSecrets.set(id, await decryptWithLocalKey(entry.record));
       mismatchedSecrets.delete(id);
       return 'unlocked';
     } catch {
@@ -362,6 +387,11 @@ export function isGeminiLockboxPin(value: string): boolean {
   return new RegExp(`^\\d{${GEMINI_LOCKBOX_PIN_MIN_LENGTH},${GEMINI_LOCKBOX_PIN_MAX_LENGTH}}$`).test(value);
 }
 
+/** Modes whose authorization secret is a short PIN rather than a passphrase. */
+function isPinMode(mode: GeminiLockboxSecurityMode): boolean {
+  return mode === 'pin' || mode === 'passkey';
+}
+
 function pinBackoffMs(failedAttempts: number): number {
   if (failedAttempts < 4) return 0;
   return Math.min(60_000, 1_000 * 2 ** Math.min(failedAttempts - 4, 6));
@@ -388,11 +418,60 @@ async function clearPinFailures(record: EncryptedLockboxSecret): Promise<void> {
 }
 
 /**
- * Opens every secondary credential that the same credential can open. A record
- * stored under a different credential is recorded as mismatched instead of
- * failing the unlock — the primary credential is still usable.
+ * Opens a secondary record using the protection it is actually stored under,
+ * and reports what would have to change to bring it onto the protection the
+ * authority currently requires.
+ */
+async function openSecondary(
+  record: EncryptedLockboxSecret,
+  governingMode: GeminiLockboxSecurityMode,
+  credential: string,
+): Promise<{ plaintext: string; rewrap: 'none' | 'restamp' | 'reencrypt' } | null> {
+  const security = normalizeSecurityMetadata(record);
+  const plaintext = security.mode === 'off'
+    ? await decryptWithLocalKey(record).catch(() => null)
+    : await decryptSecret({ ...record, security }, credential).catch(() => null);
+  if (!plaintext) return null;
+  if ((security.mode === 'off') !== (governingMode === 'off')) return { plaintext, rewrap: 'reencrypt' };
+  return { plaintext, rewrap: security.mode === governingMode ? 'none' : 'restamp' };
+}
+
+/**
+ * Writes a secondary record under the protection the authority requires: a
+ * device-local key while security is off, the Lockbox credential otherwise.
+ */
+async function storeSecondary(id: LockboxSecretId, plaintext: string, credential: string, mode: GeminiLockboxSecurityMode): Promise<void> {
+  const now = Date.now();
+  const security: GeminiLockboxSecurityMetadata = { mode, authVersion: 1, configuredAt: now, failedAttempts: 0, lockedUntil: null };
+  if (mode === 'off') {
+    const localKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: KEY_LENGTH }, false, ['encrypt', 'decrypt']);
+    const encrypted = await encryptWithLocalKey(plaintext, localKey);
+    await db.secrets.put({ id, version: 2, salt: '', iv: encrypted.iv, ciphertext: encrypted.ciphertext, iterations: PBKDF2_ITERATIONS, updatedAt: now, security, localKey });
+    return;
+  }
+  await db.secrets.put(await encryptSecret(id, plaintext, credential, security));
+}
+
+/** The mode the Gemini authority is currently running in. */
+async function authorityMode(): Promise<GeminiLockboxSecurityMode> {
+  const authority = await db.secrets.get(GEMINI_RECORD_ID);
+  if (authority) return normalizeSecurityMetadata(authority).mode;
+  return securityMode ?? 'password';
+}
+
+/**
+ * Opens every secondary credential that belongs to this Lockbox session.
+ *
+ * A secondary carries a copy of the authority's security mode. When that copy
+ * has gone stale — the authority was re-armed while this record stayed on a
+ * device-local key, or a record predates the current mode — the record is
+ * repaired onto the authority's protection during the same unlock rather than
+ * left readable under the weaker one. A record that cannot be opened at all is
+ * reported as `mismatched` instead of failing the unlock, so the primary
+ * credential remains usable.
  */
 async function unlockSecondarySecrets(credential: string): Promise<void> {
+  const mode = await authorityMode();
   for (const id of SECONDARY_SECRET_IDS) {
     const record = await db.secrets.get(id);
     if (!record) {
@@ -400,29 +479,32 @@ async function unlockSecondarySecrets(credential: string): Promise<void> {
       mismatchedSecrets.delete(id);
       continue;
     }
-    const security = normalizeSecurityMetadata(record);
-    try {
-      const value = security.mode === 'off'
-        ? await decryptWithLocalKey(record)
-        : await decryptSecret({ ...record, security }, credential);
-      if (!value) throw new Error('empty');
-      unlockedSecrets.set(id, value);
-      mismatchedSecrets.delete(id);
-    } catch {
+    const opened = await openSecondary(record, mode, credential);
+    if (!opened || !opened.plaintext) {
       unlockedSecrets.delete(id);
       mismatchedSecrets.add(id);
+      continue;
     }
+    if (opened.rewrap === 'reencrypt') await storeSecondary(id, opened.plaintext, credential, mode);
+    else if (opened.rewrap === 'restamp') {
+      await db.secrets.update(id, { security: { ...normalizeSecurityMetadata(record), mode }, updatedAt: Date.now() });
+    }
+    unlockedSecrets.set(id, opened.plaintext);
+    mismatchedSecrets.delete(id);
   }
 }
 
 async function readSecret(id: LockboxSecretId): Promise<string> {
   enforceGeminiApiKeyIdleTimeout();
   if (unlocked(id) === null) {
-    const record = await db.secrets.get(id);
-    if (record && normalizeSecurityMetadata(record).mode === 'off') {
+    const entry = await recordWithGoverningMode(id);
+    // A secondary whose stamp still says 'off' after the Lockbox was re-armed
+    // must not be self-decrypted here: that is precisely the state where it
+    // would become readable with no credential at all.
+    if (entry && entry.mode === 'off') {
       securityMode = 'off';
       try {
-        unlockedSecrets.set(id, await decryptWithLocalKey(record));
+        unlockedSecrets.set(id, await decryptWithLocalKey(entry.record));
         if (id === GEMINI_RECORD_ID) lastActivityAt = null;
       } catch {
         // An unreadable local-key record stays locked rather than throwing here.
@@ -446,8 +528,8 @@ async function saveSecretWithMode(id: LockboxSecretId, value: string, secret: st
     return;
   }
   const credential = secret.trim();
-  if (!credential) throw new Error(mode === 'pin' || mode === 'passkey' ? 'A Lockbox PIN is required.' : 'A Lockbox password is required.');
-  if ((mode === 'pin' || mode === 'passkey') && !isGeminiLockboxPin(credential)) {
+  if (!credential) throw new Error(isPinMode(mode) ? 'A Lockbox PIN is required.' : 'A Lockbox password is required.');
+  if (isPinMode(mode) && !isGeminiLockboxPin(credential)) {
     throw new Error(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
   }
   const now = Date.now();
@@ -470,6 +552,10 @@ export async function saveGeminiApiKey(value: string, passphrase: string): Promi
     return;
   }
   await saveSecretWithMode(GEMINI_RECORD_ID, value, passphrase, mode);
+  // Replacing the authority's credential is a rotation, not just a key update.
+  // Secondaries are sealed with the credential rather than the key material, so
+  // skipping this would orphan every one of them against the new passphrase.
+  await reencryptSecondarySecrets(passphrase.trim());
 }
 
 export async function configureGeminiApiKeyWithPin(value: string, pin: string): Promise<void> {
@@ -480,18 +566,33 @@ export async function configureGeminiApiKeyWithPin(value: string, pin: string): 
 }
 
 /**
- * Re-encrypts each currently-unlocked secondary credential under a new Lockbox
- * credential. Called on credential rotation so a PIN or password change never
- * orphans a secondary key.
+ * Moves every stored secondary onto a new Lockbox credential. Called on
+ * credential rotation and on security re-arm so a rotation never orphans a
+ * secondary key — and, critically, so a secondary can never remain on a
+ * device-local key after the Lockbox has been re-armed with a PIN, which would
+ * leave it permanently readable without any credential.
+ *
+ * A record this cannot open is left byte-for-byte alone and reported as
+ * mismatched: rewriting it with a credential nobody can re-derive would destroy
+ * the only copy, while the read paths now consult the authority rather than the
+ * record's own stale stamp, so an untouched record is never unprotected.
  */
 async function reencryptSecondarySecrets(credential: string): Promise<void> {
+  const mode = await authorityMode();
   for (const id of SECONDARY_SECRET_IDS) {
     const record = await db.secrets.get(id);
-    const plaintext = unlocked(id);
-    if (!record || plaintext === null) continue;
-    const security = normalizeSecurityMetadata(record);
-    if (security.mode === 'off') continue;
-    await db.secrets.put(await encryptSecret(id, plaintext, credential, security));
+    if (!record) {
+      mismatchedSecrets.delete(id);
+      continue;
+    }
+    const plaintext = unlocked(id) ?? (await openSecondary(record, mode, credential))?.plaintext ?? null;
+    if (!plaintext) {
+      unlockedSecrets.delete(id);
+      mismatchedSecrets.add(id);
+      continue;
+    }
+    await storeSecondary(id, plaintext, credential, mode);
+    unlockedSecrets.set(id, plaintext);
     mismatchedSecrets.delete(id);
   }
 }
@@ -519,8 +620,12 @@ export async function disableGeminiLockboxSecurity(): Promise<void> {
   const security = normalizeSecurityMetadata(record);
   if (security.mode === 'off') return;
 
-  // Every credential moves to device-local key protection together, so the
-  // session stays coherent: either all are 'off' or none are.
+  // Every credential this can open moves to device-local key protection
+  // together, so an unlocked session stays coherent. A secondary this *cannot*
+  // open is deliberately left sealed under its old credential rather than
+  // weakened to match the authority: it stays unusable and is reported as
+  // mismatched, which is honest, instead of becoming a silently unprotected
+  // copy of a key the user already lost the credential for.
   const now = Date.now();
   const offSecurity: GeminiLockboxSecurityMetadata = { ...security, mode: 'off', configuredAt: now, failedAttempts: 0, lockedUntil: null };
   for (const id of ALL_SECRET_IDS) {
@@ -640,54 +745,51 @@ export async function clearGeminiApiKey(): Promise<void> {
    ------------------------------------------------------------------------- */
 
 /**
- * Stores a secret under a freshly generated device-local key. Used when the
- * Lockbox security mode is 'off': those records decrypt with `localKey` and no
- * credential, so encrypting one with a passphrase would make it unreadable.
+ * Establishes that a secondary credential may be written right now, and returns
+ * the protection the new record must use.
+ *
+ * The Lockbox previously accepted any non-empty string as the authorization
+ * secret for a secondary write and encrypted the record with it. That made the
+ * UI the only thing standing between a mistyped credential and a permanently
+ * unreadable key, so the store enforced its own documented invariant in name
+ * only. A secondary write now requires proof that the caller holds the
+ * authority's *actual* current credential, and an unlocked session so that this
+ * path cannot become a credential-guessing oracle around the primary's backoff.
+ *
+ * The Gemini record must exist: it is the security authority a secondary
+ * inherits protection from, and a secondary written with no authority would be
+ * an orphan that nothing can ever re-arm or decrypt.
  */
-async function saveSecretWithLocalKey(id: LockboxSecretId, value: string, security: GeminiLockboxSecurityMetadata): Promise<void> {
-  const now = Date.now();
-  const localKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: KEY_LENGTH }, false, ['encrypt', 'decrypt']);
-  const encrypted = await encryptWithLocalKey(value, localKey);
-  await db.secrets.put({
-    id,
-    version: 2,
-    salt: '',
-    iv: encrypted.iv,
-    ciphertext: encrypted.ciphertext,
-    iterations: PBKDF2_ITERATIONS,
-    updatedAt: now,
-    security: { ...security, mode: 'off', configuredAt: now, failedAttempts: 0, lockedUntil: null },
-    localKey,
-  });
-  unlockedSecrets.set(id, value);
-  mismatchedSecrets.delete(id);
+async function requireSecondaryWriteAuthority(credential: string): Promise<GeminiLockboxSecurityMode> {
+  const authority = await db.secrets.get(GEMINI_RECORD_ID);
+  if (!authority) throw new Error('Create the Gemini API Lockbox before storing another credential.');
+  const mode = normalizeSecurityMetadata(authority).mode;
+  if (mode === 'off') return 'off';
+  if (!sessionUnlocked()) throw new Error('Unlock the Lockbox before storing another credential.');
+  if (!credential) throw new Error(isPinMode(mode) ? 'A Lockbox PIN is required.' : 'A Lockbox password is required.');
+  const opened = await decryptSecret(authority, credential).catch(() => null);
+  if (opened === null) throw new Error('That does not match the current Lockbox credential.');
+  return mode;
 }
 
 export async function saveYouTubeApiKey(value: string, credential: string): Promise<void> {
-  const primary = await db.secrets.get(GEMINI_RECORD_ID);
-  const mode = primary ? normalizeSecurityMetadata(primary).mode : 'password';
   const trimmed = value.trim();
+  // Removing a key must always work, including from a broken state.
   if (!trimmed) {
     await clearYouTubeApiKey();
     return;
   }
-  if (mode === 'off') {
-    // Security off: match the primary record's device-local protection rather
-    // than writing a passphrase-encrypted record stamped as 'off'.
-    const security = primary ? normalizeSecurityMetadata(primary) : defaultSecurityMetadata();
-    await saveSecretWithLocalKey(YOUTUBE_RECORD_ID, trimmed, security);
-    securityMode = 'off';
-    lastActivityAt = null;
-    clearIdleTimer();
-    notifyChanged();
-    return;
-  }
-  await saveSecretWithMode(YOUTUBE_RECORD_ID, trimmed, credential, mode);
+  const mode = await requireSecondaryWriteAuthority(credential.trim());
+  await storeSecondary(YOUTUBE_RECORD_ID, trimmed, credential.trim(), mode);
+  securityMode = mode;
+  unlockedSecrets.set(YOUTUBE_RECORD_ID, trimmed);
+  mismatchedSecrets.delete(YOUTUBE_RECORD_ID);
+  lastActivityAt = mode === 'off' ? null : Date.now();
+  if (mode === 'off') clearIdleTimer(); else scheduleIdleLock();
   // Keep the security authority's metadata intact: the secondary record must
   // not reset the primary's attempt counter or configured-at timestamp.
-  if (primary) {
-    await db.secrets.update(GEMINI_RECORD_ID, { updatedAt: Date.now() });
-  }
+  await db.secrets.update(GEMINI_RECORD_ID, { updatedAt: Date.now() });
+  notifyChanged();
 }
 
 export async function getYouTubeApiKey(): Promise<string> {

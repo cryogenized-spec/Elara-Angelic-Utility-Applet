@@ -1,5 +1,6 @@
 import type { GoogleToolHandlers } from '../google/tools/executor';
 import type { MediaItem } from '../domain/media';
+import { isMediaIntent } from '../domain/media';
 
 /**
  * Tool handler for `youtube.search`.
@@ -18,12 +19,18 @@ export const mediaToolHandlers: GoogleToolHandlers = {
     const queries = Array.isArray(context.arguments.queries)
       ? (context.arguments.queries as unknown[]).filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
       : [];
+    // Narrowed rather than trusted. The schema validates this on the Gemini path,
+    // but the same handler is reachable from the local executor, and a value that
+    // is merely unrecognised must fall back to the default instead of being
+    // forwarded into the renderer.
+    const intent = isMediaIntent(context.arguments.intent) ? context.arguments.intent : undefined;
 
     // Loaded here, not at module scope: see the note above.
     const { searchMedia } = await import('./search');
 
     const { outcomes, failures } = await searchMedia({
       queries,
+      intent,
       signal: context.signal,
     });
 
@@ -32,6 +39,10 @@ export const mediaToolHandlers: GoogleToolHandlers = {
     return {
       ok: true,
       mediaProvider: 'youtube',
+      // Echoed so the model can see which hand-off actually took effect rather
+      // than remembering what it asked for. Absent when it defaulted, because a
+      // result is not evidence that the caller supplied anything.
+      ...(intent ? { intent } : {}),
       queries: outcomes.map((outcome) => outcome.query),
       results: outcomes.map((outcome) => ({
         query: outcome.query,

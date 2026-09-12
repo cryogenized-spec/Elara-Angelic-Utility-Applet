@@ -1,8 +1,17 @@
 # Elara — Active Implementation Roadmap
 
-Status date: 2026-09-07
+Status date: 2026-09-11
 
 This document supersedes the historical 50-prompt foundation roadmap as the active delivery tracker.
+
+## Numbering
+
+Two independent pass sequences are recorded in `docs/`. They are not the same plan and must not be read as one:
+
+- **This document** — the delivery sequence for replacing the provisional Google authorization runtime and proving real Workspace behaviour.
+- **`docs/oauth/PASS_0N_STATUS.md`** — a separately numbered series of completed implementation passes against the same Google surface (adapter hardening, scope audit, Drive/Sheets tool exposure, the executor gate). Its numbering does not line up with this one.
+
+Status prose below is reconciled against source. Where a `docs/oauth/` status file and this tracker disagree, this tracker follows the code and records the correction rather than restating the older claim.
 
 ## Historical foundation roadmap
 
@@ -24,19 +33,26 @@ Subsequent test regressions introduced by grouped Google-tool confirmation were 
 
 ### Pass 1 — Remove the abandoned Cloudflare OAuth architecture
 
-**Status: ❌ NOT STARTED.**
+**Status: ✅ COMPLETE (verified against source on 2026-09-11).**
 
-The current source still has a browser-side Google GIS authority in `src/google/oauth/authority.ts`, while the repository architecture/history still retains the Worker as a general server/security boundary. The Worker-specific OAuth architecture has not yet been removed and its assumptions have not yet been eliminated.
+There is no Worker-backed Google OAuth path left to remove. `worker/src/index.ts` routes only `/health`, `/autonomy/*`, `/api/gemini`, and `/api/transcribe`; it holds no Google token store, no refresh authority, and no OAuth callback. `worker/wrangler.toml` configures the Gemini/transcription Worker and nothing else. The remaining `GEMINI_WORKER_URL` references are Gemini deployment configuration, not Google authorization.
 
-Completion requires removing the abandoned Worker-backed Google OAuth path/configuration/documentation and removing the browser's dependency on the old Cloudflare OAuth architecture without deleting the useful Google capability/service boundaries.
+The earlier "not started" marking conflated two different things: deleting a Worker OAuth implementation (nothing existed) and the browser's continued use of a GIS token client (real, and the subject of Passes 2–3). The browser still authorizes through `src/google/oauth/authority.ts`; that is Pass 2's problem, not leftover Cloudflare OAuth architecture. See `docs/oauth/PASS_01_STATUS.md`, which recorded this correctly.
+
+Removing the browser's *dependency* on the retired design is therefore folded into Passes 2–3 rather than tracked as a separate deletion pass.
 
 ### Pass 2 — Rebuild Google authorization around the current GIS authorization-code model
 
-**Status: ❌ NOT STARTED.**
+**Status: ❌ NOT STARTED — and currently contradicted by its own target contract.**
 
-The repository currently uses browser GIS access-token acquisition directly. That is not the target architecture for this pass: the intended end state is a small protected server-side OAuth authority using Google's authorization-code flow, with protected refresh-token storage and browser-visible capability state only.
+The repository uses browser GIS access-token acquisition directly. `src/google/oauth/code-flow.ts` implements a GIS *authorization-code* client and has unit tests, but **nothing in the application imports it** — only its own test file does. It is not a seam, not wired into `googleOAuthAuthority`, and there is no code-exchange endpoint anywhere to receive the code. Describing the code flow as "implemented" (as `docs/oauth/PASS_02_STATUS.md` does) is accurate about the module and misleading about the runtime.
 
-The existing `docs/GOOGLE_OAUTH_ARCHITECTURE.md` describes the target server-side authority, but the runtime implementation has not been migrated to it.
+Before this pass can proceed, one contradiction has to be resolved deliberately rather than by whoever writes code first:
+
+- `docs/GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` — self-described as "the authoritative contract … later features must not reopen it" — states that the interactive GIS token client *is* the current transport and that a durable authorization-code + PKCE authority is "a later, separate subsystem — not the Gemini Worker."
+- This roadmap demands the server-side authority be built as the next pass.
+
+Both cannot direct the work. Either the freeze is amended to open that subsystem now, or this pass is re-dated and Pass 3's durability requirements are scoped to what a token-client transport can actually deliver. The choice also decides the deployment question the freeze leaves open: a refresh-capable authority needs a server, and "not the Gemini Worker" means a *second* Worker with its own secret storage — a new deployment surface that CI cannot verify against live Google.
 
 ### Pass 3 — Incremental authorization + persistent connection
 
@@ -44,7 +60,12 @@ The existing `docs/GOOGLE_OAUTH_ARCHITECTURE.md` describes the target server-sid
 
 The repository already has capability-level remembered grant state, incremental capability selection, explicit partial/reauthorization states, and GIS incremental-consent support. The current authority persists capability metadata locally and keeps access tokens only in memory.
 
-What is still missing is the target durable authorization experience: server-side refresh-token persistence, separation of Google identity/session state from Workspace authorization state, and reliable silent access-token recovery across browser sessions without requiring the user to reconnect unnecessarily.
+What is still missing:
+
+- Server-side refresh-token persistence, and therefore any silent recovery of an access token once the Google browser session itself has gone. `prompt: 'none'` covers a reload, not a new day.
+- Separation of Google identity/session state from Workspace authorization state.
+- **Account identity, which is not implemented at all.** `GoogleOAuthStatus.account` and the stored `account` field are read and rendered, but no code path ever *writes* them: there is no ID token, no `enableGsi`, and no `userinfo` call anywhere in `src/google/`. In the running app the email line in Settings is therefore permanently absent. Both the unit fixture and the E2E test obtain it by writing `localStorage` directly, which is why the gap is invisible to the suite.
+- **The observable-state set the migration requires.** The contract reserves `needs-consent`, `token-recovery`, and `revoked`, and `authorizationStateFor()` never emits them — deliberately, and asserted as such by `src/google/oauth/capability-policy.test.ts`. A token-client transport cannot distinguish a silently-recoverable expiry from a revoked grant or a declined scope, so "access token expired", "refresh failed", and "grant revoked" all collapse into `reauthorization-required`. Those states are representable in the type system only. Pass 3 is blocked on Pass 2 for this reason, not merely for storage.
 
 ### Pass 4 — Audit and correct every Google scope
 
@@ -78,19 +99,59 @@ The production Elara master system instruction is already separated from ordinar
 
 Remaining work is the final integration contract and E2E proof: the model must not claim writes succeeded before application results exist; authorization-required and revoked states must be surfaced correctly; tool/read/write semantics must remain distinct; and the complete Google authorization → tool → confirmation → API → result loop needs hardened E2E coverage.
 
+## Blocking prerequisite — API Lockbox credential authority
+
+**Status: ✅ COMPLETE (2026-09-11, this pass).**
+
+This is not a Google pass, but it gates Passes 2–3. The generalized Lockbox that introduced multi-credential storage left three defects at the persistence boundary, all verified against `bc6cfc90421d5fcc67657cc1d3e28589b69b904e` before being fixed:
+
+1. **Secondary writes did not verify the Lockbox credential.** `saveYouTubeApiKey(value, credential)` accepted any non-empty string, encrypted the record with it, and reported success. A mistyped credential therefore silently produced a permanently unreadable key, with the Settings screen as the only guard. `docs/API_LOCKBOX.md` claimed the store "requires the current Lockbox credential"; it did not.
+2. **Re-arming security left a secondary permanently unprotected.** Turning security off and back on migrated the Gemini record to the new PIN but skipped the secondary, whose stale `off` stamp made every read path decrypt it with a device-local key stored inside the same record. The YouTube key stayed readable with no credential — through reloads, indefinitely — while Settings reported PIN protection. Root cause: the re-encryption helper skipped records stamped `off`, and read paths trusted a secondary's own mode copy instead of the authority's.
+3. **A secondary could exist with no security authority.** With no Gemini record, the write still succeeded; the resulting orphan had nothing to inherit protection from and nothing that could re-arm it.
+
+The fix makes the Gemini record the single source of truth for protection: read paths resolve the *effective* mode from the authority so a stale stamp can never grant weaker access, unlock repairs a diverged record onto the authority's protection, every mode transition and credential rotation re-seals secondaries it can open and reports the ones it cannot as `mismatch`, and secondary writes require an unlocked session plus proof of possession of the current credential — which also prevents this boundary from becoming a PIN-guessing oracle beside the primary's backoff.
+
+Consequence for the passes that follow: **durable refresh-token storage must land on this boundary, not beside it.** Pass 3's protected store inherits credential verification, authority-derived protection mode, and migration-on-unlock from here.
+
+## Verification integrity
+
+A gate that cannot fail is not evidence. Recorded here so no later pass mistakes it for one.
+
+**`npm run lint` does not check application source.** `eslint.config.js` lists `src/**/*.ts`, `src/**/*.tsx`, `e2e/**/*.ts`, `vite.config.ts`, `vitest.config.ts`, and `playwright.config.ts` under `ignores`, leaving a single config block that applies `no-console` to `**/*.{js,mjs,cjs}`. The command therefore lints 6 files — the `scripts/*.mjs` helpers — and reports success for everything else.
+
+It is not only mis-scoped but structurally unable to do more: `typescript-eslint` and `eslint-plugin-react-hooks` are absent from the dependency tree, so there is no TypeScript parser and no ruleset installed to apply to `src/`.
+
+Consequences to weigh:
+
+- The CI `Lint` step currently provides no signal about the app. Where a task's verification standard lists `npm run lint` as authoritative, that is typecheck and tests doing the work, not lint.
+- Rules the code style visibly depends on — unused variables, explicit `any`, effect dependency correctness in a React 19 codebase with memoised surfaces — have never been enforced automatically.
+- Adding a real TypeScript lint configuration is a prerequisite to trusting "lint green" as a completion criterion. It will surface a backlog and should be planned as its own pass, not adopted as a side effect.
+
+**`npm run typecheck` does not check `e2e/`.** `tsconfig.json` includes `src` only, so every Playwright spec is typechecked by nothing at all. This is not theoretical: the media hand-off suite shipped calling `route.request().header(...)`, a method that does not exist on Playwright's `Request`. An exception thrown inside a `page.route` handler fails the *intercepted request*, not the assertion, so the applet simply never received its fake YouTube response and every test in the file failed on a missing card. Local gates were all green. CI found it, and `--log` and artifact downloads were both unreachable from the working environment, so diagnosis came from check annotations plus reading the loop.
+
+Two consequences:
+
+- A spec can be confidently wrong in exactly the way application code cannot be caught being. Until `e2e/` is typechecked, the only feedback on a misused Playwright API is a failed CI run several minutes later.
+- Three pre-existing errors are already in `e2e/`: `autonomy-cloud.spec.ts` reads `enabled` off `{ id, name }`, and `character-runtime.spec.ts` plus `workspace-shortcuts.spec.ts` import `/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts` by a path TypeScript cannot resolve. Wiring `e2e/` into the typecheck gate means clearing those three first, which is its own small pass and should not be done as a side effect of feature work. A `tsconfig` scoped to `e2e` reproduces all three with `strict` plus `types: ["node"]`.
+
 ## Current position
 
 **Historical foundation: 50/50 prompts complete.**
 
-**Active implementation: Pass 0 complete; Passes 1–5 are the main remaining architecture/runtime work; Pass 6 is substantially implemented; Pass 7 is partially implemented.**
+**Active implementation: Pass 0 complete; Pass 1 complete (verified); the Lockbox credential-authority prerequisite complete; Passes 2–5 are the remaining architecture/runtime work; Pass 6 is substantially implemented; Pass 7 is partially implemented.**
 
-The next substantive implementation pass is **Pass 1 — Remove the abandoned Cloudflare OAuth architecture**.
+> Decision (2026-09-12): the Pass 2 question above is closed by direction rather than by analysis. The applet stays self-contained — no exterior Worker, no server component, no durable refresh-token store. Authorization remains the browser-side Google Identity Services token client that `GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` already specifies, and cross-reload recovery keeps relying on the Google session plus `prompt: 'none'`. A refresh token held in browser storage would be security theatre; the freeze document is now the live contract, not a deferred alternative. Account identity still has no writer, and the Google Settings E2E still seeds `version: 2` plus a hand-written `account`, so both items remain open and are no longer blocked on this decision.
+
+The next substantive implementation pass is **Pass 2**, and it begins with a documented decision rather than with code: reconcile this tracker with `docs/GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` on whether the durable authorization-code + PKCE authority is being built now, and where it is deployed. Two follow-on items are cheap and should ride along, because both are currently invisible to the suite: account identity has no writer (Pass 3), and the Google Settings E2E seeds `version: 2` plus a hand-written `account` into `localStorage`, so it exercises the legacy-migration branch and an unreachable UI state instead of the v3 runtime format.
 
 ## Evidence anchors
 
 - `README.md` records Prompts 1–50 as completed milestones.
-- `docs/IMPLEMENTATION_LOG.md` records the individual prompt commits through Prompt 50.
-- `docs/GOOGLE_OAUTH_ARCHITECTURE.md` describes the intended server-side authorization-code authority.
-- `src/google/oauth/authority.ts` shows the current browser GIS token authority that Passes 1–3 will replace.
+- `docs/IMPLEMENTATION_LOG.md` records the individual prompt commits through Prompt 50, then the post-foundation passes by date. It does not yet record PRs #18–#19.
+- `worker/src/index.ts` and `worker/wrangler.toml` show the Worker owning Gemini, transcription, and autonomy only — no Google OAuth route, token store, or refresh authority. This is the evidence that Pass 1 is complete.
+- `docs/GOOGLE_OAUTH_ARCHITECTURE.md` describes the intended server-side authorization-code authority; `docs/GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` is the invariant contract and currently defers that authority to a later subsystem. The conflict is Pass 2's first decision.
+- `src/google/oauth/authority.ts` shows the current browser GIS token authority that Passes 2–3 will replace.
+- `src/google/oauth/code-flow.ts` is the unreferenced authorization-code client: present, unit-tested, and not wired into any runtime path.
 - `src/google/tools/service-handlers.ts` shows the focused operational Google tool-handler surface.
-- The latest CI on `ac5d8b9d04a129fc2234ed9ad0e952e8619c6e1f` passed lint, typecheck, unit tests, and build, then failed one Android portrait E2E settings test before the final reliability gate could run.
+- CI on `bc6cfc90421d5fcc67657cc1d3e28589b69b904e` is green end to end: lint, typecheck, unit tests, Worker/DO tests, build, Chromium installation, all configured Playwright projects, the final reliability gate, and the Pages deploy. The earlier Android portrait failure recorded here is resolved.
+- Green CI means every automated gate passes. It does not mean the product is functionally complete: no automated test performs a real Google authorization or a live Workspace call, and Playwright has no browser network seam for `*.googleapis.com`.

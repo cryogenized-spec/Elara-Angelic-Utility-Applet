@@ -14,7 +14,7 @@ const MediaCard = lazy(() => import('./MediaCard').then((module) => ({ default: 
 export function MessageMedia({ items }: { items?: readonly MediaItem[] }) {
   if (!items?.length) return null;
   return (
-    <section className="media-rail" aria-label="Resolved YouTube results">
+    <section className="media-rail" aria-label="Media results from YouTube">
       <Suspense fallback={null}>
         {items.map((item) => (
           <MediaCard key={`${item.provider}:${item.id}`} item={item} />

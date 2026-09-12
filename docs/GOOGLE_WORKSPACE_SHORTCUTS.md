@@ -12,6 +12,8 @@ Geometry: the flyout opens to the right of the trigger and is clamped to the vie
 
 Tapping a service expands a compact vertically scrollable chooser of that service's saved recipes. Selecting a recipe does not append a synthetic user message to the visible conversation. It creates an internal agent-task request; the final assistant response appears normally in the conversation.
 
+> Correction (2026-09-12): the paragraph above previously described selecting a recipe as creating "an internal agent-task request" with no synthetic user message in the conversation. That behaviour was implemented in `App.tsx` as a synthesized prompt — a turn the user never wrote, streamed to the provider with no persisted transcript message — which violated the standing rule that hidden chat prompts must not implement UI shortcuts, and left the provider holding input the transcript never recorded. Selecting a recipe now places the recipe's saved intent into the composer as the user's own visible, editable draft; sending it is an ordinary message turn, so the provider input and the transcript are the same text by construction. The per-recipe restricted tool set was dropped with it: a prefilled message runs with the standard tool set exactly like typed text.
+
 The exact small-row pixel height is a visual tuning value, not a data-model contract. Keep the chooser touch-friendly and keyboard accessible.
 
 ## Settings contract

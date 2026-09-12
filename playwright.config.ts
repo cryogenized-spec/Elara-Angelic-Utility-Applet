@@ -43,5 +43,9 @@ export default defineConfig({
     command: 'npm run dev -- --host 127.0.0.1',
     url: 'http://127.0.0.1:5173/Elara-Angelic-Utility-Applet/',
     reuseExistingServer: true,
+    // The Google settings E2E drives the real OAuth authority, which refuses
+    // to run without a configured client id. Client IDs are public browser
+    // configuration (see .env.example); this value exists only for tests.
+    env: { ...process.env, VITE_GOOGLE_CLIENT_ID: 'e2e-public-client-id.apps.googleusercontent.com' },
   },
 });

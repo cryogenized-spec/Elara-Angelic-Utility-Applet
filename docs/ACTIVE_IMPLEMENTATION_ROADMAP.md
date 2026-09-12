@@ -71,6 +71,8 @@ What is still missing:
 
 > Correction (2026-09-12): Prior claim "Account identity, which is not implemented at all" is superseded — writer now exists in `authority.ts` via userinfo fetch. Prior claim that E2E seeds `version:2` plus hand-written account is fixed — E2E now seeds v3 with `enabledCapabilities` + `grantedProviderScopes` + `account`. Server-side persistence remains intentionally out of scope per freeze.
 
+> Correction (2026-09-12, Pass 5): the correction above left the E2E still forging the app's own stored state (a hand-written v3 `account` in localStorage), which tests the reader without the writer. `e2e/google-oauth-settings.spec.ts` now drives the real flow: the GIS token client and userinfo endpoints are stubbed as external provider responses, and every persisted record — including `account` — is produced by the canonical writer in `authority.ts`. Seeding survives only as an explicit legacy-migration test using the genuine v2 shape (`version: 2` + `grantedCapabilities`, no scope manifest). The freeze doc now records the best-effort nature of userinfo-derived identity.
+
 ### Pass 4 — Audit and correct every Google scope
 
 **Status: 🟡 SUBSTANTIAL FOUNDATION; RE-AUDIT REQUIRED.**
@@ -138,6 +140,11 @@ Two consequences:
 - A spec can be confidently wrong in exactly the way application code cannot be caught being. Until `e2e/` is typechecked, the only feedback on a misused Playwright API is a failed CI run several minutes later.
 - Three pre-existing errors are already in `e2e/`: `autonomy-cloud.spec.ts` reads `enabled` off `{ id, name }`, and `character-runtime.spec.ts` plus `workspace-shortcuts.spec.ts` import `/Elara-Angelic-Utility-Applet/src/persistence/gemini-api-key.ts` by a path TypeScript cannot resolve. Wiring `e2e/` into the typecheck gate means clearing those three first, which is its own small pass and should not be done as a side effect of feature work. A `tsconfig` scoped to `e2e` reproduces all three with `strict` plus `types: ["node"]`.
 
+**Correction (2026-09-12): `npm run typecheck` now checks `e2e/`.** The paragraph above preserved as written, up to this point, described the state through today: `e2e/` was typechecked by nothing, and the failure mode it records (`route.request().header(...)`) is exactly what slipped through. A committed `tsconfig.e2e.json` (`strict`, `types: ["node"]`, `noEmit`, `allowImportingTsExtensions`) includes `e2e/`; `typecheck` runs it after the `src` and `worker` projects, and `typecheck:e2e` runs it standalone. CI's existing Typecheck step therefore covers it with no workflow change, and `scripts/reliability-gate.mjs`'s required-script check passes unchanged. The three pre-existing errors were cleared with no `@ts-ignore` and no spec file excluded from the include list:
+
+- `autonomy-cloud.spec.ts(194)` asserted real runtime data through an under-typed fixture: the config POST carries `listRoutines()` output verbatim, and `ElaraRoutine` has `enabled: z.boolean()` (`src/autonomy/contracts.ts`; the Dexie table even indexes on it). Fixed by widening the spec's own `CapturedConfig.routines` type to include `enabled: boolean` — the assertion was sound; its type was not.
+- The two `TS2307` import specifiers were left untouched because they are not typos: they are Vite dev-server URLs the *browser* resolves against the configured base `/Elara-Angelic-Utility-Applet/` inside `page.evaluate`. A relative `../src/...` specifier would resolve against the page URL instead and break the running suite, so the specs stay as they are and the tsconfig maps `"/Elara-Angelic-Utility-Applet/src/*"` to `./src/*`. (`baseUrl` was removed in TypeScript 7, so `paths` targets resolve relative to the config; `allowImportingTsExtensions` covers the `.ts` suffix.) The imports now resolve to real source, so those specs' Lockbox calls are checked against the actual API. Playwright's own bundler resolves the runtime specifier exactly as before — verified by the suite running unchanged in CI on this branch.
+
 ## Current position
 
 **Historical foundation: 50/50 prompts complete.**
@@ -147,6 +154,8 @@ Two consequences:
 > Decision (2026-09-12): the Pass 2 question above is closed by direction rather than by analysis. The applet stays self-contained — no exterior Worker, no server component, no durable refresh-token store. Authorization remains the browser-side Google Identity Services token client that `GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` already specifies, and cross-reload recovery keeps relying on the Google session plus `prompt: 'none'`. A refresh token held in browser storage would be security theatre; the freeze document is now the live contract, not a deferred alternative. Account identity now has a writer (userinfo fetch after token acquisition), and the Google Settings E2E now seeds v3 runtime format instead of legacy v2.
 
 The next substantive implementation pass is **Pass 4 (scope re-audit)**, with Pass 5 (real runtime proof) following. Pass 2 is closed, Pass 3's cheap follow-ons are done: account identity writer exists and E2E seeding is fixed. Remaining open items are scope re-audit against live authority and hardening of real Workspace interactions.
+
+> Outstanding (2026-09-12): **physical Android validation of the media hand-off** is the one item blocking an honest "the YouTube feature is complete". The protocol and evidence artifact is `docs/ANDROID_DEVICE_VALIDATION.md` (2026-09-12) — a dated on-device checklist whose result fields are blank until a person runs it on a phone. Until that run is recorded, the feature's correct status is: implemented and CI-verified (unit + Playwright on desktop and an Android user-agent), device behaviour unverified. `docs/MEDIA_INTEGRATION.md` → "Verified where" carries the same split.
 
 ## Evidence anchors
 

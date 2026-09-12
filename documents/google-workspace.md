@@ -1,7 +1,7 @@
 ---
 id: SYS-GWS
 status: active
-verified_commit: cab20253ef448dd96e4feb82bf917729b27404a3
+verified_commit: 2113653bc007cbd8d3a877fd09a3242c163b8009
 scope: Google Workspace service adapters and model tool execution
 paths: [src/google/calendar, src/google/tasks, src/google/gmail, src/google/docs, src/google/drive, src/google/sheets, src/google/chat, src/google/tools, src/google/confirmation]
 keywords: [workspace, calendar, tasks, gmail, docs, drive, sheets, tools, confirmation]
@@ -41,6 +41,7 @@ The registry assigns each operation a capability, risk (`read|write|send|destruc
 | Gmail | `src/google/gmail/` |
 | Docs/Drive/Sheets | matching `src/google/*/` folders |
 | Chat adapter | `src/google/chat/` |
+| Shortcut UI | `src/app/components/WorkspaceMenu.tsx`, `WorkspaceShortcutSettings.tsx` |
 
 ## 4. Data and contracts
 
@@ -50,6 +51,8 @@ Google Chat service code and scopes exist, but Chat tools are currently marked i
 
 The shared confirmation broker supports single or grouped mutation approvals, explicit decline, approve-selected and approve-all controls. Cancellation fails closed.
 
+Saved Workspace shortcuts are UI recipes, not hidden model instructions. Selecting one pre-fills visible, editable composer text; provider execution begins only after explicit user submit and then uses the ordinary registered tool surface. Stored shortcut tool names are configuration metadata and cannot bypass schema, capability, execution-plane or confirmation checks.
+
 ## 5. Invariants
 
 - Model-visible declarations derive from the executable registry; no shadow allow-list.
@@ -58,6 +61,7 @@ The shared confirmation broker supports single or grouped mutation approvals, ex
 - Confirmation is separate from OAuth: permission to call an API is not consent to mutate data.
 - Tool schemas never contain credentials, raw scopes or provider URLs.
 - Browser/worker execution-plane filtering is explicit; browser-only tools are not silently advertised by the Worker.
+- Workspace shortcuts never create hidden synthetic user turns.
 
 ## 6. Security and failure semantics
 
@@ -65,7 +69,7 @@ Arguments are validated before execution, OAuth capabilities are checked central
 
 ## 7. Verification and tests
 
-Use service contract tests, `src/google/tools/*test*`, Gemini declaration tests, confirmation broker/policy tests and integration/E2E flows. The reliability gate locks key invariants including Calendar write capability, grouped confirmations, registry-derived declarations and explicit accessibility controls.
+Use service contract tests, `src/google/tools/*test*`, Gemini declaration tests, confirmation broker/policy tests and integration/E2E flows. `e2e/workspace-shortcuts.spec.ts` verifies visible shortcut drafting and explicit submission. The reliability gate locks key invariants including Calendar write capability, grouped confirmations, registry-derived declarations and explicit accessibility controls.
 
 ## 8. Known gaps
 

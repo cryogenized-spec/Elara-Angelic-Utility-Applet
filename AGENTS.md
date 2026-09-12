@@ -5,16 +5,14 @@ This repository is maintained for repeated AI-assisted development. Minimize arc
 ## Load protocol
 
 1. Read `documents/manifest.json`.
-2. Route by the most-specific matching source path; use keywords when the task is conceptual rather than path-scoped.
+2. Route by the longest matching source-path prefix. If equally specific routes tie, load all tied system documents. Use keywords for conceptual tasks without a clear path.
 3. Load one canonical system document by default.
 4. Fetch only the exact source/tests needed to verify or change that contract.
-5. Load `documents/architecture.md` or a second system document only when the task crosses a declared boundary.
+5. Load `documents/architecture.md` or another system document only when the task crosses a declared boundary.
 
-Authority is `source + tests -> canonical /documents`. Legacy `/docs`, old pass/status files and Git history are evidence/history only; they are not current technical authority.
+Authority is `source + tests -> canonical /documents`. Git history is evidence/history only; it is not current technical authority.
 
-Update the owning canonical system document whenever a durable contract changes. Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, milestone or implementation-log documents. Do not add new documentation under `/docs`. Chronology belongs in Git.
-
-Legacy `/docs` and remaining pass/status files are migration-only inputs pending reference migration and deletion. Do not repair them in parallel with canonical docs.
+Update the owning canonical system document whenever a durable contract changes. Do not create new `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap, milestone or implementation-log documents. Do not create a second documentation root. Chronology belongs in Git.
 
 ## Engineering boundaries
 
@@ -22,12 +20,26 @@ Use implementation and tests, not old design prose, to determine runtime truth. 
 
 Normal interactive Gemini is browser-direct through `src/gemini/provider.ts` and the local Lockbox. Google Workspace authorization is browser-side GIS through `src/google/oauth/`. Cloud Worker/autonomy execution is a separate runtime plane. VTT is an input modality and must not create a competing chat provider/persona. See `SYS-ARCH / documents/architecture.md` before changing those boundaries.
 
+A green test that passes for the wrong reason is a defect. Strengthen the assertion or fixture until it proves the intended invariant; do not weaken product or test contracts merely to make a gate green.
+
 ## Change discipline
 
 Prefer narrow changes in the owning subsystem. Reuse existing schemas, repositories, registries and state machines before introducing another authority. Prefer exact symbols, paths, compact flows and invariants over repeated explanatory prose. When a task exposes stale documentation, fix the canonical document rather than adding a compensating note.
 
-Direct commits to `main` are normal for this repository. Do not leave stale or superseded pull requests open.
+Before writing directly to `main`, check open PRs and recent `main` movement. If another active workstream depends on a stable base or touches the same files, use a short-lived branch and do not move, close or rewrite that work. Direct `main` writes remain acceptable when no such conflict exists. Do not leave stale or superseded pull requests open.
 
 ## Verification
 
-Run the smallest relevant checks while iterating and the applicable repository gates before declaring work complete. Main commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:workers`, `npm run build`, `npm run reliability:check`, `npm run e2e`. If the environment prevents a gate such as browser E2E, state that explicitly; never claim an unrun check passed.
+Before calling repository work complete, run the broad gate in this order:
+
+```text
+npm run lint
+npm run typecheck
+npm test
+npm run test:workers
+npm run build
+npx playwright test --project=chromium --project=android-portrait --project=onboarding
+npm run reliability:check
+```
+
+CI is the release authority. If the current environment cannot execute Playwright, state that explicitly and rely on CI for browser evidence; `playwright --list` proves discovery/parsing only, not execution. Never claim an unrun gate passed.

@@ -1,7 +1,7 @@
 ---
 id: SYS-ARCH
 status: active
-verified_commit: cab20253ef448dd96e4feb82bf917729b27404a3
+verified_commit: c9650583b813b6914d8f3f11161e646215330421
 scope: repository-wide
 paths: [src, worker/src]
 keywords: [architecture, systems, boundaries, source-map, runtime, persistence]
@@ -9,7 +9,7 @@ keywords: [architecture, systems, boundaries, source-map, runtime, persistence]
 
 # Elara architecture
 
-This is the code-verified repository map. Source and tests outrank prose if documentation later drifts. Legacy pass/status files, roadmaps and implementation logs are migration evidence only.
+This is the code-verified repository map. Source and tests outrank prose if documentation later drifts. Superseded implementation narratives belong to Git history rather than a parallel documentation tree.
 
 ## 1. Runtime spine
 
@@ -59,13 +59,26 @@ UI is presentation. It may invoke typed application callbacks but must not own r
 
 `SYS-GEM` may consume the Character Master, bounded memory context, prepared artifact IDs/settings and model-visible tool declarations. It does not own Google service logic, artifact persistence or memory persistence.
 
-`SYS-GWS` separates model declaration from execution. The registry assigns capability/risk/exposure/execution plane; service schemas validate arguments; mutation confirmation is a separate consent boundary.
+`SYS-GWS` separates model declaration from execution. The registry assigns capability/risk/exposure/execution plane; service schemas validate arguments; mutation confirmation is a separate consent boundary. The model proposes intent; application code validates and admits authority.
+
+Autonomy/retrieval trust follows this precedence:
+
+```text
+system policy
+> user routine
+> user-authorized context
+> external data
+```
+
+Retrieved/external content is evidence, never authority. It cannot grant tools, widen permissions or override system/application policy.
 
 `SYS-MEM` owns durable semantics. Normal Gemini receives a bounded contextual projection; records remain in the memory store. No live Gemini-visible `memory.*` mutation tool exists at this verified commit.
 
 `SYS-VTT` is an input modality. Direct transcription and optional transformation do not establish a second chat provider/persona; transformed text returns to the composer for user review.
 
 `SYS-AUTO` is a separate execution mode. Cloud routines may execute through the Worker while normal chat stays browser-driven.
+
+User-intent provenance is also a boundary: app-authored UI guidance must not masquerade as user-authored chat input. The current Workspace shortcut path in `App.tsx` is a known exception documented in `SYS-CHAT`; remove that exception rather than generalizing it.
 
 ## 4. Persistence map
 
@@ -91,7 +104,9 @@ Microphone capture is browser-local. Transcription currently calls Gemini direct
 
 ## 6. Google and model tool boundary
 
-Live Google authorization is browser GIS. There is no current durable server refresh-token authority. Workspace adapters cover Calendar, Tasks, Gmail, Docs, Drive and Sheets; Google Chat adapter/scope foundations exist but model exposure remains deferred/internal.
+Live Google authorization is browser GIS. The current product decision is self-contained browser authorization: no external Google-auth server, durable browser refresh-token store or second authorization Worker is part of the active architecture. `src/google/oauth/code-flow.ts` is an unreferenced/tested foundation, not a live execution boundary.
+
+Workspace adapters cover Calendar, Tasks, Gmail, Docs, Drive and Sheets; Google Chat adapter/scope foundations exist but model exposure remains deferred/internal.
 
 The generic model tool registry also carries application-local tools (`document.create_pdf`, roleplay world operations) and browser-only `youtube.search`. Treat it as the executable model capability surface, not as proof that every tool is a Google API.
 
@@ -105,4 +120,4 @@ The Character Master is user-owned and ships empty by default. Durable memory is
 
 `/documents` is the canonical technical-documentation root. Filenames/system IDs are stable routing keys; chapter numbers are local navigation. Do not create `PASS`, `STATUS`, `HANDOFF`, `RECOVERY`, roadmap or implementation-log files. Git owns chronology.
 
-Legacy `/docs` and old pass/status files remain migration-only inputs until hard-coded links and CI assertions are repointed; then they should be deleted rather than maintained in parallel.
+The legacy `/docs` tree and pass/status migration files were removed after canonical extraction and reference migration. `public/core/README.md` remains intentionally outside `/documents` as an operational BusyTeX asset note.

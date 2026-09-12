@@ -7,7 +7,7 @@ import { useFolders } from '../folders/FolderProvider';
 import { MarkdownText } from './MarkdownText';
 import './durable-memory-settings.css';
 
-const MEMORY_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/docs/MEMORY_README.md';
+const MEMORY_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/documents/memory.md#memory-bank';
 const MEMORY_KINDS: MemoryKind[] = ['CORE', 'CONTEXTUAL', 'EPISODIC', 'MICRO_OBSERVATION'];
 const MEMORY_LIFECYCLES = ['active', 'dormant', 'archived'] as const;
 

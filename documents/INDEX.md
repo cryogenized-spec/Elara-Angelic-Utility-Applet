@@ -1,8 +1,8 @@
 # Elara documentation index
 
-`/documents` is the canonical technical-documentation root. Every bounded system has an active current-state reference. Legacy `/docs` and remaining `*_PASS_*` / `*_STATUS.*` files are migration-only inputs pending reference migration and deletion.
+`/documents` is the canonical technical-documentation root. Every bounded system has an active current-state reference. Historical pass/status/roadmap material has been retired; use Git history only when chronology is required.
 
-For machine routing, start with [`manifest.json`](./manifest.json). For repository-wide boundaries, use [`architecture.md`](./architecture.md). [`migration-map.json`](./migration-map.json) is temporary cleanup scaffolding and is not technical authority.
+For machine routing, start with [`manifest.json`](./manifest.json). For repository-wide boundaries, use [`architecture.md`](./architecture.md).
 
 ## 1. Minimal load protocol
 
@@ -15,7 +15,7 @@ manifest.json
 -> architecture.md or another system document only if the change crosses a boundary
 ```
 
-Path routing uses the most-specific matching manifest path. Keyword routing is for conceptual tasks without a clear path. This keeps routine agent context small without hiding the human-readable index.
+Path routing uses the longest matching manifest prefix. If multiple systems tie at the same specificity, load all tied documents; otherwise load one. Keyword routing is for conceptual tasks without a clear path. This keeps routine agent context small without hiding the human-readable index.
 
 ## 2. Authority
 
@@ -25,7 +25,7 @@ source code + tests
 canonical /documents system document
 ```
 
-Legacy documents and Git history are evidence/history only. When prose conflicts with implementation, verify the implementation and repair the canonical document.
+Git history is evidence/history only. When prose conflicts with implementation, verify the implementation and repair the canonical document.
 
 ## 3. Routing table
 
@@ -77,6 +77,8 @@ keywords: [routing, terms, aliases]
 ## 8. Known gaps
 ```
 
+`manifest.json` is the routing authority. Frontmatter `paths` and `keywords` make each document self-describing and may summarize its primary roots; they do not replace or override manifest routing.
+
 Use paragraphs for explanation and compact tables/fenced flows for contracts. Prefer exact symbols, source paths and invariants over duplicated prose. Do not copy chronology into current-state references.
 
 ## 5. Cross-reference rule
@@ -89,8 +91,8 @@ When a contract spans systems, document the owning rule once and only the consum
 
 A change that modifies a durable contract updates the owning system document in the same change. New pass logs, handoff files, recovery notes, roadmap documents and implementation diaries are prohibited. Git commits/PR history provide chronology.
 
-`manifest.json` is the low-token router. Load only the mapped system document(s) for the task unless a real cross-system dependency requires more context.
+`manifest.json` is the low-token router. Load only the mapped system document(s) for the task unless a real cross-system dependency or route tie requires more context.
 
-## 7. Legacy cleanup state
+## 7. Repository state
 
-Canonical extraction is complete. Remaining cleanup is mechanical: rewrite application documentation links, move CI/reliability assertions to canonical paths, delete legacy `/docs` plus old pass/status files, and remove `migration-map.json` after no legacy references remain. `public/core/README.md` is an operational BusyTeX deployment note and is intentionally preserved in place.
+The legacy `/docs` tree and old pass/status/implementation-plan files were removed after verified current facts were consolidated here. `public/core/README.md` remains intentionally outside `/documents` because it is an operational BusyTeX runtime-asset note, not general project documentation. Superseded implementation narratives remain available through Git history.

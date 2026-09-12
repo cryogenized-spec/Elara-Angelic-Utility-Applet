@@ -29,7 +29,7 @@ export function MarkdownReference({ open, onClose }: { open: boolean; onClose: (
       <header><div><span className="panel-kicker">COMPOSER</span><h2 id="markdown-reference-title">Markdown</h2></div><button type="button" className="icon-button" aria-label="Close Markdown reference" onClick={onClose}>×</button></header>
       <p><span>Raw HTML, scripts, embeds, arbitrary CSS</span>, and browser-active markup are not rendered. Restricted Markdown is supported.</p>
       <div className="markdown-reference__rows">{rows.map(([label, syntax]) => <div className="markdown-reference__row" key={label}><span>{label}</span><code>{syntax}</code></div>)}</div>
-      <a className="markdown-reference__docs" href="https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/docs/MARKDOWN_FORMAT.md" target="_blank" rel="noreferrer noopener">Full Markdown format documentation ↗</a>
+      <a className="markdown-reference__docs" href="https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/documents/chat.md#markdown" target="_blank" rel="noreferrer noopener">Full Markdown format documentation ↗</a>
     </section>
   </div>;
 }

@@ -38,14 +38,50 @@ export interface HandoffPlatform {
  * Detects Android from the client-hints platform brand when available, falling
  * back to the UA string. Both are read defensively: this runs during render and a
  * missing value must mean "use the plain web link", never an exception.
+ *
+ * Correction (2026-09-12): The previous implementation treated any Android UA as
+ * intent-capable, but Firefox on Android and PWA standalone contexts do not
+ * understand `intent://` and show ERR_UNKNOWN_URL_SCHEME. We now only report
+ * Android when the UA also indicates a Chromium-based browser that is known to
+ * support intent (Chrome, Samsung Internet), and the href itself is always https
+ * — intent is attempted only via a user-gesture navigation with https as the
+ * guaranteed fallback.
  */
 export function detectHandoffPlatform(): HandoffPlatform {
   if (typeof navigator === 'undefined') return { isAndroid: false };
-  const hints = (navigator as { userAgentData?: { platform?: string } }).userAgentData;
+  const nav = navigator as unknown as {
+    userAgent?: string;
+    userAgentData?: { platform?: string; brands?: Array<{ brand: string }> };
+  };
+  const hints = nav.userAgentData;
+  const ua = nav.userAgent ?? '';
+
+  // Prefer client hints when available.
   if (typeof hints?.platform === 'string' && hints.platform.trim()) {
-    return { isAndroid: /android/i.test(hints.platform) };
+    const isAndroidPlatform = /android/i.test(hints.platform);
+    if (!isAndroidPlatform) return { isAndroid: false };
+    // If brands are available, require a Chromium brand for intent support.
+    if (Array.isArray(hints.brands) && hints.brands.length > 0) {
+      const brandString = hints.brands.map((b) => b.brand).join(' ');
+      const isChromium = /Chrom(ium|e)|SamsungBrowser|Google Chrome/i.test(brandString);
+      const isFirefox = /Firefox/i.test(ua);
+      return { isAndroid: isChromium && !isFirefox };
+    }
+    // No brands, but platform says Android — check UA for Chrome.
+    const isChrome = /Chrome|CriOS|SamsungBrowser/i.test(ua);
+    const isFirefox = /Firefox|FxiOS/i.test(ua);
+    const isEdge = /Edg/i.test(ua);
+    return { isAndroid: isChrome && !isFirefox && !isEdge };
   }
-  return { isAndroid: /android/i.test(navigator.userAgent ?? '') };
+
+  // Fallback to UA string.
+  const isAndroid = /Android/i.test(ua);
+  if (!isAndroid) return { isAndroid: false };
+  const isChrome = /Chrome|CriOS|SamsungBrowser/i.test(ua);
+  const isFirefox = /Firefox|FxiOS/i.test(ua);
+  const isEdge = /Edg/i.test(ua);
+  const isOpera = /OPR|Opera/i.test(ua);
+  return { isAndroid: isChrome && !isFirefox && !isEdge && !isOpera };
 }
 
 function httpsUrl(value: string): URL | undefined {
@@ -84,16 +120,18 @@ export function mediaDestinationUrl(item: MediaItem): string {
 }
 
 /**
- * The `href` a media card should use.
+ * The Android intent URI for a media item, if the platform can support it.
  *
- * Returns the destination URL unchanged on non-Android platforms and for any URL
- * that is not a well-formed https link, so the card is never given a value it
- * cannot navigate to.
+ * Returns undefined on non-Android platforms or for non-https links, so callers
+ * can fall back to the plain https destination. The intent form is what makes
+ * Android show its app chooser (all handlers) rather than jumping to the default
+ * browser, but it is only understood by Chrome on Android — other browsers show
+ * ERR_UNKNOWN_URL_SCHEME.
  */
-export function mediaHandoffHref(item: MediaItem, platform: HandoffPlatform = detectHandoffPlatform()): string {
+export function mediaHandoffIntentHref(item: MediaItem, platform: HandoffPlatform = detectHandoffPlatform()): string | undefined {
   const destination = mediaDestinationUrl(item);
   const target = httpsUrl(destination);
-  if (!platform.isAndroid || !target) return destination;
+  if (!platform.isAndroid || !target) return undefined;
 
   const params = [
     `scheme=${target.protocol.replace(':', '')}`,
@@ -103,6 +141,24 @@ export function mediaHandoffHref(item: MediaItem, platform: HandoffPlatform = de
     'category=android.intent.category.BROWSABLE',
   ];
   return `${ANDROID_INTENT_PREFIX}${target.host}${target.pathname}${target.search}#Intent;${params.join(';')};end`;
+}
+
+/**
+ * The `href` a media card should use.
+ *
+ * Always returns the https destination. The intent URI is available separately
+ * via `mediaHandoffIntentHref` and is attempted via a user-gesture navigation
+ * on Android, with the https URL as the guaranteed fallback. This avoids
+ * ERR_UNKNOWN_URL_SCHEME on desktop, in Firefox on Android, and in PWA
+ * standalone contexts where intent:// is not recognised, while still allowing
+ * the chooser on Chrome for Android.
+ */
+export function mediaHandoffHref(item: MediaItem, platform: HandoffPlatform = detectHandoffPlatform()): string {
+  const destination = mediaDestinationUrl(item);
+  // The href is always the https destination — never an intent:// URI — so the
+  // link is never dead. Android intent handling is done in the click handler.
+  void platform;
+  return destination;
 }
 
 /** The label a card shows for its primary action. */

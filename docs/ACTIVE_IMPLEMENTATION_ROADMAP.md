@@ -1,6 +1,6 @@
 # Elara — Active Implementation Roadmap
 
-Status date: 2026-09-11
+Status date: 2026-09-12
 
 This document supersedes the historical 50-prompt foundation roadmap as the active delivery tracker.
 
@@ -43,7 +43,7 @@ Removing the browser's *dependency* on the retired design is therefore folded in
 
 ### Pass 2 — Rebuild Google authorization around the current GIS authorization-code model
 
-**Status: ❌ NOT STARTED — and currently contradicted by its own target contract.**
+**Status: ✅ RESOLVED — self-contained GIS token client is the live contract (2026-09-12 decision).**
 
 The repository uses browser GIS access-token acquisition directly. `src/google/oauth/code-flow.ts` implements a GIS *authorization-code* client and has unit tests, but **nothing in the application imports it** — only its own test file does. It is not a seam, not wired into `googleOAuthAuthority`, and there is no code-exchange endpoint anywhere to receive the code. Describing the code flow as "implemented" (as `docs/oauth/PASS_02_STATUS.md` does) is accurate about the module and misleading about the runtime.
 
@@ -54,18 +54,22 @@ Before this pass can proceed, one contradiction has to be resolved deliberately 
 
 Both cannot direct the work. Either the freeze is amended to open that subsystem now, or this pass is re-dated and Pass 3's durability requirements are scoped to what a token-client transport can actually deliver. The choice also decides the deployment question the freeze leaves open: a refresh-capable authority needs a server, and "not the Gemini Worker" means a *second* Worker with its own secret storage — a new deployment surface that CI cannot verify against live Google.
 
+> Correction (2026-09-12): Decision recorded in Current position — the applet stays self-contained, no exterior Worker, no server component, no durable refresh-token store. Authorization remains the browser-side GIS token client that `GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` specifies. A refresh token held in browser storage would be security theatre. The freeze document is now the live contract, not a deferred alternative. `src/google/oauth/code-flow.ts` remains an unreferenced module for a later subsystem, not the current runtime. Pass 2 is therefore closed as "resolved by direction" rather than "rebuild now".
+
 ### Pass 3 — Incremental authorization + persistent connection
 
-**Status: 🟡 PARTIAL FOUNDATION ONLY.**
+**Status: 🟡 PARTIAL FOUNDATION — account identity writer now implemented (2026-09-12).**
 
 The repository already has capability-level remembered grant state, incremental capability selection, explicit partial/reauthorization states, and GIS incremental-consent support. The current authority persists capability metadata locally and keeps access tokens only in memory.
 
 What is still missing:
 
-- Server-side refresh-token persistence, and therefore any silent recovery of an access token once the Google browser session itself has gone. `prompt: 'none'` covers a reload, not a new day.
-- Separation of Google identity/session state from Workspace authorization state.
-- **Account identity, which is not implemented at all.** `GoogleOAuthStatus.account` and the stored `account` field are read and rendered, but no code path ever *writes* them: there is no ID token, no `enableGsi`, and no `userinfo` call anywhere in `src/google/`. In the running app the email line in Settings is therefore permanently absent. Both the unit fixture and the E2E test obtain it by writing `localStorage` directly, which is why the gap is invisible to the suite.
+- Server-side refresh-token persistence, and therefore any silent recovery of an access token once the Google browser session itself has gone. `prompt: 'none'` covers a reload, not a new day. This is by design per the 2026-09-12 decision — no server component.
+- Separation of Google identity/session state from Workspace authorization state — now partially addressed: `account` is populated from userinfo.
+- **Account identity — now implemented.** `src/google/oauth/authority.ts` now requests `https://www.googleapis.com/auth/userinfo.email openid` alongside every capability scope and best-effort fetches `https://www.googleapis.com/oauth2/v2/userinfo` (fallback to v1 and openidconnect) to populate `GoogleOAuthStatus.account`. Interactive success writes email + displayName; interactive failure clears stale account; silent `prompt:none` retains previous account on fetch failure. Unit tests in `authority.test.ts` cover write and clear paths, and `e2e/google-oauth-settings.spec.ts` now seeds v3 format.
 - **The observable-state set the migration requires.** The contract reserves `needs-consent`, `token-recovery`, and `revoked`, and `authorizationStateFor()` never emits them — deliberately, and asserted as such by `src/google/oauth/capability-policy.test.ts`. A token-client transport cannot distinguish a silently-recoverable expiry from a revoked grant or a declined scope, so "access token expired", "refresh failed", and "grant revoked" all collapse into `reauthorization-required`. Those states are representable in the type system only. Pass 3 is blocked on Pass 2 for this reason, not merely for storage.
+
+> Correction (2026-09-12): Prior claim "Account identity, which is not implemented at all" is superseded — writer now exists in `authority.ts` via userinfo fetch. Prior claim that E2E seeds `version:2` plus hand-written account is fixed — E2E now seeds v3 with `enabledCapabilities` + `grantedProviderScopes` + `account`. Server-side persistence remains intentionally out of scope per freeze.
 
 ### Pass 4 — Audit and correct every Google scope
 
@@ -138,11 +142,11 @@ Two consequences:
 
 **Historical foundation: 50/50 prompts complete.**
 
-**Active implementation: Pass 0 complete; Pass 1 complete (verified); the Lockbox credential-authority prerequisite complete; Passes 2–5 are the remaining architecture/runtime work; Pass 6 is substantially implemented; Pass 7 is partially implemented.**
+**Active implementation: Pass 0 complete; Pass 1 complete (verified); the Lockbox credential-authority prerequisite complete; Pass 2 resolved as self-contained (2026-09-12 decision); Pass 3 account identity writer implemented (2026-09-12); Passes 4–5 remain architecture/runtime proof; Pass 6 is substantially implemented; Pass 7 is partially implemented.**
 
-> Decision (2026-09-12): the Pass 2 question above is closed by direction rather than by analysis. The applet stays self-contained — no exterior Worker, no server component, no durable refresh-token store. Authorization remains the browser-side Google Identity Services token client that `GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` already specifies, and cross-reload recovery keeps relying on the Google session plus `prompt: 'none'`. A refresh token held in browser storage would be security theatre; the freeze document is now the live contract, not a deferred alternative. Account identity still has no writer, and the Google Settings E2E still seeds `version: 2` plus a hand-written `account`, so both items remain open and are no longer blocked on this decision.
+> Decision (2026-09-12): the Pass 2 question above is closed by direction rather than by analysis. The applet stays self-contained — no exterior Worker, no server component, no durable refresh-token store. Authorization remains the browser-side Google Identity Services token client that `GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` already specifies, and cross-reload recovery keeps relying on the Google session plus `prompt: 'none'`. A refresh token held in browser storage would be security theatre; the freeze document is now the live contract, not a deferred alternative. Account identity now has a writer (userinfo fetch after token acquisition), and the Google Settings E2E now seeds v3 runtime format instead of legacy v2.
 
-The next substantive implementation pass is **Pass 2**, and it begins with a documented decision rather than with code: reconcile this tracker with `docs/GOOGLE_OAUTH_ARCHITECTURE_FREEZE.md` on whether the durable authorization-code + PKCE authority is being built now, and where it is deployed. Two follow-on items are cheap and should ride along, because both are currently invisible to the suite: account identity has no writer (Pass 3), and the Google Settings E2E seeds `version: 2` plus a hand-written `account` into `localStorage`, so it exercises the legacy-migration branch and an unreachable UI state instead of the v3 runtime format.
+The next substantive implementation pass is **Pass 4 (scope re-audit)**, with Pass 5 (real runtime proof) following. Pass 2 is closed, Pass 3's cheap follow-ons are done: account identity writer exists and E2E seeding is fixed. Remaining open items are scope re-audit against live authority and hardening of real Workspace interactions.
 
 ## Evidence anchors
 

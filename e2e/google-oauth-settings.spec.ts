@@ -3,11 +3,24 @@ import { expect, test } from '@playwright/test';
 const GOOGLE_STORAGE_KEY = 'elara.google.authorization.v2';
 
 async function seedGoogleAuthorization(page: import('@playwright/test').Page, capabilities: string[], email = 'test@example.com'): Promise<void> {
+  const scopeMap: Record<string, string> = {
+    'calendar.events.read': 'https://www.googleapis.com/auth/calendar.events.readonly',
+    'tasks.read': 'https://www.googleapis.com/auth/tasks.readonly',
+    'drive.files.app.read': 'https://www.googleapis.com/auth/drive.file',
+    'gmail.read': 'https://www.googleapis.com/auth/gmail.readonly',
+  };
+  const scopes = capabilities.map((cap) => scopeMap[cap] ?? '').filter(Boolean);
   await page.addInitScript(({ key, value }) => {
     window.localStorage.setItem(key, JSON.stringify(value));
   }, {
     key: GOOGLE_STORAGE_KEY,
-    value: { version: 2, grantedCapabilities: capabilities, account: { email }, updatedAt: new Date().toISOString() },
+    value: {
+      version: 3,
+      enabledCapabilities: capabilities,
+      grantedProviderScopes: scopes,
+      account: { email, displayName: 'Test User' },
+      updatedAt: new Date().toISOString(),
+    },
   });
 }
 
@@ -32,10 +45,14 @@ test('Google settings render independent Workspace authorization states', async 
   await expect(page.getByText('Google Docs', { exact: true })).toBeVisible();
   await expect(page.getByText('Google Sheets', { exact: true })).toBeVisible();
   await expect(page.getByText('Read ready').first()).toBeVisible();
+  // Gmail is not authorized, so Connect. Docs and Sheets share the drive.file
+  // scope with Drive, so enabling Drive infers their reads (note in UI:
+  // "Enabling Docs, Drive, or Sheets read can satisfy the others’ reads").
   await expect(page.locator('.google-oauth-service').filter({ hasText: 'Gmail' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
-  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Docs' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
-  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Sheets' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
-  await expect(page.getByRole('button', { name: 'Enable writes' })).toHaveCount(3);
+  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Docs' }).getByRole('button', { name: 'Connect' })).toHaveCount(0);
+  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Sheets' }).getByRole('button', { name: 'Connect' })).toHaveCount(0);
+  // Read ready for calendar, tasks, drive, docs (inferred), sheets (inferred) => 5 Enable writes
+  await expect(page.getByRole('button', { name: 'Enable writes' })).toHaveCount(5);
 });
 
 test('Google settings can disconnect and refresh normalized status', async ({ page }) => {

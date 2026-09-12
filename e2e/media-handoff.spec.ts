@@ -281,22 +281,28 @@ test.describe('YouTube media results', () => {
       await expect(card, await traceFor(page, androidModelRequests, androidProviderCalls)()).toBeVisible();
       expect(androidProviderCalls, await traceFor(page, androidModelRequests, androidProviderCalls)()).toHaveLength(1);
 
-      // An `intent://` URI is what makes Android resolve the link across every
-      // installed handler rather than the default browser, and the absence of a
-      // pinned package is what keeps the chooser visible to the user.
+      // The href is always https — never intent:// — so the link is never dead
+      // and never shows ERR_UNKNOWN_URL_SCHEME. The intent URI is attempted via
+      // a user-gesture navigation with https as guaranteed fallback.
       const href = await card.getAttribute('href');
-      expect(href).toContain('intent://music.youtube.com/watch?v=lofiVid1#Intent;');
-      expect(href).toContain('scheme=https;');
+      expect(href).toBe('https://music.youtube.com/watch?v=lofiVid1');
+
+      // The intent URI is stored in data-intent-href and is what makes Android
+      // resolve the link across every installed handler rather than the default
+      // browser. The absence of a pinned package is what keeps the chooser visible.
+      const intentHref = await card.getAttribute('data-intent-href');
+      expect(intentHref).toContain('intent://music.youtube.com/watch?v=lofiVid1#Intent;');
+      expect(intentHref).toContain('scheme=https;');
       // Decoded rather than compared as a literal: what matters is that the
       // fallback round-trips to the destination the tap will open. Note that
       // `%3D` here is not cosmetic - an unencoded `=` inside the parameter would
       // collide with the `;`-separated intent syntax and truncate the fallback.
-      const fallback = /S\.browser_fallback_url=([^;]*)/.exec(href ?? '')?.[1];
+      const fallback = /S\.browser_fallback_url=([^;]*)/.exec(intentHref ?? '')?.[1];
       expect(fallback ? decodeURIComponent(fallback) : null).toBe('https://music.youtube.com/watch?v=lofiVid1');
-      expect(href).toContain('category=android.intent.category.BROWSABLE');
-      expect(href).toContain('action=android.intent.action.VIEW');
-      expect(href).not.toContain(';package=');
-      expect(href?.endsWith(';end')).toBe(true);
+      expect(intentHref).toContain('category=android.intent.category.BROWSABLE');
+      expect(intentHref).toContain('action=android.intent.action.VIEW');
+      expect(intentHref).not.toContain(';package=');
+      expect(intentHref?.endsWith(';end')).toBe(true);
 
       // The tooltip names the destination the tap will actually reach.
       await expect(card).toHaveAttribute('title', /in your music app$/);

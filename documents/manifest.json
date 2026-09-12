@@ -1,9 +1,8 @@
 {
-  "schema": 3,
+  "schema": 4,
   "root": "documents",
   "authority": ["source","tests","documents"],
   "routing": {"path_match":"longest-prefix","tie":"all","default":"architecture","load":"one-unless-tie"},
-  "legacy": {"status":"migration-only","patterns":["docs/**","documents/*PASS*.md","documents/*STATUS*.md","documents/VTT_IMPLEMENTATION_PLAN.md"]},
   "systems": {
     "architecture": {"id":"SYS-ARCH","doc":"architecture.md","status":"active","paths":[],"keywords":["architecture","boundary","runtime","system-map"]},
     "ui": {"id":"SYS-UI","doc":"ui.md","status":"active","paths":["src/app","src/ui","src/main.tsx","src/app/components/Composer.tsx"],"keywords":["ui","layout","settings","composer","portrait","android","appearance"]},

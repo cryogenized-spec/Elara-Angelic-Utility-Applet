@@ -22,6 +22,8 @@ Use implementation and tests, not old design prose, to determine runtime truth. 
 
 Normal interactive Gemini is browser-direct through `src/gemini/provider.ts` and the local Lockbox. Google Workspace authorization is browser-side GIS through `src/google/oauth/`. Cloud Worker/autonomy execution is a separate runtime plane. VTT is an input modality and must not create a competing chat provider/persona. See `SYS-ARCH / documents/architecture.md` before changing those boundaries.
 
+A green test that passes for the wrong reason is a defect. Strengthen the assertion or fixture until it proves the intended invariant; do not weaken product or test contracts merely to make a gate green.
+
 ## Change discipline
 
 Prefer narrow changes in the owning subsystem. Reuse existing schemas, repositories, registries and state machines before introducing another authority. Prefer exact symbols, paths, compact flows and invariants over repeated explanatory prose. When a task exposes stale documentation, fix the canonical document rather than adding a compensating note.
@@ -30,4 +32,16 @@ Before writing directly to `main`, check open PRs and recent `main` movement. If
 
 ## Verification
 
-Run the smallest relevant checks while iterating and the applicable repository gates before declaring work complete. Main commands: `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:workers`, `npm run build`, `npm run reliability:check`, `npm run e2e`. If the environment prevents a gate such as browser E2E, state that explicitly; never claim an unrun check passed.
+Before calling repository work complete, run the broad gate in this order:
+
+```text
+npm run lint
+npm run typecheck
+npm test
+npm run test:workers
+npm run build
+npx playwright test --project=chromium --project=android-portrait --project=onboarding
+npm run reliability:check
+```
+
+CI is the release authority. If the current environment cannot execute Playwright, state that explicitly and rely on CI for browser evidence; `playwright --list` proves discovery/parsing only, not execution. Never claim an unrun gate passed.

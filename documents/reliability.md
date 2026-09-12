@@ -1,10 +1,10 @@
 ---
 id: SYS-REL
 status: active
-verified_commit: cab20253ef448dd96e4feb82bf917729b27404a3
+verified_commit: c9650583b813b6914d8f3f11161e646215330421
 scope: CI, automated verification, diagnostics and release-quality gates
 paths: [scripts/reliability-gate.mjs, .github/workflows/ci.yml, e2e]
-keywords: [reliability, testing, ci, diagnostics, analytics, performance, e2e]
+keywords: [reliability, testing, ci, diagnostics, analytics, performance, e2e, lint, typecheck]
 ---
 
 # Reliability, testing and diagnostics
@@ -18,7 +18,7 @@ keywords: [reliability, testing, ci, diagnostics, analytics, performance, e2e]
 ```text
 change
 -> lint
--> web + worker typecheck
+-> typecheck
 -> unit tests
 -> Worker/Durable Object tests
 -> build
@@ -35,6 +35,8 @@ CI targets Node 24 and currently runs Chromium, Android-portrait and onboarding 
 | CI pipeline | `.github/workflows/ci.yml` |
 | Architecture invariant gate | `scripts/reliability-gate.mjs` |
 | Browser E2E | `e2e/`, `playwright.config.ts` |
+| Typecheck configuration | `tsconfig.json`, `worker/tsconfig.json`, package scripts |
+| Lint configuration | `eslint.config.js` |
 | Unit/integration | colocated `*.test.ts(x)` |
 | Worker tests | `worker/test/`, `vitest.workers.config.ts` |
 | Artifact verification | `scripts/verify-artifact-assets.mjs` |
@@ -42,7 +44,19 @@ CI targets Node 24 and currently runs Chromium, Android-portrait and onboarding 
 
 ## 4. Data and contracts
 
-Primary commands are `npm run lint`, `npm run typecheck`, `npm test`, `npm run test:workers`, `npm run build`, `npm run e2e`, and `npm run reliability:check`. Focused checks include `verify:artifact-assets`, `verify:worker` and subsystem tests.
+The broad completion gate is ordered and must not be shortened when work is reported as complete:
+
+```text
+npm run lint
+npm run typecheck
+npm test
+npm run test:workers
+npm run build
+npx playwright test --project=chromium --project=android-portrait --project=onboarding
+npm run reliability:check
+```
+
+Focused checks include `verify:artifact-assets`, `verify:worker` and subsystem tests. Focused checks are iteration aids; they do not replace the broad gate when claiming repository-level completion.
 
 The invariant gate currently protects, among other things: no legacy Gemini `generateContent`; direct browser Interactions provider with Lockbox credential and stable `v1`; no empty-character prompt injection; registry-derived tool declarations; explicit Google confirmation controls; safe Markdown; artifact integrity; BusyTeX shell escape disabled; VTT provider boundaries; and selected autonomy/roleplay invariants.
 
@@ -51,7 +65,9 @@ Diagnostics and analytics are distinct. Diagnostics explain bounded individual f
 ## 5. Invariants
 
 - Never claim a check passed if it was not run.
-- Main-quality milestones must leave relevant lint/type/test/build gates green.
+- CI is the authority for branch/release verification; local results are supporting evidence.
+- A passing test that exercises the wrong state or cannot fail when its invariant is broken is not evidence; strengthen the test instead of weakening the contract.
+- Main-quality milestones must leave relevant lint/type/test/build/browser gates green.
 - Architecture invariants should be executable when a cheap stable assertion exists.
 - E2E failure artifacts may contain app state; keep retention bounded and never deliberately log credentials.
 - Performance/accessibility/mobile reliability are product constraints, not decorative post-processing.
@@ -63,8 +79,14 @@ Diagnostic records redact credentials, OAuth material, raw attachment payloads a
 
 ## 7. Verification and tests
 
-The complete broad gate is the command sequence listed above. When changing one subsystem, run its focused tests first, then the applicable repository gate. Physical Android behavior that browser automation cannot reproduce is reported as a validation gap rather than inferred from green desktop CI.
+When changing one subsystem, run focused tests first, then the broad ordered gate above. If the current environment cannot execute Playwright, report that explicitly and rely on CI for browser evidence. `npx playwright test --list` is useful for confirming discovery and syntax, but it is not browser validation.
+
+Physical Android behavior that browser automation cannot reproduce is reported as a validation gap rather than inferred from green desktop or emulated-browser CI.
 
 ## 8. Known gaps
+
+At the verified commit, `npm run typecheck` covers the web `src` project and Worker project but not `e2e/`; an open change is addressing that gap, so re-check current `main` before modifying this area.
+
+At the verified commit, `eslint.config.js` explicitly ignores `src/**/*.ts`, `src/**/*.tsx` and `e2e/**/*.ts`. Therefore `npm run lint` being green does not yet prove application TypeScript lint cleanliness. Treat that as verification debt until a TypeScript-aware ESLint configuration lands.
 
 CI/reliability still names several legacy `/docs` files as required foundation documents. Repoint those assertions before deleting the legacy tree. A dedicated documentation-integrity guard is not yet present; it should validate the manifest, canonical file/path references and forbidden legacy documentation patterns.

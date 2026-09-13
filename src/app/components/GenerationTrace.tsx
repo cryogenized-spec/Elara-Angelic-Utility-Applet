@@ -142,7 +142,7 @@ export function GenerationActivity(props: Props) {
   const headerText = live ? `${liveLabel} · ${formatActivityDuration(durationMs)}` : summaryLine(rows, durationMs);
   const controlLabel = live
     ? `Generation activity details: ${liveLabel}`
-    : 'Generation activity details';
+    : `Generation activity details: ${headerText}`;
 
   return (
     <section className={`generation-activity${live ? ` is-${live.phase}` : ' is-complete'}`} aria-label="Generation activity">

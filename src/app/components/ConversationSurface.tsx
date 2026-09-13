@@ -26,6 +26,8 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   const conversationRef = useRef<HTMLElement>(null);
   const activityAnchorRef = useRef<HTMLDivElement>(null);
   const anchoredGenerationRef = useRef<string | null>(null);
+  const restoredManualGenerationRef = useRef<string | null>(null);
+  const manualScrollTopRef = useRef<number | null>(null);
   const retainActivityTailRef = useRef(false);
   const followModeRef = useRef<FollowMode>('bottom');
   const [manualScroll, setManualScroll] = useState(false);
@@ -56,11 +58,18 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         if (Math.abs(offset) <= ACTIVITY_ANCHOR_TOLERANCE_PX) return;
       }
       if (liveGeneration) retainActivityTailRef.current = true;
+      manualScrollTopRef.current = element.scrollTop;
       setFollowMode('manual');
       return;
     }
 
-    setFollowMode(atEnd(element) ? 'bottom' : 'manual');
+    if (atEnd(element)) {
+      manualScrollTopRef.current = null;
+      setFollowMode('bottom');
+    } else {
+      manualScrollTopRef.current = element.scrollTop;
+      setFollowMode('manual');
+    }
   }
 
   function scrollToEnd(behavior: ScrollBehavior = 'smooth') {
@@ -71,6 +80,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
   function jumpToLatest() {
     retainActivityTailRef.current = false;
+    manualScrollTopRef.current = null;
     setFollowMode('bottom');
     scrollToEnd();
   }
@@ -146,7 +156,18 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     if (!generationId) return;
 
     if (!liveGeneration) {
-      if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current && followModeRef.current === 'activity') {
+      const element = conversationRef.current;
+      if (
+        element
+        && anchoredGenerationRef.current === generationId
+        && retainActivityTailRef.current
+        && followModeRef.current === 'manual'
+        && manualScrollTopRef.current !== null
+        && restoredManualGenerationRef.current !== generationId
+      ) {
+        element.scrollTop = manualScrollTopRef.current;
+        restoredManualGenerationRef.current = generationId;
+      } else if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current && followModeRef.current === 'activity') {
         setFollowMode('bottom');
       }
       return;
@@ -159,7 +180,9 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
     const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
     anchoredGenerationRef.current = generationId;
+    restoredManualGenerationRef.current = null;
     retainActivityTailRef.current = false;
+    manualScrollTopRef.current = null;
     setFollowMode('activity');
     element.scrollTop = Math.max(0, element.scrollTop + offset);
   }, [generationId, liveGeneration, visibleMessages.length]);

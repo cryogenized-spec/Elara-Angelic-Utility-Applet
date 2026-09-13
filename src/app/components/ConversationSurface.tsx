@@ -26,6 +26,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   const conversationRef = useRef<HTMLElement>(null);
   const activityAnchorRef = useRef<HTMLDivElement>(null);
   const anchoredGenerationRef = useRef<string | null>(null);
+  const retainActivityTailRef = useRef(false);
   const followModeRef = useRef<FollowMode>('bottom');
   const [manualScroll, setManualScroll] = useState(false);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
@@ -54,6 +55,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
         if (Math.abs(offset) <= ACTIVITY_ANCHOR_TOLERANCE_PX) return;
       }
+      if (liveGeneration) retainActivityTailRef.current = true;
       setFollowMode('manual');
       return;
     }
@@ -68,6 +70,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   }
 
   function jumpToLatest() {
+    retainActivityTailRef.current = false;
     setFollowMode('bottom');
     scrollToEnd();
   }
@@ -140,13 +143,23 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   // activity card from becoming the user's starting point. Once this generation
   // is anchored, no later phase or streaming update may move the viewport again.
   useLayoutEffect(() => {
-    if (!generationId || !liveGeneration || anchoredGenerationRef.current === generationId) return;
+    if (!generationId) return;
+
+    if (!liveGeneration) {
+      if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current && followModeRef.current === 'activity') {
+        setFollowMode('bottom');
+      }
+      return;
+    }
+
+    if (anchoredGenerationRef.current === generationId) return;
     const element = conversationRef.current;
     const anchor = activityAnchorRef.current;
     if (!element || !anchor) return;
 
     const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
     anchoredGenerationRef.current = generationId;
+    retainActivityTailRef.current = false;
     setFollowMode('activity');
     element.scrollTop = Math.max(0, element.scrollTop + offset);
   }, [generationId, liveGeneration, visibleMessages.length]);
@@ -176,6 +189,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   }
 
   const hasLivePanel = liveGeneration;
+  const showActivityTail = hasLivePanel || (manualScroll && retainActivityTailRef.current);
   if (visibleMessages.length === 0 && !hasLivePanel) {
     return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
   }
@@ -223,7 +237,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         <div className="message-body"><MarkdownText text={activeAssistant.text} /></div>
       </article>}
 
-      {hasLivePanel && <div className="conversation__activity-tail" aria-hidden="true" />}
+      {showActivityTail && <div className="conversation__activity-tail" aria-hidden="true" />}
     </div>
     {manualScroll && <button type="button" className="conversation__jump" aria-label="Jump to latest messages" onClick={jumpToLatest}>↓ Newest</button>}
   </section>;

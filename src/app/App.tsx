@@ -9,7 +9,7 @@ import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPr
 import { archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
 import { ensureWorkspaceShortcuts, storedShortcutFromDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
-import { completeOnboarding, hasCompletedOnboarding, loadAppUiPreferences, loadChatAppearance, loadRoleplayPreferences, normalizeChatAppearance, saveAppUiPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
+import { completeOnboarding, hasCompletedOnboarding, loadAppUiPreferences, loadChatAppearance, loadRoleplayPreferences, saveAppUiPreferences, saveChatAppearance, saveRoleplayPreferences } from '../persistence/preferences';
 import { localThreadTitlePort } from '../chat/thread-title-port';
 import { geminiTurnPort } from '../gemini/provider';
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
@@ -106,7 +106,6 @@ export function App() {
   const activeConversationIdRef = useRef('primary');
   const generationArbiterRef = useRef(createGenerationArbiter());
   const uiSaveQueueRef = useRef(Promise.resolve());
-  const appearanceSaveQueueRef = useRef(Promise.resolve());
 
   useVisualViewport();
 
@@ -233,6 +232,8 @@ export function App() {
 
   async function regenerate(messageId: string) {
     if (status === 'streaming') return;
+    // Regenerating the failed partial itself means "redo this response":
+    // replace it via retry rather than appending a variant next to it.
     if (isFailedPartialTarget(conversation, failedAttempt, messageId)) { await retryLastTurn(); return; }
     const effectiveBase = regenerateBaseFor(conversation, failedAttempt);
     const targetIndex = effectiveBase.messages.findIndex((message) => message.id === messageId);
@@ -286,9 +287,14 @@ export function App() {
     const isCurrentConversation = () => activeConversationIdRef.current === conversationId;
     if (!isCurrentConversation()) return null;
 
+    // One stable turn identity across every tool continuation in this request.
+    // A new interaction-created never resets transcript or trace state.
+    // Activating here supersedes any still-in-flight older generation: its
+    // late events will fail the shared arbitration check below.
     const generationId = crypto.randomUUID();
     generationArbiterRef.current.activate(generationId);
-    const isActiveGeneration = () => activeConversationIdRef.current === conversationId && generationArbiterRef.current.isActive(generationId);
+    const isActiveGeneration = () =>
+      activeConversationIdRef.current === conversationId && generationArbiterRef.current.isActive(generationId);
     let assistantInserted = false;
     const ensureAssistant = () => {
       if (assistantInserted || !isActiveGeneration() || controller.signal.aborted) return;
@@ -310,6 +316,8 @@ export function App() {
         const expectedStatus = event.status === 'pending' || event.status === 'processing' || event.status === 'ready' || event.status === 'failed' ? event.status : undefined;
         void artifactRepository.updateMetadata(event.artifactId, { sourceMessageId: assistantMessage.id }, event.operationId && expectedStatus ? { operationId: event.operationId, expectedStatus, isValid: isActiveGeneration } : undefined).catch(() => undefined);
       }
+      // The trace panel is application state too: reflect it only while this
+      // turn is both elected AND on the current conversation.
       if (isActiveGeneration()) setGeneration(current);
       if (isTerminalPhase(current.phase)) {
         watchdog.dispose();
@@ -327,6 +335,8 @@ export function App() {
       idleStallMs,
       absoluteMs,
       onIdleStall: () => {
+        // A user-cancelled turn is already terminal by intent: never let a
+        // late watchdog firing convert the cancellation into a timeout error.
         if (controller.signal.aborted) return;
         failTurn(generationTimeoutError(`Gemini stopped responding${stallPhaseHint(current.phase)} (no stream activity for ${Math.round(idleStallMs / 1000)}s).`, { interactionId: current.currentInteractionId, durationMs: Date.now() - wallStartedAt }));
         controller.abort();
@@ -340,8 +350,14 @@ export function App() {
 
     try {
       const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools, generationId, isGenerationActive: isActiveGeneration };
-      const stream = options.tools?.length ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal) : geminiTurnPort.streamReply(request, controller.signal);
+      const stream = options.tools?.length
+        ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
+        : geminiTurnPort.streamReply(request, controller.signal);
       for await (const event of stream) {
+        // Stop means stop: once the turn is aborted, late provider events
+        // (buffered text deltas, tool results) must never reach the transcript.
+        // Synthesize the terminal cancellation exactly once, then break so the
+        // underlying provider/tool-loop generators are closed via return().
         if (controller.signal.aborted) {
           const interactionId = current.currentInteractionId;
           dispatch({ type: 'cancelled', ...(interactionId ? { interactionId } : {}) });
@@ -350,9 +366,14 @@ export function App() {
         dispatch(event);
         if (event.type === 'cancelled') break;
       }
+      // An exhausted iterator is never success: synthesize the missing
+      // terminal outcome (cancellation when aborted, protocol failure else).
       if (!isTerminalPhase(current.phase)) {
-        if (controller.signal.aborted || !isCurrentConversation()) dispatch({ type: 'cancelled', interactionId: current.currentInteractionId });
-        else failTurn(generationProtocolError('Gemini closed the stream without completing the turn.', { interactionId: current.currentInteractionId, durationMs: Date.now() - wallStartedAt }));
+        if (controller.signal.aborted || !isCurrentConversation()) {
+          dispatch({ type: 'cancelled', interactionId: current.currentInteractionId });
+        } else {
+          failTurn(generationProtocolError('Gemini closed the stream without completing the turn.', { interactionId: current.currentInteractionId, durationMs: Date.now() - wallStartedAt }));
+        }
       }
     } finally {
       watchdog.dispose();
@@ -363,6 +384,8 @@ export function App() {
 
   async function retryLastTurn() {
     if (status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
+    // Replace the failed attempt: stream from its exact pre-generation base so
+    // a partial assistant can never survive next to the retried answer.
     const attempt = failedAttempt;
     if (!attempt || attempt.base.id !== conversation.id || !attempt.input.trim()) return;
     const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
@@ -382,11 +405,14 @@ export function App() {
     } finally { if (abortControllerRef.current === controller) abortControllerRef.current = null; }
   }
 
+  // Stable identity for the memoised conversation surface: dispatch to the
+  // latest `regenerate` closure through a ref so nothing can go stale.
   const regenerateRef = useRef(regenerate);
   useEffect(() => { regenerateRef.current = regenerate; });
   const handleRegenerate = useCallback((messageId: string) => { void regenerateRef.current(messageId); }, []);
 
   function captureFailedAttempt(attempt: FailedTurnAttempt) {
+    // Snapshot the message list: the retry base must never observe later mutations.
     setFailedAttempt({ ...attempt, base: { ...attempt.base, messages: [...attempt.base.messages] } });
   }
 
@@ -404,14 +430,7 @@ export function App() {
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }
   async function handleResetGeminiSettings() { await handleGeminiSettingsChange(defaultsForModel(geminiModel)); }
   async function handleCharacterChange(next: CharacterProfile) { setCharacter(next); try { const saved = await saveCharacterProfile(next); setCharacter(saved); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save character settings.'); } }
-  function handleChatAppearanceChange(next: ChatAppearancePreferences) {
-    const safe = normalizeChatAppearance(next);
-    setChatAppearance(safe);
-    appearanceSaveQueueRef.current = appearanceSaveQueueRef.current.catch(() => undefined).then(async () => {
-      try { await saveChatAppearance(safe); }
-      catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save chat appearance.'); }
-    });
-  }
+  async function handleChatAppearanceChange(next: ChatAppearancePreferences) { const safe = { ...DEFAULT_CHAT_APPEARANCE, ...next, chatBackgroundOpacity: Math.max(0, Math.min(1, next.chatBackgroundOpacity)), chatBackgroundOverlay: Math.max(0, Math.min(.9, next.chatBackgroundOverlay)), chatBackgroundBlur: Math.max(0, Math.min(24, next.chatBackgroundBlur)), userSurfaceOpacity: Math.max(.2, Math.min(1, next.userSurfaceOpacity)) }; setChatAppearance(safe); try { setChatAppearance(await saveChatAppearance(safe)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save chat appearance.'); } }
   async function handleRoleplayChange(next: RoleplayPreferences) { setRoleplay(next); try { setRoleplay(await saveRoleplayPreferences(next)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save roleplay settings.'); } }
   function handleUiSettingsChange(patch: Partial<AppUiPreferences>): void {
     const next = { ...uiSettings, ...patch };
@@ -425,12 +444,17 @@ export function App() {
   async function finishFirstRun(): Promise<void> { await completeOnboarding(); setFirstRunWelcomeOpen(false); }
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
   const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity, '--generation-activity-accent': chatAppearance.generationActivityAccent, '--body-font-size': `${uiSettings.chatTextSize}px` } as React.CSSProperties), [chatAppearance, uiSettings.chatTextSize]);
+  // Stable identity: the conversation surface is memoised, and rebuilding this
+  // array on every render (including every composer keystroke) used to force
+  // every message body through `react-markdown` again.
   const visibleMessages = useMemo(() => conversation.messages.filter((message) => message.conversationId === conversation.id), [conversation]);
   const canRetry = canRetryFailedTurn(status, failedAttempt, conversation.id);
   const showLockboxAction = structuredError !== null && (structuredError.category === 'configuration' || structuredError.category === 'authentication' || structuredError.category === 'authorization' || structuredError.code === 'GEMINI_LOCKBOX_LOCKED');
-  if (settingsOpen) return <SettingsScreen initialSection={settingsSection} font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={handleChatAppearanceChange} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} enterToSend={uiSettings.enterToSend} onEnterToSendChange={(value) => handleUiSettingsChange({ enterToSend: value })} onBack={() => setSettingsOpen(false)} />;
+  if (settingsOpen) return <SettingsScreen initialSection={settingsSection} font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value: ChatAppearancePreferences) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} enterToSend={uiSettings.enterToSend} onEnterToSendChange={(value) => handleUiSettingsChange({ enterToSend: value })} onBack={() => setSettingsOpen(false)} />;
   return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}>
     <div className="app-shell__background" aria-hidden="true" />
+    {/* One authoritative control cluster: the hamburger and the Workspace
+        launcher share a column, a control height and a gap (layout.css). */}
     <div className="control-stack" aria-label="Application controls">
       <button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button>
       <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />

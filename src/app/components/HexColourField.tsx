@@ -10,13 +10,15 @@ export function canonicalHexColour(value: string): string | null {
 
 export function HexColourField({
   label,
-  ariaLabel,
+  colourAriaLabel,
+  hexAriaLabel,
   value,
   fallback,
   onCommit,
 }: {
   label: string;
-  ariaLabel: string;
+  colourAriaLabel: string;
+  hexAriaLabel: string;
   value: string;
   fallback: string;
   onCommit: (value: string) => void;
@@ -55,12 +57,12 @@ export function HexColourField({
     <div>
       <input
         type="color"
-        aria-label={`${ariaLabel} colour`}
+        aria-label={colourAriaLabel}
         value={committed}
         onChange={(event) => handlePicker(event.target.value)}
       />
       <input
-        aria-label={`${ariaLabel} hex`}
+        aria-label={hexAriaLabel}
         value={displayedValue}
         maxLength={16}
         autoComplete="off"

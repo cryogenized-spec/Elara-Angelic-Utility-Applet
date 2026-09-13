@@ -72,8 +72,8 @@ function dispatch(state: GenerationState, event: GeminiStreamEvent, context: Gen
 describe('live structured-content projection', () => {
   it('projects media immediately before any text or terminal event', () => {
     const run = harness();
-    let state = createGenerationState('gen-media', { startedAt: 0 });
-    state = dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 10);
+    const state = createGenerationState('gen-media', { startedAt: 0 });
+    dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 10);
 
     const assistant = run.read().conversation.messages.find((message) => message.role === 'assistant');
     expect(assistant?.text).toBe('');
@@ -86,7 +86,7 @@ describe('live structured-content projection', () => {
     const run = harness();
     let state = createGenerationState('gen-media-text', { startedAt: 0 });
     state = dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 10);
-    state = dispatch(state, { type: 'text-delta', index: 0, text: 'Here it is.' }, run.context, 20);
+    dispatch(state, { type: 'text-delta', index: 0, text: 'Here it is.' }, run.context, 20);
 
     const assistant = run.read().conversation.messages.find((message) => message.role === 'assistant');
     expect(assistant?.text).toBe('Here it is.');
@@ -97,7 +97,7 @@ describe('live structured-content projection', () => {
     const run = harness();
     let state = createGenerationState('gen-structured', { startedAt: 0 });
     state = dispatch(state, { type: 'artifact-created', artifactId: 'artifact-1', status: 'ready', mimeType: 'application/pdf' }, run.context, 10);
-    state = dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 20);
+    dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 20);
 
     const assistant = run.read().conversation.messages.find((message) => message.role === 'assistant');
     expect(assistant?.artifacts).toEqual(['artifact-1']);
@@ -109,7 +109,7 @@ describe('live structured-content projection', () => {
     const run = harness();
     let state = createGenerationState('gen-cancel', { startedAt: 0 });
     state = dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 10);
-    state = dispatch(state, { type: 'cancelled', interactionId: 'i-1' }, run.context, 20);
+    dispatch(state, { type: 'cancelled', interactionId: 'i-1' }, run.context, 20);
 
     expect(run.read().conversation).toEqual(run.base);
     expect(run.read().saved).toHaveLength(0);
@@ -120,7 +120,7 @@ describe('live structured-content projection', () => {
     const run = harness();
     let state = createGenerationState('gen-fail', { startedAt: 0 });
     state = dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 10);
-    state = dispatch(state, {
+    dispatch(state, {
       type: 'failed',
       error: {
         category: 'provider',
@@ -141,8 +141,8 @@ describe('live structured-content projection', () => {
 
   it('does not project stale structured events after generation ownership is lost', () => {
     const run = harness(false);
-    let state = createGenerationState('gen-stale', { startedAt: 0 });
-    state = dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 10);
+    const state = createGenerationState('gen-stale', { startedAt: 0 });
+    dispatch(state, { type: 'media-resolved', provider: 'youtube', queries: ['test'], items: [VIDEO] }, run.context, 10);
 
     expect(run.read().conversation).toEqual(run.base);
   });

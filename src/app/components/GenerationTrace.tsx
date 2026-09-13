@@ -11,6 +11,7 @@ import {
 } from '../../chat/generation-state';
 import { toolActivityPresentation } from '../../google/tools/contracts';
 import { Icon, type IconName } from '../../ui/icons';
+import { MarkdownText } from './MarkdownText';
 import './generation-activity.css';
 
 const PHASE_LABELS: Record<GenerationPhase, string> = {
@@ -69,23 +70,25 @@ function rowIcon(row: ActivityRow): IconName {
   return 'dots';
 }
 
+function toolDescriptor(name: string): string {
+  const presentation = toolActivityPresentation(name);
+  return [presentation.categoryLabel, presentation.serviceLabel, presentation.actionLabel].filter(Boolean).join(' · ');
+}
+
 function rowCopy(row: ActivityRow): { primary: string; secondary?: string } {
   if (row.kind === 'thinking') {
-    if (row.state === 'running') return { primary: 'Thinking' };
-    if (row.state === 'failed') return { primary: 'Thinking failed' };
-    if (row.state === 'cancelled') return { primary: 'Thinking stopped' };
-    return { primary: 'Thought for' };
+    if (row.state === 'failed') return { primary: 'Reasoning failed' };
+    if (row.state === 'cancelled') return { primary: 'Reasoning stopped' };
+    return { primary: 'Reasoning' };
   }
   if (row.kind === 'generation') {
-    if (row.state === 'running') return { primary: 'Writing' };
-    if (row.state === 'failed') return { primary: 'Writing failed' };
-    if (row.state === 'cancelled') return { primary: 'Writing stopped' };
-    return { primary: 'Wrote response in' };
+    if (row.state === 'running') return { primary: 'Writing response' };
+    if (row.state === 'failed') return { primary: 'Response failed' };
+    if (row.state === 'cancelled') return { primary: 'Response stopped' };
+    return { primary: 'Response' };
   }
   if (row.kind === 'tool') {
-    const presentation = toolActivityPresentation(row.toolName ?? row.label);
-    const path = [presentation.categoryLabel, presentation.serviceLabel].filter(Boolean).join(' · ');
-    return { primary: path, secondary: presentation.actionLabel };
+    return { primary: toolDescriptor(row.toolName ?? row.label) };
   }
   if (row.kind === 'context') {
     const category = row.contextCategory === 'memory' ? 'Memory' : row.contextCategory === 'artifacts' ? 'Documents & Artifacts' : row.label;
@@ -95,15 +98,10 @@ function rowCopy(row: ActivityRow): { primary: string; secondary?: string } {
 }
 
 function summaryLine(rows: readonly ActivityRow[], durationMs: number): string {
-  const thinkingRows = rows.filter((row) => row.kind === 'thinking');
-  const writingRows = rows.filter((row) => row.kind === 'generation');
-  const thinkingMs = thinkingRows.reduce((sum, row) => sum + row.durationMs, 0);
-  const writingMs = writingRows.reduce((sum, row) => sum + row.durationMs, 0);
   const toolCount = rows.filter((row) => row.kind === 'tool').length;
-  const parts: string[] = [];
-  if (thinkingRows.length > 0) parts.push(`Thought for ${formatActivityDuration(thinkingMs)}`);
-  if (toolCount > 0) parts.push(`used ${toolCount} tool${toolCount === 1 ? '' : 's'}`);
-  if (writingRows.length > 0) parts.push(`wrote in ${formatActivityDuration(writingMs)}`);
+  const stepCount = rows.length;
+  const parts = [`${stepCount} step${stepCount === 1 ? '' : 's'}`];
+  if (toolCount > 0) parts.push(`${toolCount} tool${toolCount === 1 ? '' : 's'}`);
   parts.push(`${formatActivityDuration(durationMs)} total`);
   return parts.join(' · ');
 }
@@ -132,6 +130,7 @@ export function GenerationActivity(props: Props) {
   }, [active]);
 
   const rows = useMemo<ActivityRow[]>(() => live ? liveRows(live, now) : record!.steps, [live, now, record]);
+  const toolRows = useMemo(() => rows.filter((row) => row.kind === 'tool' && row.toolName), [rows]);
   const durationMs = live ? turnDurationMs(live, now) : record!.durationMs;
   const reasoningSummary = live ? thoughtSummaryOf(live) : props.thoughtSummary?.trim();
   const liveLabel = live
@@ -139,8 +138,10 @@ export function GenerationActivity(props: Props) {
       ? statusLabel(live.statusMessage) ?? PHASE_LABELS[live.phase]
       : PHASE_LABELS[live.phase]
     : undefined;
-  const headerText = live ? `${liveLabel} · ${formatActivityDuration(durationMs)}` : summaryLine(rows, durationMs);
-  const controlLabel = live
+  const headerText = live
+    ? live.phase === 'completed' ? summaryLine(rows, durationMs) : `${liveLabel} · ${formatActivityDuration(durationMs)}`
+    : summaryLine(rows, durationMs);
+  const controlLabel = live && live.phase !== 'completed'
     ? `Generation activity details: ${liveLabel}`
     : `Generation activity details: ${headerText}`;
 
@@ -164,24 +165,43 @@ export function GenerationActivity(props: Props) {
             <ol className="generation-activity__steps">
               {rows.map((row) => {
                 const copy = rowCopy(row);
+                const duration = formatActivityDuration(row.durationMs);
                 return (
                   <li key={row.id} className={`generation-activity__step is-${row.state}`}>
                     <span className="generation-activity__step-icon" aria-hidden="true"><Icon name={rowIcon(row)} size={14} /></span>
                     <span className="generation-activity__step-copy">
-                      <span className="generation-activity__step-primary">{copy.primary}</span>
+                      <span className="generation-activity__step-mainline">
+                        <span className="generation-activity__step-primary">{copy.primary}</span>
+                        <span className="generation-activity__step-time" aria-label={`${copy.primary} duration ${duration}`}>· {duration}</span>
+                      </span>
                       {copy.secondary && <span className="generation-activity__step-secondary">{copy.secondary}</span>}
                       {row.errorCode && <span className="generation-activity__step-error">{row.errorCode}</span>}
                     </span>
-                    <span className="generation-activity__step-time">{formatActivityDuration(row.durationMs)}</span>
                   </li>
                 );
               })}
             </ol>
           )}
+          {toolRows.length > 0 && (
+            <details className="generation-activity__tools">
+              <summary>
+                <span>Tool invocations ({toolRows.length})</span>
+                <Icon name="chevron" size={13} />
+              </summary>
+              <ol>
+                {toolRows.map((row) => <li key={`tool-${row.id}`}>
+                  <span>{toolDescriptor(row.toolName!)}</span>
+                  <code>{row.toolName}</code>
+                </li>)}
+              </ol>
+            </details>
+          )}
           {reasoningSummary && (
             <div className="generation-activity__summary">
               <span className="generation-activity__summary-label">Reasoning summary</span>
-              <div className="generation-activity__summary-body">{reasoningSummary}</div>
+              <div className="generation-activity__summary-body">
+                {active ? reasoningSummary : <MarkdownText text={reasoningSummary} />}
+              </div>
             </div>
           )}
         </div>

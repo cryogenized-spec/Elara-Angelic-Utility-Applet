@@ -13,6 +13,8 @@ export type GeminiStreamEvent =
   | { type: 'thought-summary-delta'; index: number; text: string }
   | { type: 'thought-signature'; index: number; signature: string }
   | { type: 'step-stop'; index: number }
+  /** Application-owned activity outside the provider's reasoning/tool steps. */
+  | { type: 'context-activity'; category: 'memory' | 'artifacts' | 'other'; label: string; detail?: string; durationMs: number; outcome: 'used' | 'empty' | 'unavailable' | 'completed' }
   | { type: 'artifact-created'; artifactId: string; status: string; mimeType: string; toolName?: string; operationId?: string }
   /**
    * Resolved media from a media tool call. Carries the structured items directly

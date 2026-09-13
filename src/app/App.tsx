@@ -25,7 +25,7 @@ import {
   type GenerationPhase,
   type GenerationState,
 } from '../chat/generation-state';
-import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, isFailedPartialTarget, regenerateBaseFor, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
+import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, isFailedPartialTarget, regenerateBaseFor, statusAfterNavigation, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
 import { loadPairing } from '../autonomy/cloud/pairing';
 import { fullSync } from '../autonomy/cloud/sync';
 import { createTurnWatchdog } from '../chat/turn-watchdog';
@@ -178,7 +178,7 @@ export function App() {
   async function switchThread(id: string) {
     cancel();
     activeConversationIdRef.current = id;
-    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null); setStatus('idle');
+    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null); setStatus((current) => statusAfterNavigation(current));
     try {
       const nextConversation = await loadConversation(id);
       if (activeConversationIdRef.current !== id) return;
@@ -189,7 +189,7 @@ export function App() {
     cancel();
     const pendingConversation: ConversationState = { id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     activeConversationIdRef.current = pendingConversation.id;
-    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null); setStatus('idle');
+    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null); setStatus((current) => statusAfterNavigation(current));
     setConversation(pendingConversation);
     try {
       const nextConversation = await createThread();
@@ -384,7 +384,9 @@ export function App() {
           break;
         }
         dispatch(event);
-        if (event.type === 'cancelled') break;
+        // A terminal reducer state owns the turn from here. Close the upstream
+        // iterator immediately instead of trusting a provider adapter to end.
+        if (isTerminalPhase(current.phase)) break;
       }
       // An exhausted iterator is never success: synthesize the missing
       // terminal outcome (cancellation when aborted, protocol failure else).
@@ -405,17 +407,23 @@ export function App() {
           } catch (cause) {
             if (isCurrentConversation()) setError(cause instanceof Error ? `Response saved, but the conversation list could not refresh. ${cause.message}` : 'Response saved, but the conversation list could not refresh.');
           }
-          if (isCurrentConversation() && generationArbiterRef.current.isActive(generationId)) setStatus('idle');
+          if (generationArbiterRef.current.isActive(generationId)) setStatus('idle');
         } catch (cause) {
-          if (isCurrentConversation() && generationArbiterRef.current.isActive(generationId)) {
-            // The optimistic completed assistant must not become the parent of
-            // a new turn unless it is durable. Dexie's transaction rolls the
-            // failed write back, so restore the exact durable base here too.
-            setConversation((currentConversation) => currentConversation.id === base.id ? base : currentConversation);
-            setGeneration(null);
-            setStructuredError(null);
-            setStatus('failed');
-            setError(cause instanceof Error ? `Could not save the response. ${cause.message}` : 'Could not save the response.');
+          if (generationArbiterRef.current.isActive(generationId)) {
+            if (isCurrentConversation()) {
+              // The optimistic completed assistant must not become the parent
+              // of a new turn unless it is durable. Dexie's transaction rolls
+              // the failed write back, so restore the exact durable base here.
+              setConversation((currentConversation) => currentConversation.id === base.id ? base : currentConversation);
+              setGeneration(null);
+              setStructuredError(null);
+              setStatus('failed');
+              setError(cause instanceof Error ? `Could not save the response. ${cause.message}` : 'Could not save the response.');
+            } else {
+              // The user may navigate while saving, but navigation must not
+              // trap the app behind a failed write for a hidden conversation.
+              setStatus('idle');
+            }
           }
         } finally {
           generationArbiterRef.current.release(generationId);
@@ -461,7 +469,7 @@ export function App() {
 
   function openLockbox() { setSettingsSection('security'); setSettingsOpen(true); }
 
-  function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); setStructuredError(null); }
+  function cancel() { abortControllerRef.current?.abort(); setStatus((current) => statusAfterNavigation(current)); setError(null); setStructuredError(null); }
   async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
   async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
   async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } } }

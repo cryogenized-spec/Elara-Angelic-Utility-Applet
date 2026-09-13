@@ -155,28 +155,50 @@ describe('AutonomyEngine — single-alarm multiplexer (REAL alarms)', () => {
     expect(snapshot.nextAlarmAt).toBe(snapshot.routines[0].nextDueAt);
   });
 
-  it('processes multiple due entries in due order through one multiplexed alarm', async () => {
+  it('arms the earliest entry and processes multiple due entries in due order', async () => {
     const early = makeRoutine({ id: 'routine-early', schedule: { kind: 'interval', everyMinutes: 30 } });
     const late = makeRoutine({ id: 'routine-late', schedule: { kind: 'interval', everyMinutes: 30 } });
     await syncConfig(1, [early, late]);
 
-    const lateDue = Date.now() + 450;
-    const earlyDue = Date.now() + 200;
-    await ensureScheduled(late.id, lateDue);
-    await ensureScheduled(early.id, earlyDue);
-    expect((await state()).nextAlarmAt).toBe(earlyDue); // earliest wins
+    // Prove alarm multiplexing independently of wall-clock firing: these are
+    // deliberately far enough ahead that the assertion cannot race the alarm.
+    const futureAnchor = Date.now();
+    const futureLate = futureAnchor + 120_000;
+    const futureEarly = futureAnchor + 60_000;
+    await ensureScheduled(late.id, futureLate);
+    await ensureScheduled(early.id, futureEarly);
+    expect((await state()).nextAlarmAt).toBe(futureEarly);
 
-    await waitForAlarmProcessing(async () => (await runs()).length >= 2);
+    // Arrange two overdue rows through the Vitest-only harness so setup itself
+    // cannot fire one row before the other is present. The real heartbeat then
+    // runs the production reconciliation/processDue/armAlarm path unchanged.
+    const processAnchor = Date.now();
+    const earlyDue = processAnchor - 2 * 60_000;
+    const lateDue = processAnchor - 60_000;
+    const engine = await stub() as DurableObjectStub & {
+      seedScheduleWithoutAlarm(routineId: string, dueAt: number): Promise<{ routineId: string; dueAt: number }>;
+    };
+    await engine.seedScheduleWithoutAlarm(late.id, lateDue);
+    await engine.seedScheduleWithoutAlarm(early.id, earlyDue);
+
+    const result = await heartbeat();
+    expect(result.processed).toBe(2);
+
     const records = await runs();
-    const earlyRecord = records.find((run) => run.runKey === `routine-early:scheduled:${earlyDue}`)!;
-    const lateRecord = records.find((run) => run.runKey === `routine-late:scheduled:${lateDue}`)!;
-    expect(earlyRecord).toBeDefined();
-    expect(lateRecord).toBeDefined();
-    // Earliest due processed first.
-    expect(earlyRecord.startedAt).toBeLessThanOrEqual(lateRecord.startedAt);
-    // One canonical record per occurrence.
-    expect(records.filter((run) => run.routineId === 'routine-early')).toHaveLength(1);
-    expect(records.filter((run) => run.routineId === 'routine-late')).toHaveLength(1);
+    const earlyRecords = records.filter((run) => run.routineId === early.id && run.scheduledFor === earlyDue);
+    const lateRecords = records.filter((run) => run.routineId === late.id && run.scheduledFor === lateDue);
+    expect(earlyRecords).toHaveLength(1);
+    expect(lateRecords).toHaveLength(1);
+
+    // Journal is returned newest-first. processDue must claim the earlier row
+    // first, so the later row's claim is appended afterward and appears first.
+    const snapshot = await state();
+    const journal = snapshot.journal as Array<{ kind: string; routineId?: string; occurrence?: number }>;
+    const earlyClaimIndex = journal.findIndex((entry) => entry.kind === 'claimed' && entry.routineId === early.id && entry.occurrence === earlyDue);
+    const lateClaimIndex = journal.findIndex((entry) => entry.kind === 'claimed' && entry.routineId === late.id && entry.occurrence === lateDue);
+    expect(earlyClaimIndex).toBeGreaterThanOrEqual(0);
+    expect(lateClaimIndex).toBeGreaterThanOrEqual(0);
+    expect(lateClaimIndex).toBeLessThan(earlyClaimIndex);
   });
 
   it('duplicate alarm delivery (at-least-once) never duplicates an occurrence', async () => {

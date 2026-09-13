@@ -44,7 +44,7 @@ export interface GenerationSyncContext {
   setError: (message: string | null) => void;
   setStructuredError: (error: NormalizedProviderError | null) => void;
   save: (conversation: ConversationState) => Promise<void>;
-  refreshThreads: () => Promise<void>;
+  onTerminalPersistence: (persistence: Promise<void>) => void;
   isActiveGeneration: () => boolean;
   ensureAssistant: () => void;
   onFailedAttempt?: (attempt: FailedTurnAttempt) => void;
@@ -120,7 +120,8 @@ export function syncGenerationEvent(event: GeminiStreamEvent, generation: Genera
     };
     const completed: ConversationState = { ...base, updatedAt: completedAt, messages: [...base.messages, completedMessage] };
     context.setConversation(completed);
-    void context.save(completed).then(context.refreshThreads).catch((cause) => context.setError(cause instanceof Error ? cause.message : 'Could not save the response.'));
+    context.setStatus('saving');
+    context.onTerminalPersistence(context.save(completed));
     return;
   }
 

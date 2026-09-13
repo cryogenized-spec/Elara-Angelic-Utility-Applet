@@ -57,12 +57,16 @@ describe('Phase 3 media delivery resilience', () => {
     expect(container.querySelector('.media-card__thumb--empty')).not.toBeNull();
   });
 
-  it('observes conversation-stream growth as well as viewport resizing without weakening manual-scroll authority', () => {
+  it('observes late growth while only explicit user gestures may elect manual scroll authority', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/app/components/ConversationSurface.tsx'), 'utf8');
 
     expect(source).toMatch(/const\s+stream\s*=\s*[^;]+\.current/);
     expect(source).toMatch(/resizeObserver\?\.observe\(stream\)/);
     expect(source).toMatch(/mutationObserver\?\.observe\(stream,/);
     expect(source).toMatch(/if\s*\(followModeRef\.current\s*!==\s*['"]bottom['"]\)\s*return/);
+    expect(source).toContain('userScrollIntentRef');
+    expect(source).toContain('if (!consumeUserScrollIntent()) return;');
+    expect(source).toContain('onWheel={markUserScrollIntent}');
+    expect(source).toContain('onTouchMove={markUserScrollIntent}');
   });
 });

@@ -32,13 +32,18 @@ function key(input: HTMLInputElement, keyValue: string): void {
   });
 }
 
+const FIELD_PROPS = {
+  label: 'Activity accent',
+  colourAriaLabel: 'Generation activity accent colour',
+  hexAriaLabel: 'Generation activity accent hex',
+  fallback: '#6EA8FF',
+} as const;
+
 function ControlledField({ onCommit }: { onCommit: (value: string) => void }) {
   const [value, setValue] = useState('#A855F7');
   return <HexColourField
-    label="Activity accent"
-    ariaLabel="Generation activity accent"
+    {...FIELD_PROPS}
     value={value}
-    fallback="#6EA8FF"
     onCommit={(next) => {
       onCommit(next);
       setValue(next);
@@ -79,6 +84,12 @@ describe('HexColourField transactional editing', () => {
     if (!text || !picker) throw new Error('expected both colour controls');
     return { onCommit, text, picker };
   }
+
+  it('preserves the supplied accessible names exactly', () => {
+    const { text, picker } = renderField();
+    expect(text.getAttribute('aria-label')).toBe('Generation activity accent hex');
+    expect(picker.getAttribute('aria-label')).toBe('Generation activity accent colour');
+  });
 
   it('allows incomplete typing without mutating the committed colour', () => {
     const { onCommit, text, picker } = renderField();
@@ -149,26 +160,14 @@ describe('HexColourField transactional editing', () => {
   it('falls back to the newest committed colour when the parent changes during a bad draft', () => {
     const onCommit = vi.fn();
     act(() => {
-      root.render(<HexColourField
-        label="Activity accent"
-        ariaLabel="Generation activity accent"
-        value="#A855F7"
-        fallback="#6EA8FF"
-        onCommit={onCommit}
-      />);
+      root.render(<HexColourField {...FIELD_PROPS} value="#A855F7" onCommit={onCommit} />);
     });
     const text = container.querySelector<HTMLInputElement>('input[aria-label="Generation activity accent hex"]');
     if (!text) throw new Error('expected hex input');
 
     changeInput(text, '#BAD');
     act(() => {
-      root.render(<HexColourField
-        label="Activity accent"
-        ariaLabel="Generation activity accent"
-        value="#0EA5E9"
-        fallback="#6EA8FF"
-        onCommit={onCommit}
-      />);
+      root.render(<HexColourField {...FIELD_PROPS} value="#0EA5E9" onCommit={onCommit} />);
     });
     expect(text.value).toBe('#BAD');
 
@@ -181,13 +180,7 @@ describe('HexColourField transactional editing', () => {
   it('drops a stale validation warning automatically if the committed colour changes externally', () => {
     const onCommit = vi.fn();
     act(() => {
-      root.render(<HexColourField
-        label="Activity accent"
-        ariaLabel="Generation activity accent"
-        value="#A855F7"
-        fallback="#6EA8FF"
-        onCommit={onCommit}
-      />);
+      root.render(<HexColourField {...FIELD_PROPS} value="#A855F7" onCommit={onCommit} />);
     });
     const text = container.querySelector<HTMLInputElement>('input[aria-label="Generation activity accent hex"]');
     if (!text) throw new Error('expected hex input');
@@ -197,13 +190,7 @@ describe('HexColourField transactional editing', () => {
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
 
     act(() => {
-      root.render(<HexColourField
-        label="Activity accent"
-        ariaLabel="Generation activity accent"
-        value="#0EA5E9"
-        fallback="#6EA8FF"
-        onCommit={onCommit}
-      />);
+      root.render(<HexColourField {...FIELD_PROPS} value="#0EA5E9" onCommit={onCommit} />);
     });
     expect(text.value).toBe('#0EA5E9');
     expect(container.querySelector('[role="alert"]')).toBeNull();

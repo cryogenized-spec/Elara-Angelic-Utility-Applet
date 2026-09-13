@@ -27,6 +27,10 @@ import './settings-fixes.css';
 import './workspace-shortcut-settings.css';
 import './autonomy-settings.css';
 
+const YOUTUBE_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/documents/youtube/README.md';
+const YOUTUBE_TERMS_URL = 'https://www.youtube.com/t/terms';
+const GOOGLE_PRIVACY_URL = 'https://policies.google.com/privacy';
+
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },
   { id: 'character', label: 'Character', icon: 'sparkles' as const },
@@ -159,7 +163,7 @@ export function SettingsScreen({
           {section === 'autonomy' && <div className="settings-copy"><span className="panel-kicker">ROUTINES</span><h2>Autonomy</h2><p>Scheduled routines Elara runs on your behalf. Every run is read-only, policy-gated, and lands in the Autonomy Inbox — nothing is sent silently. Local “Run now” proves the loop today; the cloud scheduler arrives in the next phase.</p><AutonomySettings /></div>}
           {section === 'chat' && <div className="settings-copy"><span className="panel-kicker">CONVERSATION</span><h2>Chat</h2><p>Conversation-specific preferences live here as the application grows. Speaker colour and surface controls are in Appearance.</p><div className="setting-card setting-card--switch"><div className="setting-card__copy"><strong id="enter-to-send-label">Enter sends message</strong><span id="enter-to-send-hint">{enterToSend ? 'Enter sends · Shift+Enter inserts a new line.' : 'Enter inserts a new line · Ctrl/Cmd+Enter sends. The Send button always works.'}</span></div><ToggleSwitch checked={enterToSend} onCheckedChange={onEnterToSendChange} labelledBy="enter-to-send-label" describedBy="enter-to-send-hint" /></div><div className="setting-card"><strong>Gemini transport</strong><span>Direct browser connection · API key supplied by the local Lockbox</span></div><div className="setting-card"><strong>Startup screen</strong><span>Chat / empty chat · last chat option planned</span></div></div>}
           {section === 'roleplay' && <div className="settings-copy"><span className="panel-kicker">CREATIVE CONTEXT</span><h2>Roleplay</h2><p>Roleplay is an explicit fictional/creative context. Its controls are hidden while disabled.</p><RoleplaySettings value={roleplay} onChange={onRoleplayChange} /></div>}
-          {section === 'security' && <div className="settings-copy"><span className="panel-kicker">SECURITY</span><h2>API Lockbox</h2><p>The Gemini API key is encrypted locally with a Lockbox password. It must be unlocked before Gemini can use it.</p><GeminiApiLockbox /></div>}
+          {section === 'security' && <div className="settings-copy"><span className="panel-kicker">SECURITY</span><h2>API Lockbox</h2><p>The Gemini API key is encrypted locally with a Lockbox password. It must be unlocked before Gemini can use it.</p><GeminiApiLockbox /><div className="setting-card"><strong>YouTube API information</strong><span>How search, quota, caching and handoff work, plus the official policies that govern this integration.</span><p><a href={YOUTUBE_GUIDE_URL} target="_blank" rel="noreferrer noopener">Read the YouTube API guide</a> · <a href={YOUTUBE_TERMS_URL} target="_blank" rel="noreferrer noopener">YouTube Terms</a> · <a href={GOOGLE_PRIVACY_URL} target="_blank" rel="noreferrer noopener">Google Privacy Policy</a></p></div></div>}
         </section>
       </div>
     </main>

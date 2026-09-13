@@ -1,6 +1,6 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '../../domain/chat';
-import { isActivePhase, type GenerationState } from '../../chat/generation-state';
+import type { GenerationState } from '../../chat/generation-state';
 import { deleteMessage } from '../../persistence/conversation';
 import { GenerationActivity } from './GenerationTrace';
 import { Icon } from '../../ui/icons';
@@ -25,6 +25,7 @@ function responseGroupFor(message: ChatMessage): string {
 export const ConversationSurface = memo(function ConversationSurface({ messages, generation, onRegenerate }: { messages: ChatMessage[]; generation: GenerationState | null; onRegenerate: (messageId: string) => void }) {
   const conversationRef = useRef<HTMLElement>(null);
   const activityAnchorRef = useRef<HTMLDivElement>(null);
+  const anchoredGenerationRef = useRef<string | null>(null);
   const followModeRef = useRef<FollowMode>('bottom');
   const [manualScroll, setManualScroll] = useState(false);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
@@ -33,7 +34,6 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
   const liveGeneration = generation !== null && generation.phase !== 'completed';
   const generationId = generation?.generationId;
-  const generationPhase = generation?.phase;
 
   function atEnd(element: HTMLElement): boolean {
     return element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_STICK_THRESHOLD_PX;
@@ -135,22 +135,21 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     seenCountsRef.current = nextCounts;
   }, [grouped]);
 
+  // A newly submitted turn owns one automatic viewport move. Previous manual
+  // scroll state belongs to the previous turn and must not prevent the new
+  // activity card from becoming the user's starting point. Once this generation
+  // is anchored, no later phase or streaming update may move the viewport again.
   useLayoutEffect(() => {
-    if (!generationId || !generationPhase) return;
+    if (!generationId || !liveGeneration || anchoredGenerationRef.current === generationId) return;
     const element = conversationRef.current;
     const anchor = activityAnchorRef.current;
     if (!element || !anchor) return;
 
-    const shouldAnchor = isActivePhase(generationPhase)
-      || (generationPhase === 'completed' && followModeRef.current === 'activity')
-      || generationPhase === 'failed'
-      || generationPhase === 'cancelled';
-    if (!shouldAnchor || followModeRef.current === 'manual') return;
-
     const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
-    element.scrollTo({ top: Math.max(0, element.scrollTop + offset), behavior: 'auto' });
+    anchoredGenerationRef.current = generationId;
     setFollowMode('activity');
-  }, [generationId, generationPhase]);
+    element.scrollTop = Math.max(0, element.scrollTop + offset);
+  }, [generationId, liveGeneration, visibleMessages.length]);
 
   useEffect(() => {
     if (followModeRef.current === 'bottom') scrollToEnd();
@@ -176,7 +175,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     }
   }
 
-  const hasLivePanel = generation !== null && generation.phase !== 'completed';
+  const hasLivePanel = liveGeneration;
   if (visibleMessages.length === 0 && !hasLivePanel) {
     return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
   }

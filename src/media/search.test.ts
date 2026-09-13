@@ -19,6 +19,7 @@ function item(id: string): MediaItem {
     channel: 'Channel',
     webUrl: `https://www.youtube.com/watch?v=${id}`,
     embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
+    apiDataFetchedAt: NOW,
   };
 }
 
@@ -163,7 +164,6 @@ describe('media search orchestration', () => {
 
     await searchMedia({ queries: ['a', 'b', 'c'] }, { ...OPTIONS, provider });
 
-    // Both attempted requests remain spent; the third query is budget-blocked.
     expect(searchBudget().spent).toBe(2);
   });
 
@@ -260,8 +260,6 @@ describe('media hand-off intent', () => {
   });
 
   it('costs one network call and one budget unit for the same query under both intents', async () => {
-    // The invariant that keeps an intent from becoming a quota leak: the cached
-    // answer is intent-free, so the second request is served without dispatch.
     const { provider, calls } = fakeProvider();
 
     const watch = await searchMedia({ queries: ['lofi beats'], intent: 'watch' }, { ...OPTIONS, provider });
@@ -274,14 +272,10 @@ describe('media hand-off intent', () => {
   });
 
   it('does not persist the intent into the cache entry', async () => {
-    // Deliberate: writing the stamped item would freeze whichever intent asked
-    // first onto every later reader of the same query.
     const { provider } = fakeProvider();
 
     await searchMedia({ queries: ['lofi beats'], intent: 'listen' }, { ...OPTIONS, provider });
 
-    // Read at the same clock the write used: the fixture pins `now`, so asking
-    // the real Date.now() would report the entry as long expired.
     const cached = await readMediaCache(mediaCacheKey('youtube', 'lofi beats'), NOW);
     expect(cached.hit).toBe(true);
     expect(cached.items).toHaveLength(1);
@@ -307,9 +301,6 @@ describe('media hand-off intent', () => {
   });
 
   it('keeps a stamped outcome frozen, exactly as the provider returned it', async () => {
-    // The network path rebuilds the outcome to restamp its items. If that build
-    // dropped the freeze, a stamped result would be mutable where an unstamped
-    // one is not, and mutation would go unnoticed until two screens disagreed.
     const frozenProvider: MediaProvider = {
       id: 'youtube',
       async search(request) {

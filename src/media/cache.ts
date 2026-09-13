@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { MediaItem } from '../domain/media';
+import { freshMediaItems, isFreshMediaItem, type MediaItem } from '../domain/media';
 
 /**
  * Client-side media search cache.
@@ -51,18 +51,34 @@ export interface ReadMediaCacheResult {
   readonly items: readonly MediaItem[];
 }
 
+function cacheEntryIsUsable(record: MediaCacheEntry, now: number): boolean {
+  if (!Number.isFinite(record.cachedAt) || !Number.isFinite(record.expiresAt) || record.cachedAt <= 0 || record.expiresAt <= record.cachedAt || record.expiresAt <= now) return false;
+  if (!Array.isArray(record.items)) return false;
+  // Empty arrays are legitimate short-lived negative-cache entries. Any positive
+  // row must be wholly fresh and structurally valid; a partially corrupted row
+  // is discarded rather than converted into a misleading partial search result.
+  return record.items.length === 0 || record.items.every((item) => isFreshMediaItem(item, now));
+}
+
 /**
- * Read a cached answer. An expired entry counts as a miss and is removed, so a
- * stale hit can never be mistaken for a fresh one.
+ * Read a cached answer. Expired, malformed, legacy-undated or API-data-stale rows
+ * are removed and reported as misses, so cache storage can never bypass the
+ * provider-data freshness boundary.
  */
 export async function readMediaCache(key: string, now: number = Date.now()): Promise<ReadMediaCacheResult> {
   const record = await db.entries.get(key);
   if (!record) return { hit: false, items: [] };
-  if (record.expiresAt <= now) {
+  if (!cacheEntryIsUsable(record, now)) {
     await db.entries.delete(key).catch(() => undefined);
     return { hit: false, items: [] };
   }
-  return { hit: true, items: Object.freeze(record.items.map((item) => Object.freeze({ ...item }))) };
+  return {
+    hit: true,
+    items: Object.freeze(record.items.map((item) => Object.freeze({
+      ...item,
+      ...(item.thumbnail ? { thumbnail: Object.freeze({ ...item.thumbnail }) } : {}),
+    }))),
+  };
 }
 
 export async function writeMediaCache(
@@ -70,14 +86,22 @@ export async function writeMediaCache(
   value: { provider: string; query: string; normalizedQuery: string; items: readonly MediaItem[] },
   now: number = Date.now(),
 ): Promise<void> {
+  if (!Number.isFinite(now) || now <= 0) return;
+  // A cache is an optimisation, not a place to launder malformed/undated API
+  // data into a trusted result. Refuse the whole positive row if any item fails.
+  const safeItems = freshMediaItems(value.items, now);
+  if (value.items.length > 0 && safeItems.length !== value.items.length) return;
+
   const ttl = value.items.length > 0 ? POSITIVE_TTL_MS : NEGATIVE_TTL_MS;
   const record: MediaCacheEntry = {
     key,
     provider: value.provider,
     query: value.query,
     normalizedQuery: value.normalizedQuery,
-    // Copy out of the caller's array: a later mutation must not rewrite history.
-    items: value.items.map((item) => ({ ...item })),
+    items: safeItems.map((item) => ({
+      ...item,
+      ...(item.thumbnail ? { thumbnail: { ...item.thumbnail } } : {}),
+    })),
     cachedAt: now,
     expiresAt: now + ttl,
   };
@@ -86,12 +110,19 @@ export async function writeMediaCache(
 }
 
 /**
- * Drop expired rows, then the oldest rows if the store is still over the cap.
- * Best effort: a pruning failure must never fail the search that triggered it.
+ * Physical cache hygiene used both after writes and on app startup. Unlike the
+ * read guard, this visits rows the user may never search again, so expired or
+ * corrupt API data does not linger indefinitely in IndexedDB.
+ *
+ * Best effort by design: a cache-maintenance failure must not prevent the app
+ * from opening or a successful search from being shown.
  */
-async function pruneMediaCache(now: number): Promise<void> {
+export async function pruneMediaCache(now: number = Date.now()): Promise<void> {
   try {
-    await db.entries.where('expiresAt').belowOrEqual(now).delete();
+    const rows = await db.entries.toArray();
+    const invalidKeys = rows.filter((record) => !cacheEntryIsUsable(record, now)).map((record) => record.key);
+    if (invalidKeys.length) await db.entries.bulkDelete(invalidKeys);
+
     const count = await db.entries.count();
     if (count <= MAX_CACHE_ENTRIES) return;
     const overflow = count - MAX_CACHE_ENTRIES;

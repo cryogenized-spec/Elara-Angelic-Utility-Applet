@@ -1,7 +1,7 @@
 ---
 id: SYS-SEC
 status: active
-verified_commit: cab20253ef448dd96e4feb82bf917729b27404a3
+verified_commit: 66a4c764e479d99055285fe5a2d6a4c742947003
 scope: local API Lockbox and protected browser credentials
 paths: [src/persistence/gemini-api-key.ts, src/persistence/gemini-passkey.ts, src/persistence/gemini-lockbox-settings.ts]
 keywords: [lockbox, credential, secret, pin, passkey, encryption]
@@ -44,11 +44,14 @@ The Lockbox database is `elara-gemini-lockbox`, with `secrets` keyed by secret I
 
 When security is enabled, the session has a 15-minute idle timeout. `off` mode uses a device-local non-extractable Web Crypto key rather than plaintext persistence. A legacy plaintext localStorage Gemini key is migrated into encrypted/device-local Lockbox storage when possible and removed only after successful migration.
 
+The YouTube API key is a named secondary credential. The browser search adapter resolves it from the unlocked Lockbox only when a provider request is about to run and sends it in the `x-goog-api-key` header. It is not copied into Gemini tool arguments/results, URLs, media objects, search-cache rows, conversation records, or diagnostic payloads.
+
 ## 5. Invariants
 
 - Gemini credentials are never `VITE_*` build variables.
 - Secrets never appear in model-visible schemas, ordinary app state, conversation records, cache keys, URLs, analytics or diagnostic exports.
 - Consumers use named minimum-capability accessors.
+- YouTube requests resolve the secondary key just in time and carry it only in the provider header; structured media remains credential-free.
 - Secondary credentials cannot silently remain under weaker protection after primary security changes.
 - Lock/idle enforcement clears the in-memory unlock session.
 - Provider configuration distinguishes empty, locked/unlocked and secondary mismatch states explicitly.
@@ -57,9 +60,11 @@ When security is enabled, the session has a 15-minute idle timeout. `off` mode u
 
 Cryptographic failure is reported as a safe Lockbox error without exposing ciphertext/key material. Failed unlock/backoff metadata lives with the authority record. Secret mismatches are surfaced instead of making a key silently unusable. Passkey availability is a capability check, not an assumption about every browser/device.
 
+Provider adapters must not make credentials durable by attaching them to otherwise persistent domain data. The YouTube media path validates this boundary adversarially: credential-shaped unexpected fields are rejected from trusted `MediaItem` data, and browser acceptance verifies the normal API request carries the key in the header rather than its URL.
+
 ## 7. Verification and tests
 
-Use `src/persistence/gemini-api-key.test.ts`, passkey/Lockbox settings tests, `GeminiApiLockbox.test.tsx`, provider configuration tests and the reliability gate. Security changes require migration tests for existing stored records and secondary credentials.
+Use `src/persistence/gemini-api-key.test.ts`, passkey/Lockbox settings tests, `GeminiApiLockbox.test.tsx`, provider configuration tests, media credential/retention tests and the reliability gate. Security changes require migration tests for existing stored records and secondary credentials.
 
 ## 8. Known gaps
 

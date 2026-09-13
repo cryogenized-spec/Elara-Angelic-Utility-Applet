@@ -14,6 +14,12 @@ async function unlockTestGemini(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 
+async function openAppearance(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
+}
+
 async function ask(page: Page, text: string): Promise<void> {
   await page.getByRole('textbox', { name: 'Message Elara' }).fill(text);
   await page.getByRole('button', { name: 'Send message' }).click();
@@ -175,6 +181,43 @@ test.describe('Generation Activity', () => {
     await activity.getByRole('button').click();
     await expect(activity.getByText('Persisted reasoning summary.', { exact: true })).toBeVisible();
     await expect(activity.locator('.generation-activity__step')).toHaveCount(2);
+  });
+
+  test('applies and persists the Appearance activity accent through the rendered card', async ({ page }) => {
+    const accent = '#34D399';
+    const accentRgb = 'rgb(52, 211, 153)';
+
+    await page.route('**/v1/interactions*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: completedTurn('activity-accent', 'Accent verification answer.', ['Accent verification reasoning.']),
+      });
+    });
+
+    await page.goto('');
+    await unlockTestGemini(page);
+    await openAppearance(page);
+    const accentInput = page.getByLabel('Generation activity accent hex');
+    await accentInput.fill(accent);
+    await accentInput.blur();
+    await expect(accentInput).toHaveValue(accent);
+    await page.getByRole('button', { name: 'Back to chat' }).click();
+
+    await ask(page, 'verify the activity accent');
+    await expect(page.getByText('Accent verification answer.', { exact: true })).toBeVisible();
+    let activity = page.getByRole('region', { name: 'Generation activity' });
+    await expect(activity).toHaveCount(1);
+    await expect.poll(() => activity.evaluate((element) => getComputedStyle(element).borderLeftColor)).toBe(accentRgb);
+
+    await page.reload();
+    await expect(page.getByText('Accent verification answer.', { exact: true })).toBeVisible();
+    activity = page.getByRole('region', { name: 'Generation activity' });
+    await expect(activity).toHaveCount(1);
+    await expect.poll(() => activity.evaluate((element) => getComputedStyle(element).borderLeftColor)).toBe(accentRgb);
+
+    await openAppearance(page);
+    await expect(page.getByLabel('Generation activity accent hex')).toHaveValue(accent);
   });
 
   test('keeps completed activity useful when Gemini supplies no reasoning summary', async ({ page }) => {

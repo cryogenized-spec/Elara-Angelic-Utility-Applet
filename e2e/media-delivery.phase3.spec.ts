@@ -202,6 +202,7 @@ test.describe('Phase 3 media delivery resilience', () => {
     // terminal message. The composer is intentionally empty after send, so its
     // Send button remaining disabled is not a lifecycle signal.
     await expect(page.locator('.message-assistant--streaming')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Jump to latest messages' })).toHaveCount(0);
 
     await page.evaluate(() => {
       const stream = document.querySelector<HTMLElement>('.conversation__stream');
@@ -217,16 +218,14 @@ test.describe('Phase 3 media delivery resilience', () => {
       if (!element) throw new Error('Conversation unavailable');
       return element.scrollHeight - element.scrollTop - element.clientHeight;
     })).toBeLessThanOrEqual(2);
+    await expect(page.getByRole('button', { name: 'Jump to latest messages' })).toHaveCount(0);
 
-    await page.evaluate(() => {
-      const element = document.querySelector<HTMLElement>('.conversation');
-      if (!element) throw new Error('Conversation unavailable');
-      element.scrollTop = 0;
-      element.dispatchEvent(new Event('scroll', { bubbles: true }));
-    });
+    const conversation = page.locator('.conversation');
+    await conversation.hover();
+    await page.mouse.wheel(0, -1600);
     await expect(page.getByRole('button', { name: 'Jump to latest messages' })).toBeVisible();
 
-    const manualTop = await page.locator('.conversation').evaluate((element) => element.scrollTop);
+    const manualTop = await conversation.evaluate((element) => element.scrollTop);
     await page.evaluate(() => {
       const stream = document.querySelector<HTMLElement>('.conversation__stream');
       if (!stream) throw new Error('Conversation stream unavailable');
@@ -238,7 +237,7 @@ test.describe('Phase 3 media delivery resilience', () => {
     await waitTwoFrames(page);
     await page.waitForTimeout(80);
 
-    const afterGrowth = await page.locator('.conversation').evaluate((element) => element.scrollTop);
+    const afterGrowth = await conversation.evaluate((element) => element.scrollTop);
     expect(Math.abs(afterGrowth - manualTop)).toBeLessThanOrEqual(1);
     await expect(page.getByRole('button', { name: 'Jump to latest messages' })).toBeVisible();
   });

@@ -279,9 +279,6 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
   const hasLivePanel = liveGeneration;
   const showActivityTail = hasLivePanel || (manualScroll && retainActivityTailRef.current);
-  if (visibleMessages.length === 0 && !hasLivePanel) {
-    return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
-  }
 
   return <section
     ref={conversationRef}
@@ -293,6 +290,8 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     onPointerMove={(event) => { if (event.buttons !== 0) markUserScrollIntent(); }}
   >
     <div ref={conversationStreamRef} className="conversation__stream">
+      {visibleMessages.length === 0 && !hasLivePanel && <div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div>}
+
       {grouped.map(({ message, variants }) => {
         if (message.role !== 'assistant') {
           return <article className="message message-user user-surface-frosted" key={message.id}>

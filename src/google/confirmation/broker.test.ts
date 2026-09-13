@@ -18,8 +18,8 @@ describe('Google confirmation broker', () => {
 
   afterEach(() => {
     dismissGoogleToolConfirmation();
-    document.body.innerHTML = '';
     vi.unstubAllGlobals();
+    document.body.innerHTML = '';
   });
 
   it('fails closed outside the browser for every requested mutation', async () => {

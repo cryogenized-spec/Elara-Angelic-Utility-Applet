@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { MediaItem } from '../../../domain/media';
 import { mediaIntentOf } from '../../../domain/media';
 import {
@@ -9,6 +10,27 @@ import {
   type HandoffPlatform,
 } from '../../../media/handoff';
 import './media-card.css';
+
+function MediaThumbnail({ thumbnail }: { thumbnail: MediaItem['thumbnail'] }) {
+  const [failed, setFailed] = useState(false);
+
+  if (!thumbnail || failed) {
+    return <span className="media-card__thumb media-card__thumb--empty" aria-hidden="true" />;
+  }
+
+  return (
+    <img
+      className="media-card__thumb"
+      src={thumbnail.url}
+      alt=""
+      width={thumbnail.width}
+      height={thumbnail.height}
+      loading="lazy"
+      decoding="async"
+      onError={() => setFailed(true)}
+    />
+  );
+}
 
 /**
  * One resolved media result.
@@ -81,19 +103,7 @@ export function MediaCard({ item, platform }: {
       onClick={handleClick}
     >
       <span className="media-card__thumb-wrap">
-        {item.thumbnail ? (
-          <img
-            className="media-card__thumb"
-            src={item.thumbnail.url}
-            alt=""
-            width={item.thumbnail.width}
-            height={item.thumbnail.height}
-            loading="lazy"
-            decoding="async"
-          />
-        ) : (
-          <span className="media-card__thumb media-card__thumb--empty" aria-hidden="true" />
-        )}
+        <MediaThumbnail key={item.thumbnail?.url ?? 'no-thumbnail'} thumbnail={item.thumbnail} />
         {/* No duration overlay: `search.list` does not return one, and fetching it
             would mean a second billed call per result (see the provider's quota
             rules). A `0:00` badge would be a fabricated number, which is worse

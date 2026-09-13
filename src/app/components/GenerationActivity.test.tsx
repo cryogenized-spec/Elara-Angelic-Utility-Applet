@@ -30,12 +30,8 @@ function primaryRows(): string[] {
   return [...container.querySelectorAll('.generation-activity__step-primary')].map((node) => node.textContent ?? '');
 }
 
-function secondaryRows(): string[] {
-  return [...container.querySelectorAll('.generation-activity__step-secondary')].map((node) => node.textContent ?? '');
-}
-
 function rowTimes(): string[] {
-  return [...container.querySelectorAll('.generation-activity__step-time')].map((node) => node.textContent ?? '');
+  return [...container.querySelectorAll('.generation-activity__step-time')].map((node) => (node.textContent ?? '').replace(/^·\s*/, '').trim());
 }
 
 function headline(): string {
@@ -74,7 +70,7 @@ describe('Generation Activity duration formatting', () => {
     expect(formatActivityDuration(-25)).toBe('0 ms');
   });
 
-  it('reports stages that occurred even when their measured duration is zero', () => {
+  it('reports structural step counts even when measured duration is zero', () => {
     const markup = renderToStaticMarkup(<GenerationActivity record={{
       id: 'zero-duration-turn',
       durationMs: 0,
@@ -84,9 +80,7 @@ describe('Generation Activity duration formatting', () => {
       ],
     }} />);
 
-    expect(markup).toContain('Thought for 0 ms');
-    expect(markup).toContain('wrote in 0 ms');
-    expect(markup).toContain('0 ms total');
+    expect(markup).toContain('2 steps · 0 ms total');
   });
 
   it('keeps a sub-second live duration on the same side of the threshold after persistence', () => {
@@ -101,8 +95,7 @@ describe('Generation Activity duration formatting', () => {
     expect(record.steps[0]?.durationMs).toBe(999);
 
     const markup = renderToStaticMarkup(<GenerationActivity record={record} />);
-    expect(markup).toContain('Thought for 999 ms');
-    expect(markup).toContain('999 ms total');
+    expect(markup).toContain('1 step · 999 ms total');
     expect(markup).not.toContain('1.0 s');
   });
 });
@@ -124,7 +117,7 @@ describe('Generation Activity accessibility', () => {
     expect(button.getAttribute('aria-label')).toBe('Generation activity details: Thinking');
     expect(body.tabIndex).toBe(0);
     expect(body.getAttribute('aria-label')).toBe('Generation activity details');
-    expect(time.hasAttribute('aria-hidden')).toBe(false);
+    expect(time.getAttribute('aria-label')).toBe('Reasoning duration 230 ms');
 
     now = 850;
     act(() => { vi.advanceTimersByTime(100); });
@@ -141,7 +134,7 @@ describe('Generation Activity live lifecycle', () => {
 
     now = 538.4;
     renderLive(state);
-    expect(primaryRows()).toEqual(['Thinking']);
+    expect(primaryRows()).toEqual(['Reasoning']);
     expect(rowTimes()).toEqual(['438 ms']);
 
     now = 1300;
@@ -151,7 +144,7 @@ describe('Generation Activity live lifecycle', () => {
     state = send(state, { type: 'step-stop', index: 0 }, 1500);
     now = 1500;
     renderLive(state);
-    expect(primaryRows()).toEqual(['Thought for']);
+    expect(primaryRows()).toEqual(['Reasoning']);
     expect(rowTimes()).toEqual(['1.4 s']);
 
     now = 9000;
@@ -159,7 +152,7 @@ describe('Generation Activity live lifecycle', () => {
     expect(rowTimes()).toEqual(['1.4 s']);
   });
 
-  it('keeps thought/tool/thought/writing stages distinct with their own elapsed times', () => {
+  it('keeps thought/tool/thought/writing stages distinct with local elapsed times', () => {
     let state = createGenerationState('gen-tool-cycle', { startedAt: 0 });
     state = send(state, { type: 'interaction-created', interactionId: 'i-1', model: 'm' }, 10);
     state = send(state, { type: 'step-start', index: 0, stepType: 'thought' }, 20);
@@ -173,9 +166,10 @@ describe('Generation Activity live lifecycle', () => {
     now = 250;
     renderLive(state);
     expect(headline()).toBe('Waiting for confirmation · 250 ms');
-    expect(primaryRows()).toEqual(['Thought for', 'Google Workspace · Calendar']);
-    expect(secondaryRows()).toContain('List Events');
+    expect(primaryRows()).toEqual(['Reasoning', 'Google Workspace · Calendar · List Events']);
     expect(rowTimes()).toEqual(['80 ms', '130 ms']);
+    expect(container.textContent).toContain('Tool invocations (1)');
+    expect(container.textContent).toContain('calendar.listEvents');
 
     state = send(state, { type: 'interaction-created', interactionId: 'i-2', model: 'm' }, 300);
     state = send(state, { type: 'step-start', index: 0, stepType: 'thought' }, 320);
@@ -186,7 +180,7 @@ describe('Generation Activity live lifecycle', () => {
     expect(headline()).toMatch(/^Thinking · /);
     act(() => { vi.advanceTimersByTime(100); });
     expect(headline()).toBe('Thinking · 500 ms');
-    expect(primaryRows()).toEqual(['Thought for', 'Google Workspace · Calendar', 'Thinking']);
+    expect(primaryRows()).toEqual(['Reasoning', 'Google Workspace · Calendar · List Events', 'Reasoning']);
     expect(rowTimes()).toEqual(['80 ms', '180 ms', '180 ms']);
 
     state = send(state, { type: 'step-stop', index: 0 }, 600);
@@ -197,7 +191,7 @@ describe('Generation Activity live lifecycle', () => {
     expect(headline()).toMatch(/^Writing · /);
     act(() => { vi.advanceTimersByTime(100); });
     expect(headline()).toBe('Writing · 950 ms');
-    expect(primaryRows()).toEqual(['Thought for', 'Google Workspace · Calendar', 'Thought for', 'Writing']);
+    expect(primaryRows()).toEqual(['Reasoning', 'Google Workspace · Calendar · List Events', 'Reasoning', 'Writing response']);
     expect(rowTimes()).toEqual(['80 ms', '180 ms', '280 ms', '250 ms']);
   });
 
@@ -233,7 +227,66 @@ describe('Generation Activity live lifecycle', () => {
     renderLive(cancelled);
 
     expect(headline()).toBe('Stopped · 120 ms');
-    expect(primaryRows()).toEqual(['Thinking stopped']);
+    expect(primaryRows()).toEqual(['Reasoning stopped']);
     expect(rowTimes()).toEqual(['100 ms']);
+  });
+});
+
+describe('Generation Activity human-facing presentation', () => {
+  it('summarizes completed work by structural steps and tool count', () => {
+    const markup = renderToStaticMarkup(<GenerationActivity record={{
+      id: 'summary-counts',
+      durationMs: 21100,
+      steps: [
+        { id: 'r1', kind: 'thinking', state: 'done', durationMs: 1100, label: 'Thinking' },
+        { id: 't1', kind: 'tool', state: 'done', durationMs: 2800, label: 'roleplay_setting.list', toolName: 'roleplay_setting.list' },
+        { id: 'r2', kind: 'thinking', state: 'done', durationMs: 3, label: 'Thinking' },
+        { id: 't2', kind: 'tool', state: 'done', durationMs: 2700, label: 'roleplay_setting.list', toolName: 'roleplay_setting.list' },
+        { id: 'r3', kind: 'thinking', state: 'done', durationMs: 3500, label: 'Thinking' },
+        { id: 'w1', kind: 'generation', state: 'done', durationMs: 3600, label: 'Writing' },
+      ],
+    }} />);
+
+    expect(markup).toContain('6 steps · 2 tools · 21.1 s total');
+  });
+
+  it('exposes exact tool identity without exposing arguments or call ids', () => {
+    let state = createGenerationState('tool-privacy-ui', { startedAt: 0 });
+    state = send(state, { type: 'step-start', index: 0, stepType: 'function_call' }, 10);
+    state = send(state, {
+      type: 'tool-call',
+      interactionId: 'i-tool',
+      index: 0,
+      callId: 'SECRET-CALL-ID',
+      name: 'roleplay_setting.list',
+      arguments: { token: 'TOP-SECRET-TOKEN', privateQuery: 'do-not-render' },
+    }, 20);
+    state = send(state, { type: 'completed', interactionId: 'i-tool', status: 'completed', durationMs: 30 }, 30);
+
+    renderLive(state);
+    expect(container.textContent).toContain('Roleplay World · List');
+    expect(container.textContent).toContain('roleplay_setting.list');
+    expect(container.textContent).not.toContain('SECRET-CALL-ID');
+    expect(container.textContent).not.toContain('TOP-SECRET-TOKEN');
+    expect(container.textContent).not.toContain('do-not-render');
+  });
+
+  it('keeps streaming reasoning as plain text and renders stable terminal Markdown once', () => {
+    let state = createGenerationState('markdown-summary', { startedAt: 0 });
+    state = send(state, { type: 'step-start', index: 0, stepType: 'thought' }, 10);
+    state = send(state, { type: 'thought-summary-delta', index: 0, text: '**Crafting response**\n\n- one\n- two' }, 20);
+    now = 30;
+    renderLive(state);
+
+    expect(container.querySelector('.generation-activity__summary-body strong')).toBeNull();
+    expect(container.querySelector('.generation-activity__summary-body')?.textContent).toContain('**Crafting response**');
+
+    state = send(state, { type: 'step-stop', index: 0 }, 40);
+    state = send(state, { type: 'completed', interactionId: 'i-markdown', status: 'completed', durationMs: 50 }, 50);
+    now = 50;
+    renderLive(state);
+
+    expect(container.querySelector('.generation-activity__summary-body strong')?.textContent).toBe('Crafting response');
+    expect([...container.querySelectorAll('.generation-activity__summary-body li')].map((node) => node.textContent)).toEqual(['one', 'two']);
   });
 });

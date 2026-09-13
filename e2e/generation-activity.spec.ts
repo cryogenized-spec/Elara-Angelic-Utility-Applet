@@ -82,8 +82,6 @@ test.describe('Generation Activity', () => {
     await page.goto('');
     await unlockTestGemini(page);
 
-    // Build history only through the public composer so the scroll container is
-    // genuinely occupied; no storage or DOM state is manufactured for the test.
     for (let index = 0; index < 7; index += 1) {
       await ask(page, `history-${index}`);
       await expect(page.getByText(`History response ${index + 1}.`, { exact: true })).toBeVisible();
@@ -104,8 +102,6 @@ test.describe('Generation Activity', () => {
       return Math.abs(activityBox.y - conversationBox.y);
     }).toBeLessThan(28);
 
-    // A deliberate user scroll changes the follow mode. The Newest affordance
-    // is the visible proof that the app no longer owns the viewport position.
     await conversation.evaluate((element) => element.scrollBy({ top: -160, behavior: 'auto' }));
     await expect(page.getByRole('button', { name: 'Jump to latest messages' })).toBeVisible();
     const manualPosition = await conversation.evaluate((element) => element.scrollTop);
@@ -138,7 +134,7 @@ test.describe('Generation Activity', () => {
     const activity = page.getByRole('region', { name: 'Generation activity' });
     await expect(activity).toHaveCount(1);
     const toggle = activity.getByRole('button');
-    await expect(toggle).toContainText(/Thought for .*wrote in .*total/);
+    await expect(toggle).toContainText(/37 steps · .*total/);
     await expect(toggle).toHaveAttribute('aria-expanded', 'false');
     await toggle.focus();
     await expect(toggle).toBeFocused();
@@ -158,12 +154,12 @@ test.describe('Generation Activity', () => {
     expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
   });
 
-  test('rehydrates the completed activity and reasoning summary after reload', async ({ page }) => {
+  test('rehydrates the completed activity and renders stable reasoning Markdown after reload', async ({ page }) => {
     await page.route('**/v1/interactions*', async (route) => {
       await route.fulfill({
         status: 200,
         contentType: 'text/event-stream',
-        body: completedTurn('activity-reload', 'Persisted activity answer.', ['Persisted reasoning summary.']),
+        body: completedTurn('activity-reload', 'Persisted activity answer.', ['**Persisted reasoning summary.**']),
       });
     });
 
@@ -174,9 +170,9 @@ test.describe('Generation Activity', () => {
 
     let activity = page.getByRole('region', { name: 'Generation activity' });
     await expect(activity).toHaveCount(1);
-    await expect(activity.getByRole('button')).toContainText(/Thought for .*wrote in .*total/);
+    await expect(activity.getByRole('button')).toContainText(/2 steps · .*total/);
     await activity.getByRole('button').click();
-    await expect(activity.getByText('Persisted reasoning summary.', { exact: true })).toBeVisible();
+    await expect(activity.locator('.generation-activity__summary-body strong')).toHaveText('Persisted reasoning summary.');
     await expect(activity.locator('.generation-activity__step')).toHaveCount(2);
 
     await page.reload();
@@ -184,9 +180,9 @@ test.describe('Generation Activity', () => {
 
     activity = page.getByRole('region', { name: 'Generation activity' });
     await expect(activity).toHaveCount(1);
-    await expect(activity.getByRole('button')).toContainText(/Thought for .*wrote in .*total/);
+    await expect(activity.getByRole('button')).toContainText(/2 steps · .*total/);
     await activity.getByRole('button').click();
-    await expect(activity.getByText('Persisted reasoning summary.', { exact: true })).toBeVisible();
+    await expect(activity.locator('.generation-activity__summary-body strong')).toHaveText('Persisted reasoning summary.');
     await expect(activity.locator('.generation-activity__step')).toHaveCount(2);
   });
 
@@ -225,6 +221,32 @@ test.describe('Generation Activity', () => {
 
     await openAppearance(page);
     await expect(page.getByLabel('Generation activity accent hex')).toHaveValue(accent);
+  });
+
+  test('keeps partial and malformed hex edits transactional instead of resetting the committed accent', async ({ page }) => {
+    await page.goto('');
+    await openAppearance(page);
+    const accentInput = page.getByLabel('Generation activity accent hex');
+
+    await accentInput.fill('#A855F7');
+    await accentInput.press('Enter');
+    await expect(accentInput).toHaveValue('#A855F7');
+
+    await accentInput.fill('#A85');
+    await expect(accentInput).toHaveValue('#A85');
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await accentInput.blur();
+    await expect(accentInput).toHaveValue('#A855F7');
+    await expect(page.getByRole('alert')).toContainText('Enter a 6-digit hex colour');
+
+    await accentInput.fill(' 34d399 ');
+    await accentInput.blur();
+    await expect(accentInput).toHaveValue('#34D399');
+    await expect(page.getByRole('alert')).toHaveCount(0);
+
+    await page.reload();
+    await openAppearance(page);
+    await expect(page.getByLabel('Generation activity accent hex')).toHaveValue('#34D399');
   });
 
   test('keeps completed activity useful when Gemini supplies no reasoning summary', async ({ page }) => {

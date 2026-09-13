@@ -51,6 +51,8 @@ Git history is evidence/history only. When prose conflicts with implementation, 
 | `SYS-REL` | Reliability, testing and diagnostics | [`reliability.md`](./reliability.md) |
 | `SYS-LEGAL` | Third-party notices | [`third-party-notices.md`](./third-party-notices.md) |
 
+Supporting human guides are registered explicitly in `manifest.json` so they remain discoverable without reopening the repository to loose documentation sprawl. The first is the plain-language [`YouTube API guide`](./youtube/README.md), covering search flow, quota, Lockbox setup, cards, handoff, policy boundaries and troubleshooting.
+
 ## 4. Standard system-document shape
 
 Each system document uses stable metadata and numbered chapters. Filenames and system IDs are durable references; chapter numbers are local navigation only.
@@ -93,7 +95,7 @@ A change that modifies a durable contract updates the owning system document in 
 
 `manifest.json` is the low-token router. Load only the mapped system document(s) for the task unless a real cross-system dependency or route tie requires more context.
 
-Run `npm run docs:check` after changing documentation, routing metadata or documented source paths. The dependency-free guard validates manifest structure, active system documents, routed source paths, canonical filenames/chapters, local Markdown links and the absence of the retired `/docs`/pass-status conventions. CI runs it before dependency installation and the final reliability command chains it again.
+Run `npm run docs:check` after changing documentation, routing metadata or documented source paths. The dependency-free guard validates manifest structure, active system documents, explicitly registered supporting guides, routed source paths, canonical filenames/chapters, local Markdown links and the absence of the retired `/docs`/pass-status conventions. CI runs it before dependency installation and the final reliability command chains it again.
 
 ## 7. Repository state
 

@@ -139,6 +139,8 @@ describe('Generation Activity live lifecycle', () => {
     now = 500;
     renderLive(state);
 
+    expect(headline()).toMatch(/^Thinking · /);
+    act(() => { vi.advanceTimersByTime(100); });
     expect(headline()).toBe('Thinking · 500 ms');
     expect(primaryRows()).toEqual(['Thought for', 'Google Workspace · Calendar', 'Thinking']);
     expect(rowTimes()).toEqual(['80 ms', '180 ms', '180 ms']);
@@ -148,6 +150,8 @@ describe('Generation Activity live lifecycle', () => {
     now = 950;
     renderLive(state);
 
+    expect(headline()).toMatch(/^Writing · /);
+    act(() => { vi.advanceTimersByTime(100); });
     expect(headline()).toBe('Writing · 950 ms');
     expect(primaryRows()).toEqual(['Thought for', 'Google Workspace · Calendar', 'Thought for', 'Writing']);
     expect(rowTimes()).toEqual(['80 ms', '180 ms', '280 ms', '250 ms']);

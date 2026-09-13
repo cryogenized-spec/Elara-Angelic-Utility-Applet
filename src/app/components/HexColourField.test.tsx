@@ -11,9 +11,9 @@ let root: Root;
 
 function changeInput(input: HTMLInputElement, value: string): void {
   act(() => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-    if (!setter) throw new Error('HTMLInputElement value setter unavailable');
-    setter.call(input, value);
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+    if (!descriptor?.set) throw new Error('HTMLInputElement value setter unavailable');
+    descriptor.set.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }

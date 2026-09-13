@@ -119,7 +119,7 @@ test.describe('Generation Activity', () => {
     expect(Math.abs(completedPosition - manualPosition)).toBeLessThan(80);
   });
 
-  test('persists a long reasoning timeline inside a bounded activity body', async ({ page }) => {
+  test('persists a long reasoning timeline inside a bounded, keyboard-accessible activity body', async ({ page }) => {
     const thoughts = Array.from({ length: 36 }, (_, index) => `Reasoning summary segment ${index + 1}.`);
 
     await page.route('**/v1/interactions*', async (route) => {
@@ -139,13 +139,20 @@ test.describe('Generation Activity', () => {
     await expect(activity).toHaveCount(1);
     const toggle = activity.getByRole('button');
     await expect(toggle).toContainText(/Thought for .*wrote in .*total/);
-    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await toggle.focus();
+    await expect(toggle).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 
+    const body = activity.locator('.generation-activity__body');
+    await page.keyboard.press('Tab');
+    await expect(body).toBeFocused();
+    await expect(body).toHaveAttribute('aria-label', 'Generation activity details');
     await expect(activity.getByText('Reasoning summary', { exact: true })).toBeVisible();
     await expect(activity.getByText('Reasoning summary segment 1.', { exact: false })).toBeVisible();
     await expect(activity.locator('.generation-activity__step')).toHaveCount(37);
 
-    const body = activity.locator('.generation-activity__body');
     const dimensions = await body.evaluate((element) => ({ clientHeight: element.clientHeight, scrollHeight: element.scrollHeight }));
     expect(dimensions.clientHeight).toBeGreaterThan(0);
     expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);

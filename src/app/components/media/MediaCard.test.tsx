@@ -98,7 +98,7 @@ describe('MediaCard', () => {
     const html = renderToStaticMarkup(<MediaCard item={item({ webUrl })} />);
     expect(html).toContain('media-card--unavailable');
     expect(html).toContain('>Unavailable<');
-    expect(html).not.toContain('<a');
+    expect(html).not.toMatch(/<a(?:\s|>)/);
     expect(html).not.toContain('href=');
     expect(html).not.toContain('data-intent-href');
   });

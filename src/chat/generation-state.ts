@@ -351,12 +351,12 @@ export function buildGenerationActivity(state: GenerationState): GenerationActiv
   const terminalAt = state.endedAt ?? state.startedAt;
   return {
     id: state.generationId,
-    durationMs: Math.max(0, Math.round(terminalAt - state.startedAt)),
+    durationMs: Math.max(0, Math.floor(terminalAt - state.startedAt)),
     steps: state.steps.map((step) => ({
       id: step.id,
       kind: step.kind,
       state: durableStepState(step.state),
-      durationMs: Math.max(0, Math.round((step.endedAt ?? terminalAt) - step.startedAt)),
+      durationMs: Math.max(0, Math.floor((step.endedAt ?? terminalAt) - step.startedAt)),
       label: step.label,
       ...(step.kind === 'context' && step.detail ? { detail: step.detail } : {}),
       ...(step.toolName ? { toolName: step.toolName } : {}),

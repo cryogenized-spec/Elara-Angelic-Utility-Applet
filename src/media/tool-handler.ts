@@ -1,6 +1,5 @@
 import type { GoogleToolHandlers } from '../google/tools/executor';
-import type { MediaItem } from '../domain/media';
-import { isMediaIntent } from '../domain/media';
+import { isMediaIntent, mergeMediaItems, type MediaItem } from '../domain/media';
 
 /**
  * Tool handler for `youtube.search`.
@@ -34,7 +33,11 @@ export const mediaToolHandlers: GoogleToolHandlers = {
       signal: context.signal,
     });
 
-    const items: MediaItem[] = outcomes.flatMap((outcome) => [...outcome.items]);
+    // Per-query provider results below remain untouched for the model. Only the
+    // flattened presentation collection is collapsed by provider-scoped identity;
+    // first sighting owns the slot while the latest representation owns its data.
+    const flattened: MediaItem[] = outcomes.flatMap((outcome) => [...outcome.items]);
+    const items = mergeMediaItems([], flattened);
 
     return {
       ok: true,

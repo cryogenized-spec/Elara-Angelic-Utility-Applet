@@ -194,10 +194,18 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   useEffect(() => {
     const element = conversationRef.current;
     if (!element || typeof ResizeObserver === 'undefined') return undefined;
-    const observer = new ResizeObserver(() => {
+
+    const reconcileViewport = () => {
+      // The Generation Activity runway is exactly one real conversation
+      // viewport tall. This gives the browser enough physical scroll range to
+      // place a final activity card at the top without phone/desktop constants.
+      element.style.setProperty('--conversation-viewport-height', `${element.clientHeight}px`);
       if (followModeRef.current !== 'bottom') return;
       element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-    });
+    };
+
+    reconcileViewport();
+    const observer = new ResizeObserver(reconcileViewport);
     observer.observe(element);
     return () => observer.disconnect();
   }, []);

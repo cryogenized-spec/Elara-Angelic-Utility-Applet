@@ -23,19 +23,16 @@ export const googleToolCallSchema = z.object({
 export type GoogleToolCall = z.infer<typeof googleToolCallSchema>;
 
 export type GoogleToolRisk = 'read' | 'write' | 'destructive' | 'send';
-
 export type GoogleToolExposure = 'gemini' | 'internal';
-
-/**
- * Where a tool can actually be executed.
- *
- * Both the browser tool loop and the Cloudflare Worker build their Gemini
- * function list from the one central registry, but only the browser has tool
- * handlers. Without this field the Worker advertises tools it cannot run, and
- * the model calls them into a dead end. Omitted means "runs anywhere", which is
- * the case for every OAuth-backed tool the Worker proxies.
- */
 export type GoogleToolExecutionPlane = 'browser' | 'worker';
+
+export type ToolActivityCategory = 'google-workspace' | 'youtube' | 'roleplay' | 'documents' | 'other';
+export interface ToolActivityPresentation {
+  readonly category: ToolActivityCategory;
+  readonly categoryLabel: string;
+  readonly serviceLabel?: string;
+  readonly actionLabel: string;
+}
 
 export interface GoogleToolDescriptor {
   readonly name: GoogleToolName;

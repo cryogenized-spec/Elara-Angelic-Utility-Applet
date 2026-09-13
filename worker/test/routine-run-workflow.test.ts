@@ -99,40 +99,61 @@ describe('Phase C0 — durable claim and Workflow identity', () => {
     expect(secondId).toBe(id);
   });
 
+  it('requires a structured result while a claim is active', { timeout: 20_000 }, async () => {
+    const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
+    await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])));
+    const dueAt = Date.now() - 10 * 60_000;
+    const engine = await stub();
+    const claimed = await engine.claimWithoutDispatch(routine.id, dueAt);
+
+    expect(claimed.dispatched).toBe(false);
+    expect(await engine.envelopePresent(claimed.runKey)).toBe(true);
+
+    const missingResult = await doFetch(await internalDo('/run/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runKey: claimed.runKey, workflowInstanceId: claimed.workflowInstanceId }),
+    }));
+    expect(missingResult.status).toBe(500);
+    expect(await missingResult.json()).toMatchObject({ status: 'retryable-error', code: 'missing-result' });
+
+    const records = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs.filter((run) => run.runKey === claimed.runKey);
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({ state: 'running', scheduledFor: dueAt });
+  });
+
   it('completing the same runKey twice is a no-op', { timeout: 20_000 }, async () => {
     const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
     await doFetch(await signedWrite('/autonomy/config', configPayload(1, [routine])));
     const dueAt = Date.now() - 10 * 60_000;
-    await doFetch(await internalDo('/scheduler/ensure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ routineId: routine.id, dueAt }) }));
-    await doFetch(await internalDo('/heartbeat', { method: 'POST' }));
-    const runKey = `routine-cloud-1:catch-up:${dueAt}`;
-    const workflowInstanceId = await workflowInstanceIdForRunKey(runKey);
-    // Invariant: a run cannot be completed before its frozen envelope exists
-    // and before a structured C1 result is supplied. The previous predicate
-    // waited only for the RUN ROW, which can appear before the envelope is
-    // persisted and before the Workflow would have a result, causing
-    // engine.ts:679 missing-envelope / :686 missing-result to return 500.
-    // We now wait for the real precondition: envelope present, then complete
-    // with a valid result. Second completion is idempotent even without a
-    // result because the engine returns already-completed for terminal runs.
     const engine = await stub();
-    await waitUntil(async () => {
-      const runs = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs;
-      return runs.some((run) => run.runKey === runKey) && (await engine.envelopePresent(runKey));
-    });
+    const claimed = await engine.claimWithoutDispatch(routine.id, dueAt);
+
+    expect(claimed.dispatched).toBe(false);
+    expect(await engine.envelopePresent(claimed.runKey)).toBe(true);
+    const before = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs.filter((run) => run.runKey === claimed.runKey);
+    expect(before).toHaveLength(1);
+    expect(before[0]).toMatchObject({ state: 'running', scheduledFor: dueAt });
+
     const first = await doFetch(await internalDo('/run/complete', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runKey, workflowInstanceId, result: { disposition: 'noop' } }),
+      body: JSON.stringify({ runKey: claimed.runKey, workflowInstanceId: claimed.workflowInstanceId, result: { disposition: 'noop' } }),
     }));
     expect(first.status).toBe(200);
-    const firstBody = await first.json() as { status: string };
-    expect(['completed', 'already-completed']).toContain(firstBody.status);
-    const second = await doFetch(await internalDo('/run/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ runKey, workflowInstanceId }) }));
+    expect(await first.json()).toMatchObject({ status: 'completed', alreadyCompleted: false });
+
+    const completed = ((await (await doFetch(await bearerRead('/autonomy/runs?since=0'))).json()) as { runs: RoutineRunRecord[] }).runs.filter((run) => run.runKey === claimed.runKey);
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({ state: 'completed', outcome: 'no-op', scheduledFor: dueAt });
+
+    const second = await doFetch(await internalDo('/run/complete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ runKey: claimed.runKey, workflowInstanceId: claimed.workflowInstanceId }),
+    }));
     expect(second.status).toBe(200);
-    const secondBody = await second.json() as { alreadyCompleted: boolean; status: string };
-    expect(secondBody.alreadyCompleted).toBe(true);
-    expect(secondBody.status).toBe('already-completed');
+    expect(await second.json()).toMatchObject({ alreadyCompleted: true, status: 'already-completed' });
   });
 });
 

@@ -3,6 +3,25 @@ import { createYouTubeProvider, YouTubeSearchError } from './service';
 import type { MediaItem } from '../../domain/media';
 
 const API_KEY = 'AIzaSy-test-key-that-must-never-leak';
+const NOW = 1_800_000_000_000;
+
+type ThumbnailFixture = { url: string; width?: number; height?: number };
+interface VideoFixture {
+  kind: string;
+  id: { kind: string; videoId: string };
+  snippet: {
+    publishedAt: string;
+    channelId: string;
+    title: string;
+    description: string;
+    thumbnails: {
+      default: ThumbnailFixture;
+      medium?: ThumbnailFixture;
+      high: ThumbnailFixture;
+    };
+    channelTitle: string;
+  };
+}
 
 function searchResponse(items: unknown[], nextPageToken?: string): Response {
   return new Response(JSON.stringify({
@@ -13,7 +32,7 @@ function searchResponse(items: unknown[], nextPageToken?: string): Response {
   }), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
-function videoItem(videoId: string, title: string): any {
+function videoItem(videoId: string, title: string): VideoFixture {
   return {
     kind: 'youtube#searchResult',
     id: { kind: 'youtube#video', videoId },
@@ -40,12 +59,12 @@ function providerWith(response: () => Response) {
     });
     return response();
   });
-  const provider = createYouTubeProvider({ apiKey: () => API_KEY, fetch: fetchMock as unknown as typeof fetch });
+  const provider = createYouTubeProvider({ apiKey: () => API_KEY, fetch: fetchMock as unknown as typeof fetch, now: () => NOW });
   return { provider, calls, fetchMock };
 }
 
 describe('YouTube search adapter', () => {
-  it('maps a search response onto the domain contract', async () => {
+  it('maps a search response onto the domain contract and timestamps API data', async () => {
     const { provider } = providerWith(() => searchResponse([videoItem('abc123', 'Dark Ambient Mix')]));
 
     const outcome = await provider.search({ query: 'dark ambient' });
@@ -61,6 +80,7 @@ describe('YouTube search adapter', () => {
       title: 'Dark Ambient Mix',
       channel: 'Ambient Channel',
       webUrl: 'https://www.youtube.com/watch?v=abc123',
+      apiDataFetchedAt: NOW,
     });
     expect(item.thumbnail?.url).toContain('hqdefault.jpg');
   });

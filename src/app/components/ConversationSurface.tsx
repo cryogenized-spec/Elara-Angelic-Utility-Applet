@@ -32,6 +32,8 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   const seenCountsRef = useRef<Record<string, number>>({});
 
   const liveGeneration = generation !== null && generation.phase !== 'completed';
+  const generationId = generation?.generationId;
+  const generationPhase = generation?.phase;
 
   function atEnd(element: HTMLElement): boolean {
     return element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_STICK_THRESHOLD_PX;
@@ -71,6 +73,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   }
 
   const visibleMessages = useMemo(() => messages.filter((message) => !deletedIds.has(message.id)), [messages, deletedIds]);
+  const latestVisibleText = visibleMessages.at(-1)?.text;
 
   const activeAssistant = useMemo(() => {
     if (!liveGeneration) return undefined;
@@ -103,6 +106,13 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   }, [visibleMessages, activeAssistant]);
 
   useEffect(() => {
+    const previousCounts = seenCountsRef.current;
+    const nextCounts: Record<string, number> = {};
+    for (const entry of grouped) {
+      if (entry.message.role !== 'assistant') continue;
+      nextCounts[responseGroupFor(entry.message)] = entry.variants.length;
+    }
+
     setSelectedVariants((current) => {
       const next = { ...current };
       let changed = false;
@@ -110,11 +120,10 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         if (entry.message.role !== 'assistant') continue;
         const key = responseGroupFor(entry.message);
         const count = entry.variants.length;
-        const previousCount = seenCountsRef.current[key];
+        const previousCount = previousCounts[key];
         const value = !(key in next) || (previousCount !== undefined && count > previousCount)
           ? count - 1
           : Math.min(next[key] ?? count - 1, count - 1);
-        seenCountsRef.current[key] = count;
         if (next[key] !== value) {
           next[key] = value;
           changed = true;
@@ -122,28 +131,30 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
       }
       return changed ? next : current;
     });
+
+    seenCountsRef.current = nextCounts;
   }, [grouped]);
 
   useLayoutEffect(() => {
-    if (!generation) return;
+    if (!generationId || !generationPhase) return;
     const element = conversationRef.current;
     const anchor = activityAnchorRef.current;
     if (!element || !anchor) return;
 
-    const shouldAnchor = isActivePhase(generation.phase)
-      || (generation.phase === 'completed' && followModeRef.current === 'activity')
-      || generation.phase === 'failed'
-      || generation.phase === 'cancelled';
+    const shouldAnchor = isActivePhase(generationPhase)
+      || (generationPhase === 'completed' && followModeRef.current === 'activity')
+      || generationPhase === 'failed'
+      || generationPhase === 'cancelled';
     if (!shouldAnchor || followModeRef.current === 'manual') return;
 
     const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
     element.scrollTo({ top: Math.max(0, element.scrollTop + offset), behavior: 'auto' });
     setFollowMode('activity');
-  }, [generation?.generationId, generation?.phase]);
+  }, [generationId, generationPhase]);
 
   useEffect(() => {
     if (followModeRef.current === 'bottom') scrollToEnd();
-  }, [visibleMessages.length, visibleMessages.at(-1)?.text]);
+  }, [visibleMessages.length, latestVisibleText]);
 
   useEffect(() => {
     const element = conversationRef.current;
@@ -206,7 +217,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         </article>;
       })}
 
-      {hasLivePanel && generation && <div ref={activityAnchorRef}><GenerationActivity generation={generation} /></div>}
+      {hasLivePanel && generation && <div ref={activityAnchorRef}><GenerationActivity key={generation.generationId} generation={generation} /></div>}
 
       {activeAssistant?.text.trim() && <article className="message message-assistant message-assistant--streaming" key={activeAssistant.id}>
         <header className="message-meta"><span>ELARA</span><time dateTime={new Date(activeAssistant.createdAt).toISOString()}>{new Date(activeAssistant.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>

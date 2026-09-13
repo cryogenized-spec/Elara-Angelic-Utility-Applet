@@ -145,6 +145,38 @@ test.describe('Generation Activity', () => {
     expect(dimensions.scrollHeight).toBeGreaterThan(dimensions.clientHeight);
   });
 
+  test('rehydrates the completed activity and reasoning summary after reload', async ({ page }) => {
+    await page.route('**/v1/interactions*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: completedTurn('activity-reload', 'Persisted activity answer.', ['Persisted reasoning summary.']),
+      });
+    });
+
+    await page.goto('');
+    await unlockTestGemini(page);
+    await ask(page, 'persist this activity');
+    await expect(page.getByText('Persisted activity answer.', { exact: true })).toBeVisible();
+
+    let activity = page.getByRole('region', { name: 'Generation activity' });
+    await expect(activity).toHaveCount(1);
+    await expect(activity.getByRole('button')).toContainText(/Thought for .*wrote in .*total/);
+    await activity.getByRole('button').click();
+    await expect(activity.getByText('Persisted reasoning summary.', { exact: true })).toBeVisible();
+    await expect(activity.locator('.generation-activity__step')).toHaveCount(2);
+
+    await page.reload();
+    await expect(page.getByText('Persisted activity answer.', { exact: true })).toBeVisible();
+
+    activity = page.getByRole('region', { name: 'Generation activity' });
+    await expect(activity).toHaveCount(1);
+    await expect(activity.getByRole('button')).toContainText(/Thought for .*wrote in .*total/);
+    await activity.getByRole('button').click();
+    await expect(activity.getByText('Persisted reasoning summary.', { exact: true })).toBeVisible();
+    await expect(activity.locator('.generation-activity__step')).toHaveCount(2);
+  });
+
   test('keeps completed activity useful when Gemini supplies no reasoning summary', async ({ page }) => {
     await page.route('**/v1/interactions*', async (route) => {
       await route.fulfill({

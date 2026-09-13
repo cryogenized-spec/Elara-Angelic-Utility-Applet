@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatActivityDuration } from './GenerationActivity';
+import { formatActivityDuration } from './GenerationTrace';
 
 describe('Generation Activity duration formatting', () => {
   it('uses elapsed whole milliseconds below one second', () => {

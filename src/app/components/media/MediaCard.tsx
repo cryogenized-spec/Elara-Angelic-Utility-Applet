@@ -53,19 +53,11 @@ export function MediaCard({ item, platform }: {
   readonly platform?: HandoffPlatform;
 }) {
   const listen = mediaIntentOf(item) === 'listen';
-  // One detector for both the label and the href: a card that promised music and
-  // linked to the watch page would be worse than either.
   const resolved = platform ?? detectHandoffPlatform();
   const href = mediaHandoffHref(item, resolved);
   const destination = mediaDestinationUrl(item);
   const intentHref = mediaHandoffIntentHref(item, resolved);
   const label = mediaHandoffLabel(item);
-  // A full phrase rather than a bare name, because the preposition is part of the
-  // promise: on Android the tap leaves the browser for a chooser, and the user
-  // should not discover that after the fact.
-  const targetLabel = listen
-    ? (resolved.isAndroid ? 'in your music app' : 'in YouTube Music')
-    : 'on YouTube';
 
   function handleClick(event: React.MouseEvent<HTMLAnchorElement>): void {
     if (!resolved.isAndroid || !intentHref) return;
@@ -82,9 +74,6 @@ export function MediaCard({ item, platform }: {
       window.open(destination, '_blank', 'noopener,noreferrer');
       return;
     }
-    // Fallback for browsers that do not understand intent:// at all — they will
-    // stay on the page and show ERR_UNKNOWN_URL_SCHEME if we do nothing. After a
-    // short delay, if the page is still visible, open the https destination.
     window.setTimeout(() => {
       if (document.visibilityState === 'visible') {
         window.open(destination, '_blank', 'noopener,noreferrer');
@@ -98,16 +87,15 @@ export function MediaCard({ item, platform }: {
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      title={`Open “${item.title}” ${targetLabel}`}
+      title={`Open “${item.title}” on YouTube`}
       data-intent-href={intentHref}
       onClick={handleClick}
     >
       <span className="media-card__thumb-wrap">
         <MediaThumbnail key={item.thumbnail?.url ?? 'no-thumbnail'} thumbnail={item.thumbnail} />
         {/* No duration overlay: `search.list` does not return one, and fetching it
-            would mean a second billed call per result (see the provider's quota
-            rules). A `0:00` badge would be a fabricated number, which is worse
-            than no number. */}
+            would mean another API request. A `0:00` badge would also be fabricated
+            provider information, which is worse than no number. */}
         <span className="media-card__badge" aria-hidden="true">YouTube</span>
       </span>
       <span className="media-card__meta">

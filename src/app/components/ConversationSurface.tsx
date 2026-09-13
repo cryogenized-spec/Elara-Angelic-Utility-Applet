@@ -7,6 +7,7 @@ import { Icon } from '../../ui/icons';
 import { MarkdownText } from './MarkdownText';
 import { MessageArtifacts } from './artifacts/MessageArtifacts';
 import { MessageMedia } from './media/MessageMedia';
+import { hasRenderableMessageContent } from './message-content';
 import './conversation-surface.css';
 
 const BOTTOM_STICK_THRESHOLD_PX = 32;
@@ -104,7 +105,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         entries.push({ message, variants: [message] });
         continue;
       }
-      if (!message.text.trim()) continue;
+      if (!hasRenderableMessageContent(message)) continue;
       const key = responseGroupFor(message);
       const variants = groups.get(key);
       if (variants) {
@@ -251,7 +252,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
             <span className="response-variants__pagination" aria-live="polite">{selectedIndex + 1}/{variants.length}</span>
             <button type="button" className="response-variants__button" aria-label="Next response" disabled={selectedIndex === variants.length - 1} onClick={() => setSelectedVariants((current) => ({ ...current, [groupId]: Math.min(variants.length - 1, selectedIndex + 1) }))}>›</button>
           </div>}
-          <div className="message-body"><MarkdownText text={selected.text} /></div>
+          {selected.text.trim() && <div className="message-body"><MarkdownText text={selected.text} /></div>}
           <MessageArtifacts attachmentIds={selected.attachments} artifactIds={selected.artifacts} messageId={selected.id} conversationId={selected.conversationId} />
           <MessageMedia items={selected.media} />
           <div className="message-actions" aria-label="Message actions">
@@ -263,9 +264,11 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
       {hasLivePanel && generation && <div ref={activityAnchorRef}><GenerationActivity key={generation.generationId} generation={generation} /></div>}
 
-      {activeAssistant?.text.trim() && <article className="message message-assistant message-assistant--streaming" key={activeAssistant.id}>
+      {activeAssistant && hasRenderableMessageContent(activeAssistant) && <article className="message message-assistant message-assistant--streaming" key={activeAssistant.id}>
         <header className="message-meta"><span>ELARA</span><time dateTime={new Date(activeAssistant.createdAt).toISOString()}>{new Date(activeAssistant.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
-        <div className="message-body"><MarkdownText text={activeAssistant.text} /></div>
+        {activeAssistant.text.trim() && <div className="message-body"><MarkdownText text={activeAssistant.text} /></div>}
+        <MessageArtifacts attachmentIds={activeAssistant.attachments} artifactIds={activeAssistant.artifacts} messageId={activeAssistant.id} conversationId={activeAssistant.conversationId} />
+        <MessageMedia items={activeAssistant.media} />
       </article>}
 
       {showActivityTail && <div className="conversation__activity-tail" aria-hidden="true" />}

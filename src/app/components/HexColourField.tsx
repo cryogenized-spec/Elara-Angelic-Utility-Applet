@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 
 const HEX_ERROR = 'Enter a 6-digit hex colour, e.g. #7C3AED.';
 
@@ -22,24 +22,21 @@ export function HexColourField({
   onCommit: (value: string) => void;
 }) {
   const committed = canonicalHexColour(value) ?? canonicalHexColour(fallback) ?? '#000000';
-  const [draft, setDraft] = useState(committed);
+  const [draft, setDraft] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const cancelNextBlur = useRef(false);
   const errorId = useId();
-
-  useEffect(() => {
-    setDraft(committed);
-    setError(null);
-  }, [committed]);
+  const displayedValue = draft ?? committed;
 
   function commitDraft(): void {
+    if (draft === null) return;
     const next = canonicalHexColour(draft);
     if (!next) {
-      setDraft(committed);
+      setDraft(null);
       setError(HEX_ERROR);
       return;
     }
-    setDraft(next);
+    setDraft(null);
     setError(null);
     if (next !== committed) onCommit(next);
   }
@@ -47,7 +44,7 @@ export function HexColourField({
   function handlePicker(nextValue: string): void {
     const next = canonicalHexColour(nextValue);
     if (!next) return;
-    setDraft(next);
+    setDraft(null);
     setError(null);
     if (next !== committed) onCommit(next);
   }
@@ -63,7 +60,7 @@ export function HexColourField({
       />
       <input
         aria-label={`${ariaLabel} hex`}
-        value={draft}
+        value={displayedValue}
         maxLength={16}
         autoComplete="off"
         autoCapitalize="characters"
@@ -90,7 +87,7 @@ export function HexColourField({
           if (event.key === 'Escape') {
             event.preventDefault();
             cancelNextBlur.current = true;
-            setDraft(committed);
+            setDraft(null);
             setError(null);
             event.currentTarget.blur();
           }

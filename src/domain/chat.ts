@@ -26,11 +26,32 @@ export interface ProviderTurnMetadata {
   supersedesGenerationId?: string;
 }
 
-export interface ExecutionSummary {
+export type GenerationActivityKind = 'thinking' | 'tool' | 'generation' | 'context' | 'status';
+export type GenerationActivityState = 'done' | 'failed' | 'cancelled';
+export type GenerationContextCategory = 'memory' | 'artifacts' | 'other';
+
+/**
+ * Durable, provider-agnostic record of one observable generation activity.
+ * Raw hidden chain-of-thought is never stored here; `detail` is limited to
+ * provider-supplied thought summaries or application-owned status text.
+ */
+export interface GenerationActivityStep {
   id: string;
-  steps: string[];
+  kind: GenerationActivityKind;
+  state: GenerationActivityState;
   durationMs: number;
-  thoughtSummary?: string;
+  label: string;
+  detail?: string;
+  toolName?: string;
+  contextCategory?: GenerationContextCategory;
+  errorCode?: string;
+}
+
+/** Terminal snapshot used by the same UI that renders the live generation. */
+export interface GenerationActivityRecord {
+  id: string;
+  durationMs: number;
+  steps: GenerationActivityStep[];
 }
 
 export interface ChatMessage {
@@ -50,7 +71,7 @@ export interface ChatMessage {
    * version bump. Never contains credential material.
    */
   media?: MediaItem[];
-  executionSummary?: ExecutionSummary;
+  generationActivity?: GenerationActivityRecord;
   providerTurn?: ProviderTurnMetadata;
 }
 

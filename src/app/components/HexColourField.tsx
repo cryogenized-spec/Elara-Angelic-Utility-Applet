@@ -23,21 +23,22 @@ export function HexColourField({
 }) {
   const committed = canonicalHexColour(value) ?? canonicalHexColour(fallback) ?? '#000000';
   const [draft, setDraft] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [invalidAgainst, setInvalidAgainst] = useState<string | null>(null);
   const cancelNextBlur = useRef(false);
   const errorId = useId();
   const displayedValue = draft ?? committed;
+  const hasError = invalidAgainst === committed;
 
   function commitDraft(): void {
     if (draft === null) return;
     const next = canonicalHexColour(draft);
     if (!next) {
       setDraft(null);
-      setError(HEX_ERROR);
+      setInvalidAgainst(committed);
       return;
     }
     setDraft(null);
-    setError(null);
+    setInvalidAgainst(null);
     if (next !== committed) onCommit(next);
   }
 
@@ -45,7 +46,7 @@ export function HexColourField({
     const next = canonicalHexColour(nextValue);
     if (!next) return;
     setDraft(null);
-    setError(null);
+    setInvalidAgainst(null);
     if (next !== committed) onCommit(next);
   }
 
@@ -65,11 +66,11 @@ export function HexColourField({
         autoComplete="off"
         autoCapitalize="characters"
         spellCheck={false}
-        aria-invalid={error ? 'true' : undefined}
-        aria-describedby={error ? errorId : undefined}
+        aria-invalid={hasError ? 'true' : undefined}
+        aria-describedby={hasError ? errorId : undefined}
         onChange={(event) => {
           setDraft(event.target.value);
-          setError(null);
+          setInvalidAgainst(null);
         }}
         onBlur={() => {
           if (cancelNextBlur.current) {
@@ -88,12 +89,12 @@ export function HexColourField({
             event.preventDefault();
             cancelNextBlur.current = true;
             setDraft(null);
-            setError(null);
+            setInvalidAgainst(null);
             event.currentTarget.blur();
           }
         }}
       />
     </div>
-    {error && <small id={errorId} className="colour-field__error" role="alert">{error}</small>}
+    {hasError && <small id={errorId} className="colour-field__error" role="alert">{HEX_ERROR}</small>}
   </label>;
 }

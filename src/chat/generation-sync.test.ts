@@ -157,7 +157,7 @@ describe('generation sync: one-assistant-message invariant', () => {
       outputTokens: 7,
       thoughtSummary: 'Checking the calendar first.',
     });
-    expect(persisted?.executionSummary?.steps.join(' | ')).toContain('Tool calendar.listEvents');
+    expect(persisted?.generationActivity?.steps.some((step) => step.toolName === 'calendar.listEvents')).toBe(true);
   });
 
   it('records the superseded generation on regeneration-style turns', async () => {
@@ -270,7 +270,6 @@ describe('generation sync: one-assistant-message invariant', () => {
     const captured = box.attempt;
     if (!captured) throw new Error('expected the failed attempt to be captured');
 
-    // Retry streams from the failed attempt's pre-generation base.
     const retryTurn = createHarness({
       base: captured.base,
       supersedesGenerationId: captured.generationId,
@@ -378,7 +377,6 @@ describe('follow-up turns after a failure', () => {
 
 describe('cross-generation arbitration', () => {
   it('rejects late events from a superseded runner: conversation, error, retry, and persistence stay untouched', async () => {
-    // One shared application store, two independent turn runners.
     const base: ConversationState = {
       id: 'thread-1',
       title: 'Arbitration',
@@ -422,13 +420,11 @@ describe('cross-generation arbitration', () => {
     const contextA = makeContext('gen-A', makeMessage('assistant', ''));
     const contextB = makeContext('gen-B', makeMessage('assistant', ''));
 
-    // Generation A starts and streams partial text.
     arbiter.activate('gen-A');
     let genA = createGenerationState('gen-A', { startedAt: 0 });
     genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'old' }, receivedAt: 10 }, contextA);
     expect(conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text)).toEqual(['old']);
 
-    // Generation B supersedes A: restores the pre-turn base, streams, completes.
     arbiter.activate('gen-B');
     conversation = base;
     let genB = createGenerationState('gen-B', { startedAt: 0 });
@@ -439,8 +435,6 @@ describe('cross-generation arbitration', () => {
     expect(conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text)).toEqual(['new']);
     expect(saved).toHaveLength(1);
 
-    // Late events from the obsolete runner change nothing: not the visible
-    // transcript, not status/error, not retry state, not persistence.
     const snapshot = JSON.stringify({ conversation, status, error });
     genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'STALE' }, receivedAt: 30 }, contextA);
     expect(genA.transcript).toBe('oldSTALE');
@@ -485,7 +479,6 @@ describe('cross-generation arbitration', () => {
     let activeThread = 'thread-1';
     const texts = () => conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text);
 
-    // Composite runner predicate: elected generation AND current conversation.
     const context: GenerationSyncContext = {
       assistantMessage: makeMessage('assistant', ''),
       base: thread1,
@@ -518,8 +511,6 @@ describe('cross-generation arbitration', () => {
     gen = dispatchGenerationEvent(gen, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'old' }, receivedAt: 10 }, context);
     expect(texts()).toEqual(['old']);
 
-    // Switch threads: the UI clears, but the arbiter is untouched — the old
-    // turn is still "elected" yet no longer authorized to mutate anything.
     activeThread = 'thread-2';
     expect(arbiter.isActive('gen-A')).toBe(true);
 
@@ -546,8 +537,6 @@ describe('cross-generation arbitration', () => {
     expect(saved).toHaveLength(0);
     expect(attempts).toHaveLength(0);
     expect(error).toBeNull();
-    // The stale election survives until some future turn activates — the
-    // inertness above came from the composite predicate, not the arbiter.
     expect(arbiter.isActive('gen-A')).toBe(true);
   });
 
@@ -558,7 +547,6 @@ describe('cross-generation arbitration', () => {
     generation = dispatchGenerationEvent(generation, { generationId: 'gen-1', event: COMPLETED('i-1'), receivedAt: 20 }, harness.context);
     expect(generation.phase).toBe('completed');
 
-    // A late abort-induced cancelled must not revert the completed turn.
     const before = JSON.stringify(harness.read().conversation);
     const after = dispatchGenerationEvent(generation, { generationId: 'gen-1', event: { type: 'cancelled' }, receivedAt: 30 }, harness.context);
     expect(after).toBe(generation);

@@ -1,27 +1,19 @@
 import type { GeminiStreamEvent, GeminiUsage } from '../gemini/contracts';
 import { normalizeGeminiError, type NormalizedProviderError } from '../gemini/errors';
-import type { ExecutionSummary } from '../domain/chat';
+import type { GenerationActivityRecord, GenerationActivityState, GenerationContextCategory } from '../domain/chat';
 import type { MediaItem } from '../domain/media';
 
 // ---------------------------------------------------------------------------
 // Generation state: the chat-owned lifecycle of one assistant turn.
 //
-// The provider translates the Gemini wire protocol into canonical
-// `GeminiStreamEvent`s. This module consumes ONLY those normalized events and
-// reduces them into `GenerationState` for the live UI. It never parses SSE,
-// never touches the SDK, and never persists anything.
-//
-// Key distinction: one generation (user turn) may span MANY provider
-// interactions (tool continuations). A new `interaction-created` event must
-// never reset transcript or trace state. Stale events from a superseded
-// generation are ignored.
+// The provider translates wire/application activity into canonical
+// `GeminiStreamEvent`s. This module consumes only those normalized events and
+// reduces them into the single GenerationState used by live UI and terminal
+// persistence. It never parses SSE, touches the SDK, or writes storage.
 // ---------------------------------------------------------------------------
 
-/** Idle gap with no stream activity before the runner fails the turn. */
 export const DEFAULT_IDLE_STALL_TIMEOUT_MS = 45_000;
-/** Absolute wall-clock bound for one turn, even when actively streaming. */
 export const DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS = 15 * 60_000;
-/** Cap on persisted thought-summary text to protect the local store. */
 export const MAX_PERSISTED_THOUGHT_SUMMARY_CHARS = 8_000;
 
 export type GenerationPhase =
@@ -33,7 +25,7 @@ export type GenerationPhase =
   | 'failed'
   | 'cancelled';
 
-export type GenerationStepKind = 'thinking' | 'tool' | 'generation' | 'status';
+export type GenerationStepKind = 'thinking' | 'tool' | 'generation' | 'context' | 'status';
 export type GenerationStepState = 'running' | 'done' | 'failed' | 'cancelled';
 
 export interface GenerationStep {
@@ -46,10 +38,11 @@ export interface GenerationStep {
   /** Monotonic ms when the step froze; absent while running. */
   endedAt?: number;
   state: GenerationStepState;
-  /** Accumulated thought-summary text (thinking steps only). */
+  /** Provider-supplied thought-summary text or application-owned context detail. */
   detail?: string;
   toolName?: string;
   toolCallId?: string;
+  contextCategory?: GenerationContextCategory;
   errorCode?: string;
 }
 
@@ -58,19 +51,13 @@ export interface GenerationState {
   supersedesGenerationId?: string;
   phase: GenerationPhase;
   model?: string;
-  /** Every provider interaction observed in this turn, in order. */
   interactionIds: string[];
   currentInteractionId?: string;
-  /** Monotonic ms (performance.now basis) when the turn started. */
   startedAt: number;
-  /** Monotonic ms from turn start to the first stream event. */
   timeToFirstEventMs?: number;
-  /** Monotonic ms when the turn reached a terminal phase. */
   endedAt?: number;
-  /** Full assistant transcript accumulated across all interactions. */
   transcript: string;
   artifactIds: string[];
-  /** Media resolved during this turn, deduplicated by provider:id. */
   mediaItems: MediaItem[];
   steps: GenerationStep[];
   activeTool?: { name: string; callId: string; stepId: string };
@@ -83,13 +70,11 @@ export interface GenerationState {
 export interface GenerationEventEnvelope {
   generationId: string;
   event: GeminiStreamEvent;
-  /** Monotonic ms (performance.now basis) when the runner received the event. */
   receivedAt: number;
 }
 
 const TERMINAL_PHASES: ReadonlySet<GenerationPhase> = new Set(['completed', 'failed', 'cancelled']);
 const ACTIVE_PHASES: ReadonlySet<GenerationPhase> = new Set(['connecting', 'thinking', 'tool-working', 'generating']);
-/** Tool-loop status vocabulary that means "tool work is in flight". */
 const TOOL_ACTIVITY_STATUSES: ReadonlySet<string> = new Set(['executing_tools', 'awaiting_tool_confirmation', 'awaiting_authorization', 'preparing_document', 'compiling_pdf', 'finalizing_artifact']);
 
 export function isTerminalPhase(phase: GenerationPhase): boolean {
@@ -120,29 +105,17 @@ export function createGenerationState(
 
 function classifyStepType(rawStepType: string): GenerationStepKind {
   const normalized = rawStepType.trim().toLowerCase().replace(/-/g, '_');
-  if (normalized === 'thought' || normalized === 'thinking' || normalized === 'thought_summary' || normalized === 'reasoning') {
-    return 'thinking';
-  }
-  if (normalized === 'function_call' || normalized === 'tool_call' || normalized === 'tool' || normalized === 'function') {
-    return 'tool';
-  }
-  if (
-    normalized === 'model_output' ||
-    normalized === 'output' ||
-    normalized === 'text' ||
-    normalized === 'message' ||
-    normalized === 'content' ||
-    normalized === 'response'
-  ) {
-    return 'generation';
-  }
+  if (normalized === 'thought' || normalized === 'thinking' || normalized === 'thought_summary' || normalized === 'reasoning') return 'thinking';
+  if (normalized === 'function_call' || normalized === 'tool_call' || normalized === 'tool' || normalized === 'function') return 'tool';
+  if (normalized === 'model_output' || normalized === 'output' || normalized === 'text' || normalized === 'message' || normalized === 'content' || normalized === 'response') return 'generation';
   return 'status';
 }
 
 function defaultStepLabel(kind: GenerationStepKind, index: number): string {
   if (kind === 'thinking') return 'Thinking';
-  if (kind === 'tool') return 'Calling tool…';
+  if (kind === 'tool') return 'Calling tool';
   if (kind === 'generation') return 'Writing';
+  if (kind === 'context') return 'Context';
   return `Step ${index}`;
 }
 
@@ -196,34 +169,21 @@ function updateStepAt(state: GenerationState, position: number, update: Partial<
   return { ...state, steps };
 }
 
-/**
- * Pure reducer. Returns the SAME state reference when the envelope is stale
- * (another generation) or when the turn already reached a terminal phase.
- */
 export function applyGenerationEvent(state: GenerationState, envelope: GenerationEventEnvelope): GenerationState {
   if (envelope.generationId !== state.generationId) return state;
   if (isTerminalPhase(state.phase)) return state;
 
   const { event, receivedAt } = envelope;
-  const next: GenerationState =
-    state.timeToFirstEventMs === undefined
-      ? { ...state, timeToFirstEventMs: Math.max(0, receivedAt - state.startedAt) }
-      : state;
+  const next: GenerationState = state.timeToFirstEventMs === undefined
+    ? { ...state, timeToFirstEventMs: Math.max(0, receivedAt - state.startedAt) }
+    : state;
 
   switch (event.type) {
     case 'interaction-created': {
-      // A new interaction NEVER resets transcript or trace: tool continuations
-      // belong to the same generation. Freeze in-flight steps from the
-      // previous interaction so their timers stay honest, then continue.
-      // A re-announced (duplicate) id is not a boundary: leave running steps
-      // and the active tool untouched.
       const seen = next.interactionIds.includes(event.interactionId);
-      const steps =
-        !seen && next.steps.length > 0
-          ? next.steps.map((step) =>
-              step.state === 'running' ? { ...step, state: 'done' as const, endedAt: receivedAt } : step,
-            )
-          : next.steps;
+      const steps = !seen && next.steps.length > 0
+        ? next.steps.map((step) => step.state === 'running' ? { ...step, state: 'done' as const, endedAt: receivedAt } : step)
+        : next.steps;
       return {
         ...next,
         steps,
@@ -235,11 +195,7 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
     }
     case 'interaction-status': {
       const toolActive = TOOL_ACTIVITY_STATUSES.has(event.status);
-      return {
-        ...next,
-        statusMessage: event.status,
-        phase: toolActive ? 'tool-working' : next.phase,
-      };
+      return { ...next, statusMessage: event.status, phase: toolActive ? 'tool-working' : next.phase };
     }
     case 'step-start': {
       const kind = classifyStepType(event.stepType);
@@ -252,18 +208,29 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
       if (position < 0) {
         const opened = openStep(next, 'thinking', receivedAt, event.index);
         const created = opened.steps.length - 1;
-        return {
-          ...updateStepAt(opened, created, { detail: event.text }),
-          phase: 'thinking',
-        };
+        return { ...updateStepAt(opened, created, { detail: event.text }), phase: 'thinking' };
       }
       const current = next.steps[position].detail ?? '';
       return updateStepAt(next, position, { detail: `${current}${event.text}` });
     }
     case 'thought-signature': {
-      // Encrypted payload: transport noise as far as the UI is concerned.
-      // Never displayed, never persisted.
       return next;
+    }
+    case 'context-activity': {
+      if (event.outcome === 'empty') return next;
+      const durationMs = Math.max(0, event.durationMs);
+      const step: GenerationStep = {
+        id: `step-${next.nextStepSequence}`,
+        kind: 'context',
+        label: event.label,
+        detail: event.detail,
+        contextCategory: event.category,
+        startedAt: Math.max(next.startedAt, receivedAt - durationMs),
+        endedAt: receivedAt,
+        state: event.outcome === 'unavailable' ? 'failed' : 'done',
+        errorCode: event.outcome === 'unavailable' ? 'CONTEXT_UNAVAILABLE' : undefined,
+      };
+      return { ...next, steps: [...next.steps, step], nextStepSequence: next.nextStepSequence + 1 };
     }
     case 'tool-call': {
       let withStep = next;
@@ -274,32 +241,20 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
       }
       const stepId = withStep.steps[position].id;
       return {
-        ...updateStepAt(withStep, position, {
-          label: event.name,
-          toolName: event.name,
-          toolCallId: event.callId,
-        }),
+        ...updateStepAt(withStep, position, { label: event.name, toolName: event.name, toolCallId: event.callId }),
         phase: 'tool-working',
         activeTool: { name: event.name, callId: event.callId, stepId },
       };
     }
     case 'text-delta': {
       let withStep = next;
-      const position =
-        lastRunningStepOfKind(next.steps, 'generation', event.index) >= 0
-          ? lastRunningStepOfKind(next.steps, 'generation', event.index)
-          : -1;
-      if (position < 0) {
-        withStep = openStep(next, 'generation', receivedAt, event.index);
-      }
+      const position = lastRunningStepOfKind(next.steps, 'generation', event.index);
+      if (position < 0) withStep = openStep(next, 'generation', receivedAt, event.index);
       return { ...withStep, transcript: `${withStep.transcript}${event.text}`, phase: 'generating' };
     }
     case 'step-stop': {
       const position = lastRunningStepIndex(next.steps, event.index);
       if (position < 0) return next;
-      // Tool steps stay running across the execution gap: their timer should
-      // measure call → continuation, closed by the next interaction-created
-      // (or by a terminal event below).
       if (next.steps[position].kind === 'tool') return next;
       return updateStepAt(next, position, { state: 'done', endedAt: receivedAt });
     }
@@ -307,7 +262,6 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
       return next.artifactIds.includes(event.artifactId) ? next : { ...next, artifactIds: [...next.artifactIds, event.artifactId] };
     }
     case 'media-resolved': {
-      // Two queries in one batch can resolve the same video; keep one card.
       const seen = new Set(next.mediaItems.map((item) => `${item.provider}:${item.id}`));
       const added = event.items.filter((item) => !seen.has(`${item.provider}:${item.id}`));
       return added.length ? { ...next, mediaItems: [...next.mediaItems, ...added] } : next;
@@ -316,9 +270,7 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
       const seen = next.interactionIds.includes(event.interactionId);
       return {
         ...next,
-        steps: next.steps.map((step) =>
-          step.state === 'running' ? { ...step, state: 'done' as const, endedAt: receivedAt } : step,
-        ),
+        steps: next.steps.map((step) => step.state === 'running' ? { ...step, state: 'done' as const, endedAt: receivedAt } : step),
         phase: 'completed',
         endedAt: receivedAt,
         interactionIds: seen ? next.interactionIds : [...next.interactionIds, event.interactionId],
@@ -327,28 +279,18 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
         usage: event.usage,
       };
     }
-    case 'failed': {
-      return failGeneration(next, event.error, receivedAt);
-    }
-    case 'error': {
-      // Legacy vocabulary: map onto the canonical failed outcome.
-      const error = event.error ?? normalizeGeminiError(new Error(event.message));
-      return failGeneration(next, error, receivedAt);
-    }
+    case 'failed': return failGeneration(next, event.error, receivedAt);
+    case 'error': return failGeneration(next, event.error ?? normalizeGeminiError(new Error(event.message)), receivedAt);
     case 'cancelled': {
       return {
         ...next,
-        steps: next.steps.map((step) =>
-          step.state === 'running' ? { ...step, state: 'cancelled' as const, endedAt: receivedAt } : step,
-        ),
+        steps: next.steps.map((step) => step.state === 'running' ? { ...step, state: 'cancelled' as const, endedAt: receivedAt } : step),
         phase: 'cancelled',
         endedAt: receivedAt,
         activeTool: undefined,
       };
     }
-    default: {
-      return next;
-    }
+    default: return next;
   }
 }
 
@@ -357,15 +299,14 @@ function failGeneration(state: GenerationState, error: NormalizedProviderError, 
   const failedPosition = lastRunningStepIndex(steps);
   for (let cursor = 0; cursor < steps.length; cursor += 1) {
     if (steps[cursor].state !== 'running') continue;
-    steps[cursor] =
-      cursor === failedPosition
-        ? { ...steps[cursor], state: 'failed', endedAt: receivedAt, errorCode: error.code }
-        : { ...steps[cursor], state: 'done', endedAt: receivedAt };
+    steps[cursor] = cursor === failedPosition
+      ? { ...steps[cursor], state: 'failed', endedAt: receivedAt, errorCode: error.code }
+      : { ...steps[cursor], state: 'done', endedAt: receivedAt };
   }
   return { ...state, steps, phase: 'failed', endedAt: receivedAt, activeTool: undefined, error };
 }
 
-/** Provider-supplied thought summary if present, else the accumulated live steps. */
+/** Provider-supplied summary when present, otherwise accumulated summary deltas. */
 export function thoughtSummaryOf(state: GenerationState): string | undefined {
   const providerSummary = state.usage?.thoughtSummary?.trim();
   if (providerSummary) return providerSummary;
@@ -376,6 +317,14 @@ export function thoughtSummaryOf(state: GenerationState): string | undefined {
     .join('\n\n')
     .trim();
   return summary || undefined;
+}
+
+export function persistedThoughtSummaryOf(state: GenerationState): string | undefined {
+  const summary = thoughtSummaryOf(state);
+  if (!summary) return undefined;
+  return summary.length > MAX_PERSISTED_THOUGHT_SUMMARY_CHARS
+    ? `${summary.slice(0, MAX_PERSISTED_THOUGHT_SUMMARY_CHARS)}…`
+    : summary;
 }
 
 export function toolNamesOf(state: GenerationState): string[] {
@@ -390,36 +339,33 @@ export function stepElapsedMs(step: GenerationStep, now: number): number {
   return Math.max(0, (step.endedAt ?? now) - step.startedAt);
 }
 
-function describeStep(step: GenerationStep): string {
-  const elapsed = Math.max(0, Math.round((step.endedAt ?? step.startedAt) - step.startedAt));
-  const base =
-    step.kind === 'tool' ? `Tool ${step.toolName ?? step.label}` : step.kind === 'thinking' && !(step.detail ?? '').trim()
-      ? 'Thinking (no summary)'
-      : step.label;
-  if (step.state === 'failed') return `${base} · failed after ${elapsed} ms`;
-  if (step.state === 'cancelled') return `${base} · stopped after ${elapsed} ms`;
-  if (step.state === 'running') return `${base} · running ${elapsed} ms`;
-  return `${base} · ${elapsed} ms`;
+function durableStepState(state: GenerationStepState): GenerationActivityState {
+  return state === 'failed' || state === 'cancelled' ? state : 'done';
 }
 
 /**
- * Fold ephemeral trace state into the durable per-message summary.
- * Only call at terminal time; never persists transient phase labels.
+ * Terminal snapshot of the exact same lifecycle the live panel renders.
+ * No separate summary reconstruction and no raw hidden reasoning payloads.
  */
-export function buildExecutionSummary(state: GenerationState): ExecutionSummary {
-  const summary = thoughtSummaryOf(state);
+export function buildGenerationActivity(state: GenerationState): GenerationActivityRecord {
+  const terminalAt = state.endedAt ?? state.startedAt;
   return {
     id: state.generationId,
-    steps: state.steps.map(describeStep),
-    durationMs: Math.max(0, Math.round((state.endedAt ?? state.startedAt) - state.startedAt)),
-    thoughtSummary:
-      summary && summary.length > MAX_PERSISTED_THOUGHT_SUMMARY_CHARS
-        ? `${summary.slice(0, MAX_PERSISTED_THOUGHT_SUMMARY_CHARS)}…`
-        : summary,
+    durationMs: Math.max(0, Math.round(terminalAt - state.startedAt)),
+    steps: state.steps.map((step) => ({
+      id: step.id,
+      kind: step.kind,
+      state: durableStepState(step.state),
+      durationMs: Math.max(0, Math.round((step.endedAt ?? terminalAt) - step.startedAt)),
+      label: step.label,
+      ...(step.kind === 'context' && step.detail ? { detail: step.detail } : {}),
+      ...(step.toolName ? { toolName: step.toolName } : {}),
+      ...(step.contextCategory ? { contextCategory: step.contextCategory } : {}),
+      ...(step.errorCode ? { errorCode: step.errorCode } : {}),
+    })),
   };
 }
 
-/** Runner-synthesized timeout failure (watchdog fired, no provider event). */
 export function generationTimeoutError(
   message: string,
   context: { interactionId?: string; durationMs?: number } = {},
@@ -427,7 +373,6 @@ export function generationTimeoutError(
   return normalizeGeminiError(new Error(message), { ...context, category: 'timeout' });
 }
 
-/** Runner-synthesized protocol failure (stream exhausted without a terminal event). */
 export function generationProtocolError(
   message: string,
   context: { interactionId?: string; durationMs?: number } = {},

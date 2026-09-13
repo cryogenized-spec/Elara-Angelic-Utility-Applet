@@ -75,6 +75,11 @@
 .message-action--danger:hover, .message-action--danger:focus-visible { color: rgba(255,150,180,.95); border-color: rgba(240,123,220,.28); background: rgba(240,123,220,.07); }
 .message-action svg { display: block; }
 
+/* Temporary runway while a turn is live. Without trailing scroll extent, the
+   browser cannot place a final stream item at the top of the viewport. The
+   spacer disappears with the live panel at the terminal transition. */
+.conversation__activity-tail { height: clamp(260px, 60dvh, 520px); pointer-events: none; }
+
 @media (min-width: 720px) {
   .message-assistant .message-body { max-width: 88%; }
 }

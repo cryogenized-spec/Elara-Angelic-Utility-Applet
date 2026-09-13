@@ -399,8 +399,7 @@ export function App() {
       watchdog.dispose();
       if (terminalWhileActive && current.phase === 'completed') {
         try {
-          if (!terminalPersistence) throw new Error('The completed turn did not register its persistence handoff.');
-          await terminalPersistence;
+          await (terminalPersistence ?? Promise.reject(new Error('The completed turn did not register its persistence handoff.')));
           try {
             await refreshThreads();
           } catch (cause) {

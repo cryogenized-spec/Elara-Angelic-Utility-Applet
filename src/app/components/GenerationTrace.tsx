@@ -140,6 +140,9 @@ export function GenerationActivity(props: Props) {
       : PHASE_LABELS[live.phase]
     : undefined;
   const headerText = live ? `${liveLabel} · ${formatActivityDuration(durationMs)}` : summaryLine(rows, durationMs);
+  const controlLabel = live
+    ? `Generation activity details: ${liveLabel}`
+    : 'Generation activity details';
 
   return (
     <section className={`generation-activity${live ? ` is-${live.phase}` : ' is-complete'}`} aria-label="Generation activity">
@@ -148,6 +151,7 @@ export function GenerationActivity(props: Props) {
         type="button"
         className="generation-activity__header"
         aria-expanded={expanded}
+        aria-label={controlLabel}
         onClick={() => setExpanded((current) => !current)}
       >
         <span className="generation-activity__dot" aria-hidden="true" />
@@ -155,7 +159,7 @@ export function GenerationActivity(props: Props) {
         <Icon name="chevron" size={14} />
       </button>
       {expanded && (
-        <div className="generation-activity__body">
+        <div className="generation-activity__body" tabIndex={0} aria-label="Generation activity details">
           {rows.length > 0 && (
             <ol className="generation-activity__steps">
               {rows.map((row) => {
@@ -168,7 +172,7 @@ export function GenerationActivity(props: Props) {
                       {copy.secondary && <span className="generation-activity__step-secondary">{copy.secondary}</span>}
                       {row.errorCode && <span className="generation-activity__step-error">{row.errorCode}</span>}
                     </span>
-                    <span className="generation-activity__step-time" aria-hidden="true">{formatActivityDuration(row.durationMs)}</span>
+                    <span className="generation-activity__step-time">{formatActivityDuration(row.durationMs)}</span>
                   </li>
                 );
               })}

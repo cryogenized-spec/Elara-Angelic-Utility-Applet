@@ -247,4 +247,42 @@ test.describe('Generation Activity', () => {
     await expect(activity.getByText('Reasoning summary')).toHaveCount(0);
     await expect(activity.locator('.generation-activity__step')).toHaveCount(1);
   });
+
+  test('rolls back an optimistic completed assistant when terminal persistence fails', async ({ page }) => {
+    await page.addInitScript(() => {
+      const originalPut = IDBObjectStore.prototype.put;
+      let failedTerminalSave = false;
+      IDBObjectStore.prototype.put = function patchedPut(this: IDBObjectStore, value: unknown, key?: IDBValidKey) {
+        const request = Reflect.apply(originalPut, this, key === undefined ? [value] : [value, key]) as IDBRequest<IDBValidKey>;
+        const record = typeof value === 'object' && value !== null ? value as { role?: unknown; providerTurn?: { provider?: unknown } } : null;
+        if (!failedTerminalSave && record?.role === 'assistant' && record.providerTurn?.provider === 'gemini') {
+          failedTerminalSave = true;
+          queueMicrotask(() => {
+            try { this.transaction.abort(); } catch { /* transaction already settled */ }
+          });
+        }
+        return request;
+      };
+    });
+
+    await page.route('**/v1/interactions*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: completedTurn('activity-save-failure', 'This optimistic answer must roll back.', ['Save failure reasoning.']),
+      });
+    });
+
+    await page.goto('');
+    await unlockTestGemini(page);
+    await ask(page, 'persist failure probe');
+
+    await expect(page.getByText(/Could not save the response\./)).toBeVisible();
+    await expect(page.getByText('This optimistic answer must roll back.', { exact: true })).toHaveCount(0);
+    await expect(page.getByText('persist failure probe', { exact: true })).toBeVisible();
+
+    await page.reload();
+    await expect(page.getByText('persist failure probe', { exact: true })).toBeVisible();
+    await expect(page.getByText('This optimistic answer must roll back.', { exact: true })).toHaveCount(0);
+  });
 });

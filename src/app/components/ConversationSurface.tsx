@@ -25,6 +25,7 @@ function responseGroupFor(message: ChatMessage): string {
  */
 export const ConversationSurface = memo(function ConversationSurface({ messages, generation, onRegenerate }: { messages: ChatMessage[]; generation: GenerationState | null; onRegenerate: (messageId: string) => void }) {
   const conversationRef = useRef<HTMLElement>(null);
+  const conversationStreamRef = useRef<HTMLDivElement>(null);
   const activityAnchorRef = useRef<HTMLDivElement>(null);
   const anchoredGenerationRef = useRef<string | null>(null);
   const restoredManualGenerationRef = useRef<string | null>(null);
@@ -194,13 +195,18 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
   useEffect(() => {
     const element = conversationRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') return undefined;
+    const stream = conversationStreamRef.current;
+    if (!element || !stream || typeof ResizeObserver === 'undefined') return undefined;
 
     const reconcileViewport = () => {
       // The Generation Activity runway is exactly one real conversation
       // viewport tall. This gives the browser enough physical scroll range to
       // place a final activity card at the top without phone/desktop constants.
       element.style.setProperty('--conversation-viewport-height', `${element.clientHeight}px`);
+      // The stream is observed as well as the viewport. Lazy cards, images and
+      // other late content can grow scrollHeight without resizing the scroll
+      // owner. Bottom-follow may reconcile that growth; manual/activity modes
+      // remain authoritative and are never yanked by a late layout change.
       if (followModeRef.current !== 'bottom') return;
       element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
     };
@@ -208,6 +214,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     reconcileViewport();
     const observer = new ResizeObserver(reconcileViewport);
     observer.observe(element);
+    observer.observe(stream);
     return () => observer.disconnect();
   }, []);
 
@@ -227,7 +234,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   }
 
   return <section ref={conversationRef} className="conversation" aria-label="Conversation" onScroll={rememberScrollPosition}>
-    <div className="conversation__stream">
+    <div ref={conversationStreamRef} className="conversation__stream">
       {grouped.map(({ message, variants }) => {
         if (message.role !== 'assistant') {
           return <article className="message message-user user-surface-frosted" key={message.id}>

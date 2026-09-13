@@ -107,6 +107,32 @@ describe('Generation Activity duration formatting', () => {
   });
 });
 
+describe('Generation Activity accessibility', () => {
+  it('keeps the live control name stable while exposing deliberate detail timing and keyboard scrolling', () => {
+    let state = createGenerationState('gen-accessible', { startedAt: 0 });
+    state = send(state, { type: 'interaction-created', interactionId: 'i-1', model: 'm' }, 10);
+    state = send(state, { type: 'step-start', index: 0, stepType: 'thought' }, 20);
+
+    now = 250;
+    renderLive(state);
+
+    const button = container.querySelector<HTMLButtonElement>('.generation-activity__header');
+    const body = container.querySelector<HTMLDivElement>('.generation-activity__body');
+    const time = container.querySelector<HTMLSpanElement>('.generation-activity__step-time');
+    if (!button || !body || !time) throw new Error('expected the expanded live Generation Activity controls');
+
+    expect(button.getAttribute('aria-label')).toBe('Generation activity details: Thinking');
+    expect(body.tabIndex).toBe(0);
+    expect(body.getAttribute('aria-label')).toBe('Generation activity details');
+    expect(time.hasAttribute('aria-hidden')).toBe(false);
+
+    now = 850;
+    act(() => { vi.advanceTimersByTime(100); });
+    expect(headline()).toBe('Thinking · 850 ms');
+    expect(button.getAttribute('aria-label')).toBe('Generation activity details: Thinking');
+  });
+});
+
 describe('Generation Activity live lifecycle', () => {
   it('advances the active step timer and freezes it when that step ends', () => {
     let state = createGenerationState('gen-live-timer', { startedAt: 0 });

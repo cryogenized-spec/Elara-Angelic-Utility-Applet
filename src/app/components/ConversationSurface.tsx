@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'rea
 import type { ChatMessage } from '../../domain/chat';
 import { isActivePhase, type GenerationState } from '../../chat/generation-state';
 import { deleteMessage } from '../../persistence/conversation';
-import { GenerationActivity } from './GenerationActivity';
+import { GenerationActivity } from './GenerationTrace';
 import { Icon } from '../../ui/icons';
 import { MarkdownText } from './MarkdownText';
 import { MessageArtifacts } from './artifacts/MessageArtifacts';

@@ -11,14 +11,6 @@ import type { MediaItem } from '../../../domain/media';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-/**
- * The stylesheet as text. Some layout invariants below are not observable through
- * React's output and were broken at least once in this sheet's history, so they
- * are asserted against the source rather than left to visual review.
- *
- * Resolved from the project root: this suite runs in jsdom, where
- * `import.meta.url` is a served URL rather than a path on disk.
- */
 const cssSheet = readFileSync(resolve(process.cwd(), 'src/app/components/media/media-card.css'), 'utf8');
 
 function item(overrides: Partial<MediaItem> = {}): MediaItem {
@@ -53,8 +45,6 @@ afterEach(async () => {
 describe('MediaCard', () => {
   it('is a link to the canonical watch URL, not an embedded player', () => {
     const html = renderToStaticMarkup(<MediaCard item={item()} />);
-
-    // No iframe means no player script, no autoplay, and nothing heavy to load.
     expect(html).not.toContain('<iframe');
     expect(html).not.toContain('<video');
     expect(html).toContain('href="https://www.youtube.com/watch?v=abc123"');
@@ -63,22 +53,17 @@ describe('MediaCard', () => {
 
   it('never enables autoplay anywhere in its output', () => {
     const html = renderToStaticMarkup(<MediaCard item={item()} />);
-
     expect(html).not.toContain('autoplay=1');
     expect(html).not.toContain('autoplay=0');
     expect(html).not.toMatch(/<iframe|<video|<audio/i);
   });
 
   it('opens the link safely in a new tab', () => {
-    const html = renderToStaticMarkup(<MediaCard item={item()} />);
-
-    expect(html).toContain('rel="noreferrer noopener"');
+    expect(renderToStaticMarkup(<MediaCard item={item()} />)).toContain('rel="noreferrer noopener"');
   });
 
   it('defers the thumbnail and hides it from assistive tech', () => {
     const html = renderToStaticMarkup(<MediaCard item={item()} />);
-
-    // The title is the accessible name; the image is decorative.
     expect(html).toContain('loading="lazy"');
     expect(html).toContain('decoding="async"');
     expect(html).toContain('alt=""');
@@ -88,15 +73,13 @@ describe('MediaCard', () => {
 
   it('renders a placeholder instead of a broken image when there is no thumbnail', () => {
     const html = renderToStaticMarkup(<MediaCard item={item({ thumbnail: undefined })} />);
-
     expect(html).not.toContain('<img');
     expect(html).toContain('media-card__thumb--empty');
     expect(html).toContain('Dark Ambient Mix');
   });
 
   it('omits the channel line when the provider did not return one', () => {
-    expect(renderToStaticMarkup(<MediaCard item={item({ channel: undefined })} />))
-      .not.toContain('media-card__channel');
+    expect(renderToStaticMarkup(<MediaCard item={item({ channel: undefined })} />)).not.toContain('media-card__channel');
   });
 
   it('states its provenance so a resolved video is never mistaken for a local artifact', () => {
@@ -117,7 +100,6 @@ describe('MessageMedia', () => {
 
   it('loads the card lazily and renders every item', async () => {
     await act(async () => { root.render(<MessageMedia items={[item(), item({ id: 'def456', title: 'Second', webUrl: 'https://www.youtube.com/watch?v=def456' })]} />); });
-    // Let the dynamic import behind React.lazy settle.
     for (let attempt = 0; attempt < 40 && !container.querySelector('.media-card'); attempt += 1) {
       await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 10); }); });
     }
@@ -134,9 +116,6 @@ describe('MessageMedia', () => {
     for (let attempt = 0; attempt < 40 && !container.querySelector('.media-card'); attempt += 1) {
       await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 10); }); });
     }
-
-    // Wording is for a screen-reader user, not a developer: the label names what
-    // the group contains rather than describing how it was produced.
     expect(container.querySelector('.media-rail')?.getAttribute('aria-label')).toBe('Media results from YouTube');
   });
 });
@@ -145,90 +124,60 @@ describe('MediaCard hand-off behaviour', () => {
   const ANDROID = { isAndroid: true };
   const ELSEWHERE = { isAndroid: false };
 
-  it('offers the platform, never itself, as the thing that will play media', () => {
+  it('offers the provider, never itself, as the thing that will play media', () => {
     const titles = [
       renderToStaticMarkup(<MediaCard item={item()} platform={ANDROID} />),
       renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ANDROID} />),
       renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ELSEWHERE} />),
     ];
 
-    // Wording matters here: "Play in Elara" would be a false promise, and so is
-    // a card that implies nothing happens when a tap leaves the browser.
     for (const html of titles) {
       expect(html).not.toMatch(/play (it |this )?(in|with) elara/i);
-      expect(html).toMatch(/title="Open “[^”]+” (in|on) /);
+      expect(html).toMatch(/title="Open “[^”]+” on YouTube/);
     }
   });
 
   it('labels the action after the intent, defaulting to watch', () => {
-    expect(renderToStaticMarkup(<MediaCard item={item()} platform={ELSEWHERE} />))
-      .toContain('media-card__action">Watch');
-    expect(renderToStaticMarkup(<MediaCard item={item({ intent: 'watch' })} platform={ELSEWHERE} />))
-      .toContain('>Watch');
-    expect(renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ELSEWHERE} />))
-      .toContain('>Listen');
+    expect(renderToStaticMarkup(<MediaCard item={item()} platform={ELSEWHERE} />)).toContain('media-card__action">Watch');
+    expect(renderToStaticMarkup(<MediaCard item={item({ intent: 'watch' })} platform={ELSEWHERE} />)).toContain('>Watch');
+    expect(renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ELSEWHERE} />)).toContain('>Listen');
   });
 
-  it('names the same destination in its tooltip that its href will actually open', () => {
-    // The wording and the link are computed from the intent separately, so this is
-    // the pair most likely to drift: a card that says "on YouTube" but launches a
-    // music app is a broken promise in five words.
-    const musicElsewhere = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ELSEWHERE} />);
-    expect(musicElsewhere).toContain('in YouTube Music"');
-    expect(musicElsewhere).toContain('media-card--listen');
-    expect(musicElsewhere).toContain('music.youtube.com');
+  it('keeps listen and watch on the exact canonical provider destination', () => {
+    const canonical = 'https://www.youtube.com/watch?v=abc123&t=42s';
+    const listen = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen', webUrl: canonical })} platform={ELSEWHERE} />);
+    const watch = renderToStaticMarkup(<MediaCard item={item({ intent: 'watch', webUrl: canonical })} platform={ELSEWHERE} />);
 
-    const musicAndroid = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ANDROID} />);
-    expect(musicAndroid).toContain('in your music app"');
-
-    const watchHtml = renderToStaticMarkup(<MediaCard item={item()} platform={ELSEWHERE} />);
-    expect(watchHtml).toContain('on YouTube"');
-    expect(watchHtml).toContain('media-card--watch');
-    expect(watchHtml).not.toContain('music.youtube.com');
+    expect(listen).toContain('title="Open “Dark Ambient Mix — 3 Hours” on YouTube"');
+    expect(listen).toContain('media-card--listen');
+    expect(listen).toContain('youtube.com/watch?v=abc123&amp;t=42s');
+    expect(listen).not.toContain('music.youtube.com');
+    expect(watch).toContain('media-card--watch');
+    expect(watch).toContain('youtube.com/watch?v=abc123&amp;t=42s');
   });
 
   it('still never embeds a player for a listen request', () => {
-    // The original invariant has to survive the new feature: an audio intent is
-    // a reason to hand off more eagerly, not a licence to add an <audio> tag.
     const html = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ANDROID} />);
-
     expect(html).not.toMatch(/<iframe|<video|<audio/i);
     expect(html).not.toContain('autoplay');
   });
 
-  it('hands off through an intent URI on Android', () => {
-    const html = renderToStaticMarkup(<MediaCard item={item()} platform={ANDROID} />);
-
+  it('hands the same canonical URL through an unpinned Android intent', () => {
+    const html = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ANDROID} />);
+    expect(html).toContain('href="https://www.youtube.com/watch?v=abc123"');
     expect(html).toContain('intent://www.youtube.com/watch?v=abc123#Intent;');
     expect(html).toContain('browser_fallback_url');
+    expect(html).not.toContain(';package=');
+    expect(html).not.toContain('music.youtube.com');
   });
 
-  it('sends a listen request to the music surface, and a playlist to the watch page', () => {
-    const music = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ELSEWHERE} />);
-    expect(music).toContain('music.youtube.com/watch?v=abc123');
-
-    const playlist = renderToStaticMarkup(<MediaCard
-      item={item({ kind: 'playlist', intent: 'listen', webUrl: 'https://www.youtube.com/playlist?list=PL9' })}
-      platform={ELSEWHERE}
-    />);
-    expect(playlist).toContain('youtube.com/playlist?list=PL9');
-    expect(playlist).not.toContain('music.youtube.com');
-  });
-
-  it('shows no duration, because inventing one would cost a second billed call', () => {
-    // The provider never sets `durationSeconds`: `search.list` does not return a
-    // duration, and looking one up means another call per result. Pinning the
-    // absence here is what stops a future edit from adding a fake `0:00` badge.
-    expect(renderToStaticMarkup(<MediaCard item={item()} platform={ELSEWHERE} />))
-      .not.toContain('media-card__duration');
+  it('shows no duration, because search.list does not provide one', () => {
+    expect(renderToStaticMarkup(<MediaCard item={item()} platform={ELSEWHERE} />)).not.toContain('media-card__duration');
     expect(cssSheet).not.toMatch(/\.media-card__duration/);
   });
 
   it('stays one control, so a tap anywhere on the card works', () => {
     const html = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ANDROID} />);
-
-    // A nested <a> or <button> would be invalid markup and create a dead zone in
-    // the middle of the tap target.
     expect(html.match(/<a\b/g)).toHaveLength(1);
     expect(html).not.toContain('<button');
   });
@@ -252,11 +201,6 @@ describe('MediaCard hand-off behaviour', () => {
 });
 
 describe('MediaCard stylesheet contract', () => {
-  // The layout invariants below are not observable through React's output, and
-  // each one was already broken at least once in this sheet's history, so they
-  // are asserted against the source instead of left to visual review.
-  // Resolved from the project root: this suite runs in jsdom, where
-  // `import.meta.url` is a served URL rather than a path on disk.
   const css = cssSheet;
 
   it('reserves the thumbnail box at the ratio the provider actually serves', () => {

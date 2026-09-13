@@ -53,22 +53,34 @@ it('attributes a repeated ensureScheduled budget refusal to the exact requested 
   const afterFirst = (await runs()).filter((run) => run.routineId === routine.id);
   expect(afterFirst.filter((run) => run.scheduledFor === firstDue)).toHaveLength(1);
 
-  // Derive the second occurrence from the first captured timestamp rather than
-  // sampling Date.now() again. It stays inside the same grace window while
-  // giving the record a stable natural key for attribution.
+  // Exhausted budget, two distinct caller-supplied occurrences. This makes the
+  // attribution check adversarial on purpose: a generic `find(errorCode)` has
+  // two valid refusal candidates and therefore cannot prove which occurrence
+  // it is talking about.
+  const intermediateDue = firstDue + 60_000;
+  await ensureScheduled(routine.id, intermediateDue);
+  await heartbeat();
+
   const secondDue = firstDue + 3 * 60_000;
   await ensureScheduled(routine.id, secondDue);
   await heartbeat();
 
   const records = (await runs()).filter((run) => run.routineId === routine.id);
   const firstOccurrence = records.filter((run) => run.scheduledFor === firstDue);
+  const intermediateOccurrence = records.filter((run) => run.scheduledFor === intermediateDue);
   const secondOccurrence = records.filter((run) => run.scheduledFor === secondDue);
 
-  // Repeated ensureScheduled may also expose an intermediate scheduler grid
-  // tick that is legitimately budget-refused. That must never satisfy the
-  // assertion for the caller-supplied second occurrence: identify by the
-  // natural occurrence key first, then inspect its refusal.
   expect(firstOccurrence).toHaveLength(1);
+  expect(intermediateOccurrence).toHaveLength(1);
+  expect(intermediateOccurrence[0]).toMatchObject({
+    scheduledFor: intermediateDue,
+    state: 'skipped',
+    outcome: 'skipped',
+    errorCode: SCHEDULER_BUDGET_CODE,
+  });
+
+  // Natural-key attribution first, refusal assertion second. An earlier valid
+  // budget refusal must never satisfy the requested second occurrence.
   expect(secondOccurrence).toHaveLength(1);
   expect(secondOccurrence[0]).toMatchObject({
     scheduledFor: secondDue,

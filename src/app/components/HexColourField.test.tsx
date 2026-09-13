@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { canonicalHexColour, HexColourField } from './HexColourField';
@@ -32,6 +32,20 @@ function key(input: HTMLInputElement, keyValue: string): void {
   });
 }
 
+function ControlledField({ onCommit }: { onCommit: (value: string) => void }) {
+  const [value, setValue] = useState('#A855F7');
+  return <HexColourField
+    label="Activity accent"
+    ariaLabel="Generation activity accent"
+    value={value}
+    fallback="#6EA8FF"
+    onCommit={(next) => {
+      onCommit(next);
+      setValue(next);
+    }}
+  />;
+}
+
 beforeEach(() => {
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -59,15 +73,7 @@ describe('canonicalHexColour', () => {
 
 describe('HexColourField transactional editing', () => {
   function renderField(onCommit = vi.fn()) {
-    act(() => {
-      root.render(<HexColourField
-        label="Activity accent"
-        ariaLabel="Generation activity accent"
-        value="#A855F7"
-        fallback="#6EA8FF"
-        onCommit={onCommit}
-      />);
-    });
+    act(() => { root.render(<ControlledField onCommit={onCommit} />); });
     const text = container.querySelector<HTMLInputElement>('input[aria-label="Generation activity accent hex"]');
     const picker = container.querySelector<HTMLInputElement>('input[aria-label="Generation activity accent colour"]');
     if (!text || !picker) throw new Error('expected both colour controls');
@@ -114,6 +120,7 @@ describe('HexColourField transactional editing', () => {
 
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith('#112233');
+    expect(text.value).toBe('#112233');
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
@@ -135,6 +142,70 @@ describe('HexColourField transactional editing', () => {
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith('#22C55E');
     expect(text.value).toBe('#22C55E');
+    expect(picker.value.toUpperCase()).toBe('#22C55E');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('falls back to the newest committed colour when the parent changes during a bad draft', () => {
+    const onCommit = vi.fn();
+    act(() => {
+      root.render(<HexColourField
+        label="Activity accent"
+        ariaLabel="Generation activity accent"
+        value="#A855F7"
+        fallback="#6EA8FF"
+        onCommit={onCommit}
+      />);
+    });
+    const text = container.querySelector<HTMLInputElement>('input[aria-label="Generation activity accent hex"]');
+    if (!text) throw new Error('expected hex input');
+
+    changeInput(text, '#BAD');
+    act(() => {
+      root.render(<HexColourField
+        label="Activity accent"
+        ariaLabel="Generation activity accent"
+        value="#0EA5E9"
+        fallback="#6EA8FF"
+        onCommit={onCommit}
+      />);
+    });
+    expect(text.value).toBe('#BAD');
+
+    blur(text);
+    expect(text.value).toBe('#0EA5E9');
+    expect(onCommit).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('Enter a 6-digit hex colour');
+  });
+
+  it('drops a stale validation warning automatically if the committed colour changes externally', () => {
+    const onCommit = vi.fn();
+    act(() => {
+      root.render(<HexColourField
+        label="Activity accent"
+        ariaLabel="Generation activity accent"
+        value="#A855F7"
+        fallback="#6EA8FF"
+        onCommit={onCommit}
+      />);
+    });
+    const text = container.querySelector<HTMLInputElement>('input[aria-label="Generation activity accent hex"]');
+    if (!text) throw new Error('expected hex input');
+
+    changeInput(text, '#BAD');
+    blur(text);
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+
+    act(() => {
+      root.render(<HexColourField
+        label="Activity accent"
+        ariaLabel="Generation activity accent"
+        value="#0EA5E9"
+        fallback="#6EA8FF"
+        onCommit={onCommit}
+      />);
+    });
+    expect(text.value).toBe('#0EA5E9');
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 });

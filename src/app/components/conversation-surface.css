@@ -75,12 +75,11 @@
 .message-action--danger:hover, .message-action--danger:focus-visible { color: rgba(255,150,180,.95); border-color: rgba(240,123,220,.28); background: rgba(240,123,220,.07); }
 .message-action svg { display: block; }
 
-/* Scroll runway for Generation Activity. It exists while a turn is live and,
-   if the user deliberately scrolls away during that turn, remains just long
-   enough to stop completion from collapsing their chosen viewport position.
-   The larger portrait allowance is required because the fixed banner/composer
-   leave the conversation viewport materially shorter than 100dvh. */
-.conversation__activity-tail { height: clamp(360px, 72dvh, 680px); pointer-events: none; }
+/* Scroll runway for Generation Activity. The scroll owner measures the real
+   conversation viewport and publishes it here; one viewport of trailing space
+   is sufficient for a final activity card to be physically alignable at the
+   top, and preserves a deliberate manual position through completion. */
+.conversation__activity-tail { height: var(--conversation-viewport-height, 100dvh); pointer-events: none; }
 
 @media (min-width: 720px) {
   .message-assistant .message-body { max-width: 88%; }

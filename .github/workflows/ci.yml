@@ -39,7 +39,7 @@ jobs:
         run: npm run docs:check
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Lint
         run: npm run lint
@@ -57,7 +57,7 @@ jobs:
         run: npm run build
 
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: npm exec -- playwright install --with-deps chromium
 
       - name: End-to-end tests
         run: npm run e2e -- --project=chromium --project=android-portrait --project=onboarding

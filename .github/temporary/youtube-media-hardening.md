@@ -21,6 +21,7 @@ YouTube API Services Terms, Developer Policies, Branding Guidelines and Required
 9. `listen` rewrites a Data API video result onto `music.youtube.com` without an explicit Data API contract for that cross-product destination; use the canonical YouTube result URL unless policy authority clearly supports the rewrite.
 10. Current text badge needs a branding review against YouTube's requirement for applicable Brand Features on API-result surfaces.
 11. Browser E2E asserts Android handoff attributes but does not prove the click path or physical app dispatch.
+12. Repository search finds no YouTube Terms of Service link or user-facing privacy-policy disclosure for YouTube API use. Developer Policies require both for an API Client, so this is a compliance closeout item rather than optional documentation polish.
 
 ## Invariants
 
@@ -33,6 +34,8 @@ YouTube API Services Terms, Developer Policies, Branding Guidelines and Required
 - YouTube audiovisual content is never downloaded, proxied, cached or made available offline.
 - Search-result title/channel/thumbnail data is not synthesized or replaced.
 - Non-authorized API metadata is refreshed or removed before the policy retention ceiling; stale data is never silently presented as current.
+- YouTube-origin content carries clear, approved provider attribution without altering YouTube Brand Features.
+- The API Client exposes the required YouTube Terms and privacy disclosures before final compliance sign-off.
 - Manual user scrolling always beats late media/layout autoscroll.
 - Android physical app chooser acceptance remains a handset-only acceptance check.
 
@@ -62,9 +65,9 @@ Adversarial: delayed lazy import; 404 thumbnail; missing thumbnail; very slow im
 
 ### Phase 4 — policy/security hardening
 
-Make YouTube destinations canonical and fail closed to HTTPS/provider-safe targets. Remove unsupported YouTube-Music URL rewriting unless official policy/docs establish it. Add explicit API-data freshness metadata and startup/read cleanup so persisted search metadata cannot be displayed beyond its allowed freshness window. Review/implement official YouTube attribution without modifying provider branding.
+Make YouTube destinations canonical and fail closed to HTTPS/provider-safe targets. Remove unsupported YouTube-Music URL rewriting unless official policy/docs establish it. Add explicit API-data freshness metadata and startup/read cleanup so persisted search metadata cannot be displayed beyond its allowed freshness window. Review/implement approved YouTube attribution without modifying provider branding. Add the required user-facing YouTube Terms link and privacy disclosure/links for YouTube API use in the appropriate legal/settings surface.
 
-Adversarial: `javascript:`, `data:`, `http:`, hostile host, malformed URL, corrupted IndexedDB row, stale >30-day message media, stale cache, missing timestamps, invalid thumbnail dimensions, credential-shaped strings.
+Adversarial: `javascript:`, `data:`, `http:`, hostile host, malformed URL, corrupted IndexedDB row, stale >30-day message media, stale cache, missing timestamps, invalid thumbnail dimensions, credential-shaped strings, missing legal links, altered attribution asset.
 
 ### Phase 5 — browser + platform acceptance harness
 

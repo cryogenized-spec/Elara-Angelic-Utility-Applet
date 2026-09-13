@@ -1,7 +1,7 @@
 import type { GeminiStreamEvent, GeminiUsage } from '../gemini/contracts';
 import { normalizeGeminiError, type NormalizedProviderError } from '../gemini/errors';
 import type { GenerationActivityRecord, GenerationActivityState, GenerationContextCategory } from '../domain/chat';
-import type { MediaItem } from '../domain/media';
+import { mergeMediaItems, type MediaItem } from '../domain/media';
 
 // ---------------------------------------------------------------------------
 // Generation state: the chat-owned lifecycle of one assistant turn.
@@ -267,9 +267,8 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
       return next.artifactIds.includes(event.artifactId) ? next : { ...next, artifactIds: [...next.artifactIds, event.artifactId] };
     }
     case 'media-resolved': {
-      const seen = new Set(next.mediaItems.map((item) => `${item.provider}:${item.id}`));
-      const added = event.items.filter((item) => !seen.has(`${item.provider}:${item.id}`));
-      return added.length ? { ...next, mediaItems: [...next.mediaItems, ...added] } : next;
+      const mediaItems = mergeMediaItems(next.mediaItems, event.items);
+      return { ...next, mediaItems };
     }
     case 'completed': {
       const seen = next.interactionIds.includes(event.interactionId);

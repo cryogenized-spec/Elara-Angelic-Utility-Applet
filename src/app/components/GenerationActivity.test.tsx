@@ -1,0 +1,19 @@
+import { describe, expect, it } from 'vitest';
+import { formatActivityDuration } from './GenerationActivity';
+
+describe('Generation Activity duration formatting', () => {
+  it('uses elapsed whole milliseconds below one second', () => {
+    expect(formatActivityDuration(0)).toBe('0 ms');
+    expect(formatActivityDuration(438.4)).toBe('438 ms');
+    expect(formatActivityDuration(999.9)).toBe('999 ms');
+  });
+
+  it('uses one decimal second from one second onward', () => {
+    expect(formatActivityDuration(1000)).toBe('1.0 s');
+    expect(formatActivityDuration(12749)).toBe('12.7 s');
+  });
+
+  it('never exposes a negative duration', () => {
+    expect(formatActivityDuration(-25)).toBe('0 ms');
+  });
+});

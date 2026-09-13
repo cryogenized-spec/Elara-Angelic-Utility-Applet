@@ -42,16 +42,29 @@ export async function loadMemoryContext(query: string): Promise<string> {
   return formatMemoryContext(await retrieveMemories(scope));
 }
 
+export type MemoryContextStatus = 'used' | 'empty' | 'unavailable';
+export interface MemoryContextResult { context: string; status: MemoryContextStatus; }
+
 /**
- * Compose durable memory into application context. Retrieval failures are
- * deliberately swallowed so a local-memory problem can never block Gemini.
+ * Retrieve memory without allowing a local persistence failure to block Gemini.
+ * The status is deliberately coarse: UI may report that memory was used or
+ * unavailable, but never receives memory contents through this diagnostic path.
  */
-export async function loadMemoryContextSafely(query: string, loader: (query: string) => Promise<string> = loadMemoryContext): Promise<string> {
+export async function loadMemoryContextResult(
+  query: string,
+  loader: (query: string) => Promise<string> = loadMemoryContext,
+): Promise<MemoryContextResult> {
   try {
-    return await loader(query);
+    const context = await loader(query);
+    return { context, status: context.trim() ? 'used' : 'empty' };
   } catch {
-    return '';
+    return { context: '', status: 'unavailable' };
   }
+}
+
+/** Backwards-compatible string-only helper for existing callers/tests. */
+export async function loadMemoryContextSafely(query: string, loader: (query: string) => Promise<string> = loadMemoryContext): Promise<string> {
+  return (await loadMemoryContextResult(query, loader)).context;
 }
 
 /** Keep durable memory explicitly contextual and separate from Elara's identity instructions. */
@@ -62,11 +75,25 @@ export function appendMemoryContext(systemInstruction: string, memoryContext: st
   return base ? `${base}\n\n[APPLICATION CONTEXT — DURABLE MEMORY]\n${memory}` : `[APPLICATION CONTEXT — DURABLE MEMORY]\n${memory}`;
 }
 
+export interface ComposedSystemInstruction {
+  instruction?: string;
+  memoryStatus: MemoryContextStatus;
+}
+
 /**
- * Build the final system instruction without making memory availability a
- * prerequisite for the provider request.
+ * Build the final instruction and expose only the retrieval outcome needed by
+ * Generation Activity. No durable-memory contents are duplicated into telemetry.
  */
+export async function composeSystemInstructionWithStatus(
+  systemInstruction: string | undefined,
+  query: string,
+): Promise<ComposedSystemInstruction> {
+  const memory = await loadMemoryContextResult(query);
+  const contextual = appendMemoryContext(systemInstruction ?? '', memory.context);
+  return { instruction: contextual.trim() ? contextual : undefined, memoryStatus: memory.status };
+}
+
+/** Existing string-only API retained for non-trace callers. */
 export async function composeSystemInstruction(systemInstruction: string | undefined, query: string): Promise<string | undefined> {
-  const contextual = appendMemoryContext(systemInstruction ?? '', await loadMemoryContextSafely(query));
-  return contextual.trim() ? contextual : undefined;
+  return (await composeSystemInstructionWithStatus(systemInstruction, query)).instruction;
 }

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MediaItem } from '../domain/media';
 import {
+  canonicalMediaWebUrl,
   detectHandoffPlatform,
   mediaDestinationUrl,
   mediaHandoffHref,
@@ -31,20 +32,47 @@ function fallbackOf(href: string): string {
 
 describe('media hand-off', () => {
   describe('canonical destination', () => {
-    it('preserves the provider URL verbatim for watch and listen intents', () => {
-      const canonical = 'https://www.youtube.com/watch?v=abc123&t=42s';
-      expect(mediaDestinationUrl(item({ webUrl: canonical, intent: 'watch' }))).toBe(canonical);
-      expect(mediaDestinationUrl(item({ webUrl: canonical, intent: 'listen' }))).toBe(canonical);
+    it('derives the only accepted YouTube destination from provider, kind and id', () => {
+      expect(canonicalMediaWebUrl(item())).toBe('https://www.youtube.com/watch?v=abc123');
+      expect(canonicalMediaWebUrl(item({ kind: 'playlist', id: 'PL123' })))
+        .toBe('https://www.youtube.com/playlist?list=PL123');
     });
 
-    it('does not invent a YouTube Music URL for listen intent', () => {
+    it('keeps watch and listen on the same canonical YouTube result', () => {
+      expect(mediaDestinationUrl(item({ intent: 'watch' }))).toBe('https://www.youtube.com/watch?v=abc123');
       expect(mediaDestinationUrl(item({ intent: 'listen' }))).toBe('https://www.youtube.com/watch?v=abc123');
       expect(mediaDestinationUrl(item({ intent: 'listen' }))).not.toContain('music.youtube.com');
+    });
+
+    it.each([
+      ['javascript:alert(1)', 'javascript scheme'],
+      ['data:text/html,hello', 'data scheme'],
+      ['http://www.youtube.com/watch?v=abc123', 'plain HTTP'],
+      ['https://evil.example/watch?v=abc123', 'hostile HTTPS host'],
+      ['https://youtube.com/watch?v=abc123', 'non-canonical host alias'],
+      ['https://www.youtube.com/watch?v=other', 'mismatched video id'],
+      ['https://www.youtube.com/watch?v=abc123&t=42s', 'unexpected extra parameters'],
+      ['not a url', 'malformed URL'],
+    ])('fails closed for %s (%s)', (webUrl) => {
+      const unsafe = item({ webUrl });
+      expect(mediaDestinationUrl(unsafe)).toBeUndefined();
+      expect(mediaHandoffHref(unsafe, ELSEWHERE)).toBeUndefined();
+      expect(mediaHandoffHref(unsafe, ANDROID)).toBeUndefined();
+      expect(mediaHandoffIntentHref(unsafe, ANDROID)).toBeUndefined();
+    });
+
+    it('rejects a URL whose shape contradicts the declared kind', () => {
+      const contradictory = item({
+        kind: 'playlist',
+        id: 'PL123',
+        webUrl: 'https://www.youtube.com/watch?v=PL123',
+      });
+      expect(mediaDestinationUrl(contradictory)).toBeUndefined();
     });
   });
 
   describe('on platforms without Android intent support', () => {
-    it('uses the item URL verbatim', () => {
+    it('uses the canonical YouTube URL', () => {
       expect(mediaHandoffHref(item(), ELSEWHERE)).toBe('https://www.youtube.com/watch?v=abc123');
     });
 
@@ -67,20 +95,9 @@ describe('media hand-off', () => {
       expect(intent).toContain('action=android.intent.action.VIEW');
       expect(intent).toContain('category=android.intent.category.BROWSABLE');
       expect(intent).not.toMatch(/;package=/);
-      expect(intent!.endsWith(';end')).toBe(true);
-      expect(fallbackOf(intent!)).toBe('https://www.youtube.com/watch?v=abc123');
+      expect(intent?.endsWith(';end')).toBe(true);
+      expect(fallbackOf(intent ?? '')).toBe('https://www.youtube.com/watch?v=abc123');
     });
-  });
-
-  it('does not build an Android intent around a malformed or non-https URL', () => {
-    const junk = item({ webUrl: 'not a url' });
-    const insecure = item({ webUrl: 'http://www.youtube.com/watch?v=abc123' });
-
-    expect(mediaHandoffHref(junk, ANDROID)).toBe('not a url');
-    expect(mediaHandoffIntentHref(junk, ANDROID)).toBeUndefined();
-    expect(mediaHandoffHref(insecure, ANDROID)).toBe(insecure.webUrl);
-    expect(mediaHandoffIntentHref(insecure, ANDROID)).toBeUndefined();
-    expect(mediaHandoffIntentHref(item(), ANDROID)).toContain('scheme=https;');
   });
 
   it('names the action after the intent without changing the destination', () => {

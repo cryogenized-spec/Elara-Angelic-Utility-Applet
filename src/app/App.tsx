@@ -25,7 +25,7 @@ import {
   type GenerationPhase,
   type GenerationState,
 } from '../chat/generation-state';
-import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, isFailedPartialTarget, regenerateBaseFor, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
+import { canRetryFailedTurn, createGenerationArbiter, dispatchGenerationEvent, isFailedPartialTarget, regenerateBaseFor, statusAfterNavigation, type GenerationSyncContext, type FailedTurnAttempt } from '../chat/generation-sync';
 import { loadPairing } from '../autonomy/cloud/pairing';
 import { fullSync } from '../autonomy/cloud/sync';
 import { createTurnWatchdog } from '../chat/turn-watchdog';
@@ -178,7 +178,7 @@ export function App() {
   async function switchThread(id: string) {
     cancel();
     activeConversationIdRef.current = id;
-    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null);
+    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null); setStatus((current) => statusAfterNavigation(current));
     try {
       const nextConversation = await loadConversation(id);
       if (activeConversationIdRef.current !== id) return;
@@ -189,7 +189,7 @@ export function App() {
     cancel();
     const pendingConversation: ConversationState = { id: `pending-${crypto.randomUUID()}`, title: DEFAULT_TITLE, createdAt: Date.now(), updatedAt: Date.now(), messages: [] };
     activeConversationIdRef.current = pendingConversation.id;
-    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null);
+    setError(null); setDraft(''); setDraftAttachments([]); setGeneration(null); setFailedAttempt(null); setStatus((current) => statusAfterNavigation(current));
     setConversation(pendingConversation);
     try {
       const nextConversation = await createThread();
@@ -200,7 +200,7 @@ export function App() {
   }
   async function send() {
     const text = draft.trim();
-    if ((!text && draftAttachments.length === 0) || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
+    if ((!text && draftAttachments.length === 0) || status === 'streaming' || status === 'saving' || !conversation.id || !activeConversationIdRef.current) return;
     if (draftAttachments.some((attachment) => attachment.status !== 'ready')) {
       setError('Wait for the attachments to finish processing before sending.');
       return;
@@ -231,7 +231,7 @@ export function App() {
   }
 
   async function regenerate(messageId: string) {
-    if (status === 'streaming') return;
+    if (status === 'streaming' || status === 'saving') return;
     // Regenerating the failed partial itself means "redo this response":
     // replace it via retry rather than appending a variant next to it.
     if (isFailedPartialTarget(conversation, failedAttempt, messageId)) { await retryLastTurn(); return; }
@@ -304,10 +304,28 @@ export function App() {
     const idleStallMs = options.watchdog?.idleStallMs ?? DEFAULT_IDLE_STALL_TIMEOUT_MS;
     const absoluteMs = options.watchdog?.absoluteMs ?? DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS;
     let terminalWhileActive = false;
+    let terminalPersistence: Promise<void> | null = null;
     let current = createGenerationState(generationId, { supersedesGenerationId: options.supersedesGenerationId, startedAt: performance.now() });
     setGeneration(current);
     setStructuredError(null);
-    const syncContext: GenerationSyncContext = { assistantMessage, base, input, inputMessageId: options.inputMessageId, model: geminiModel, wallStartedAt, supersedesGenerationId: options.supersedesGenerationId, setConversation, setStatus, setError, setStructuredError, save: saveConversation, refreshThreads, isActiveGeneration, ensureAssistant, onFailedAttempt: captureFailedAttempt };
+    const syncContext: GenerationSyncContext = {
+      assistantMessage,
+      base,
+      input,
+      inputMessageId: options.inputMessageId,
+      model: geminiModel,
+      wallStartedAt,
+      supersedesGenerationId: options.supersedesGenerationId,
+      setConversation,
+      setStatus,
+      setError,
+      setStructuredError,
+      save: saveConversation,
+      onTerminalPersistence: (persistence) => { terminalPersistence = persistence; },
+      isActiveGeneration,
+      ensureAssistant,
+      onFailedAttempt: captureFailedAttempt,
+    };
 
     const dispatch = (event: GeminiStreamEvent) => {
       watchdog.notifyActivity();
@@ -323,7 +341,9 @@ export function App() {
         watchdog.dispose();
         if (isActiveGeneration()) {
           terminalWhileActive = true;
-          generationArbiterRef.current.release(generationId);
+          // A completed turn remains elected until its terminal conversation
+          // write settles. Failed/cancelled turns have no durability barrier.
+          if (current.phase !== 'completed') generationArbiterRef.current.release(generationId);
         }
       }
     };
@@ -364,7 +384,9 @@ export function App() {
           break;
         }
         dispatch(event);
-        if (event.type === 'cancelled') break;
+        // A terminal reducer state owns the turn from here. Close the upstream
+        // iterator immediately instead of trusting a provider adapter to end.
+        if (isTerminalPhase(current.phase)) break;
       }
       // An exhausted iterator is never success: synthesize the missing
       // terminal outcome (cancellation when aborted, protocol failure else).
@@ -377,13 +399,42 @@ export function App() {
       }
     } finally {
       watchdog.dispose();
-      if (terminalWhileActive && current.phase === 'completed') setStatus('idle');
+      if (terminalWhileActive && current.phase === 'completed') {
+        try {
+          await (terminalPersistence ?? Promise.reject(new Error('The completed turn did not register its persistence handoff.')));
+          try {
+            await refreshThreads();
+          } catch (cause) {
+            if (isCurrentConversation()) setError(cause instanceof Error ? `Response saved, but the conversation list could not refresh. ${cause.message}` : 'Response saved, but the conversation list could not refresh.');
+          }
+          if (generationArbiterRef.current.isActive(generationId)) setStatus('idle');
+        } catch (cause) {
+          if (generationArbiterRef.current.isActive(generationId)) {
+            if (isCurrentConversation()) {
+              // The optimistic completed assistant must not become the parent
+              // of a new turn unless it is durable. Dexie's transaction rolls
+              // the failed write back, so restore the exact durable base here.
+              setConversation((currentConversation) => currentConversation.id === base.id ? base : currentConversation);
+              setGeneration(null);
+              setStructuredError(null);
+              setStatus('failed');
+              setError(cause instanceof Error ? `Could not save the response. ${cause.message}` : 'Could not save the response.');
+            } else {
+              // The user may navigate while saving, but navigation must not
+              // trap the app behind a failed write for a hidden conversation.
+              setStatus('idle');
+            }
+          }
+        } finally {
+          generationArbiterRef.current.release(generationId);
+        }
+      }
     }
     return generationId;
   }
 
   async function retryLastTurn() {
-    if (status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
+    if (status === 'streaming' || status === 'saving' || !conversation.id || !activeConversationIdRef.current) return;
     // Replace the failed attempt: stream from its exact pre-generation base so
     // a partial assistant can never survive next to the retried answer.
     const attempt = failedAttempt;
@@ -418,10 +469,10 @@ export function App() {
 
   function openLockbox() { setSettingsSection('security'); setSettingsOpen(true); }
 
-  function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); setStructuredError(null); }
-  async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
-  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
-  async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } } }
+  function cancel() { abortControllerRef.current?.abort(); setStatus((current) => statusAfterNavigation(current)); setError(null); setStructuredError(null); }
+  async function handleRename(id: string, title: string) { if (status === 'saving') return; try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
+  async function handleArchive(id: string) { if (status === 'saving') return; try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
+  async function handleDelete(id: string) { if (status === 'saving') return; if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } } }
   function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) {
     const record = workspaceShortcuts.find((item) => item.id === shortcut.id) ?? storedShortcutFromDefinition(shortcut, workspaceShortcuts.length);
     prefillWorkspaceShortcut(record);
@@ -443,7 +494,7 @@ export function App() {
   }
   async function finishFirstRun(): Promise<void> { await completeOnboarding(); setFirstRunWelcomeOpen(false); }
   const currentGeminiSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
-  const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity, '--body-font-size': `${uiSettings.chatTextSize}px` } as React.CSSProperties), [chatAppearance, uiSettings.chatTextSize]);
+  const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity, '--generation-activity-accent': chatAppearance.generationActivityAccent, '--body-font-size': `${uiSettings.chatTextSize}px` } as React.CSSProperties), [chatAppearance, uiSettings.chatTextSize]);
   // Stable identity: the conversation surface is memoised, and rebuilding this
   // array on every render (including every composer keystroke) used to force
   // every message body through `react-markdown` again.

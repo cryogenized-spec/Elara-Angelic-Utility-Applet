@@ -144,13 +144,15 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
 
   const vttBusy = vttState === 'requesting' || vttState === 'recording' || vttState === 'processing';
   const isStreaming = status === 'streaming';
-  const composerLocked = isStreaming || vttBusy;
-  // The send button doubles as the stop button while streaming: it must stay
-  // enabled so the user can cancel the turn. Every other composer control
-  // stays locked until the turn settles.
-  const sendDisabled = vttBusy || (!isStreaming && !draft.trim() && attachments.length === 0);
+  const isSaving = status === 'saving';
+  const composerLocked = isStreaming || isSaving || vttBusy;
+  // The send button doubles as the stop button only while the provider is
+  // actively streaming. During terminal persistence the whole composer stays
+  // locked until the completed response is durably committed.
+  const sendDisabled = vttBusy || isSaving || (!isStreaming && !draft.trim() && attachments.length === 0);
+  const sendAriaLabel = isStreaming ? 'Cancel response' : isSaving ? 'Saving response' : 'Send message';
 
-  const canSend = status !== 'streaming' && !vttBusy && (Boolean(draft.trim()) || attachments.length > 0);
+  const canSend = !isStreaming && !isSaving && !vttBusy && (Boolean(draft.trim()) || attachments.length > 0);
   const enterKeyHint = composerEnterKeyHint(enterToSend);
 
   // Both composers share one Enter rule (see composer-keys.ts). Only the
@@ -174,7 +176,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }
 
   async function handleVtt(target: HTMLTextAreaElement | null): Promise<void> {
-    if (status === 'streaming') return;
+    if (isStreaming || isSaving) return;
     if (vttState === 'recording') {
       recorderRef.current?.stop();
       return;
@@ -273,7 +275,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }
 
   function beginVttPress(): void {
-    if (status === 'streaming') return;
+    if (isStreaming || isSaving) return;
     const target = currentVttTarget();
     if (!target) return;
     vttTargetRef.current = target;
@@ -463,7 +465,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           {attachmentPicker()}
           <div className="composer-expanded__spacer" />
           {vttControl(expandedTextareaRef)}
-          <button className={`composer__send${isStreaming ? ' is-cancel' : ''}`} type="button" aria-label={isStreaming ? 'Cancel response' : 'Send message'} disabled={sendDisabled} onClick={() => { if (isStreaming) onCancel(); else onSend(); }}>
+          <button className={`composer__send${isStreaming ? ' is-cancel' : ''}`} type="button" aria-label={sendAriaLabel} disabled={sendDisabled} onClick={() => { if (isStreaming) onCancel(); else if (!isSaving) onSend(); }}>
             <Icon name={isStreaming ? 'close' : 'send'} size={19} />
           </button>
         </footer>
@@ -475,7 +477,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   return <>
     {banner}
     {attachmentPreviews()}
-    <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
+    <form className="composer" onSubmit={(event) => { event.preventDefault(); if (isStreaming) onCancel(); else if (!isSaving) onSend(); }}>
       {attachmentPicker()}
       <div className="composer__input-wrap">
         <textarea ref={textareaRef} className="composer__input" aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint={enterKeyHint} />
@@ -484,7 +486,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
         </button>
       </div>
       {vttControl(textareaRef)}
-      <button className={`composer__send${isStreaming ? ' is-cancel' : ''}`} type="submit" aria-label={isStreaming ? 'Cancel response' : 'Send message'} disabled={sendDisabled}>
+      <button className={`composer__send${isStreaming ? ' is-cancel' : ''}`} type="submit" aria-label={sendAriaLabel} disabled={sendDisabled}>
         <Icon name={isStreaming ? 'close' : 'send'} size={19} />
       </button>
     </form>

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
 import { saveMemory } from '../memory/store';
 import { createFolderPath } from '../persistence/folders';
-import { appendMemoryContext, composeSystemInstruction, loadMemoryContext, loadMemoryContextSafely } from './memory-context';
+import { appendMemoryContext, composeSystemInstruction, loadMemoryContext, loadMemoryContextResult, loadMemoryContextSafely } from './memory-context';
 
 describe('Gemini durable-memory context boundary', () => {
   beforeEach(async () => {
@@ -28,6 +28,12 @@ describe('Gemini durable-memory context boundary', () => {
     expect(result).toContain('MASTER');
     expect(result).toContain('The user prefers dark mode.');
     expect(result).toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
+  });
+
+  it('reports only a coarse used/empty/unavailable status beside the private context', async () => {
+    await expect(loadMemoryContextResult('q', async () => 'private memory body')).resolves.toEqual({ context: 'private memory body', status: 'used' });
+    await expect(loadMemoryContextResult('q', async () => '   ')).resolves.toEqual({ context: '   ', status: 'empty' });
+    await expect(loadMemoryContextResult('q', async () => { throw new Error('IndexedDB unavailable'); })).resolves.toEqual({ context: '', status: 'unavailable' });
   });
 
   it('degrades to an empty context when retrieval fails', async () => {

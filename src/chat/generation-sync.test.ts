@@ -44,6 +44,7 @@ function createHarness(
   let error: string | null = null;
   let structured: NormalizedProviderError | null = null;
   const saved: ConversationState[] = [];
+  const persistence: Promise<void>[] = [];
   const context: GenerationSyncContext = {
     assistantMessage,
     base,
@@ -66,12 +67,14 @@ function createHarness(
     save: async (next) => {
       saved.push(next);
     },
-    refreshThreads: async () => undefined,
+    onTerminalPersistence: (pending) => {
+      persistence.push(pending);
+    },
     isActiveGeneration: () => options.active ?? true,
     ensureAssistant: () => undefined,
     onFailedAttempt: options.onFailedAttempt,
   };
-  return { context, base, read: () => ({ conversation, status, error, structured, saved }) };
+  return { context, base, read: () => ({ conversation, status, error, structured, saved, persistence }) };
 }
 
 function runTurn(
@@ -107,12 +110,15 @@ describe('generation sync: one-assistant-message invariant', () => {
     ]);
     await Promise.resolve();
 
-    const { conversation, saved } = harness.read();
+    const { conversation, saved, status, persistence } = harness.read();
     const assistants = conversation.messages.filter((message) => message.role === 'assistant');
     expect(assistants).toHaveLength(1);
     expect(assistants[0].text).toBe('abc');
     expect(saved).toHaveLength(1);
     expect(saved[0].messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(status).toBe('saving');
+    expect(persistence).toHaveLength(1);
+    await expect(persistence[0]).resolves.toBeUndefined();
   });
 
   it('persists pre- and post-tool text as one ordered transcript with one record', async () => {
@@ -157,7 +163,7 @@ describe('generation sync: one-assistant-message invariant', () => {
       outputTokens: 7,
       thoughtSummary: 'Checking the calendar first.',
     });
-    expect(persisted?.executionSummary?.steps.join(' | ')).toContain('Tool calendar.listEvents');
+    expect(persisted?.generationActivity?.steps.some((step) => step.toolName === 'calendar.listEvents')).toBe(true);
   });
 
   it('records the superseded generation on regeneration-style turns', async () => {
@@ -176,13 +182,14 @@ describe('generation sync: one-assistant-message invariant', () => {
       { type: 'cancelled', interactionId: 'i-1' },
     ]);
 
-    const { conversation, status, error, structured, saved } = harness.read();
+    const { conversation, status, error, structured, saved, persistence } = harness.read();
     expect(conversation).toEqual(harness.base);
     expect(conversation.messages.some((message) => message.role === 'assistant')).toBe(false);
     expect(status).toBe('idle');
     expect(error).toBeNull();
     expect(structured).toBeNull();
     expect(saved).toHaveLength(0);
+    expect(persistence).toHaveLength(0);
   });
 
   it('keeps structured failures with code, status, and retryability', () => {
@@ -204,11 +211,12 @@ describe('generation sync: one-assistant-message invariant', () => {
       },
     ]);
 
-    const { status, error, structured, saved } = harness.read();
+    const { status, error, structured, saved, persistence } = harness.read();
     expect(status).toBe('failed');
     expect(error).toBe('[GEMINI_RATE_LIMIT] Slow down.');
     expect(structured).toMatchObject({ providerStatus: 429, providerCode: 'RESOURCE_EXHAUSTED', retryable: true });
     expect(saved).toHaveLength(0);
+    expect(persistence).toHaveLength(0);
   });
 
   it('captures the failed attempt so a retry can replace it', () => {
@@ -270,7 +278,6 @@ describe('generation sync: one-assistant-message invariant', () => {
     const captured = box.attempt;
     if (!captured) throw new Error('expected the failed attempt to be captured');
 
-    // Retry streams from the failed attempt's pre-generation base.
     const retryTurn = createHarness({
       base: captured.base,
       supersedesGenerationId: captured.generationId,
@@ -334,8 +341,9 @@ describe('canRetryFailedTurn', () => {
     expect(canRetryFailedTurn('failed', attempt, 'thread-1')).toBe(true);
   });
 
-  it('refuses retry while streaming, when idle, without an attempt, or on another thread', () => {
+  it('refuses retry while busy, when idle, without an attempt, or on another thread', () => {
     expect(canRetryFailedTurn('streaming', attempt, 'thread-1')).toBe(false);
+    expect(canRetryFailedTurn('saving', attempt, 'thread-1')).toBe(false);
     expect(canRetryFailedTurn('idle', attempt, 'thread-1')).toBe(false);
     expect(canRetryFailedTurn('failed', null, 'thread-1')).toBe(false);
     expect(canRetryFailedTurn('failed', attempt, 'thread-2')).toBe(false);
@@ -378,7 +386,6 @@ describe('follow-up turns after a failure', () => {
 
 describe('cross-generation arbitration', () => {
   it('rejects late events from a superseded runner: conversation, error, retry, and persistence stay untouched', async () => {
-    // One shared application store, two independent turn runners.
     const base: ConversationState = {
       id: 'thread-1',
       title: 'Arbitration',
@@ -390,6 +397,7 @@ describe('cross-generation arbitration', () => {
     let status: ProviderStatus = 'streaming';
     let error: string | null = null;
     const saved: ConversationState[] = [];
+    const persistence: Promise<void>[] = [];
     const attempts: FailedTurnAttempt[] = [];
     const arbiter = createGenerationArbiter();
 
@@ -412,7 +420,9 @@ describe('cross-generation arbitration', () => {
       save: async (next) => {
         saved.push(next);
       },
-      refreshThreads: async () => undefined,
+      onTerminalPersistence: (pending) => {
+        persistence.push(pending);
+      },
       isActiveGeneration: () => arbiter.isActive(generationId),
       ensureAssistant: () => undefined,
       onFailedAttempt: (attempt) => {
@@ -422,13 +432,11 @@ describe('cross-generation arbitration', () => {
     const contextA = makeContext('gen-A', makeMessage('assistant', ''));
     const contextB = makeContext('gen-B', makeMessage('assistant', ''));
 
-    // Generation A starts and streams partial text.
     arbiter.activate('gen-A');
     let genA = createGenerationState('gen-A', { startedAt: 0 });
     genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'old' }, receivedAt: 10 }, contextA);
     expect(conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text)).toEqual(['old']);
 
-    // Generation B supersedes A: restores the pre-turn base, streams, completes.
     arbiter.activate('gen-B');
     conversation = base;
     let genB = createGenerationState('gen-B', { startedAt: 0 });
@@ -438,9 +446,8 @@ describe('cross-generation arbitration', () => {
     await Promise.resolve();
     expect(conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text)).toEqual(['new']);
     expect(saved).toHaveLength(1);
+    expect(persistence).toHaveLength(1);
 
-    // Late events from the obsolete runner change nothing: not the visible
-    // transcript, not status/error, not retry state, not persistence.
     const snapshot = JSON.stringify({ conversation, status, error });
     genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'STALE' }, receivedAt: 30 }, contextA);
     expect(genA.transcript).toBe('oldSTALE');
@@ -480,12 +487,12 @@ describe('cross-generation arbitration', () => {
     let status: ProviderStatus = 'streaming';
     let error: string | null = null;
     const saved: ConversationState[] = [];
+    const persistence: Promise<void>[] = [];
     const attempts: FailedTurnAttempt[] = [];
     const arbiter = createGenerationArbiter();
     let activeThread = 'thread-1';
     const texts = () => conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text);
 
-    // Composite runner predicate: elected generation AND current conversation.
     const context: GenerationSyncContext = {
       assistantMessage: makeMessage('assistant', ''),
       base: thread1,
@@ -505,7 +512,9 @@ describe('cross-generation arbitration', () => {
       save: async (next) => {
         saved.push(next);
       },
-      refreshThreads: async () => undefined,
+      onTerminalPersistence: (pending) => {
+        persistence.push(pending);
+      },
       isActiveGeneration: () => activeThread === 'thread-1' && arbiter.isActive('gen-A'),
       ensureAssistant: () => undefined,
       onFailedAttempt: (attempt) => {
@@ -518,8 +527,6 @@ describe('cross-generation arbitration', () => {
     gen = dispatchGenerationEvent(gen, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'old' }, receivedAt: 10 }, context);
     expect(texts()).toEqual(['old']);
 
-    // Switch threads: the UI clears, but the arbiter is untouched — the old
-    // turn is still "elected" yet no longer authorized to mutate anything.
     activeThread = 'thread-2';
     expect(arbiter.isActive('gen-A')).toBe(true);
 
@@ -544,10 +551,9 @@ describe('cross-generation arbitration', () => {
     expect(JSON.stringify({ conversation, status, error })).toBe(snapshot);
     expect(texts()).toEqual(['old']);
     expect(saved).toHaveLength(0);
+    expect(persistence).toHaveLength(0);
     expect(attempts).toHaveLength(0);
     expect(error).toBeNull();
-    // The stale election survives until some future turn activates — the
-    // inertness above came from the composite predicate, not the arbiter.
     expect(arbiter.isActive('gen-A')).toBe(true);
   });
 
@@ -558,7 +564,6 @@ describe('cross-generation arbitration', () => {
     generation = dispatchGenerationEvent(generation, { generationId: 'gen-1', event: COMPLETED('i-1'), receivedAt: 20 }, harness.context);
     expect(generation.phase).toBe('completed');
 
-    // A late abort-induced cancelled must not revert the completed turn.
     const before = JSON.stringify(harness.read().conversation);
     const after = dispatchGenerationEvent(generation, { generationId: 'gen-1', event: { type: 'cancelled' }, receivedAt: 30 }, harness.context);
     expect(after).toBe(generation);

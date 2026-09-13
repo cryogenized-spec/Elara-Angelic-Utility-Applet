@@ -23,19 +23,16 @@ export const googleToolCallSchema = z.object({
 export type GoogleToolCall = z.infer<typeof googleToolCallSchema>;
 
 export type GoogleToolRisk = 'read' | 'write' | 'destructive' | 'send';
-
 export type GoogleToolExposure = 'gemini' | 'internal';
-
-/**
- * Where a tool can actually be executed.
- *
- * Both the browser tool loop and the Cloudflare Worker build their Gemini
- * function list from the one central registry, but only the browser has tool
- * handlers. Without this field the Worker advertises tools it cannot run, and
- * the model calls them into a dead end. Omitted means "runs anywhere", which is
- * the case for every OAuth-backed tool the Worker proxies.
- */
 export type GoogleToolExecutionPlane = 'browser' | 'worker';
+
+export type ToolActivityCategory = 'google-workspace' | 'youtube' | 'roleplay' | 'documents' | 'other';
+export interface ToolActivityPresentation {
+  readonly category: ToolActivityCategory;
+  readonly categoryLabel: string;
+  readonly serviceLabel?: string;
+  readonly actionLabel: string;
+}
 
 export interface GoogleToolDescriptor {
   readonly name: GoogleToolName;
@@ -44,4 +41,58 @@ export interface GoogleToolDescriptor {
   readonly description: string;
   readonly exposure: GoogleToolExposure;
   readonly executionPlane?: GoogleToolExecutionPlane;
+}
+
+const WORKSPACE_SERVICE_LABELS: Readonly<Record<string, string>> = {
+  calendar: 'Calendar',
+  tasks: 'Tasks',
+  docs: 'Docs',
+  chat: 'Chat',
+  gmail: 'Gmail',
+  drive: 'Drive',
+  sheets: 'Sheets',
+};
+
+function humanizeToolAction(value: string): string {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/_/g, ' ')
+    .replace(/^./, (first) => first.toUpperCase());
+}
+
+/** Presentation metadata derived from the canonical executable tool name. */
+export function toolActivityPresentation(name: string): ToolActivityPresentation {
+  if (name === 'youtube.search') {
+    return { category: 'youtube', categoryLabel: 'YouTube', actionLabel: 'Search' };
+  }
+  if (name.startsWith('roleplay_setting.')) {
+    return {
+      category: 'roleplay',
+      categoryLabel: 'Roleplay World',
+      actionLabel: humanizeToolAction(name.slice('roleplay_setting.'.length)),
+    };
+  }
+  if (name === 'document.create_pdf') {
+    return { category: 'documents', categoryLabel: 'Documents & Artifacts', actionLabel: 'Create PDF' };
+  }
+
+  const separator = name.indexOf('.');
+  if (separator > 0) {
+    const service = name.slice(0, separator);
+    const serviceLabel = WORKSPACE_SERVICE_LABELS[service];
+    if (serviceLabel) {
+      return {
+        category: 'google-workspace',
+        categoryLabel: 'Google Workspace',
+        serviceLabel,
+        actionLabel: humanizeToolAction(name.slice(separator + 1)),
+      };
+    }
+  }
+
+  return {
+    category: 'other',
+    categoryLabel: 'Tools',
+    actionLabel: separator >= 0 ? humanizeToolAction(name.slice(separator + 1)) : humanizeToolAction(name),
+  };
 }

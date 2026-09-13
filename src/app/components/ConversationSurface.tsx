@@ -1,9 +1,8 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '../../domain/chat';
 import type { GenerationState } from '../../chat/generation-state';
 import { deleteMessage } from '../../persistence/conversation';
-import { ExecutionSummary } from './ExecutionSummary';
-import { GenerationTrace } from './GenerationTrace';
+import { GenerationActivity } from './GenerationTrace';
 import { Icon } from '../../ui/icons';
 import { MarkdownText } from './MarkdownText';
 import { MessageArtifacts } from './artifacts/MessageArtifacts';
@@ -11,6 +10,8 @@ import { MessageMedia } from './media/MessageMedia';
 import './conversation-surface.css';
 
 const BOTTOM_STICK_THRESHOLD_PX = 32;
+const ACTIVITY_ANCHOR_TOLERANCE_PX = 18;
+type FollowMode = 'bottom' | 'activity' | 'manual';
 
 function responseGroupFor(message: ChatMessage): string {
   return message.responseGroupId || message.id;
@@ -23,45 +24,86 @@ function responseGroupFor(message: ChatMessage): string {
  */
 export const ConversationSurface = memo(function ConversationSurface({ messages, generation, onRegenerate }: { messages: ChatMessage[]; generation: GenerationState | null; onRegenerate: (messageId: string) => void }) {
   const conversationRef = useRef<HTMLElement>(null);
-  const shouldStickToEndRef = useRef(true);
-  const [pinned, setPinned] = useState(true);
+  const activityAnchorRef = useRef<HTMLDivElement>(null);
+  const anchoredGenerationRef = useRef<string | null>(null);
+  const restoredManualGenerationRef = useRef<string | null>(null);
+  const manualScrollTopRef = useRef<number | null>(null);
+  const retainActivityTailRef = useRef(false);
+  const followModeRef = useRef<FollowMode>('bottom');
+  const [manualScroll, setManualScroll] = useState(false);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
   const seenCountsRef = useRef<Record<string, number>>({});
 
+  const liveGeneration = generation !== null && generation.phase !== 'completed';
+  const generationId = generation?.generationId;
+
+  function atEnd(element: HTMLElement): boolean {
+    return element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_STICK_THRESHOLD_PX;
+  }
+
+  function setFollowMode(mode: FollowMode): void {
+    followModeRef.current = mode;
+    setManualScroll(mode === 'manual');
+  }
+
   function rememberScrollPosition() {
     const element = conversationRef.current;
     if (!element) return;
-    const atEnd = element.scrollHeight - element.scrollTop - element.clientHeight <= BOTTOM_STICK_THRESHOLD_PX;
-    shouldStickToEndRef.current = atEnd;
-    setPinned(atEnd);
+
+    if (followModeRef.current === 'activity') {
+      const anchor = activityAnchorRef.current;
+      if (anchor) {
+        const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
+        if (Math.abs(offset) <= ACTIVITY_ANCHOR_TOLERANCE_PX) return;
+      }
+      if (liveGeneration) retainActivityTailRef.current = true;
+      manualScrollTopRef.current = element.scrollTop;
+      setFollowMode('manual');
+      return;
+    }
+
+    if (atEnd(element)) {
+      manualScrollTopRef.current = null;
+      setFollowMode('bottom');
+    } else {
+      manualScrollTopRef.current = element.scrollTop;
+      setFollowMode('manual');
+    }
   }
 
   function scrollToEnd(behavior: ScrollBehavior = 'smooth') {
     const element = conversationRef.current;
-    if (!element || !shouldStickToEndRef.current) return;
+    if (!element || followModeRef.current !== 'bottom') return;
     element.scrollTo({ top: Math.max(0, element.scrollHeight - element.clientHeight), behavior });
   }
 
   function jumpToLatest() {
-    shouldStickToEndRef.current = true;
-    setPinned(true);
+    retainActivityTailRef.current = false;
+    manualScrollTopRef.current = null;
+    setFollowMode('bottom');
     scrollToEnd();
   }
 
   const visibleMessages = useMemo(() => messages.filter((message) => !deletedIds.has(message.id)), [messages, deletedIds]);
+  const latestVisibleText = visibleMessages.at(-1)?.text;
+
+  const activeAssistant = useMemo(() => {
+    if (!liveGeneration) return undefined;
+    const candidate = visibleMessages.at(-1);
+    if (candidate?.role !== 'assistant' || candidate.providerTurn) return undefined;
+    return candidate;
+  }, [liveGeneration, visibleMessages]);
 
   const grouped = useMemo(() => {
     const entries: Array<{ message: ChatMessage; variants: ChatMessage[] }> = [];
     const groups = new Map<string, ChatMessage[]>();
     for (const message of visibleMessages) {
+      if (activeAssistant?.id === message.id) continue;
       if (message.role !== 'assistant') {
         entries.push({ message, variants: [message] });
         continue;
       }
-      // Do not render an assistant bubble that has no response at all. The
-      // app-level error surface is the source of truth when a turn fails before
-      // the provider produces output.
       if (!message.text.trim()) continue;
       const key = responseGroupFor(message);
       const variants = groups.get(key);
@@ -74,13 +116,16 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
       entries.push({ message, variants: next });
     }
     return entries;
-  }, [visibleMessages]);
+  }, [visibleMessages, activeAssistant]);
 
-  // Reconciles the selected response variant with the available variants. It
-  // returns the *same* object when nothing changed so this effect cannot force
-  // a second render pass when an ancestor re-renders with an equivalent (but
-  // freshly built) message array.
   useEffect(() => {
+    const previousCounts = seenCountsRef.current;
+    const nextCounts: Record<string, number> = {};
+    for (const entry of grouped) {
+      if (entry.message.role !== 'assistant') continue;
+      nextCounts[responseGroupFor(entry.message)] = entry.variants.length;
+    }
+
     setSelectedVariants((current) => {
       const next = { ...current };
       let changed = false;
@@ -88,14 +133,10 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         if (entry.message.role !== 'assistant') continue;
         const key = responseGroupFor(entry.message);
         const count = entry.variants.length;
-        const previousCount = seenCountsRef.current[key];
-        let value: number;
-        if (!(key in next) || (previousCount !== undefined && count > previousCount)) {
-          value = count - 1;
-        } else {
-          value = Math.min(next[key] ?? count - 1, count - 1);
-        }
-        seenCountsRef.current[key] = count;
+        const previousCount = previousCounts[key];
+        const value = !(key in next) || (previousCount !== undefined && count > previousCount)
+          ? count - 1
+          : Math.min(next[key] ?? count - 1, count - 1);
         if (next[key] !== value) {
           next[key] = value;
           changed = true;
@@ -103,18 +144,68 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
       }
       return changed ? next : current;
     });
+
+    seenCountsRef.current = nextCounts;
   }, [grouped]);
 
-  useEffect(() => { scrollToEnd(); }, [visibleMessages.length, visibleMessages.at(-1)?.text]);
+  // A newly submitted turn owns one automatic viewport move. Previous manual
+  // scroll state belongs to the previous turn and must not prevent the new
+  // activity card from becoming the user's starting point. Once this generation
+  // is anchored, no later phase or streaming update may move the viewport again.
+  useLayoutEffect(() => {
+    if (!generationId) return;
+
+    if (!liveGeneration) {
+      const element = conversationRef.current;
+      if (
+        element
+        && anchoredGenerationRef.current === generationId
+        && retainActivityTailRef.current
+        && followModeRef.current === 'manual'
+        && manualScrollTopRef.current !== null
+        && restoredManualGenerationRef.current !== generationId
+      ) {
+        element.scrollTop = manualScrollTopRef.current;
+        restoredManualGenerationRef.current = generationId;
+      } else if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current && followModeRef.current === 'activity') {
+        setFollowMode('bottom');
+      }
+      return;
+    }
+
+    if (anchoredGenerationRef.current === generationId) return;
+    const element = conversationRef.current;
+    const anchor = activityAnchorRef.current;
+    if (!element || !anchor) return;
+
+    const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
+    anchoredGenerationRef.current = generationId;
+    restoredManualGenerationRef.current = null;
+    retainActivityTailRef.current = false;
+    manualScrollTopRef.current = null;
+    setFollowMode('activity');
+    element.scrollTop = Math.max(0, element.scrollTop + offset);
+  }, [generationId, liveGeneration, visibleMessages.length]);
+
+  useEffect(() => {
+    if (followModeRef.current === 'bottom') scrollToEnd();
+  }, [visibleMessages.length, latestVisibleText]);
 
   useEffect(() => {
     const element = conversationRef.current;
     if (!element || typeof ResizeObserver === 'undefined') return undefined;
 
-    const observer = new ResizeObserver(() => {
-      if (!shouldStickToEndRef.current) return;
+    const reconcileViewport = () => {
+      // The Generation Activity runway is exactly one real conversation
+      // viewport tall. This gives the browser enough physical scroll range to
+      // place a final activity card at the top without phone/desktop constants.
+      element.style.setProperty('--conversation-viewport-height', `${element.clientHeight}px`);
+      if (followModeRef.current !== 'bottom') return;
       element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
-    });
+    };
+
+    reconcileViewport();
+    const observer = new ResizeObserver(reconcileViewport);
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
@@ -128,8 +219,11 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     }
   }
 
-  const showTrace = generation !== null && generation.phase !== 'completed';
-  if (visibleMessages.length === 0 && !showTrace) return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
+  const hasLivePanel = liveGeneration;
+  const showActivityTail = hasLivePanel || (manualScroll && retainActivityTailRef.current);
+  if (visibleMessages.length === 0 && !hasLivePanel) {
+    return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
+  }
 
   return <section ref={conversationRef} className="conversation" aria-label="Conversation" onScroll={rememberScrollPosition}>
     <div className="conversation__stream">
@@ -148,18 +242,16 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         const groupId = responseGroupFor(message);
         const selectedIndex = Math.min(Math.max(selectedVariants[groupId] ?? variants.length - 1, 0), variants.length - 1);
         const selected = variants[selectedIndex];
-        const thoughtSummary = selected.providerTurn?.usage?.thoughtSummary;
+        const anchorsCurrentGeneration = Boolean(generation?.generationId && selected.generationActivity?.id === generation.generationId);
         return <article className="message message-assistant" key={groupId}>
           <header className="message-meta"><span>ELARA</span><time dateTime={new Date(selected.createdAt).toISOString()}>{new Date(selected.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
-          {thoughtSummary && selected.executionSummary && <ExecutionSummary summary={selected.executionSummary} thoughtSummary={thoughtSummary} />}
-          {variants.length > 0 && <div className="response-variants" aria-label="Generated response variants">
+          {selected.generationActivity && <div ref={anchorsCurrentGeneration ? activityAnchorRef : undefined}><GenerationActivity record={selected.generationActivity} thoughtSummary={selected.providerTurn?.usage?.thoughtSummary} /></div>}
+          {variants.length > 1 && <div className="response-variants" aria-label="Generated response variants">
             <button type="button" className="response-variants__button" aria-label="Previous response" disabled={selectedIndex === 0} onClick={() => setSelectedVariants((current) => ({ ...current, [groupId]: Math.max(0, selectedIndex - 1) }))}>‹</button>
             <span className="response-variants__pagination" aria-live="polite">{selectedIndex + 1}/{variants.length}</span>
             <button type="button" className="response-variants__button" aria-label="Next response" disabled={selectedIndex === variants.length - 1} onClick={() => setSelectedVariants((current) => ({ ...current, [groupId]: Math.min(variants.length - 1, selectedIndex + 1) }))}>›</button>
           </div>}
-          <div className="message-body">
-            <MarkdownText text={selected.text} />
-          </div>
+          <div className="message-body"><MarkdownText text={selected.text} /></div>
           <MessageArtifacts attachmentIds={selected.attachments} artifactIds={selected.artifacts} messageId={selected.id} conversationId={selected.conversationId} />
           <MessageMedia items={selected.media} />
           <div className="message-actions" aria-label="Message actions">
@@ -168,8 +260,16 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
           </div>
         </article>;
       })}
-      {showTrace && generation && <GenerationTrace key={generation.generationId} generation={generation} />}
+
+      {hasLivePanel && generation && <div ref={activityAnchorRef}><GenerationActivity key={generation.generationId} generation={generation} /></div>}
+
+      {activeAssistant?.text.trim() && <article className="message message-assistant message-assistant--streaming" key={activeAssistant.id}>
+        <header className="message-meta"><span>ELARA</span><time dateTime={new Date(activeAssistant.createdAt).toISOString()}>{new Date(activeAssistant.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
+        <div className="message-body"><MarkdownText text={activeAssistant.text} /></div>
+      </article>}
+
+      {showActivityTail && <div className="conversation__activity-tail" aria-hidden="true" />}
     </div>
-    {!pinned && <button type="button" className="conversation__jump" aria-label="Jump to latest messages" onClick={jumpToLatest}>↓ Newest</button>}
+    {manualScroll && <button type="button" className="conversation__jump" aria-label="Jump to latest messages" onClick={jumpToLatest}>↓ Newest</button>}
   </section>;
 });

@@ -3,7 +3,7 @@ import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiToolContinuati
 import { normalizeGeminiError } from './errors';
 import { getGeminiApiKey, getGeminiLockboxStatus } from '../persistence/gemini-api-key';
 import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
-import { composeSystemInstruction } from './memory-context';
+import { composeSystemInstructionWithStatus } from './memory-context';
 import { artifactRepository } from '../artifacts/repository';
 import { ArtifactError } from '../artifacts/errors';
 import { isAttachment } from '../domain/artifact';
@@ -36,21 +36,12 @@ function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
   return summary || undefined;
 }
 
-// `arguments` accumulates the documented streaming path: `arguments_delta`
-// JSON-string fragments. `initialArguments` holds an already-structured object
-// carried on `step.start`. The Interactions API emits a placeholder object
-// (`"arguments": {}`) on `step.start` and then streams the real arguments as
-// deltas, so the two sources must never be concatenated as text.
 type PendingFunctionCall = { callId: string; name: string; arguments: string; initialArguments?: unknown };
 type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; memoryContext?: 'thread' | 'none'; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
 
 function pendingFunctionCall(callId: string, name: string, step: Record<string, unknown>): PendingFunctionCall {
   const initial = step.arguments;
-  // A string on step.start is the first JSON fragment; later deltas append to it.
   if (typeof initial === 'string') return { callId, name, arguments: initial };
-  // Any structured value on step.start is kept separately (unvalidated) and
-  // only consulted when no argument deltas arrive; streamed deltas win. Shape
-  // validation happens once, in resolveFunctionArguments.
   if (initial === undefined || initial === null) return { callId, name, arguments: '' };
   return { callId, name, arguments: '', initialArguments: initial };
 }
@@ -67,9 +58,7 @@ const INLINE_ATTACHMENT_LIMIT = 4 * 1024 * 1024;
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize)));
-  }
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize)));
   return btoa(binary);
 }
 
@@ -87,9 +76,7 @@ async function blobAsBase64(blob: Blob): Promise<string> {
   return bytesToBase64(new Uint8Array(bytes));
 }
 
-function providerPartType(mimeType: string): 'image' | 'document' {
-  return mimeType.startsWith('image/') ? 'image' : 'document';
-}
+function providerPartType(mimeType: string): 'image' | 'document' { return mimeType.startsWith('image/') ? 'image' : 'document'; }
 
 async function resolveGeminiInput(request: InteractionRequest, client: GoogleGenAI): Promise<unknown> {
   if (!request.attachments?.length) return request.input;
@@ -102,10 +89,7 @@ async function resolveGeminiInput(request: InteractionRequest, client: GoogleGen
     if (!isAttachment(artifact) || artifact.status !== 'ready') throw new ArtifactError('PROVIDER_ATTACHMENT_FAILED', 'An attachment is not ready for Gemini.');
     const type = providerPartType(artifact.mimeType);
     const validRemoteRef = artifact.remoteRef?.provider === 'gemini' && artifact.remoteRef.expiresAt > Date.now() + 60_000;
-    if (validRemoteRef) {
-      parts.push({ type, uri: artifact.remoteRef!.fileUri, mime_type: artifact.mimeType });
-      continue;
-    }
+    if (validRemoteRef) { parts.push({ type, uri: artifact.remoteRef!.fileUri, mime_type: artifact.mimeType }); continue; }
     const operationId = `${request.generationId ?? crypto.randomUUID()}:${artifact.id}`;
     await artifactRepository.beginOperation(artifact.id, operationId, 'ready');
     const guard = { operationId, expectedStatus: 'ready' as const, isValid: () => !request.signal?.aborted && active() };
@@ -165,11 +149,6 @@ function buildInteractionPayload(request: InteractionRequest) {
   return payload;
 }
 
-/**
- * Await the next stream item, but resolve promptly when `signal` aborts
- * instead of hanging until the next provider chunk arrives. Cancellation must
- * terminate the turn immediately even when the network is idle.
- */
 async function nextStreamItem(iterator: AsyncIterator<unknown>, signal?: AbortSignal): Promise<IteratorResult<unknown> | 'aborted'> {
   if (!signal || signal.aborted) return signal?.aborted ? 'aborted' : iterator.next();
   let onAbort: (() => void) | undefined;
@@ -177,11 +156,8 @@ async function nextStreamItem(iterator: AsyncIterator<unknown>, signal?: AbortSi
     onAbort = () => resolve('aborted');
     signal.addEventListener('abort', onAbort, { once: true });
   });
-  try {
-    return await Promise.race([iterator.next(), abortPromise]);
-  } finally {
-    if (onAbort) signal.removeEventListener('abort', onAbort);
-  }
+  try { return await Promise.race([iterator.next(), abortPromise]); }
+  finally { if (onAbort) signal.removeEventListener('abort', onAbort); }
 }
 
 async function* streamDirectRequest(request: InteractionRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
@@ -195,35 +171,38 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
   try {
     const lockboxStatus = await getGeminiLockboxStatus();
-    if (lockboxStatus === 'empty') {
-      yield {
-        type: 'failed',
-        error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }),
-      };
-      return;
-    }
+    if (lockboxStatus === 'empty') { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }) }; return; }
     if (lockboxStatus === 'locked') {
       const error = normalizeGeminiError(new Error('Gemini API key is locked in the app Lockbox. Unlock the Lockbox before sending.'), { requestId, category: 'configuration' });
       yield { type: 'failed', error: { ...error, code: 'GEMINI_LOCKBOX_LOCKED' } };
       return;
     }
     const apiKey = await getGeminiApiKey();
-    if (!apiKey) {
-      yield {
-        type: 'failed',
-        error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }),
-      };
-      return;
-    }
+    if (!apiKey) { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }) }; return; }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
-    // Interactive chat composes thread-scoped durable memory here. Callers that
-    // own their own memory scoping (autonomous routine runs) pass
-    // memoryContext: 'none' and receive their instruction verbatim.
-    const contextualInstruction = request.memoryContext === 'none'
-      ? (request.systemInstruction?.trim() || undefined)
-      : await composeSystemInstruction(request.systemInstruction, query);
+
+    let contextualInstruction = request.systemInstruction?.trim() || undefined;
+    const shouldComposeThreadMemory = request.memoryContext !== 'none' && !request.previousInteractionId;
+    if (shouldComposeThreadMemory) {
+      const memoryStartedAt = performance.now();
+      const composed = await composeSystemInstructionWithStatus(request.systemInstruction, query);
+      contextualInstruction = composed.instruction;
+      const memoryDurationMs = Math.max(0, performance.now() - memoryStartedAt);
+      if (composed.memoryStatus !== 'empty') {
+        yield {
+          type: 'context-activity',
+          category: 'memory',
+          label: 'Memory',
+          detail: composed.memoryStatus === 'used' ? 'Recalled relevant durable memory.' : 'Memory retrieval was unavailable; continued without it.',
+          durationMs: memoryDurationMs,
+          outcome: composed.memoryStatus,
+        };
+      }
+    }
+
+    if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const providerInput = await resolveGeminiInput({ ...request, signal }, client);
     const stream = await client.interactions.create(buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction }) as never);
     const iterator = (stream as unknown as AsyncIterable<unknown>)[Symbol.asyncIterator]();
@@ -231,8 +210,6 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
       for (;;) {
         const next = await nextStreamItem(iterator, signal);
         if (next === 'aborted' || signal?.aborted) {
-          // Best-effort reader cancellation (never awaited: the turn is over
-          // regardless of whether the SDK honors iterator cleanup).
           void iterator.return?.()?.catch(() => undefined);
           yield { type: 'cancelled', interactionId };
           return;
@@ -294,8 +271,6 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
       if (sawRequiresAction || sawTerminalEvent) return;
       yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
     } finally {
-      // Consumer abandoned the stream early (turn cancelled or superseded):
-      // release the SDK reader without blocking generator teardown.
       void iterator.return?.()?.catch(() => undefined);
     }
   } catch (cause) {
@@ -309,10 +284,12 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
 }
 
 export const geminiTurnPort: GeminiTurnPort = {
-  streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> { return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, attachments: request.attachments, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, generationId: request.generationId, isGenerationActive: request.isGenerationActive }, signal); },
+  streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
+    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, attachments: request.attachments, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: request.memoryContext, generationId: request.generationId, isGenerationActive: request.isGenerationActive }, signal);
+  },
   streamToolResult(request: GeminiToolContinuationRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
     const results = request.results ?? (request.result ? [request.result] : []);
     const input = results.map((result) => ({ type: 'function_result', name: result.name, call_id: result.callId, result: [{ type: 'text', text: JSON.stringify(result.result) }] }));
-    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools }, signal);
+    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: 'none' }, signal);
   },
 };

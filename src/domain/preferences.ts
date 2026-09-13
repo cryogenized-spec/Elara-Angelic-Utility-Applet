@@ -21,6 +21,7 @@ export interface ChatAppearancePreferences {
   userSurfaceColor: string;
   userSurfaceOpacity: number;
   userSurfaceStyle: 'solid' | 'frosted' | 'gradient';
+  generationActivityAccent: string;
 }
 
 export interface RoleplayPreferences {
@@ -53,6 +54,7 @@ export const DEFAULT_CHAT_APPEARANCE: ChatAppearancePreferences = {
   userSurfaceColor: '#28344F',
   userSurfaceOpacity: 0.78,
   userSurfaceStyle: 'frosted',
+  generationActivityAccent: '#6EA8FF',
 };
 
 export const DEFAULT_ROLEPLAY: RoleplayPreferences = {

@@ -1,12 +1,14 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_APP_UI } from '../domain/preferences';
+import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE } from '../domain/preferences';
 import {
   loadAppUiPreferences,
+  loadChatAppearance,
   normalizeAppUiPreferences,
   normalizeChatAppearance,
   normalizeRoleplay,
   saveAppUiPreferences,
+  saveChatAppearance,
 } from './preferences';
 
 const longString = 'x'.repeat(400);
@@ -51,6 +53,7 @@ describe('preference normalization', () => {
       userSurfaceColor: '#112233',
       userSurfaceOpacity: 0.01,
       userSurfaceStyle: 'invalid' as never,
+      generationActivityAccent: '#34d399',
     });
 
     expect(value.chatBackgroundOpacity).toBe(1);
@@ -61,6 +64,13 @@ describe('preference normalization', () => {
     expect(value.userSurfaceColor).toBe('#112233');
     expect(value.userSurfaceOpacity).toBe(0.2);
     expect(value.userSurfaceStyle).toBe('frosted');
+    expect(value.generationActivityAccent).toBe('#34D399');
+  });
+
+  it('rejects malformed Generation Activity accent values', () => {
+    expect(normalizeChatAppearance({ generationActivityAccent: 'green' }).generationActivityAccent).toBe(DEFAULT_CHAT_APPEARANCE.generationActivityAccent);
+    expect(normalizeChatAppearance({ generationActivityAccent: '#12345' }).generationActivityAccent).toBe(DEFAULT_CHAT_APPEARANCE.generationActivityAccent);
+    expect(normalizeChatAppearance({ generationActivityAccent: '#1234567' }).generationActivityAccent).toBe(DEFAULT_CHAT_APPEARANCE.generationActivityAccent);
   });
 
   it('normalizes roleplay text and rejects unknown environment presets', () => {
@@ -76,6 +86,22 @@ describe('preference normalization', () => {
     expect(value.environmentName).toHaveLength(160);
     expect(value.environmentName.startsWith('x')).toBe(true);
     expect(value.environmentDescription).toBe('Scene');
+  });
+});
+
+describe('Generation Activity appearance persistence', () => {
+  beforeEach(async () => {
+    await saveChatAppearance(DEFAULT_CHAT_APPEARANCE);
+  });
+
+  it('saves and reloads the normalized activity accent through the existing chat-appearance record', async () => {
+    const saved = await saveChatAppearance({ ...DEFAULT_CHAT_APPEARANCE, generationActivityAccent: '#34d399' });
+    expect(saved.generationActivityAccent).toBe('#34D399');
+
+    const loaded = await loadChatAppearance();
+    expect(loaded.generationActivityAccent).toBe('#34D399');
+    expect(loaded.assistantTextColor).toBe(DEFAULT_CHAT_APPEARANCE.assistantTextColor);
+    expect(loaded.userSurfaceColor).toBe(DEFAULT_CHAT_APPEARANCE.userSurfaceColor);
   });
 });
 

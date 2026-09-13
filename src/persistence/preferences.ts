@@ -72,6 +72,7 @@ export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences
     userSurfaceColor: safeHex(merged.userSurfaceColor, DEFAULT_CHAT_APPEARANCE.userSurfaceColor),
     userSurfaceOpacity: clamp(merged.userSurfaceOpacity, 0.2, 1, DEFAULT_CHAT_APPEARANCE.userSurfaceOpacity),
     userSurfaceStyle: merged.userSurfaceStyle === 'solid' || merged.userSurfaceStyle === 'gradient' ? merged.userSurfaceStyle : 'frosted',
+    generationActivityAccent: safeHex(merged.generationActivityAccent, DEFAULT_CHAT_APPEARANCE.generationActivityAccent),
   };
 }
 

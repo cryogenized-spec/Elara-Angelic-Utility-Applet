@@ -36,6 +36,12 @@ export class TestAutonomyEngine extends AutonomyEngine {
     if (this.dispatchHold) await this.dispatchHold;
   }
 
+  async seedScheduleWithoutAlarm(routineId: string, dueAt: number): Promise<{ routineId: string; dueAt: number }> {
+    if (!this.store.getRoutine(routineId) || !Number.isFinite(dueAt)) throw new Error('seedScheduleWithoutAlarm needs an existing routineId and finite dueAt.');
+    this.store.upsertSchedule(routineId, dueAt, Date.now());
+    return { routineId, dueAt };
+  }
+
   async claimWithoutDispatch(routineId: string, dueAt: number): Promise<{ runKey: string; workflowInstanceId: string; dispatched: boolean }> {
     const now = Date.now();
     const generation = this.stateGeneration();

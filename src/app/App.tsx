@@ -464,7 +464,7 @@ export function App() {
 
   function cancel() { abortControllerRef.current?.abort(); setStatus('idle'); setError(null); setStructuredError(null); }
   async function handleRename(id: string, title: string) { try { await renameThread(id, title); await refreshThreads(); if (id === conversation.id && activeConversationIdRef.current === id) setConversation((current) => ({ ...current, title })); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not rename that thread.'); } }
-  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that conversation.'); } }
+  async function handleArchive(id: string) { try { await archiveThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) setError(cause instanceof Error ? cause.message : 'Could not archive that thread.'); } }
   async function handleDelete(id: string) { if (!window.confirm('Delete this conversation? This removes its local messages.')) return; try { await deleteThread(id); await refreshThreads(); if (id === conversation.id) await startNewChat(); } catch (cause) { if (activeConversationIdRef.current === id) { setError(cause instanceof Error ? cause.message : 'Could not delete that conversation.'); } } }
   function handleQuickShortcut(shortcut: WorkspaceShortcutDefinition) {
     const record = workspaceShortcuts.find((item) => item.id === shortcut.id) ?? storedShortcutFromDefinition(shortcut, workspaceShortcuts.length);

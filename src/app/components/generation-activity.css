@@ -21,6 +21,7 @@
 @keyframes generation-activity-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
 .generation-activity__headline { min-width:0; flex:1; font-size:10px; line-height:1.4; letter-spacing:.035em; font-variant-numeric:tabular-nums; }
 .generation-activity__body { max-height:min(240px, 34vh); overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; margin-top:7px; padding-right:4px; }
+.generation-activity__body:focus-visible { outline:2px solid var(--generation-activity-accent, #6EA8FF); outline-offset:2px; border-radius:4px; }
 .generation-activity__steps { position:relative; display:grid; margin:0; padding:0; list-style:none; }
 .generation-activity__steps::before { content:""; position:absolute; left:10px; top:10px; bottom:10px; border-left:1px dotted color-mix(in srgb, var(--generation-activity-accent, #6EA8FF) 30%, transparent); }
 .generation-activity__step { position:relative; display:grid; grid-template-columns:21px minmax(0,1fr) auto; gap:8px; align-items:center; padding:4px 0; color:rgba(255,255,255,.66); font-size:10px; line-height:1.35; }

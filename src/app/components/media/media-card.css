@@ -1,16 +1,9 @@
-/* Media results resolved by a media tool call.
-   Owns only .media-rail / .media-card selectors; no other sheet touches them.
+/* Settled media cards resolved by a media tool call.
+   The rail and Suspense shell live in message-media.css so their geometry exists
+   before this lazy stylesheet is downloaded.
 
-   Sized for a phone first: the rail is a single column on narrow viewports so a
-   card is wide enough to read, and every card is at least 44px tall at every
-   part that can be tapped, because this control is operated with a thumb. */
-
-.media-rail {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-  gap: 10px;
-  margin-top: 10px;
-}
+   Sized for a phone first: every card is at least 44px tall at every part that
+   can be tapped, because this control is operated with a thumb. */
 
 .media-card {
   position: relative;
@@ -131,8 +124,4 @@
      landed on the card rather than the message behind it. */
   transform: scale(.985);
   background: rgba(255,255,255,.1);
-}
-
-@media (max-width: 560px) {
-  .media-rail { grid-template-columns: 1fr; }
 }

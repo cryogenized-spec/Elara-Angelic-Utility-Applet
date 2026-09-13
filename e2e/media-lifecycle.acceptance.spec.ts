@@ -93,6 +93,33 @@ async function ask(page: Page, text: string): Promise<void> {
   await page.getByRole('button', { name: 'Send message' }).click();
 }
 
+async function persistedMediaSnapshot(page: Page): Promise<Array<{ id: string; title: string }>> {
+  return page.evaluate(async (videoId) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('elara-angelic-utility-applet');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      const rows = await new Promise<Array<{ media?: unknown }>>((resolve, reject) => {
+        const request = database.transaction('messages', 'readonly').objectStore('messages').getAll();
+        request.onsuccess = () => resolve(request.result as Array<{ media?: unknown }>);
+        request.onerror = () => reject(request.error);
+      });
+      return rows.flatMap((row) => Array.isArray(row.media) ? row.media : [])
+        .filter((entry): entry is { id: string; title: string } => (
+          typeof entry === 'object'
+          && entry !== null
+          && (entry as { id?: unknown }).id === videoId
+          && typeof (entry as { title?: unknown }).title === 'string'
+        ))
+        .map((entry) => ({ id: entry.id, title: entry.title }));
+    } finally {
+      database.close();
+    }
+  }, VIDEO_ID);
+}
+
 async function installSingleSearch(page: Page, continuation: (route: import('@playwright/test').Route) => Promise<void>): Promise<void> {
   await page.route('**/v1/interactions*', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
@@ -126,6 +153,8 @@ test.describe('media lifecycle closeout acceptance', () => {
     await expect(page.locator('.message-assistant')).toHaveCount(1);
     await expect(page.locator('.message-assistant--streaming')).toHaveCount(0);
     await expect(card).toHaveAttribute('href', CANONICAL_URL);
+    await expect.poll(async () => JSON.stringify(await persistedMediaSnapshot(page)))
+      .toBe(JSON.stringify([{ id: VIDEO_ID, title: 'Closeout Media Probe' }]));
 
     await page.reload();
     await expect(page.getByRole('link', { name: /Closeout Media Probe/ })).toHaveCount(1);
@@ -175,6 +204,7 @@ test.describe('media lifecycle closeout acceptance', () => {
 
     await expect(page.getByRole('link', { name: /Closeout Media Probe/ })).toBeVisible();
     await expect(page.getByRole('alert')).toContainText('Continuation failed deliberately.');
+    await expect.poll(async () => JSON.stringify(await persistedMediaSnapshot(page))).toBe('[]');
 
     await page.reload();
     await expect(page.getByText('fail after resolving media', { exact: true })).toBeVisible();
@@ -220,6 +250,8 @@ test.describe('media lifecycle closeout acceptance', () => {
     await expect(cards).toHaveCount(1);
     await expect(cards).toContainText('Closeout Media Probe — refreshed');
     expect(providerQueries).toEqual(['first duplicate probe', 'second duplicate probe']);
+    await expect.poll(async () => JSON.stringify(await persistedMediaSnapshot(page)))
+      .toBe(JSON.stringify([{ id: VIDEO_ID, title: 'Closeout Media Probe — refreshed' }]));
 
     await page.reload();
     await expect(page.locator('a.media-card')).toHaveCount(1);

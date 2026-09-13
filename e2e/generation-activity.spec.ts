@@ -85,7 +85,9 @@ test.describe('Generation Activity', () => {
 
     await ask(page, 'hold-final');
     const conversation = page.getByRole('region', { name: 'Conversation' });
-    const activity = page.getByRole('region', { name: 'Generation activity' });
+    const activity = page.locator('section.generation-activity:not(.is-complete)');
+    await expect(activity).toHaveCount(1);
+    await expect(activity).toHaveAttribute('aria-label', 'Generation activity');
     await expect(activity).toBeVisible();
     await expect(activity.getByRole('button')).toContainText(/Thinking · (?:\d+ ms|\d+\.\d s)/);
 

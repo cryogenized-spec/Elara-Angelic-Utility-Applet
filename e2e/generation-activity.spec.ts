@@ -135,7 +135,7 @@ test.describe('Generation Activity', () => {
     await expect(toggle).toContainText(/Thought for .*wrote in .*total/);
     await toggle.click();
 
-    await expect(activity.getByText('Reasoning summary')).toBeVisible();
+    await expect(activity.getByText('Reasoning summary', { exact: true })).toBeVisible();
     await expect(activity.getByText('Reasoning summary segment 1.', { exact: false })).toBeVisible();
     await expect(activity.locator('.generation-activity__step')).toHaveCount(37);
 

@@ -8,8 +8,8 @@
    -------------------
    Vertical rhythm is derived from the selected text size, never hardcoded:
    `--chat-line-height` is a unitless ratio and `--chat-paragraph-gap` is in
-   em, so 10px text is tight and 24px text is proportionally airier, with no
-   fixed pixel spacing anywhere.
+   em, so 10px text is tight, 24px text is proportionally airier, and no part
+   of the rhythm is a fixed pixel constant.
 
    Spacing between blocks is the *renderer's* decision, not the model's:
    Markdown is free to express paragraphs, and a paragraph is worth exactly
@@ -75,14 +75,16 @@
 .message-action--danger:hover, .message-action--danger:focus-visible { color: rgba(255,150,180,.95); border-color: rgba(240,123,220,.28); background: rgba(240,123,220,.07); }
 .message-action svg { display: block; }
 
-/* Temporary runway while a turn is live. Without trailing scroll extent, the
-   browser cannot place a final stream item at the top of the viewport. The
-   spacer disappears with the live panel at the terminal transition. */
-.conversation__activity-tail { height: clamp(260px, 60dvh, 520px); pointer-events: none; }
+/* Scroll runway for Generation Activity. It exists while a turn is live and,
+   if the user deliberately scrolls away during that turn, remains just long
+   enough to stop completion from collapsing their chosen viewport position.
+   The larger portrait allowance is required because the fixed banner/composer
+   leave the conversation viewport materially shorter than 100dvh. */
+.conversation__activity-tail { height: clamp(360px, 72dvh, 680px); pointer-events: none; }
 
 @media (min-width: 720px) {
   .message-assistant .message-body { max-width: 88%; }
 }
 
-.conversation__jump { position: sticky; bottom: 12px; display: block; margin: -30px auto 0; padding: 6px 14px; border-radius: 999px; border: 1px solid rgba(110,168,255,.4); background: rgba(11,12,18,.92); color: rgba(231,240,255,.9); font-size: 11px; letter-spacing: .04em; cursor: pointer; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
+.conversation__jump { position: sticky; bottom: 12px; display: block; margin: -30px auto 0; padding: 6px 14px; border-radius: 999px; border: 1px solid rgba(110,168,255,.4); background: rgba(11,12,18,.92); color: rgba(231,240,255,.9); font-size: 11px; letter-spacing: .04em; cursor:pointer; box-shadow: 0 4px 18px rgba(0,0,0,.45); }
 .conversation__jump:hover { background: rgba(28,32,48,.95); }

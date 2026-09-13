@@ -42,7 +42,7 @@ describe('Phase 3 media delivery resilience', () => {
   it('reserves one visible card shell per result while the lazy card module is unresolved', () => {
     const html = renderToStaticMarkup(<MessageMedia items={[video('one'), video('two')]} />);
 
-    expect(html.match(/media-card__skeleton/g)).toHaveLength(2);
+    expect(html.match(/class="media-card__skeleton"/g)).toHaveLength(2);
     expect(html).toContain('aria-hidden="true"');
   });
 

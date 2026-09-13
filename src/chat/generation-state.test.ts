@@ -3,10 +3,11 @@ import type { GeminiStreamEvent } from '../gemini/contracts';
 import {
   MAX_PERSISTED_THOUGHT_SUMMARY_CHARS,
   applyGenerationEvent,
-  buildExecutionSummary,
+  buildGenerationActivity,
   createGenerationState,
   isActivePhase,
   isTerminalPhase,
+  persistedThoughtSummaryOf,
   stepElapsedMs,
   thoughtSummaryOf,
   toolNamesOf,
@@ -55,7 +56,6 @@ describe('generation-state reducer', () => {
       { type: 'step-start', index: 2, stepType: 'function_call' },
       { type: 'tool-call', interactionId: 'interaction-1', index: 2, callId: 'call-1', name: 'calendar.listEvents', arguments: {} },
       { type: 'step-stop', index: 2 },
-      // Tool continuation: same generation, new interaction.
       { type: 'interaction-created', interactionId: 'interaction-2', model: 'gemini-3.8-flash' },
       { type: 'step-start', index: 0, stepType: 'thought' },
       { type: 'thought-summary-delta', index: 0, text: 'The calendar has one event.' },
@@ -64,7 +64,6 @@ describe('generation-state reducer', () => {
       { type: 'completed', interactionId: 'interaction-2', status: 'completed', durationMs: 1400 },
     ]);
 
-    // Criterion: same generation ≠ same interaction.
     expect(state.interactionIds).toEqual(['interaction-1', 'interaction-2']);
     expect(state.transcript).toBe('Let me look that up. You have a design review.');
     expect(state.steps).toHaveLength(5);
@@ -85,7 +84,6 @@ describe('generation-state reducer', () => {
     expect(state.activeTool).toMatchObject({ name: 'tasks.createTask', callId: 'c-1' });
 
     send({ type: 'step-stop', index: 0 }, 40);
-    // step-stop does NOT close tool steps: execution is still in flight.
     expect(state.steps[0].state).toBe('running');
     expect(state.steps[0].endedAt).toBeUndefined();
 
@@ -93,7 +91,6 @@ describe('generation-state reducer', () => {
     expect(state.phase).toBe('tool-working');
 
     send({ type: 'interaction-created', interactionId: 'i-2', model: 'm' }, 100);
-    // Continuation arrival closes the round trip and clears the active tool.
     expect(state.steps[0].state).toBe('done');
     expect(state.steps[0].endedAt).toBe(100);
     expect(stepElapsedMs(state.steps[0], 100)).toBe(80);
@@ -110,7 +107,6 @@ describe('generation-state reducer', () => {
     send({ type: 'step-start', index: 1, stepType: 'function_call' }, 30);
     send({ type: 'tool-call', interactionId: 'i-1', index: 1, callId: 'c-1', name: 'tasks.createTask', arguments: {} }, 40);
     send({ type: 'step-stop', index: 1 }, 50);
-    // Tool-loop status vocabulary during the execution/confirmation gap.
     send({ type: 'interaction-status', interactionId: 'i-1', status: 'executing_tools' }, 60);
     expect(state.phase).toBe('tool-working');
     send({ type: 'interaction-status', interactionId: 'i-1', status: 'awaiting_tool_confirmation' }, 70);
@@ -119,7 +115,6 @@ describe('generation-state reducer', () => {
     expect(state.statusMessage).toBe('awaiting_tool_confirmation');
     expect(state.steps.find((step) => step.kind === 'tool')?.state).toBe('running');
 
-    // The continuation closes the round trip without touching the transcript.
     send({ type: 'interaction-created', interactionId: 'i-2', model: 'm' }, 100);
     const toolStep = state.steps.find((step) => step.kind === 'tool');
     if (!toolStep) throw new Error('expected a tool step in the trace');
@@ -145,20 +140,18 @@ describe('generation-state reducer', () => {
     send({ type: 'tool-call', interactionId: 'i-1', index: 1, callId: 'c-1', name: 'tasks.createTask', arguments: {} }, 30);
     expect(state.activeTool?.name).toBe('tasks.createTask');
 
-    // Duplicate announcement of the same interaction: not a boundary.
     send({ type: 'interaction-created', interactionId: 'i-1', model: 'm' }, 40);
     expect(state.interactionIds).toEqual(['i-1']);
     expect(state.steps.every((step) => step.state === 'running')).toBe(true);
     expect(state.activeTool?.name).toBe('tasks.createTask');
 
-    // A genuinely new interaction still closes the previous round.
     send({ type: 'interaction-created', interactionId: 'i-2', model: 'm' }, 50);
     expect(state.interactionIds).toEqual(['i-1', 'i-2']);
     expect(state.steps.every((step) => step.state === 'done')).toBe(true);
     expect(state.activeTool).toBeUndefined();
   });
 
-  it('marks truncated persisted thought summaries with an ellipsis', () => {
+  it('caps only the persisted provider summary and leaves live provider text intact', () => {
     const state = drive(
       [
         { type: 'thought-summary-delta', index: 0, text: 'x'.repeat(9000) },
@@ -166,9 +159,40 @@ describe('generation-state reducer', () => {
       ],
       'gen-truncate',
     );
-    const summary = buildExecutionSummary(state);
-    expect(summary.thoughtSummary?.length).toBe(MAX_PERSISTED_THOUGHT_SUMMARY_CHARS + 1);
-    expect(summary.thoughtSummary?.endsWith('…')).toBe(true);
+    expect(thoughtSummaryOf(state)?.length).toBe(9000);
+    const persisted = persistedThoughtSummaryOf(state);
+    expect(persisted?.length).toBe(MAX_PERSISTED_THOUGHT_SUMMARY_CHARS + 1);
+    expect(persisted?.endsWith('…')).toBe(true);
+  });
+
+  it('records used memory as context activity without turning it into a tool', () => {
+    const state = drive([
+      { type: 'context-activity', category: 'memory', label: 'Memory', detail: 'Recalled relevant durable memory.', durationMs: 37, outcome: 'used' },
+      { type: 'interaction-created', interactionId: 'i-1', model: 'm' },
+      { type: 'completed', interactionId: 'i-1', status: 'completed', durationMs: 5 },
+    ]);
+    expect(state.steps[0]).toMatchObject({ kind: 'context', contextCategory: 'memory', state: 'done', detail: 'Recalled relevant durable memory.' });
+    expect(toolNamesOf(state)).toEqual([]);
+    expect(buildGenerationActivity(state).steps[0]).toMatchObject({ kind: 'context', contextCategory: 'memory', durationMs: 37 });
+  });
+
+  it('records unavailable memory as a failed context row but does not fail the turn', () => {
+    const state = drive([
+      { type: 'context-activity', category: 'memory', label: 'Memory', detail: 'Memory retrieval was unavailable; continued without it.', durationMs: 12, outcome: 'unavailable' },
+      { type: 'text-delta', index: 0, text: 'Still answered.' },
+      { type: 'completed', interactionId: 'i-1', status: 'completed', durationMs: 5 },
+    ]);
+    expect(state.phase).toBe('completed');
+    expect(state.transcript).toBe('Still answered.');
+    expect(state.steps[0]).toMatchObject({ kind: 'context', state: 'failed', errorCode: 'CONTEXT_UNAVAILABLE' });
+  });
+
+  it('does not add empty memory lookups to the user-visible activity record', () => {
+    const state = drive([
+      { type: 'context-activity', category: 'memory', label: 'Memory', durationMs: 5, outcome: 'empty' },
+      { type: 'completed', interactionId: 'i-1', status: 'completed', durationMs: 5 },
+    ]);
+    expect(state.steps).toEqual([]);
   });
 
   it('ignores stale events from superseded generations by reference', () => {
@@ -285,7 +309,7 @@ describe('generation-state reducer', () => {
     expect(state.usage).toMatchObject({ inputTokens: 10, outputTokens: 5 });
   });
 
-  it('builds a durable execution summary without transient labels', () => {
+  it('builds one durable activity record from the same live steps', () => {
     const state = drive(
       [
         { type: 'interaction-created', interactionId: 'i-1', model: 'm' },
@@ -303,15 +327,16 @@ describe('generation-state reducer', () => {
       0,
       100,
     );
-    const summary = buildExecutionSummary(state);
-    expect(summary.id).toBe('gen-summary');
-    expect(summary.durationMs).toBe(1000);
-    expect(summary.thoughtSummary).toBe('Why we did it.');
-    expect(summary.steps).toEqual([
-      'Thinking · 200 ms',
-      'Tool calendar.listEvents · 300 ms',
-      'Writing · 100 ms',
-    ]);
-    expect(summary.steps.join(' ')).not.toMatch(/Thinking\.\.\.|Writing\.\.\./);
+    const activity = buildGenerationActivity(state);
+    expect(activity).toEqual({
+      id: 'gen-summary',
+      durationMs: 1000,
+      steps: [
+        { id: 'step-0', kind: 'thinking', state: 'done', durationMs: 200, label: 'Thinking' },
+        { id: 'step-1', kind: 'tool', state: 'done', durationMs: 300, label: 'calendar.listEvents', toolName: 'calendar.listEvents' },
+        { id: 'step-2', kind: 'generation', state: 'done', durationMs: 100, label: 'Writing' },
+      ],
+    });
+    expect(persistedThoughtSummaryOf(state)).toBe('Why we did it.');
   });
 });

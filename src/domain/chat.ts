@@ -1,7 +1,7 @@
 import type { MediaItem } from './media';
 
 export type ChatRole = 'user' | 'assistant' | 'system';
-export type ProviderStatus = 'idle' | 'streaming' | 'failed';
+export type ProviderStatus = 'idle' | 'streaming' | 'saving' | 'failed';
 
 export interface ProviderUsage {
   inputTokens?: number;

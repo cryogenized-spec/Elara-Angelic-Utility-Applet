@@ -21,6 +21,10 @@ import { mediaIntentOf } from '../domain/media';
  * - **Everything else** gets the canonical web URL verbatim. `intent://` is not a
  *   scheme other platforms understand, and inventing per-platform deep links for
  *   players Elara cannot detect would be guessing.
+ *
+ * Stored media is external/corruptible input. A card may navigate only when its
+ * URL exactly matches the canonical destination that this provider+kind+id would
+ * have produced. A merely-HTTPS hostile host is not sufficient.
  */
 
 /** Recognised Android hand-off target. Kept module-private on purpose. */
@@ -68,34 +72,32 @@ export function detectHandoffPlatform(): HandoffPlatform {
   return { isAndroid: isChrome && !isFirefox && !isEdge && !isOpera };
 }
 
-function httpsUrl(value: string): URL | undefined {
-  try {
-    const url = new URL(value);
-    return url.protocol === 'https:' ? url : undefined;
-  } catch {
-    return undefined;
-  }
+/** Canonical URL Elara's YouTube adapter is allowed to produce. */
+export function canonicalMediaWebUrl(item: Pick<MediaItem, 'provider' | 'kind' | 'id'>): string | undefined {
+  if (item.provider !== 'youtube' || !item.id || item.id.length > 128 || item.id.trim() !== item.id || /\s/.test(item.id)) return undefined;
+  if (item.kind === 'video') return `https://www.youtube.com/watch?v=${encodeURIComponent(item.id)}`;
+  if (item.kind === 'playlist') return `https://www.youtube.com/playlist?list=${encodeURIComponent(item.id)}`;
+  return undefined;
 }
 
 /**
- * Canonical destination for a tap. Intent never rewrites provider identity or
- * swaps a YouTube result onto another YouTube surface.
+ * Canonical destination for a tap. Returns undefined rather than repairing,
+ * redirecting or normalising an untrusted stored URL.
  */
-export function mediaDestinationUrl(item: MediaItem): string {
-  return item.webUrl;
+export function mediaDestinationUrl(item: MediaItem): string | undefined {
+  const expected = canonicalMediaWebUrl(item);
+  return expected && item.webUrl === expected ? expected : undefined;
 }
 
 /**
- * The Android intent URI for a media item, if the platform can support it.
- *
- * Returns undefined on non-Android platforms or for non-https links, so callers
- * can fall back to the plain HTTPS destination. The intent form is attempted only
- * on Chromium-family Android browsers that support it.
+ * The Android intent URI for a media item, if the platform and destination are
+ * both safe. A rejected ordinary destination can never be wrapped in a more
+ * privileged launch URI.
  */
 export function mediaHandoffIntentHref(item: MediaItem, platform: HandoffPlatform = detectHandoffPlatform()): string | undefined {
   const destination = mediaDestinationUrl(item);
-  const target = httpsUrl(destination);
-  if (!platform.isAndroid || !target) return undefined;
+  if (!platform.isAndroid || !destination) return undefined;
+  const target = new URL(destination);
 
   const params = [
     `scheme=${target.protocol.replace(':', '')}`,
@@ -107,12 +109,10 @@ export function mediaHandoffIntentHref(item: MediaItem, platform: HandoffPlatfor
 }
 
 /**
- * The `href` a media card should use.
- *
- * Always returns the provider's canonical destination. Android intent handling is
- * separate and therefore cannot turn the ordinary href into a dead custom URL.
+ * The `href` a media card should use. Invalid, non-canonical or hostile URLs do
+ * not get an href at all; callers render a non-interactive unavailable card.
  */
-export function mediaHandoffHref(item: MediaItem, platform: HandoffPlatform = detectHandoffPlatform()): string {
+export function mediaHandoffHref(item: MediaItem, platform: HandoffPlatform = detectHandoffPlatform()): string | undefined {
   void platform;
   return mediaDestinationUrl(item);
 }

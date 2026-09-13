@@ -32,6 +32,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   const manualScrollTopRef = useRef<number | null>(null);
   const retainActivityTailRef = useRef(false);
   const followModeRef = useRef<FollowMode>('bottom');
+  const layoutScrollSuppressionRef = useRef(0);
   const [manualScroll, setManualScroll] = useState(false);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
@@ -49,9 +50,20 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     setManualScroll(mode === 'manual');
   }
 
+  function suppressLayoutScrollEvents(): void {
+    const token = layoutScrollSuppressionRef.current + 1;
+    layoutScrollSuppressionRef.current = token;
+    // `scroll` is asynchronous relative to `scrollTop` writes and to the DOM
+    // shrink that removes the live activity runway. Ignore those browser/layout
+    // notifications for two frames so they cannot masquerade as user intent.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (layoutScrollSuppressionRef.current === token) layoutScrollSuppressionRef.current = 0;
+    }));
+  }
+
   function rememberScrollPosition() {
     const element = conversationRef.current;
-    if (!element) return;
+    if (!element || layoutScrollSuppressionRef.current !== 0) return;
 
     if (followModeRef.current === 'activity') {
       const anchor = activityAnchorRef.current;
@@ -167,9 +179,18 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         && manualScrollTopRef.current !== null
         && restoredManualGenerationRef.current !== generationId
       ) {
+        suppressLayoutScrollEvents();
         element.scrollTop = manualScrollTopRef.current;
         restoredManualGenerationRef.current = generationId;
-      } else if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current && followModeRef.current === 'activity') {
+      } else if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current) {
+        // Removing the one-viewport live runway can clamp scrollTop and emit a
+        // browser-generated scroll after this layout effect. Elect bottom now,
+        // but suppress that settling event so it cannot immediately re-elect
+        // `manual`. We intentionally do not move the viewport here: the user's
+        // accepted Generation Activity position remains stable until genuinely
+        // new late content asks bottom-follow to reconcile it.
+        suppressLayoutScrollEvents();
+        manualScrollTopRef.current = null;
         setFollowMode('bottom');
       }
       return;
@@ -185,6 +206,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     restoredManualGenerationRef.current = null;
     retainActivityTailRef.current = false;
     manualScrollTopRef.current = null;
+    suppressLayoutScrollEvents();
     setFollowMode('activity');
     element.scrollTop = Math.max(0, element.scrollTop + offset);
   }, [generationId, liveGeneration, visibleMessages.length]);

@@ -36,7 +36,7 @@ export type MediaKind = 'video' | 'playlist';
  *
  * - `watch`  — the user wants to see it. Rendered as a playable-looking card.
  * - `listen` — the user wants to hear it. Handed off to the platform's own
- *   audio player and never played inside Elara.
+ *   player and never played inside Elara.
  *
  * Declared as a const array so the type, the Zod contract, and the runtime
  * membership check cannot drift apart.
@@ -169,8 +169,15 @@ export interface MediaProvider {
   search(request: MediaSearchRequest): Promise<MediaSearchOutcome>;
 }
 
-/** Hard cap on queries accepted in one tool call. */
-export const MAX_MEDIA_QUERIES_PER_CALL = 8;
+/**
+ * Hard cap on distinct searches accepted in one model tool call.
+ *
+ * YouTube's default `search.list` bucket is 100 calls/day. Three keeps even an
+ * overeager call bounded to 3% of that bucket while still allowing a genuinely
+ * multi-part user request to be answered in one tool invocation. The model is
+ * separately instructed to use one query by default.
+ */
+export const MAX_MEDIA_QUERIES_PER_CALL = 3;
 
 /** Hard cap on items surfaced for one query. */
 export const MAX_MEDIA_ITEMS_PER_QUERY = 5;

@@ -15,6 +15,11 @@ import type { MediaItem } from '../domain/media';
 export const DEFAULT_IDLE_STALL_TIMEOUT_MS = 45_000;
 export const DEFAULT_ABSOLUTE_TURN_TIMEOUT_MS = 15 * 60_000;
 export const MAX_PERSISTED_THOUGHT_SUMMARY_CHARS = 8_000;
+export const MAX_PERSISTED_ACTIVITY_STEPS = 128;
+export const MAX_PERSISTED_ACTIVITY_LABEL_CHARS = 160;
+export const MAX_PERSISTED_ACTIVITY_DETAIL_CHARS = 512;
+export const MAX_PERSISTED_ACTIVITY_TOOL_NAME_CHARS = 160;
+export const MAX_PERSISTED_ACTIVITY_ERROR_CODE_CHARS = 128;
 
 export type GenerationPhase =
   | 'connecting'
@@ -343,25 +348,33 @@ function durableStepState(state: GenerationStepState): GenerationActivityState {
   return state === 'failed' || state === 'cancelled' ? state : 'done';
 }
 
+function boundedPersistedText(value: string | undefined, maxChars: number): string | undefined {
+  if (!value) return undefined;
+  return value.length > maxChars ? `${value.slice(0, maxChars)}…` : value;
+}
+
 /**
  * Terminal snapshot of the exact same lifecycle the live panel renders.
  * No separate summary reconstruction and no raw hidden reasoning payloads.
+ * Persisted diagnostics are deliberately bounded even if a malformed provider
+ * produces an excessive event sequence or oversized identifiers.
  */
 export function buildGenerationActivity(state: GenerationState): GenerationActivityRecord {
   const terminalAt = state.endedAt ?? state.startedAt;
+  const durableSteps = state.steps.slice(-MAX_PERSISTED_ACTIVITY_STEPS);
   return {
     id: state.generationId,
     durationMs: Math.max(0, Math.floor(terminalAt - state.startedAt)),
-    steps: state.steps.map((step) => ({
+    steps: durableSteps.map((step) => ({
       id: step.id,
       kind: step.kind,
       state: durableStepState(step.state),
       durationMs: Math.max(0, Math.floor((step.endedAt ?? terminalAt) - step.startedAt)),
-      label: step.label,
-      ...(step.kind === 'context' && step.detail ? { detail: step.detail } : {}),
-      ...(step.toolName ? { toolName: step.toolName } : {}),
+      label: boundedPersistedText(step.label, MAX_PERSISTED_ACTIVITY_LABEL_CHARS) ?? '',
+      ...(step.kind === 'context' && step.detail ? { detail: boundedPersistedText(step.detail, MAX_PERSISTED_ACTIVITY_DETAIL_CHARS) } : {}),
+      ...(step.toolName ? { toolName: boundedPersistedText(step.toolName, MAX_PERSISTED_ACTIVITY_TOOL_NAME_CHARS) } : {}),
       ...(step.contextCategory ? { contextCategory: step.contextCategory } : {}),
-      ...(step.errorCode ? { errorCode: step.errorCode } : {}),
+      ...(step.errorCode ? { errorCode: boundedPersistedText(step.errorCode, MAX_PERSISTED_ACTIVITY_ERROR_CODE_CHARS) } : {}),
     })),
   };
 }

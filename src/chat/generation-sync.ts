@@ -63,6 +63,11 @@ export function canRetryFailedTurn(status: ProviderStatus, attempt: FailedTurnAt
   return status === 'failed' && attempt !== null && attempt.base.id === conversationId && attempt.input.trim().length > 0;
 }
 
+/** Navigation may hide the old turn, but it must not release a durability barrier. */
+export function statusAfterNavigation(status: ProviderStatus): ProviderStatus {
+  return status === 'saving' ? 'saving' : 'idle';
+}
+
 export function regenerateBaseFor(conversation: ConversationState, attempt: FailedTurnAttempt | null): ConversationState {
   return attempt !== null && attempt.base.id === conversation.id ? attempt.base : conversation;
 }
@@ -121,7 +126,12 @@ export function syncGenerationEvent(event: GeminiStreamEvent, generation: Genera
     const completed: ConversationState = { ...base, updatedAt: completedAt, messages: [...base.messages, completedMessage] };
     context.setConversation(completed);
     context.setStatus('saving');
-    context.onTerminalPersistence(context.save(completed));
+    const persistence = context.save(completed);
+    // The turn owner awaits this exact promise. Mark the rejection handled now
+    // so a fast storage failure cannot surface as an unhandled rejection before
+    // control reaches the owner's finally block.
+    void persistence.catch(() => undefined);
+    context.onTerminalPersistence(persistence);
     return;
   }
 

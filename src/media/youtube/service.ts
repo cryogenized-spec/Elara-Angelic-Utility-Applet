@@ -18,7 +18,13 @@ import { normalizeMediaQuery } from '../normalize';
  *     `search.list` bills against its own small dedicated daily bucket, and
  *     `maxResults` does not change the number of calls — so a second page costs
  *     a whole additional call for marginal benefit.
- *  3. No `videos.list` follow-up for durations. That would double the calls.
+ *  3. No `videos.list` follow-up for durations. Search cards only show data
+ *     actually returned by `search.list`.
+ *
+ * Provider-returned display data is preserved verbatim when valid. Bounds are
+ * validation limits, not truncation rules: an invalid value is omitted (or the
+ * item is rejected when required) rather than modified. This keeps the card a
+ * faithful presentation of YouTube search results.
  *
  * The API key is supplied per call by a resolver and sent as the
  * `x-goog-api-key` header rather than a query parameter. The key is not placed
@@ -52,22 +58,44 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function boundedText(value: unknown, maxLength: number): string | undefined {
-  if (typeof value !== 'string') return undefined;
-  const trimmed = value.trim();
-  return trimmed ? trimmed.slice(0, maxLength) : undefined;
+/** Return provider text unchanged when it is non-blank and within a defensive bound. */
+function exactText(value: unknown, maxLength: number): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) return undefined;
+  return value.trim().length > 0 ? value : undefined;
+}
+
+function exactIdentifier(value: unknown, maxLength = 128): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > maxLength) return undefined;
+  if (value.trim() !== value || /\s/.test(value)) return undefined;
+  return value;
+}
+
+function exactHttpsUrl(value: unknown, maxLength = 2048): string | undefined {
+  const candidate = exactText(value, maxLength);
+  if (!candidate) return undefined;
+  try {
+    const url = new URL(candidate);
+    return url.protocol === 'https:' ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function positiveDimension(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 && value <= 10_000 ? value : undefined;
 }
 
 function pickThumbnail(thumbnails: unknown): MediaThumbnail | undefined {
   if (!isRecord(thumbnails)) return undefined;
-  // Prefer the largest of the three that `part=snippet` returns, but accept any.
+  // Prefer the largest of the three that `part=snippet` returns, but never
+  // fabricate metadata when a candidate is incomplete.
   for (const size of ['high', 'medium', 'default'] as const) {
     const candidate = thumbnails[size];
     if (!isRecord(candidate)) continue;
-    const url = boundedText(candidate.url, 2048);
-    if (!url) continue;
-    const width = typeof candidate.width === 'number' ? candidate.width : 480;
-    const height = typeof candidate.height === 'number' ? candidate.height : 360;
+    const url = exactHttpsUrl(candidate.url);
+    const width = positiveDimension(candidate.width);
+    const height = positiveDimension(candidate.height);
+    if (!url || !width || !height) continue;
     return { url, width, height };
   }
   return undefined;
@@ -82,11 +110,14 @@ function toMediaItem(raw: unknown): MediaItem | undefined {
   // Only videos are requested, but a defensive check keeps a future `type`
   // change from silently producing broken watch URLs.
   const kind = id.kind === 'youtube#playlist' ? 'playlist' : id.kind === 'youtube#video' ? 'video' : undefined;
-  const resourceId = kind === 'playlist' ? boundedText(id.playlistId, 64) : boundedText(id.videoId, 64);
+  const resourceId = kind === 'playlist' ? exactIdentifier(id.playlistId) : exactIdentifier(id.videoId);
   if (!kind || !resourceId) return undefined;
 
-  const title = boundedText(snippet.title, 300);
+  const title = exactText(snippet.title, 1_000);
   if (!title) return undefined;
+  const channel = exactText(snippet.channelTitle, 1_000);
+  const publishedAt = exactText(snippet.publishedAt, 64);
+  const thumbnail = pickThumbnail(snippet.thumbnails);
 
   const webUrl = kind === 'playlist'
     ? `https://www.youtube.com/playlist?list=${encodeURIComponent(resourceId)}`
@@ -97,9 +128,9 @@ function toMediaItem(raw: unknown): MediaItem | undefined {
     id: resourceId,
     kind,
     title,
-    ...(boundedText(snippet.channelTitle, 200) ? { channel: boundedText(snippet.channelTitle, 200) } : {}),
-    ...(boundedText(snippet.publishedAt, 40) ? { publishedAt: boundedText(snippet.publishedAt, 40) } : {}),
-    ...(pickThumbnail(snippet.thumbnails) ? { thumbnail: pickThumbnail(snippet.thumbnails) } : {}),
+    ...(channel ? { channel } : {}),
+    ...(publishedAt ? { publishedAt } : {}),
+    ...(thumbnail ? { thumbnail } : {}),
     webUrl,
     embedUrl: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(resourceId)}?autoplay=0`,
   };
@@ -137,9 +168,10 @@ function reasonOf(payload: unknown): string | undefined {
   if (!isRecord(error)) return undefined;
   const errors = error.errors;
   if (!Array.isArray(errors) || !errors.length) return undefined;
-  // Array.isArray narrows `unknown` to any[]; pin the element to unknown.
   const first: unknown = errors[0];
-  return isRecord(first) ? boundedText(first.reason, 64) : undefined;
+  if (!isRecord(first) || typeof first.reason !== 'string') return undefined;
+  const reason = first.reason.trim();
+  return reason && reason.length <= 64 ? reason : undefined;
 }
 
 function markNetworkAttempted(error: unknown): void {

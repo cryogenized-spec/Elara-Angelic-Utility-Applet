@@ -29,4 +29,10 @@ describe('terminal persistence navigation ownership', () => {
     const turn = bodyOf('streamAssistantTurn');
     expect(turn).toContain('if (isTerminalPhase(current.phase)) break;');
   });
+
+  it('blocks thread metadata/destructive mutations while terminal persistence owns storage', () => {
+    for (const name of ['handleRename', 'handleArchive', 'handleDelete']) {
+      expect(bodyOf(name)).toContain("if (status === 'saving') return;");
+    }
+  });
 });

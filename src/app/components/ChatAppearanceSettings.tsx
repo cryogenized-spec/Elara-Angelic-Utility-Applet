@@ -91,7 +91,7 @@ export function ChatAppearanceSettings({ value, onChange }: { value: ChatAppeara
       <div className="appearance-segment" role="radiogroup" aria-label="Chat background mode">
         {(['solid','gradient','image'] as const).map((mode) => <button key={mode} type="button" className={value.chatBackgroundMode === mode ? 'is-active' : ''} role="radio" aria-checked={value.chatBackgroundMode === mode} onClick={() => { setBackgroundError(null); patch({ chatBackgroundMode: mode }); }}>{mode[0].toUpperCase() + mode.slice(1)}</button>)}
       </div>
-      {value.chatBackgroundMode === 'solid' && <HexColourField label="Background colour" ariaLabel="Chat background" value={value.chatBackgroundValue} fallback="#050507" onCommit={(chatBackgroundValue) => patch({ chatBackgroundValue })} />}
+      {value.chatBackgroundMode === 'solid' && <HexColourField label="Background colour" colourAriaLabel="Chat background colour" hexAriaLabel="Chat background hex" value={value.chatBackgroundValue} fallback="#050507" onCommit={(chatBackgroundValue) => patch({ chatBackgroundValue })} />}
       {value.chatBackgroundMode === 'gradient' && <div className="gradient-options">{GRADIENTS.map(([id,label]) => <button key={id} type="button" className={value.chatBackgroundValue === id ? 'is-active' : ''} onClick={() => patch({ chatBackgroundValue: id })}>{label}</button>)}</div>}
       {value.chatBackgroundMode === 'image' && <>
         <button className="upload-button" type="button" disabled={backgroundBusy} onClick={() => backgroundInput.current?.click()}>{backgroundBusy ? 'Preparing background…' : 'Choose background image'}</button>
@@ -104,17 +104,17 @@ export function ChatAppearanceSettings({ value, onChange }: { value: ChatAppeara
     </div>
     <div className="setting-card appearance-card">
       <strong>Elara messages</strong><span>Independent assistant text colour.</span>
-      <HexColourField label="Text colour" ariaLabel="Elara text" value={value.assistantTextColor} fallback="#F7F8FF" onCommit={(assistantTextColor) => patch({ assistantTextColor })} />
+      <HexColourField label="Text colour" colourAriaLabel="Elara text colour" hexAriaLabel="Elara text colour hex" value={value.assistantTextColor} fallback="#F7F8FF" onCommit={(assistantTextColor) => patch({ assistantTextColor })} />
       <label className="checkbox-line"><input type="checkbox" checked={value.assistantGlow} onChange={(event) => patch({ assistantGlow: event.target.checked })}/><span>Subtle assistant glow</span></label>
     </div>
     <div className="setting-card appearance-card">
       <strong>Generation activity</strong><span>Accent colour for Thinking, tools, timing and reasoning summaries.</span>
-      <HexColourField label="Activity accent" ariaLabel="Generation activity accent" value={value.generationActivityAccent} fallback="#6EA8FF" onCommit={(generationActivityAccent) => patch({ generationActivityAccent })} />
+      <HexColourField label="Activity accent" colourAriaLabel="Generation activity accent colour" hexAriaLabel="Generation activity accent hex" value={value.generationActivityAccent} fallback="#6EA8FF" onCommit={(generationActivityAccent) => patch({ generationActivityAccent })} />
     </div>
     <div className="setting-card appearance-card">
       <strong>User messages</strong><span>Separate text and surface styling.</span>
-      <HexColourField label="Text colour" ariaLabel="User text" value={value.userTextColor} fallback="#F7F8FF" onCommit={(userTextColor) => patch({ userTextColor })} />
-      <HexColourField label="Surface colour" ariaLabel="User surface" value={value.userSurfaceColor} fallback="#28344F" onCommit={(userSurfaceColor) => patch({ userSurfaceColor })} />
+      <HexColourField label="Text colour" colourAriaLabel="User text colour" hexAriaLabel="User text colour hex" value={value.userTextColor} fallback="#F7F8FF" onCommit={(userTextColor) => patch({ userTextColor })} />
+      <HexColourField label="Surface colour" colourAriaLabel="User surface colour" hexAriaLabel="User surface colour hex" value={value.userSurfaceColor} fallback="#28344F" onCommit={(userSurfaceColor) => patch({ userSurfaceColor })} />
       <div className="appearance-segment" role="radiogroup" aria-label="User message surface style">{(['solid','frosted','gradient'] as const).map((style) => <button key={style} type="button" className={value.userSurfaceStyle === style ? 'is-active' : ''} role="radio" aria-checked={value.userSurfaceStyle === style} onClick={() => patch({ userSurfaceStyle: style })}>{style[0].toUpperCase() + style.slice(1)}</button>)}</div>
       <label className="setting-range"><span>Surface opacity</span><input aria-label="Surface opacity" type="range" min={0.2} max={1} step={0.01} value={value.userSurfaceOpacity} onChange={(event) => patch({ userSurfaceOpacity: Number(event.target.value) })}/><output>{Math.round(value.userSurfaceOpacity * 100)}%</output></label>
     </div>

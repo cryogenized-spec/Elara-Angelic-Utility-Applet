@@ -32,7 +32,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   const manualScrollTopRef = useRef<number | null>(null);
   const retainActivityTailRef = useRef(false);
   const followModeRef = useRef<FollowMode>('bottom');
-  const userScrollIntentRef = useRef(0);
+  const userScrollIntentRef = useRef<object | null>(null);
   const [manualScroll, setManualScroll] = useState(false);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
@@ -51,19 +51,20 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   }
 
   function markUserScrollIntent(): void {
-    const token = userScrollIntentRef.current + 1;
+    const token = {};
     userScrollIntentRef.current = token;
     // A wheel/touch/pointer gesture owns only the scroll events it immediately
     // causes. If no scroll follows (for example at an edge), expire the intent
-    // so a later layout clamp cannot impersonate that human gesture.
+    // so a later layout clamp cannot impersonate that human gesture. Identity
+    // tokens make an older expiry callback unable to clear a newer gesture.
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (userScrollIntentRef.current === token) userScrollIntentRef.current = 0;
+      if (userScrollIntentRef.current === token) userScrollIntentRef.current = null;
     }));
   }
 
   function consumeUserScrollIntent(): boolean {
-    if (userScrollIntentRef.current === 0) return false;
-    userScrollIntentRef.current = 0;
+    if (userScrollIntentRef.current === null) return false;
+    userScrollIntentRef.current = null;
     return true;
   }
 
@@ -106,7 +107,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   function jumpToLatest() {
     retainActivityTailRef.current = false;
     manualScrollTopRef.current = null;
-    userScrollIntentRef.current = 0;
+    userScrollIntentRef.current = null;
     setFollowMode('bottom');
     scrollToEnd();
   }
@@ -199,7 +200,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         // be elected here without a timer/suppression race and without yanking
         // the accepted activity position immediately.
         manualScrollTopRef.current = null;
-        userScrollIntentRef.current = 0;
+        userScrollIntentRef.current = null;
         setFollowMode('bottom');
       }
       return;
@@ -215,7 +216,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     restoredManualGenerationRef.current = null;
     retainActivityTailRef.current = false;
     manualScrollTopRef.current = null;
-    userScrollIntentRef.current = 0;
+    userScrollIntentRef.current = null;
     setFollowMode('activity');
     element.scrollTop = Math.max(0, element.scrollTop + offset);
   }, [generationId, liveGeneration, visibleMessages.length]);

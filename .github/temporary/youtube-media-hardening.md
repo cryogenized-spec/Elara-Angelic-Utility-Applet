@@ -22,6 +22,7 @@ YouTube API Services Terms, Developer Policies, Branding Guidelines and Required
 10. Current text badge needs a branding review against YouTube's requirement for applicable Brand Features on API-result surfaces.
 11. Browser E2E asserts Android handoff attributes but does not prove the click path or physical app dispatch.
 12. Repository search finds no YouTube Terms of Service link or user-facing privacy-policy disclosure for YouTube API use. Developer Policies require both for an API Client, so this is a compliance closeout item rather than optional documentation polish.
+13. The provider adapter defensively trims/slices returned search text and fabricates fallback thumbnail dimensions. YouTube policy says search result text/images/information must not be modified or replaced; defensive handling should validate/reject malformed values or constrain them in CSS rather than mutate provider data.
 
 ## Invariants
 
@@ -65,9 +66,9 @@ Adversarial: delayed lazy import; 404 thumbnail; missing thumbnail; very slow im
 
 ### Phase 4 — policy/security hardening
 
-Make YouTube destinations canonical and fail closed to HTTPS/provider-safe targets. Remove unsupported YouTube-Music URL rewriting unless official policy/docs establish it. Add explicit API-data freshness metadata and startup/read cleanup so persisted search metadata cannot be displayed beyond its allowed freshness window. Review/implement approved YouTube attribution without modifying provider branding. Add the required user-facing YouTube Terms link and privacy disclosure/links for YouTube API use in the appropriate legal/settings surface.
+Make YouTube destinations canonical and fail closed to HTTPS/provider-safe targets. Remove unsupported YouTube-Music URL rewriting unless official policy/docs establish it. Preserve provider-returned search data rather than trimming/synthesizing it; malformed values fail validation instead of being rewritten. Add explicit API-data freshness metadata and startup/read cleanup so persisted search metadata cannot be displayed beyond its allowed freshness window. Review/implement approved YouTube attribution without modifying provider branding. Add the required user-facing YouTube Terms link and privacy disclosure/links for YouTube API use in the appropriate legal/settings surface.
 
-Adversarial: `javascript:`, `data:`, `http:`, hostile host, malformed URL, corrupted IndexedDB row, stale >30-day message media, stale cache, missing timestamps, invalid thumbnail dimensions, credential-shaped strings, missing legal links, altered attribution asset.
+Adversarial: `javascript:`, `data:`, `http:`, hostile host, malformed URL, corrupted IndexedDB row, stale >30-day message media, stale cache, missing timestamps, invalid thumbnail dimensions, oversized/malformed provider text, credential-shaped strings, missing legal links, altered attribution asset.
 
 ### Phase 5 — browser + platform acceptance harness
 

@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MediaItem } from '../../../domain/media';
+import { ConversationSurface } from '../ConversationSurface';
 import { MediaCard } from './MediaCard';
 import { MessageMedia } from './MessageMedia';
 
@@ -55,6 +56,13 @@ describe('Phase 3 media delivery resilience', () => {
 
     expect(container.querySelector('img.media-card__thumb')).toBeNull();
     expect(container.querySelector('.media-card__thumb--empty')).not.toBeNull();
+  });
+
+  it('mounts the same observable conversation stream before the first message exists', () => {
+    const html = renderToStaticMarkup(<ConversationSurface messages={[]} generation={null} onRegenerate={() => undefined} />);
+
+    expect(html).toContain('class="conversation__stream"');
+    expect(html).toContain('class="empty-state"');
   });
 
   it('observes late growth while only explicit user gestures may elect manual scroll authority', () => {

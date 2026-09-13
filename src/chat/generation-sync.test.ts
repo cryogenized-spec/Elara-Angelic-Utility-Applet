@@ -44,6 +44,7 @@ function createHarness(
   let error: string | null = null;
   let structured: NormalizedProviderError | null = null;
   const saved: ConversationState[] = [];
+  const persistence: Promise<void>[] = [];
   const context: GenerationSyncContext = {
     assistantMessage,
     base,
@@ -66,12 +67,14 @@ function createHarness(
     save: async (next) => {
       saved.push(next);
     },
-    refreshThreads: async () => undefined,
+    onTerminalPersistence: (pending) => {
+      persistence.push(pending);
+    },
     isActiveGeneration: () => options.active ?? true,
     ensureAssistant: () => undefined,
     onFailedAttempt: options.onFailedAttempt,
   };
-  return { context, base, read: () => ({ conversation, status, error, structured, saved }) };
+  return { context, base, read: () => ({ conversation, status, error, structured, saved, persistence }) };
 }
 
 function runTurn(
@@ -107,12 +110,15 @@ describe('generation sync: one-assistant-message invariant', () => {
     ]);
     await Promise.resolve();
 
-    const { conversation, saved } = harness.read();
+    const { conversation, saved, status, persistence } = harness.read();
     const assistants = conversation.messages.filter((message) => message.role === 'assistant');
     expect(assistants).toHaveLength(1);
     expect(assistants[0].text).toBe('abc');
     expect(saved).toHaveLength(1);
     expect(saved[0].messages.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(status).toBe('saving');
+    expect(persistence).toHaveLength(1);
+    await expect(persistence[0]).resolves.toBeUndefined();
   });
 
   it('persists pre- and post-tool text as one ordered transcript with one record', async () => {
@@ -176,13 +182,14 @@ describe('generation sync: one-assistant-message invariant', () => {
       { type: 'cancelled', interactionId: 'i-1' },
     ]);
 
-    const { conversation, status, error, structured, saved } = harness.read();
+    const { conversation, status, error, structured, saved, persistence } = harness.read();
     expect(conversation).toEqual(harness.base);
     expect(conversation.messages.some((message) => message.role === 'assistant')).toBe(false);
     expect(status).toBe('idle');
     expect(error).toBeNull();
     expect(structured).toBeNull();
     expect(saved).toHaveLength(0);
+    expect(persistence).toHaveLength(0);
   });
 
   it('keeps structured failures with code, status, and retryability', () => {
@@ -204,11 +211,12 @@ describe('generation sync: one-assistant-message invariant', () => {
       },
     ]);
 
-    const { status, error, structured, saved } = harness.read();
+    const { status, error, structured, saved, persistence } = harness.read();
     expect(status).toBe('failed');
     expect(error).toBe('[GEMINI_RATE_LIMIT] Slow down.');
     expect(structured).toMatchObject({ providerStatus: 429, providerCode: 'RESOURCE_EXHAUSTED', retryable: true });
     expect(saved).toHaveLength(0);
+    expect(persistence).toHaveLength(0);
   });
 
   it('captures the failed attempt so a retry can replace it', () => {
@@ -333,8 +341,9 @@ describe('canRetryFailedTurn', () => {
     expect(canRetryFailedTurn('failed', attempt, 'thread-1')).toBe(true);
   });
 
-  it('refuses retry while streaming, when idle, without an attempt, or on another thread', () => {
+  it('refuses retry while busy, when idle, without an attempt, or on another thread', () => {
     expect(canRetryFailedTurn('streaming', attempt, 'thread-1')).toBe(false);
+    expect(canRetryFailedTurn('saving', attempt, 'thread-1')).toBe(false);
     expect(canRetryFailedTurn('idle', attempt, 'thread-1')).toBe(false);
     expect(canRetryFailedTurn('failed', null, 'thread-1')).toBe(false);
     expect(canRetryFailedTurn('failed', attempt, 'thread-2')).toBe(false);
@@ -388,6 +397,7 @@ describe('cross-generation arbitration', () => {
     let status: ProviderStatus = 'streaming';
     let error: string | null = null;
     const saved: ConversationState[] = [];
+    const persistence: Promise<void>[] = [];
     const attempts: FailedTurnAttempt[] = [];
     const arbiter = createGenerationArbiter();
 
@@ -410,7 +420,9 @@ describe('cross-generation arbitration', () => {
       save: async (next) => {
         saved.push(next);
       },
-      refreshThreads: async () => undefined,
+      onTerminalPersistence: (pending) => {
+        persistence.push(pending);
+      },
       isActiveGeneration: () => arbiter.isActive(generationId),
       ensureAssistant: () => undefined,
       onFailedAttempt: (attempt) => {
@@ -434,6 +446,7 @@ describe('cross-generation arbitration', () => {
     await Promise.resolve();
     expect(conversation.messages.filter((message) => message.role === 'assistant').map((message) => message.text)).toEqual(['new']);
     expect(saved).toHaveLength(1);
+    expect(persistence).toHaveLength(1);
 
     const snapshot = JSON.stringify({ conversation, status, error });
     genA = dispatchGenerationEvent(genA, { generationId: 'gen-A', event: { type: 'text-delta', index: 0, text: 'STALE' }, receivedAt: 30 }, contextA);
@@ -474,6 +487,7 @@ describe('cross-generation arbitration', () => {
     let status: ProviderStatus = 'streaming';
     let error: string | null = null;
     const saved: ConversationState[] = [];
+    const persistence: Promise<void>[] = [];
     const attempts: FailedTurnAttempt[] = [];
     const arbiter = createGenerationArbiter();
     let activeThread = 'thread-1';
@@ -498,7 +512,9 @@ describe('cross-generation arbitration', () => {
       save: async (next) => {
         saved.push(next);
       },
-      refreshThreads: async () => undefined,
+      onTerminalPersistence: (pending) => {
+        persistence.push(pending);
+      },
       isActiveGeneration: () => activeThread === 'thread-1' && arbiter.isActive('gen-A'),
       ensureAssistant: () => undefined,
       onFailedAttempt: (attempt) => {
@@ -535,6 +551,7 @@ describe('cross-generation arbitration', () => {
     expect(JSON.stringify({ conversation, status, error })).toBe(snapshot);
     expect(texts()).toEqual(['old']);
     expect(saved).toHaveLength(0);
+    expect(persistence).toHaveLength(0);
     expect(attempts).toHaveLength(0);
     expect(error).toBeNull();
     expect(arbiter.isActive('gen-A')).toBe(true);

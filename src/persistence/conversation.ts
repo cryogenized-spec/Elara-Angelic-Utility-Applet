@@ -1,5 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import type { ChatMessage, ConversationState, ConversationThread } from '../domain/chat';
+import { freshMediaItems } from '../domain/media';
 import type { DurableMemory } from '../domain/memory';
 import type { StoredArtifactBlob, StoredArtifactMetadata } from '../domain/artifact';
 import { DEFAULT_GEMINI_MODEL, getGeminiModel } from '../gemini/model-registry';
@@ -157,16 +158,53 @@ async function ensurePrimaryThread(): Promise<StoredThread> {
   return primary;
 }
 
+function sanitizePersistedMedia(message: ChatMessage, now: number): { message: ChatMessage; changed: boolean } {
+  if (message.media === undefined) return { message, changed: false };
+  const rawMedia: unknown = message.media;
+  const media = freshMediaItems(rawMedia, now);
+  if (Array.isArray(rawMedia) && media.length === rawMedia.length) return { message, changed: false };
+  const { media: _discarded, ...withoutMedia } = message;
+  return media.length > 0
+    ? { message: { ...withoutMedia, media }, changed: true }
+    : { message: withoutMedia as ChatMessage, changed: true };
+}
+
+/**
+ * Physically remove stale/corrupt YouTube API metadata from every conversation.
+ * Message text, activity, artifacts and thread timestamps are deliberately left
+ * alone: retention hygiene must not rewrite chat history or look like user edit.
+ */
+export async function pruneExpiredConversationMedia(now: number = Date.now()): Promise<number> {
+  const messages = await db.messages.toArray();
+  const updates: ChatMessage[] = [];
+  for (const message of messages) {
+    const sanitized = sanitizePersistedMedia(message, now);
+    if (sanitized.changed) updates.push(sanitized.message);
+  }
+  if (updates.length) await db.messages.bulkPut(updates);
+  return updates.length;
+}
+
 export async function loadThreads(includeArchived = false): Promise<ConversationThread[]> {
   await ensurePrimaryThread();
   const threads = await db.threads.orderBy('updatedAt').reverse().toArray();
   return (includeArchived ? threads : threads.filter((thread) => !thread.archived)).map(({ id, title, createdAt, updatedAt, archived }) => ({ id, title, createdAt, updatedAt, archived }));
 }
 
-export async function loadConversation(id = PRIMARY_ID): Promise<ConversationState> {
+export async function loadConversation(id = PRIMARY_ID, now: number = Date.now()): Promise<ConversationState> {
   const thread = (await db.threads.get(id)) ?? (id === PRIMARY_ID ? await ensurePrimaryThread() : undefined);
   if (!thread) throw new Error('Conversation thread not found.');
-  const messages = await db.messages.where('conversationId').equals(id).sortBy('createdAt');
+  const storedMessages = await db.messages.where('conversationId').equals(id).sortBy('createdAt');
+  const messages: ChatMessage[] = [];
+  const cleanup: ChatMessage[] = [];
+  for (const stored of storedMessages) {
+    const sanitized = sanitizePersistedMedia(stored, now);
+    messages.push(sanitized.message);
+    if (sanitized.changed) cleanup.push(sanitized.message);
+  }
+  // Read safety is authoritative even if physical cleanup fails. The user sees the
+  // sanitized copy; best-effort persistence merely prevents rediscovering it.
+  if (cleanup.length) await db.messages.bulkPut(cleanup).catch(() => undefined);
   return { id: thread.id, title: thread.title, createdAt: thread.createdAt, updatedAt: thread.updatedAt, messages };
 }
 

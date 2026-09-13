@@ -198,7 +198,10 @@ test.describe('Phase 3 media delivery resilience', () => {
     await unlockTestLockbox(page);
     await ask(page, 'phase 3 scroll probe');
     await expect(page.getByText('Scroll probe answer.')).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Send message' })).toBeEnabled();
+    // Wait for the optimistic live assistant to be replaced by the durable
+    // terminal message. The composer is intentionally empty after send, so its
+    // Send button remaining disabled is not a lifecycle signal.
+    await expect(page.locator('.message-assistant--streaming')).toHaveCount(0);
 
     await page.evaluate(() => {
       const stream = document.querySelector<HTMLElement>('.conversation__stream');

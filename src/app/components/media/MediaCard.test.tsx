@@ -82,13 +82,25 @@ describe('MediaCard', () => {
     expect(renderToStaticMarkup(<MediaCard item={item({ channel: undefined })} />)).not.toContain('media-card__channel');
   });
 
-  it('states its provenance so a resolved video is never mistaken for a local artifact', () => {
-    expect(renderToStaticMarkup(<MediaCard item={item()} />)).toContain('YouTube');
+  it('visibly attributes the API result to YouTube', () => {
+    const html = renderToStaticMarkup(<MediaCard item={item()} />);
+    expect(html).toContain('media-card__badge">YouTube');
   });
 
-  it('uses the item URL verbatim rather than rebuilding it', () => {
-    const custom = item({ webUrl: 'https://www.youtube.com/watch?v=abc123&t=42s' });
-    expect(renderToStaticMarkup(<MediaCard item={custom} />)).toContain('https://www.youtube.com/watch?v=abc123&amp;t=42s');
+  it.each([
+    'javascript:alert(1)',
+    'data:text/html,hello',
+    'http://www.youtube.com/watch?v=abc123',
+    'https://evil.example/watch?v=abc123',
+    'https://www.youtube.com/watch?v=abc123&t=42s',
+    'not a url',
+  ])('turns an unsafe or non-canonical destination into an inert card: %s', (webUrl) => {
+    const html = renderToStaticMarkup(<MediaCard item={item({ webUrl })} />);
+    expect(html).toContain('media-card--unavailable');
+    expect(html).toContain('>Unavailable<');
+    expect(html).not.toContain('<a');
+    expect(html).not.toContain('href=');
+    expect(html).not.toContain('data-intent-href');
   });
 });
 
@@ -99,7 +111,12 @@ describe('MessageMedia', () => {
   });
 
   it('loads the card lazily and renders every item', async () => {
-    await act(async () => { root.render(<MessageMedia items={[item(), item({ id: 'def456', title: 'Second', webUrl: 'https://www.youtube.com/watch?v=def456' })]} />); });
+    await act(async () => {
+      root.render(<MessageMedia items={[
+        item(),
+        item({ id: 'def456', title: 'Second', webUrl: 'https://www.youtube.com/watch?v=def456' }),
+      ]} />);
+    });
     for (let attempt = 0; attempt < 40 && !container.querySelector('.media-card'); attempt += 1) {
       await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 10); }); });
     }
@@ -143,17 +160,16 @@ describe('MediaCard hand-off behaviour', () => {
     expect(renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ELSEWHERE} />)).toContain('>Listen');
   });
 
-  it('keeps listen and watch on the exact canonical provider destination', () => {
-    const canonical = 'https://www.youtube.com/watch?v=abc123&t=42s';
-    const listen = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen', webUrl: canonical })} platform={ELSEWHERE} />);
-    const watch = renderToStaticMarkup(<MediaCard item={item({ intent: 'watch', webUrl: canonical })} platform={ELSEWHERE} />);
+  it('keeps listen and watch on the same exact canonical provider destination', () => {
+    const listen = renderToStaticMarkup(<MediaCard item={item({ intent: 'listen' })} platform={ELSEWHERE} />);
+    const watch = renderToStaticMarkup(<MediaCard item={item({ intent: 'watch' })} platform={ELSEWHERE} />);
 
     expect(listen).toContain('title="Open “Dark Ambient Mix — 3 Hours” on YouTube"');
     expect(listen).toContain('media-card--listen');
-    expect(listen).toContain('youtube.com/watch?v=abc123&amp;t=42s');
+    expect(listen).toContain('youtube.com/watch?v=abc123');
     expect(listen).not.toContain('music.youtube.com');
     expect(watch).toContain('media-card--watch');
-    expect(watch).toContain('youtube.com/watch?v=abc123&amp;t=42s');
+    expect(watch).toContain('youtube.com/watch?v=abc123');
   });
 
   it('still never embeds a player for a listen request', () => {
@@ -185,8 +201,8 @@ describe('MediaCard hand-off behaviour', () => {
   it('renders each item of a mixed rail with its own intent', async () => {
     await act(async () => {
       root.render(<MessageMedia items={[
-        item({ id: 'v1', intent: 'watch', title: 'Clip' }),
-        item({ id: 'm1', intent: 'listen', title: 'Track' }),
+        item({ id: 'v1', intent: 'watch', title: 'Clip', webUrl: 'https://www.youtube.com/watch?v=v1' }),
+        item({ id: 'm1', intent: 'listen', title: 'Track', webUrl: 'https://www.youtube.com/watch?v=m1' }),
       ]} />);
     });
     for (let attempt = 0; attempt < 40 && container.querySelectorAll('.media-card').length < 2; attempt += 1) {
@@ -210,6 +226,10 @@ describe('MediaCard stylesheet contract', () => {
 
   it('keeps the action row at a thumb-sized tap target', () => {
     expect(css).toMatch(/\.media-card__cta\s*\{[^}]*min-height:\s*44px/s);
+  });
+
+  it('makes unavailable cards visibly non-interactive', () => {
+    expect(css).toMatch(/\.media-card--unavailable\s*\{[^}]*cursor:\s*default/s);
   });
 
   it('honours reduced-motion preferences', () => {

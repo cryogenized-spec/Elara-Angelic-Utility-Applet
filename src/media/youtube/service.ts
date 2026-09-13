@@ -38,6 +38,7 @@ export interface YouTubeSearchOptions {
   /** Resolves the key at call time. Never stored, never logged, never returned. */
   readonly apiKey: () => Promise<string> | string;
   readonly fetch?: typeof fetch;
+  /** Wall-clock provider-data timestamp. Injectable for deterministic retention tests. */
   readonly now?: () => number;
   readonly timeoutMs?: number;
   readonly maxResults?: number;
@@ -101,7 +102,7 @@ function pickThumbnail(thumbnails: unknown): MediaThumbnail | undefined {
   return undefined;
 }
 
-function toMediaItem(raw: unknown): MediaItem | undefined {
+function toMediaItem(raw: unknown, apiDataFetchedAt: number): MediaItem | undefined {
   if (!isRecord(raw)) return undefined;
   const id = raw.id;
   const snippet = raw.snippet;
@@ -133,6 +134,7 @@ function toMediaItem(raw: unknown): MediaItem | undefined {
     ...(thumbnail ? { thumbnail } : {}),
     webUrl,
     embedUrl: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(resourceId)}?autoplay=0`,
+    apiDataFetchedAt,
   };
 }
 
@@ -248,12 +250,18 @@ export function createYouTubeProvider(options: YouTubeSearchOptions): MediaProvi
     } catch {
       throw new YouTubeSearchError('network', 'The YouTube response could not be read.', true);
     }
+
+    const apiDataFetchedAt = options.now?.() ?? Date.now();
+    if (!Number.isFinite(apiDataFetchedAt) || apiDataFetchedAt <= 0) {
+      throw new YouTubeSearchError('unknown', 'YouTube search metadata could not be timestamped safely.', true);
+    }
+
     const rawItems = isRecord(payload) && Array.isArray(payload.items) ? payload.items : [];
     const items: MediaItem[] = [];
     // `nextPageToken` is deliberately ignored. See the module rules.
     for (const raw of rawItems) {
       if (items.length >= maxResults) break;
-      const item = toMediaItem(raw);
+      const item = toMediaItem(raw, apiDataFetchedAt);
       if (item) items.push(item);
     }
 

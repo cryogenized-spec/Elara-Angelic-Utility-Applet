@@ -32,7 +32,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   const manualScrollTopRef = useRef<number | null>(null);
   const retainActivityTailRef = useRef(false);
   const followModeRef = useRef<FollowMode>('bottom');
-  const layoutScrollSuppressionRef = useRef(0);
+  const userScrollIntentRef = useRef(0);
   const [manualScroll, setManualScroll] = useState(false);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
@@ -50,20 +50,26 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     setManualScroll(mode === 'manual');
   }
 
-  function suppressLayoutScrollEvents(): void {
-    const token = layoutScrollSuppressionRef.current + 1;
-    layoutScrollSuppressionRef.current = token;
-    // `scroll` is asynchronous relative to `scrollTop` writes and to the DOM
-    // shrink that removes the live activity runway. Ignore those browser/layout
-    // notifications for two frames so they cannot masquerade as user intent.
+  function markUserScrollIntent(): void {
+    const token = userScrollIntentRef.current + 1;
+    userScrollIntentRef.current = token;
+    // A wheel/touch/pointer gesture owns only the scroll events it immediately
+    // causes. If no scroll follows (for example at an edge), expire the intent
+    // so a later layout clamp cannot impersonate that human gesture.
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if (layoutScrollSuppressionRef.current === token) layoutScrollSuppressionRef.current = 0;
+      if (userScrollIntentRef.current === token) userScrollIntentRef.current = 0;
     }));
+  }
+
+  function consumeUserScrollIntent(): boolean {
+    if (userScrollIntentRef.current === 0) return false;
+    userScrollIntentRef.current = 0;
+    return true;
   }
 
   function rememberScrollPosition() {
     const element = conversationRef.current;
-    if (!element || layoutScrollSuppressionRef.current !== 0) return;
+    if (!element) return;
 
     if (followModeRef.current === 'activity') {
       const anchor = activityAnchorRef.current;
@@ -71,12 +77,17 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
         if (Math.abs(offset) <= ACTIVITY_ANCHOR_TOLERANCE_PX) return;
       }
+      // Geometry alone is not user intent. Activity anchoring, runway removal,
+      // lazy cards and browser clamping all emit ordinary `scroll` events. Only
+      // an explicit user gesture is allowed to take viewport authority away.
+      if (!consumeUserScrollIntent()) return;
       if (liveGeneration) retainActivityTailRef.current = true;
       manualScrollTopRef.current = element.scrollTop;
       setFollowMode('manual');
       return;
     }
 
+    if (!consumeUserScrollIntent()) return;
     if (atEnd(element)) {
       manualScrollTopRef.current = null;
       setFollowMode('bottom');
@@ -95,6 +106,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   function jumpToLatest() {
     retainActivityTailRef.current = false;
     manualScrollTopRef.current = null;
+    userScrollIntentRef.current = 0;
     setFollowMode('bottom');
     scrollToEnd();
   }
@@ -179,18 +191,15 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         && manualScrollTopRef.current !== null
         && restoredManualGenerationRef.current !== generationId
       ) {
-        suppressLayoutScrollEvents();
         element.scrollTop = manualScrollTopRef.current;
         restoredManualGenerationRef.current = generationId;
       } else if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current) {
-        // Removing the one-viewport live runway can clamp scrollTop and emit a
-        // browser-generated scroll after this layout effect. Elect bottom now,
-        // but suppress that settling event so it cannot immediately re-elect
-        // `manual`. We intentionally do not move the viewport here: the user's
-        // accepted Generation Activity position remains stable until genuinely
-        // new late content asks bottom-follow to reconcile it.
-        suppressLayoutScrollEvents();
+        // Completion removes the one-viewport activity runway and can itself emit
+        // scroll events. Those events carry no user-intent token, so bottom can
+        // be elected here without a timer/suppression race and without yanking
+        // the accepted activity position immediately.
         manualScrollTopRef.current = null;
+        userScrollIntentRef.current = 0;
         setFollowMode('bottom');
       }
       return;
@@ -206,7 +215,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     restoredManualGenerationRef.current = null;
     retainActivityTailRef.current = false;
     manualScrollTopRef.current = null;
-    suppressLayoutScrollEvents();
+    userScrollIntentRef.current = 0;
     setFollowMode('activity');
     element.scrollTop = Math.max(0, element.scrollTop + offset);
   }, [generationId, liveGeneration, visibleMessages.length]);
@@ -273,7 +282,15 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
   }
 
-  return <section ref={conversationRef} className="conversation" aria-label="Conversation" onScroll={rememberScrollPosition}>
+  return <section
+    ref={conversationRef}
+    className="conversation"
+    aria-label="Conversation"
+    onScroll={rememberScrollPosition}
+    onWheel={markUserScrollIntent}
+    onTouchMove={markUserScrollIntent}
+    onPointerMove={(event) => { if (event.buttons !== 0) markUserScrollIntent(); }}
+  >
     <div ref={conversationStreamRef} className="conversation__stream">
       {grouped.map(({ message, variants }) => {
         if (message.role !== 'assistant') {

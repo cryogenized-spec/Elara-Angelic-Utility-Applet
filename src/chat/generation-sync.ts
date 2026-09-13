@@ -90,14 +90,38 @@ function buildUsage(usage: GeminiUsage | undefined, thoughtSummary: string | und
   };
 }
 
+/**
+ * One projection from reducer-owned live state into the single optimistic
+ * assistant message. Text, artifacts and media therefore cannot overwrite one
+ * another merely because their events arrive in a different order.
+ *
+ * This projection is intentionally in-memory only. Terminal completion below
+ * remains the sole owner of durable persistence.
+ */
+function projectLiveAssistant(assistantMessage: ChatMessage, generation: GenerationState): ChatMessage {
+  return {
+    ...assistantMessage,
+    text: generation.transcript,
+    artifacts: generation.artifactIds.length ? [...generation.artifactIds] : undefined,
+    media: generation.mediaItems.length ? [...generation.mediaItems] : undefined,
+  };
+}
+
+function projectLiveGeneration(generation: GenerationState, context: GenerationSyncContext): void {
+  const { assistantMessage, base } = context;
+  context.ensureAssistant();
+  if (!context.isActiveGeneration()) return;
+  const projected = projectLiveAssistant(assistantMessage, generation);
+  context.setConversation((current) => current.id === base.id
+    ? { ...base, messages: [...base.messages, projected] }
+    : current);
+}
+
 export function syncGenerationEvent(event: GeminiStreamEvent, generation: GenerationState, context: GenerationSyncContext): void {
   const { assistantMessage, base, isActiveGeneration } = context;
 
-  if (event.type === 'text-delta') {
-    context.ensureAssistant();
-    if (!isActiveGeneration()) return;
-    const text = generation.transcript;
-    context.setConversation((current) => current.id === base.id ? { ...base, messages: [...base.messages, { ...assistantMessage, text }] } : current);
+  if (event.type === 'text-delta' || event.type === 'artifact-created' || event.type === 'media-resolved') {
+    projectLiveGeneration(generation, context);
     return;
   }
 

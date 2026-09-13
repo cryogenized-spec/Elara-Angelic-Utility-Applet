@@ -5,9 +5,19 @@ import { describe, expect, it } from 'vitest';
 const appSource = readFileSync(resolve(process.cwd(), 'src/app/App.tsx'), 'utf8');
 
 function bodyOf(name: string): string {
-  const match = appSource.match(new RegExp(`(?:async )?function ${name}\\([\\s\\S]*?\\n  \\}`));
-  if (!match) throw new Error(`${name} must exist — update this guard if it was intentionally renamed`);
-  return match[0];
+  const start = appSource.search(new RegExp(`(?:async )?function ${name}\\(`));
+  if (start < 0) throw new Error(`${name} must exist — update this guard if it was intentionally renamed`);
+  const open = appSource.indexOf('{', start);
+  if (open < 0) throw new Error(`${name} has no function body`);
+  let depth = 0;
+  for (let cursor = open; cursor < appSource.length; cursor += 1) {
+    if (appSource[cursor] === '{') depth += 1;
+    else if (appSource[cursor] === '}') {
+      depth -= 1;
+      if (depth === 0) return appSource.slice(start, cursor + 1);
+    }
+  }
+  throw new Error(`${name} has an unterminated function body`);
 }
 
 describe('terminal persistence navigation ownership', () => {

@@ -1,21 +1,21 @@
 /**
  * Per-session search budget.
  *
- * Elara calls the YouTube Data API directly from the browser with the user's own
- * key, so there is no server that can rate-limit on the user's behalf. This
- * module is the replacement: a small, explicit allowance of network searches per
- * page session, spent only when the cache misses.
+ * Elara calls the YouTube Data API directly from the browser with the operator's
+ * configured key, so there is no server that can rate-limit on the app's behalf.
+ * This module is the replacement: a small, explicit allowance of network searches
+ * per page session, spent only when the cache misses.
  *
- * Why it matters: `search.list` draws from its own dedicated quota bucket rather
- * than the shared daily pool, and there is no paid tier to raise it. A runaway
- * tool loop would exhaust the user's key for the rest of the Pacific-time day.
+ * Why it matters: `search.list` draws from its own dedicated default bucket of
+ * 100 calls per Pacific-time day. A runaway tool loop should never be allowed to
+ * exhaust a meaningful fraction of that bucket before the user can intervene.
  *
- * Pure apart from the module-level ledger, and the clock is injectable so tests
- * never sleep.
+ * Pure apart from the module-level ledger, and the allowance is injectable so
+ * tests can exercise exhaustion without making network calls.
  */
 
 /** Network searches allowed per page session. Cached answers are free. */
-export const SEARCH_BUDGET_PER_SESSION = 12;
+export const SEARCH_BUDGET_PER_SESSION = 8;
 
 export interface SearchBudget {
   readonly allowance: number;

@@ -196,26 +196,44 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   useEffect(() => {
     const element = conversationRef.current;
     const stream = conversationStreamRef.current;
-    if (!element || !stream || typeof ResizeObserver === 'undefined') return undefined;
+    if (!element || !stream) return undefined;
 
+    let frame = 0;
     const reconcileViewport = () => {
+      frame = 0;
       // The Generation Activity runway is exactly one real conversation
       // viewport tall. This gives the browser enough physical scroll range to
       // place a final activity card at the top without phone/desktop constants.
       element.style.setProperty('--conversation-viewport-height', `${element.clientHeight}px`);
-      // The stream is observed as well as the viewport. Lazy cards, images and
-      // other late content can grow scrollHeight without resizing the scroll
-      // owner. Bottom-follow may reconcile that growth; manual/activity modes
-      // remain authoritative and are never yanked by a late layout change.
+      // Bottom-follow is an elected authority, not a geometric guess. Lazy card
+      // resolution, image fallback and other late content may grow scrollHeight
+      // without a React message update. Reconcile only while bottom mode owns the
+      // viewport; deliberate manual/activity modes must never be yanked.
       if (followModeRef.current !== 'bottom') return;
       element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
     };
+    const scheduleReconcile = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(reconcileViewport);
+    };
 
     reconcileViewport();
-    const observer = new ResizeObserver(reconcileViewport);
-    observer.observe(element);
-    observer.observe(stream);
-    return () => observer.disconnect();
+
+    // ResizeObserver catches real box-size changes (viewport resize, image/card
+    // layout). MutationObserver catches late DOM/content insertions even when the
+    // stream's observed border box does not report a resize in that browser.
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(scheduleReconcile);
+    resizeObserver?.observe(element);
+    resizeObserver?.observe(stream);
+
+    const mutationObserver = typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(scheduleReconcile);
+    mutationObserver?.observe(stream, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+    };
   }, []);
 
   async function handleDelete(message: ChatMessage) {

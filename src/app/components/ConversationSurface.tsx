@@ -50,8 +50,6 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
       const anchor = activityAnchorRef.current;
       if (anchor) {
         const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
-        // Programmatic anchoring fires scroll events too. Remaining near the
-        // requested top position is not a user override; any meaningful move is.
         if (Math.abs(offset) <= ACTIVITY_ANCHOR_TOLERANCE_PX) return;
       }
       setFollowMode('manual');
@@ -74,10 +72,6 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
   const visibleMessages = useMemo(() => messages.filter((message) => !deletedIds.has(message.id)), [messages, deletedIds]);
 
-  // During a live turn the trailing assistant message is the in-flight record.
-  // Pull it out of ordinary grouping so Generation Activity can stay *before*
-  // the growing answer. This keeps the activity anchor stable instead of
-  // moving downward as streamed response text expands above it.
   const activeAssistant = useMemo(() => {
     if (!liveGeneration) return undefined;
     const candidate = visibleMessages.at(-1);
@@ -130,10 +124,6 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     });
   }, [grouped]);
 
-  // A new turn changes the scrolling contract exactly once: anchor the top of
-  // its activity card. Card growth is internally scrollable and never makes the
-  // outer conversation chase its bottom. If the user subsequently scrolls,
-  // their manual position wins until they explicitly jump to newest.
   useLayoutEffect(() => {
     if (!generation) return;
     const element = conversationRef.current;
@@ -222,6 +212,8 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         <header className="message-meta"><span>ELARA</span><time dateTime={new Date(activeAssistant.createdAt).toISOString()}>{new Date(activeAssistant.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
         <div className="message-body"><MarkdownText text={activeAssistant.text} /></div>
       </article>}
+
+      {hasLivePanel && <div className="conversation__activity-tail" aria-hidden="true" />}
     </div>
     {manualScroll && <button type="button" className="conversation__jump" aria-label="Jump to latest messages" onClick={jumpToLatest}>↓ Newest</button>}
   </section>;

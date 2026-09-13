@@ -1,0 +1,44 @@
+.generation-activity {
+  margin: 6px 0 10px;
+  border-left: 2px solid var(--generation-activity-accent, #6EA8FF);
+  background: color-mix(in srgb, var(--generation-activity-accent, #6EA8FF) 7%, transparent);
+  padding: 7px 10px 8px 10px;
+  min-width: 0;
+}
+.generation-activity.is-failed { border-left-color: #ff7d9c; }
+.generation-activity.is-cancelled { border-left-color: rgba(255,255,255,.28); }
+.generation-activity__sr-status { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+.generation-activity__header { width:100%; display:flex; align-items:center; gap:8px; padding:2px 0; border:0; background:transparent; color:rgba(255,255,255,.72); text-align:left; cursor:pointer; }
+.generation-activity__header svg { flex:none; transition:transform .18s ease; }
+.generation-activity__header[aria-expanded="true"] svg { transform:rotate(180deg); }
+.generation-activity__dot { width:7px; height:7px; flex:none; border-radius:50%; background:var(--generation-activity-accent, #6EA8FF); box-shadow:0 0 10px color-mix(in srgb, var(--generation-activity-accent, #6EA8FF) 60%, transparent); }
+.generation-activity.is-failed .generation-activity__dot { background:#ff7d9c; box-shadow:0 0 10px rgba(255,125,156,.55); }
+.generation-activity.is-cancelled .generation-activity__dot { background:rgba(255,255,255,.4); box-shadow:none; }
+.generation-activity.is-connecting .generation-activity__dot,
+.generation-activity.is-thinking .generation-activity__dot,
+.generation-activity.is-tool-working .generation-activity__dot,
+.generation-activity.is-generating .generation-activity__dot { animation:generation-activity-pulse 1.4s ease-in-out infinite; }
+@keyframes generation-activity-pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.generation-activity__headline { min-width:0; flex:1; font-size:10px; line-height:1.4; letter-spacing:.035em; font-variant-numeric:tabular-nums; }
+.generation-activity__body { max-height:min(240px, 34vh); overflow-y:auto; overscroll-behavior:contain; scrollbar-gutter:stable; margin-top:7px; padding-right:4px; }
+.generation-activity__steps { position:relative; display:grid; margin:0; padding:0; list-style:none; }
+.generation-activity__steps::before { content:""; position:absolute; left:10px; top:10px; bottom:10px; border-left:1px dotted color-mix(in srgb, var(--generation-activity-accent, #6EA8FF) 30%, transparent); }
+.generation-activity__step { position:relative; display:grid; grid-template-columns:21px minmax(0,1fr) auto; gap:8px; align-items:center; padding:4px 0; color:rgba(255,255,255,.66); font-size:10px; line-height:1.35; }
+.generation-activity__step-icon { z-index:1; display:grid; place-items:center; width:21px; height:21px; border:1px solid color-mix(in srgb, var(--generation-activity-accent, #6EA8FF) 30%, transparent); border-radius:50%; background:#0b0c12; color:var(--generation-activity-accent, #6EA8FF); }
+.generation-activity__step.is-failed .generation-activity__step-icon { border-color:rgba(255,125,156,.45); color:#ff9bb2; }
+.generation-activity__step-copy { min-width:0; display:grid; gap:1px; }
+.generation-activity__step-primary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.generation-activity__step-secondary { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; color:rgba(255,255,255,.42); font-size:9px; }
+.generation-activity__step-error { width:max-content; max-width:100%; margin-top:2px; padding:1px 5px; border-radius:8px; background:rgba(255,125,156,.12); color:rgba(255,180,196,.9); font-size:8px; overflow:hidden; text-overflow:ellipsis; }
+.generation-activity__step-time { color:rgba(255,255,255,.4); white-space:nowrap; font-variant-numeric:tabular-nums; }
+.generation-activity__summary { margin-top:8px; padding-top:7px; border-top:1px dotted color-mix(in srgb, var(--generation-activity-accent, #6EA8FF) 25%, transparent); }
+.generation-activity__summary-label { display:block; margin-bottom:4px; color:rgba(255,255,255,.48); font-size:9px; letter-spacing:.07em; text-transform:uppercase; }
+.generation-activity__summary-body { color:rgba(255,255,255,.72); font-size:11px; line-height:1.55; white-space:pre-wrap; overflow-wrap:anywhere; }
+
+@media (prefers-reduced-motion: reduce) {
+  .generation-activity.is-connecting .generation-activity__dot,
+  .generation-activity.is-thinking .generation-activity__dot,
+  .generation-activity.is-tool-working .generation-activity__dot,
+  .generation-activity.is-generating .generation-activity__dot { animation:none; }
+  .generation-activity__header svg { transition:none; }
+}

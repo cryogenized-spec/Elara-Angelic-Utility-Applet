@@ -134,7 +134,11 @@ export function GenerationActivity(props: Props) {
   const rows = useMemo<ActivityRow[]>(() => live ? liveRows(live, now) : record!.steps, [live, now, record]);
   const durationMs = live ? turnDurationMs(live, now) : record!.durationMs;
   const reasoningSummary = live ? thoughtSummaryOf(live) : props.thoughtSummary?.trim();
-  const liveLabel = live ? statusLabel(live.statusMessage) ?? PHASE_LABELS[live.phase] : undefined;
+  const liveLabel = live
+    ? live.phase === 'tool-working'
+      ? statusLabel(live.statusMessage) ?? PHASE_LABELS[live.phase]
+      : PHASE_LABELS[live.phase]
+    : undefined;
   const headerText = live ? `${liveLabel} · ${formatActivityDuration(durationMs)}` : summaryLine(rows, durationMs);
 
   return (

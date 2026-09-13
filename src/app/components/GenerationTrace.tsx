@@ -95,13 +95,15 @@ function rowCopy(row: ActivityRow): { primary: string; secondary?: string } {
 }
 
 function summaryLine(rows: readonly ActivityRow[], durationMs: number): string {
-  const thinkingMs = rows.filter((row) => row.kind === 'thinking').reduce((sum, row) => sum + row.durationMs, 0);
-  const writingMs = rows.filter((row) => row.kind === 'generation').reduce((sum, row) => sum + row.durationMs, 0);
+  const thinkingRows = rows.filter((row) => row.kind === 'thinking');
+  const writingRows = rows.filter((row) => row.kind === 'generation');
+  const thinkingMs = thinkingRows.reduce((sum, row) => sum + row.durationMs, 0);
+  const writingMs = writingRows.reduce((sum, row) => sum + row.durationMs, 0);
   const toolCount = rows.filter((row) => row.kind === 'tool').length;
   const parts: string[] = [];
-  if (thinkingMs > 0) parts.push(`Thought for ${formatActivityDuration(thinkingMs)}`);
+  if (thinkingRows.length > 0) parts.push(`Thought for ${formatActivityDuration(thinkingMs)}`);
   if (toolCount > 0) parts.push(`used ${toolCount} tool${toolCount === 1 ? '' : 's'}`);
-  if (writingMs > 0) parts.push(`wrote in ${formatActivityDuration(writingMs)}`);
+  if (writingRows.length > 0) parts.push(`wrote in ${formatActivityDuration(writingMs)}`);
   parts.push(`${formatActivityDuration(durationMs)} total`);
   return parts.join(' · ');
 }
@@ -120,11 +122,8 @@ export function GenerationActivity(props: Props) {
   const record = props.record;
   const isLive = live !== undefined;
   const active = live ? isActivePhase(live.phase) : false;
-  const identity = live?.generationId ?? record!.id;
   const [expanded, setExpanded] = useState(isLive);
   const [now, setNow] = useState(() => performance.now());
-
-  useEffect(() => setExpanded(isLive), [identity, isLive]);
 
   useEffect(() => {
     if (!active) return;

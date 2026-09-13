@@ -52,6 +52,15 @@ export function isMediaIntent(value: unknown): value is MediaIntent {
 /** The intent assumed when a result predates this field or the caller omitted it. */
 export const DEFAULT_MEDIA_INTENT: MediaIntent = 'watch';
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * YouTube non-authorized API data must be refreshed or removed after 30 days.
+ * Search cache TTLs are much shorter; this ceiling primarily protects media
+ * metadata persisted with conversations.
+ */
+export const MEDIA_API_DATA_MAX_AGE_MS = 30 * DAY_MS;
+
 export interface MediaThumbnail {
   readonly url: string;
   readonly width: number;
@@ -81,6 +90,14 @@ export interface MediaItem {
    * is asserted by test rather than by convention.
    */
   readonly embedUrl: string;
+  /**
+   * Wall-clock time when the provider API returned this metadata.
+   *
+   * Optional only for backward compatibility with records created before the
+   * freshness contract existed. Missing timestamps are treated as untrusted and
+   * removed on persistence/cache reads; new provider results always set it.
+   */
+  readonly apiDataFetchedAt?: number;
   /**
    * How this result should be acted on. Optional because media items are
    * persisted with conversation messages: a result stored before this field
@@ -182,24 +199,67 @@ export const MAX_MEDIA_QUERIES_PER_CALL = 3;
 /** Hard cap on items surfaced for one query. */
 export const MAX_MEDIA_ITEMS_PER_QUERY = 5;
 
+function isNonBlankBoundedString(value: unknown, maxLength: number): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= maxLength && value.trim().length > 0;
+}
+
+function isHttpsUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || !value || value.length > 2048) return false;
+  try {
+    return new URL(value).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isMediaThumbnail(value: unknown): value is MediaThumbnail {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const thumbnail = value as Record<string, unknown>;
+  return isHttpsUrl(thumbnail.url)
+    && typeof thumbnail.width === 'number' && Number.isInteger(thumbnail.width) && thumbnail.width > 0 && thumbnail.width <= 10_000
+    && typeof thumbnail.height === 'number' && Number.isInteger(thumbnail.height) && thumbnail.height > 0 && thumbnail.height <= 10_000;
+}
+
 /**
- * Structural guard shared by the stream-event boundary and the card.
+ * Structural guard shared by the stream-event boundary, persistence cleanup and
+ * the card. It validates rather than repairs provider metadata: corrupted or
+ * implausible values are rejected so they can never become convincing UI data.
  *
- * One validator, used on both sides, so a malformed item is rejected once and
- * consistently rather than half-rendered in the UI.
+ * `apiDataFetchedAt` may be absent only so legacy IndexedDB rows can be read and
+ * explicitly removed by the freshness policy below.
  */
 export function isMediaItem(value: unknown): value is MediaItem {
-  if (typeof value !== 'object' || value === null) return false;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
   const intent = item.intent;
+  const fetchedAt = item.apiDataFetchedAt;
   return isMediaProviderId(item.provider)
-    && typeof item.id === 'string' && item.id.length > 0
+    && isNonBlankBoundedString(item.id, 128)
     && (item.kind === 'video' || item.kind === 'playlist')
-    && typeof item.title === 'string' && item.title.length > 0
-    && typeof item.webUrl === 'string' && item.webUrl.length > 0
-    && typeof item.embedUrl === 'string' && item.embedUrl.length > 0
-    // Absent is valid (a result persisted before `intent` existed). Present but
-    // unrecognised is not: an intent that silently degraded to a default could
-    // turn a hand-off card into an in-app player, or the reverse.
+    && isNonBlankBoundedString(item.title, 1_000)
+    && (item.channel === undefined || isNonBlankBoundedString(item.channel, 1_000))
+    && (item.publishedAt === undefined || isNonBlankBoundedString(item.publishedAt, 64))
+    && (item.durationSeconds === undefined || (typeof item.durationSeconds === 'number' && Number.isFinite(item.durationSeconds) && item.durationSeconds >= 0))
+    && (item.thumbnail === undefined || isMediaThumbnail(item.thumbnail))
+    && isHttpsUrl(item.webUrl)
+    && isHttpsUrl(item.embedUrl)
+    && (fetchedAt === undefined || (typeof fetchedAt === 'number' && Number.isFinite(fetchedAt) && fetchedAt > 0))
     && (intent === undefined || isMediaIntent(intent));
+}
+
+/**
+ * True only while provider metadata is still inside the API-data retention
+ * window. A missing, future, malformed or exactly-expired timestamp fails closed.
+ */
+export function isFreshMediaItem(value: unknown, now: number = Date.now()): value is MediaItem {
+  if (!isMediaItem(value)) return false;
+  const fetchedAt = value.apiDataFetchedAt;
+  return typeof fetchedAt === 'number'
+    && fetchedAt <= now
+    && now - fetchedAt < MEDIA_API_DATA_MAX_AGE_MS;
+}
+
+/** Filter unknown persisted/cache input down to currently displayable media. */
+export function freshMediaItems(value: unknown, now: number = Date.now()): MediaItem[] {
+  return Array.isArray(value) ? value.filter((item): item is MediaItem => isFreshMediaItem(item, now)) : [];
 }

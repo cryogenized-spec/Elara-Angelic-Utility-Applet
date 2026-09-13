@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GeminiStreamEvent } from '../../gemini/contracts';
 import {
   applyGenerationEvent,
+  buildGenerationActivity,
   createGenerationState,
   type GenerationState,
 } from '../../chat/generation-state';
@@ -86,6 +87,23 @@ describe('Generation Activity duration formatting', () => {
     expect(markup).toContain('Thought for 0 ms');
     expect(markup).toContain('wrote in 0 ms');
     expect(markup).toContain('0 ms total');
+  });
+
+  it('keeps a sub-second live duration on the same side of the threshold after persistence', () => {
+    let state = createGenerationState('gen-threshold', { startedAt: 0 });
+    state = send(state, { type: 'step-start', index: 0, stepType: 'thought' }, 0);
+    state = send(state, { type: 'step-stop', index: 0 }, 999.6);
+    state = send(state, { type: 'completed', interactionId: 'i-threshold', status: 'completed', durationMs: 999.6 }, 999.6);
+
+    expect(formatActivityDuration(state.endedAt! - state.startedAt)).toBe('999 ms');
+    const record = buildGenerationActivity(state);
+    expect(record.durationMs).toBe(999);
+    expect(record.steps[0]?.durationMs).toBe(999);
+
+    const markup = renderToStaticMarkup(<GenerationActivity record={record} />);
+    expect(markup).toContain('Thought for 999 ms');
+    expect(markup).toContain('999 ms total');
+    expect(markup).not.toContain('1.0 s');
   });
 });
 

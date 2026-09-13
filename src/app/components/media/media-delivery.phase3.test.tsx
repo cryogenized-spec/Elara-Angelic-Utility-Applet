@@ -61,7 +61,8 @@ describe('Phase 3 media delivery resilience', () => {
     const source = readFileSync(resolve(process.cwd(), 'src/app/components/ConversationSurface.tsx'), 'utf8');
 
     expect(source).toMatch(/const\s+stream\s*=\s*[^;]+\.current/);
-    expect(source).toMatch(/observer\.observe\(stream\)/);
+    expect(source).toMatch(/resizeObserver\?\.observe\(stream\)/);
+    expect(source).toMatch(/mutationObserver\?\.observe\(stream,/);
     expect(source).toMatch(/if\s*\(followModeRef\.current\s*!==\s*['"]bottom['"]\)\s*return/);
   });
 });

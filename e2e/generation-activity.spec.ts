@@ -102,7 +102,8 @@ test.describe('Generation Activity', () => {
       return Math.abs(activityBox.y - conversationBox.y);
     }).toBeLessThan(28);
 
-    await conversation.evaluate((element) => element.scrollBy({ top: -160, behavior: 'auto' }));
+    await conversation.hover();
+    await page.mouse.wheel(0, -220);
     await expect(page.getByRole('button', { name: 'Jump to latest messages' })).toBeVisible();
     const manualPosition = await conversation.evaluate((element) => element.scrollTop);
 

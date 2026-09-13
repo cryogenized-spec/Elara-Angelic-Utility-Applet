@@ -52,7 +52,6 @@ export function isMediaIntent(value: unknown): value is MediaIntent {
 /** The intent assumed when a result predates this field or the caller omitted it. */
 export const DEFAULT_MEDIA_INTENT: MediaIntent = 'watch';
 
-
 export interface MediaThumbnail {
   readonly url: string;
   readonly width: number;
@@ -98,6 +97,36 @@ export interface MediaItem {
  */
 export function mediaIntentOf(item: Pick<MediaItem, 'intent'>): MediaIntent {
   return isMediaIntent(item.intent) ? item.intent : DEFAULT_MEDIA_INTENT;
+}
+
+/** Stable provider-scoped identity for one surfaced media resource. */
+export function mediaIdentityOf(item: Pick<MediaItem, 'provider' | 'id'>): string {
+  return `${item.provider}:${item.id}`;
+}
+
+/**
+ * Merge a presentation collection without creating duplicate identities.
+ *
+ * First sighting owns the slot/order; the newest valid representation owns the
+ * data in that slot. That makes repeated search results deterministic while
+ * allowing a later tool call to change presentation intent or refresh metadata.
+ */
+export function mergeMediaItems(current: readonly MediaItem[], incoming: readonly MediaItem[]): MediaItem[] {
+  if (incoming.length === 0) return [...current];
+  const merged = [...current];
+  const positions = new Map<string, number>();
+  for (let index = 0; index < merged.length; index += 1) positions.set(mediaIdentityOf(merged[index]), index);
+  for (const item of incoming) {
+    const identity = mediaIdentityOf(item);
+    const position = positions.get(identity);
+    if (position === undefined) {
+      positions.set(identity, merged.length);
+      merged.push(item);
+    } else {
+      merged[position] = item;
+    }
+  }
+  return merged;
 }
 
 /** Why a search produced nothing. Surfaced to the model as plain language. */

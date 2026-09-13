@@ -6,14 +6,15 @@ import {
   POSITIVE_TTL_MS,
   clearMediaCache,
   mediaCacheSize,
+  pruneMediaCache,
   readMediaCache,
   writeMediaCache,
 } from './cache';
-import type { MediaItem } from '../domain/media';
+import { MEDIA_API_DATA_MAX_AGE_MS, type MediaItem } from '../domain/media';
 
 const NOW = 1_700_000_000_000;
 
-function item(id: string): MediaItem {
+function item(id: string, apiDataFetchedAt: number = NOW): MediaItem {
   return {
     provider: 'youtube',
     id,
@@ -22,6 +23,7 @@ function item(id: string): MediaItem {
     channel: 'Channel',
     webUrl: `https://www.youtube.com/watch?v=${id}`,
     embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
+    apiDataFetchedAt,
   };
 }
 
@@ -36,23 +38,22 @@ describe('media search cache', () => {
     expect(await readMediaCache('youtube:v1:never-written', NOW)).toEqual({ hit: false, items: [] });
   });
 
-  it('round-trips items under a normalized key', async () => {
+  it('round-trips fresh items under a normalized key without changing the API timestamp', async () => {
     await writeMediaCache('youtube:v1:dark ambient', { ...VALUE, items: [item('a'), item('b')] }, NOW);
 
-    const read = await readMediaCache('youtube:v1:dark ambient', NOW);
+    const read = await readMediaCache('youtube:v1:dark ambient', NOW + 1_000);
     expect(read.hit).toBe(true);
     expect(read.items.map((entry) => entry.id)).toEqual(['a', 'b']);
+    expect(read.items.map((entry) => entry.apiDataFetchedAt)).toEqual([NOW, NOW]);
   });
 
-  it('gives a positive result the long TTL and an empty one the short TTL', async () => {
+  it('gives a positive result the long cache TTL and an empty one the short TTL', async () => {
     await writeMediaCache('youtube:v1:hit', { ...VALUE, items: [item('a')] }, NOW);
     await writeMediaCache('youtube:v1:miss', { ...VALUE, items: [] }, NOW);
 
-    // Just inside both windows.
     expect((await readMediaCache('youtube:v1:hit', NOW + POSITIVE_TTL_MS - 1)).hit).toBe(true);
     expect((await readMediaCache('youtube:v1:miss', NOW + NEGATIVE_TTL_MS - 1)).hit).toBe(true);
 
-    // A negative result must be retried long before a positive one expires.
     expect((await readMediaCache('youtube:v1:miss', NOW + NEGATIVE_TTL_MS + 1)).hit).toBe(false);
     expect((await readMediaCache('youtube:v1:hit', NOW + NEGATIVE_TTL_MS + 1)).hit).toBe(true);
   });
@@ -65,6 +66,28 @@ describe('media search cache', () => {
 
     expect(read.hit).toBe(false);
     expect(await mediaCacheSize()).toBe(0);
+  });
+
+  it('physically prunes expired rows even when nobody reads that query again', async () => {
+    await writeMediaCache('youtube:v1:orphaned', { ...VALUE, items: [item('a')] }, NOW);
+    expect(await mediaCacheSize()).toBe(1);
+
+    await pruneMediaCache(NOW + POSITIVE_TTL_MS + 1);
+
+    expect(await mediaCacheSize()).toBe(0);
+  });
+
+  it('refuses legacy-undated or API-data-stale positive rows', async () => {
+    const legacy = { ...item('legacy') } as MediaItem;
+    delete (legacy as { apiDataFetchedAt?: number }).apiDataFetchedAt;
+    const stale = item('stale', NOW - MEDIA_API_DATA_MAX_AGE_MS);
+
+    await writeMediaCache('youtube:v1:legacy', { ...VALUE, items: [legacy] }, NOW);
+    await writeMediaCache('youtube:v1:api-stale', { ...VALUE, items: [stale] }, NOW);
+
+    expect(await mediaCacheSize()).toBe(0);
+    expect((await readMediaCache('youtube:v1:legacy', NOW)).hit).toBe(false);
+    expect((await readMediaCache('youtube:v1:api-stale', NOW)).hit).toBe(false);
   });
 
   it('caches negative results so a no-match query does not re-spend a call', async () => {
@@ -94,25 +117,22 @@ describe('media search cache', () => {
 
   it('keeps the store bounded', async () => {
     for (let index = 0; index < MAX_CACHE_ENTRIES + 25; index += 1) {
-      await writeMediaCache(`youtube:v1:q${index}`, { ...VALUE, items: [item(`id${index}`)] }, NOW + index);
+      const timestamp = NOW + index;
+      await writeMediaCache(`youtube:v1:q${index}`, { ...VALUE, items: [item(`id${index}`, timestamp)] }, timestamp);
     }
 
     expect(await mediaCacheSize()).toBeLessThanOrEqual(MAX_CACHE_ENTRIES);
   });
 
   it('never stores credential material', async () => {
-    // The only thing that reaches this store is rendered item data. Assert the
-    // serialized record contains no key-shaped field, so a future field addition
-    // that smuggles one in fails here.
     await writeMediaCache('youtube:v1:secret-check', { ...VALUE, items: [item('a')] }, NOW);
 
-    const { readMediaCache: readBack } = await import('./cache');
-    const read = await readBack('youtube:v1:secret-check', NOW);
+    const read = await readMediaCache('youtube:v1:secret-check', NOW);
     const serialized = JSON.stringify(read.items);
     expect(serialized).not.toMatch(/AIza/);
     expect(serialized).not.toMatch(/apiKey|api_key|x-goog/i);
     expect(Object.keys(read.items[0]).sort()).toEqual([
-      'channel', 'embedUrl', 'id', 'kind', 'provider', 'title', 'webUrl',
+      'apiDataFetchedAt', 'channel', 'embedUrl', 'id', 'kind', 'provider', 'title', 'webUrl',
     ]);
   });
 });

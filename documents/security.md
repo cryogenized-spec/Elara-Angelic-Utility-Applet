@@ -1,7 +1,7 @@
 ---
 id: SYS-SEC
 status: active
-verified_commit: 66a4c764e479d99055285fe5a2d6a4c742947003
+verified_commit: 49db36e68195f2ee91763f0de859a7f385ac53a7
 scope: local API Lockbox and protected browser credentials
 paths: [src/persistence/gemini-api-key.ts, src/persistence/gemini-passkey.ts, src/persistence/gemini-lockbox-settings.ts]
 keywords: [lockbox, credential, secret, pin, passkey, encryption]

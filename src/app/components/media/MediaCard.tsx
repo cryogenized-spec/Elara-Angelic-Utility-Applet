@@ -1,6 +1,7 @@
 import { useState, type MouseEvent } from 'react';
 import type { MediaItem } from '../../../domain/media';
 import { mediaIntentOf } from '../../../domain/media';
+import type { PlaybackPhase } from '../../../domain/playback';
 import { usePlaybackAuthority } from '../../../media/playback/PlaybackProvider';
 import {
   detectHandoffPlatform,
@@ -55,7 +56,7 @@ function MediaCardBody({ item, action, unavailable = false, target }: {
   </>;
 }
 
-function playbackStatusLabel(phase: ReturnType<typeof usePlaybackAuthority>['state']['phase']): string | null {
+function playbackStatusLabel(phase: PlaybackPhase): string | null {
   if (phase === 'requested' || phase === 'checking' || phase === 'ready') return 'Checking playback…';
   if (phase === 'loading') return 'Loading player…';
   if (phase === 'paused') return 'Player ready';
@@ -114,14 +115,14 @@ export function MediaCard({ item, platform }: {
     try {
       window.location.href = intentHref;
     } catch {
-      window.open(destination!, '_blank', 'noopener,noreferrer');
+      window.open(destination, '_blank', 'noopener,noreferrer');
       return;
     }
     // If the browser stayed visible after the Android intent attempt, preserve a
     // safe path to the exact same canonical HTTPS destination.
     window.setTimeout(() => {
       if (document.visibilityState === 'visible') {
-        window.open(destination!, '_blank', 'noopener,noreferrer');
+        window.open(destination, '_blank', 'noopener,noreferrer');
       }
     }, 700);
   }
@@ -175,7 +176,7 @@ export function MediaCard({ item, platform }: {
       >
         <MediaCardBody
           item={item}
-          action={statusLabel ?? (route === 'embedded' ? `Play ${listen ? 'here' : 'here'}` : 'Choose playback')}
+          action={statusLabel ?? (route === 'embedded' ? 'Play here' : 'Choose playback')}
           target={route === 'ask' ? '›' : undefined}
         />
       </button>

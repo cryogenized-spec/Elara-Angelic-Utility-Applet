@@ -67,6 +67,15 @@ function press(key: string): void {
   act(() => { switch_().dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })); });
 }
 
+async function waitForPlaybackPreferenceReady(): Promise<HTMLButtonElement[]> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const options = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+    if (options.length === 3 && options.every((button) => !button.disabled)) return options;
+    await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 0); }); });
+  }
+  throw new Error('Playback preference did not finish loading in the settings test.');
+}
+
 beforeEach(() => {
   savedPreference = 'ask';
   savePreference.mockClear();
@@ -155,7 +164,7 @@ describe('Chat settings — Enter sends message', () => {
 describe('Chat settings — media playback', () => {
   it('shows all three values from the singular playback preference', async () => {
     await act(async () => { root.render(<Harness initial />); await Promise.resolve(); });
-    const options = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+    const options = await waitForPlaybackPreferenceReady();
     expect(options.map((button) => button.textContent)).toEqual(expect.arrayContaining([
       expect.stringContaining('Ask each time'),
       expect.stringContaining('Play here'),
@@ -166,8 +175,8 @@ describe('Chat settings — media playback', () => {
 
   it('persists a new route through PlaybackProvider.setPreference', async () => {
     await act(async () => { root.render(<Harness initial />); await Promise.resolve(); });
-    const playHere = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
-      .find((button) => button.textContent?.includes('Play here'))!;
+    const options = await waitForPlaybackPreferenceReady();
+    const playHere = options.find((button) => button.textContent?.includes('Play here'))!;
 
     await act(async () => { playHere.click(); await Promise.resolve(); await Promise.resolve(); });
     expect(savePreference).toHaveBeenCalledTimes(1);

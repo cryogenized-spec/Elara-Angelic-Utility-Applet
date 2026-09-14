@@ -15,7 +15,7 @@ export interface PlaybackReadinessPort {
  * is never consulted; internal playback is derived from provider + validated id.
  */
 export const playbackReadinessPort: PlaybackReadinessPort = Object.freeze({
-  async check(item, signal) {
+  async check(item: MediaItem, signal: AbortSignal): Promise<PlaybackReadinessDecision> {
     if (signal.aborted) return { status: 'aborted' };
 
     if (item.provider !== 'youtube' || item.kind !== 'video') {

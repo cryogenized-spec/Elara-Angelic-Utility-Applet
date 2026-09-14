@@ -139,7 +139,7 @@ async function installSingleSearch(page: Page, continuation: (route: import('@pl
 }
 
 test.describe('media lifecycle closeout acceptance', () => {
-  test('a media-only terminal answer is renderable, singular, durable, and reloadable', async ({ page }) => {
+  test('a media-only terminal answer is renderable, singular, durable, reloadable, and exposes the default ask routes', async ({ page }) => {
     await installSingleSearch(page, async (route) => {
       await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sseTurn('closeout-media-only', []) });
     });
@@ -148,16 +148,23 @@ test.describe('media lifecycle closeout acceptance', () => {
     await unlockTestLockbox(page);
     await ask(page, 'return only the matching media card');
 
-    const card = page.getByRole('link', { name: /Closeout Media Probe/ });
+    const card = page.locator('.media-card').filter({ hasText: 'Closeout Media Probe' });
     await expect(card).toBeVisible();
     await expect(page.locator('.message-assistant')).toHaveCount(1);
     await expect(page.locator('.message-assistant--streaming')).toHaveCount(0);
-    await expect(card).toHaveAttribute('href', CANONICAL_URL);
+
+    const primary = card.locator('.media-card__primary');
+    await expect(primary).toContainText('Choose playback');
+    await primary.click();
+    const external = card.locator('a.media-card__choice--external');
+    await expect(card.getByRole('button', { name: 'Play here' })).toBeVisible();
+    await expect(external).toHaveAttribute('href', CANONICAL_URL);
+
     await expect.poll(async () => JSON.stringify(await persistedMediaSnapshot(page)))
       .toBe(JSON.stringify([{ id: VIDEO_ID, title: 'Closeout Media Probe' }]));
 
     await page.reload();
-    await expect(page.getByRole('link', { name: /Closeout Media Probe/ })).toHaveCount(1);
+    await expect(page.locator('.media-card').filter({ hasText: 'Closeout Media Probe' })).toHaveCount(1);
     await expect(page.locator('.message-assistant')).toHaveCount(1);
   });
 
@@ -182,7 +189,7 @@ test.describe('media lifecycle closeout acceptance', () => {
 
     try {
       await expect.poll(() => continuationStarted).toBe(true);
-      await expect(page.getByRole('link', { name: /Closeout Media Probe/ })).toBeVisible();
+      await expect(page.locator('.media-card').filter({ hasText: 'Closeout Media Probe' })).toBeVisible();
       await expect(page.locator('.message-assistant--streaming')).toHaveCount(1);
       await expect(page.getByText('Continuation released.', { exact: true })).toHaveCount(0);
     } finally {
@@ -202,13 +209,13 @@ test.describe('media lifecycle closeout acceptance', () => {
     await unlockTestLockbox(page);
     await ask(page, 'fail after resolving media');
 
-    await expect(page.getByRole('link', { name: /Closeout Media Probe/ })).toBeVisible();
+    await expect(page.locator('.media-card').filter({ hasText: 'Closeout Media Probe' })).toBeVisible();
     await expect(page.getByRole('alert')).toContainText('Continuation failed deliberately.');
     await expect.poll(async () => JSON.stringify(await persistedMediaSnapshot(page))).toBe('[]');
 
     await page.reload();
     await expect(page.getByText('fail after resolving media', { exact: true })).toBeVisible();
-    await expect(page.getByRole('link', { name: /Closeout Media Probe/ })).toHaveCount(0);
+    await expect(page.locator('.media-card').filter({ hasText: 'Closeout Media Probe' })).toHaveCount(0);
   });
 
   test('the same provider identity from separate tool calls collapses to one newest card', async ({ page }) => {
@@ -246,7 +253,7 @@ test.describe('media lifecycle closeout acceptance', () => {
     await unlockTestLockbox(page);
     await ask(page, 'exercise duplicate media identities');
 
-    const cards = page.locator('a.media-card');
+    const cards = page.locator('.media-card');
     await expect(cards).toHaveCount(1);
     await expect(cards).toContainText('Closeout Media Probe — refreshed');
     expect(providerQueries).toEqual(['first duplicate probe', 'second duplicate probe']);
@@ -254,15 +261,15 @@ test.describe('media lifecycle closeout acceptance', () => {
       .toBe(JSON.stringify([{ id: VIDEO_ID, title: 'Closeout Media Probe — refreshed' }]));
 
     await page.reload();
-    await expect(page.locator('a.media-card')).toHaveCount(1);
-    await expect(page.locator('a.media-card')).toContainText('Closeout Media Probe — refreshed');
+    await expect(page.locator('.media-card')).toHaveCount(1);
+    await expect(page.locator('.media-card')).toContainText('Closeout Media Probe — refreshed');
   });
 });
 
 test.describe('Android media handoff closeout acceptance', () => {
   test.use({ userAgent: 'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Mobile Safari/537.36' });
 
-  test('a real click executes the Android handoff handler and preserves canonical HTTPS fallback', async ({ page }) => {
+  test('a real ask-choice click executes the Android handoff handler and preserves canonical HTTPS fallback', async ({ page }) => {
     await page.addInitScript(() => {
       (window as unknown as { __mediaOpened?: string }).__mediaOpened = '';
       window.open = ((url?: string | URL) => {
@@ -279,9 +286,12 @@ test.describe('Android media handoff closeout acceptance', () => {
     await unlockTestLockbox(page);
     await ask(page, 'open the closeout media probe');
 
-    const card = page.getByRole('link', { name: /Closeout Media Probe/ });
+    const card = page.locator('.media-card').filter({ hasText: 'Closeout Media Probe' });
     await expect(card).toBeVisible();
-    await card.click();
+    await card.locator('.media-card__primary').click();
+    const external = card.locator('a.media-card__choice--external');
+    await expect(external).toHaveAttribute('href', CANONICAL_URL);
+    await external.click();
 
     await expect.poll(() => page.evaluate(() => (window as unknown as { __mediaOpened?: string }).__mediaOpened ?? ''))
       .toBe(CANONICAL_URL);

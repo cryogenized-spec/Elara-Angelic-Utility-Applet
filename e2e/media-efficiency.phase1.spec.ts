@@ -157,14 +157,19 @@ test.describe('Phase 1 media efficiency', () => {
     );
     expect(functionResult).toBeTruthy();
 
-    const resultValue = functionResult?.result;
+    const resultParts = functionResult?.result;
+    expect(Array.isArray(resultParts)).toBe(true);
+    expect(resultParts).toHaveLength(1);
+    const resultPart = (resultParts as Array<Record<string, unknown>>)[0];
+    expect(resultPart?.type).toBe('text');
+    expect(typeof resultPart?.text).toBe('string');
+    const resultValue = JSON.parse(resultPart.text as string) as Record<string, unknown>;
     expect(resultValue).toEqual({
       ok: true,
       provider: 'youtube',
       intent: 'listen',
       results: [{
         query: 'phase one efficiency track',
-        source: 'network',
         items: [{ id: VIDEO_ID, kind: 'video', title: TITLE, channel: 'Efficiency Channel' }],
       }],
       failures: [],

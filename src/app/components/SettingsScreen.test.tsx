@@ -5,6 +5,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsScreen, type SettingsSection } from './SettingsScreen';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY } from '../../domain/preferences';
+import type { MediaPlaybackPreference } from '../../domain/playback';
 import { DEFAULT_CHARACTER_PROFILE } from '../../domain/character';
 import { DEFAULT_GEMINI_MODEL } from '../../gemini/contracts';
 import { defaultsForModel } from '../../gemini/settings-engine';
@@ -14,8 +15,8 @@ import { PlaybackProvider, type PlaybackPreferenceStore } from '../../media/play
 
 let container: HTMLDivElement;
 let root: Root;
-let savedPreference: 'ask' | 'embedded' | 'external';
-let savePreference: ReturnType<typeof vi.fn>;
+let savedPreference: MediaPlaybackPreference;
+const savePreference = vi.fn<(value: MediaPlaybackPreference) => void>();
 
 const preferenceStore: PlaybackPreferenceStore = {
   load: async () => savedPreference,
@@ -68,7 +69,7 @@ function press(key: string): void {
 
 beforeEach(() => {
   savedPreference = 'ask';
-  savePreference = vi.fn();
+  savePreference.mockClear();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);

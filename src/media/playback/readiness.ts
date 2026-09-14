@@ -37,7 +37,10 @@ export const playbackReadinessPort: PlaybackReadinessPort = Object.freeze({
       });
     }
 
+    // Snapshot the only provider target we need before crossing the async import
+    // boundary. The caller's object is never retained as readiness authority.
+    const videoId = item.id;
     const { checkYouTubePlaybackReadiness } = await import('../youtube/readiness');
-    return checkYouTubePlaybackReadiness(item.id, signal);
+    return checkYouTubePlaybackReadiness(videoId, signal);
   },
 });

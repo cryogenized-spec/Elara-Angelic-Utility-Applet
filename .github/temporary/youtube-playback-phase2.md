@@ -67,7 +67,6 @@ ended
 - `fc14aac972a8c0bbffdf86e0bc883e7635bfa0a1` — lint passed; CI #1678 exposed a test-only type-narrowing issue after provider remount.
 - `e533214fc6b4acad7c2048ec824085fe018b1c5f` — lint + typecheck passed; CI #1680 reached units with 1,157 passing and one failing test-only assertion that required incidental React `console.error` logging in addition to the actual nested-provider exception contract.
 - `96d60a3ff7777c245dcfe30bb62ae031a09c1a6a` — nested-provider test now asserts only the actual application contract; runtime safeguard unchanged.
-- `d919d9a171930f2cf253d788de73fbcde328df23` — current exact head; full matrix certification pending.
 
 ## Exit criteria
 

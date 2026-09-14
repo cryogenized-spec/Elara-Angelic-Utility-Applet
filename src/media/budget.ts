@@ -76,6 +76,16 @@ function snapshot(quotaDay: string, currentSpent: number): DailySearchBudget {
   });
 }
 
+/**
+ * Persisted quota state is untrusted input. A malformed same-day counter must not
+ * grant fresh budget, so corruption is interpreted as fully exhausted. A row
+ * from an older provider day is intentionally irrelevant and starts from zero.
+ */
+function persistedSpentForDay(row: MediaDailySearchBudgetEntry | undefined, quotaDay: string): number {
+  if (!row || row.quotaDay !== quotaDay) return 0;
+  return Number.isInteger(row.spent) && row.spent >= 0 ? row.spent : dailyAllowance;
+}
+
 function isBudgetMessage(value: unknown): value is { quotaDay: string; spent: number } {
   if (typeof value !== 'object' || value === null) return false;
   const record = value as Record<string, unknown>;
@@ -122,8 +132,7 @@ export function observedDailySearchBudget(): DailySearchBudget | undefined {
 export async function dailySearchBudget(now: number = Date.now()): Promise<DailySearchBudget> {
   const quotaDay = youtubeQuotaDay(now);
   const row = await mediaDb.dailySearchBudget.get(DAILY_BUDGET_ID);
-  const currentSpent = row?.quotaDay === quotaDay ? row.spent : 0;
-  const value = snapshot(quotaDay, currentSpent);
+  const value = snapshot(quotaDay, persistedSpentForDay(row, quotaDay));
   publishDailyBudget(value);
   return value;
 }
@@ -154,7 +163,7 @@ export async function reserveSearch(now: number = Date.now()): Promise<SearchRes
   try {
     await mediaDb.transaction('rw', mediaDb.dailySearchBudget, async () => {
       const existing = await mediaDb.dailySearchBudget.get(DAILY_BUDGET_ID);
-      const currentSpent = existing?.quotaDay === quotaDay ? existing.spent : 0;
+      const currentSpent = persistedSpentForDay(existing, quotaDay);
       resultingSpent = currentSpent;
       if (currentSpent >= dailyAllowance) return;
 
@@ -195,7 +204,8 @@ export async function releaseSearch(reservation?: SearchReservation, now: number
     await mediaDb.transaction('rw', mediaDb.dailySearchBudget, async () => {
       const existing = await mediaDb.dailySearchBudget.get(DAILY_BUDGET_ID);
       if (!existing || existing.quotaDay !== reservation.quotaDay) return;
-      resultingSpent = Math.max(0, existing.spent - 1);
+      const currentSpent = persistedSpentForDay(existing, reservation.quotaDay);
+      resultingSpent = Math.max(0, currentSpent - 1);
       await mediaDb.dailySearchBudget.put({ ...existing, spent: resultingSpent, updatedAt: now });
     });
     publishDailyBudget(snapshot(reservation.quotaDay, resultingSpent));

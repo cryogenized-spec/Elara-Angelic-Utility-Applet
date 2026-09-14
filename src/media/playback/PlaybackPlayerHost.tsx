@@ -21,6 +21,7 @@ export function PlaybackPlayerHost({
   markPaused,
   markEnded,
   markFailed,
+  reset,
 }: {
   readonly state: PlaybackState;
   readonly playerPort: PlaybackPlayerPort;
@@ -28,6 +29,7 @@ export function PlaybackPlayerHost({
   readonly markPaused: (requestId: string) => void;
   readonly markEnded: (requestId: string) => void;
   readonly markFailed: (requestId: string, error: unknown) => void;
+  readonly reset: () => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const activeRef = useRef<ActivePlayerAttempt | null>(null);
@@ -104,6 +106,10 @@ export function PlaybackPlayerHost({
       aria-label="YouTube player"
       hidden={!visible}
     >
+      <div className="playback-player-toolbar">
+        <span className="playback-player-toolbar__label">YouTube</span>
+        <button className="playback-player-close" type="button" onClick={reset} aria-label="Close player">×</button>
+      </div>
       <div ref={hostRef} className="playback-player-host" />
     </section>
   );

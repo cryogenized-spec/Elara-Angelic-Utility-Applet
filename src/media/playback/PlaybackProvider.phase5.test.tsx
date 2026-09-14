@@ -47,6 +47,28 @@ function Probe() {
   return null;
 }
 
+function currentAuthority(): PlaybackAuthority {
+  if (!authority) throw new Error('Playback authority probe has not mounted.');
+  return authority;
+}
+
+async function renderProvider(playerPort: PlaybackPlayerPort): Promise<void> {
+  await act(async () => {
+    root.render(
+      <PlaybackProvider
+        preferenceStore={preferenceStore}
+        readinessPort={readinessPort}
+        playerPort={playerPort}
+        requestIdFactory={() => 'request-a'}
+        now={() => NOW}
+      >
+        <Probe />
+      </PlaybackProvider>,
+    );
+    await Promise.resolve();
+  });
+}
+
 beforeEach(() => {
   authority = null;
   container = document.createElement('div');
@@ -65,56 +87,36 @@ describe('Phase 5 global player surface', () => {
     const playerPort: PlaybackPlayerPort = {
       load: async () => ({ destroy }),
     };
+    await renderProvider(playerPort);
 
     await act(async () => {
-      root.render(
-        <PlaybackProvider
-          preferenceStore={preferenceStore}
-          readinessPort={readinessPort}
-          playerPort={playerPort}
-          requestIdFactory={() => 'request-a'}
-          now={() => NOW}
-        >
-          <Probe />
-        </PlaybackProvider>,
-      );
+      await currentAuthority().start(ITEM);
       await Promise.resolve();
     });
+    expect(currentAuthority().state.phase).toBe('loading');
+    const close = container.querySelector<HTMLButtonElement>('.playback-player-close');
+    expect(close).not.toBeNull();
 
-    await act(async () => {
-      await authority!.start(ITEM);
-      await Promise.resolve();
-    });
-    expect(authority!.state.phase).toBe('loading');
-    expect(container.querySelector<HTMLButtonElement>('.playback-player-close')).not.toBeNull();
-
-    act(() => container.querySelector<HTMLButtonElement>('.playback-player-close')!.click());
-    expect(authority!.state).toMatchObject({ phase: 'idle', requestId: null, item: null });
+    act(() => close!.click());
+    expect(currentAuthority().state).toMatchObject({ phase: 'idle', requestId: null, item: null });
     expect(destroy).toHaveBeenCalledTimes(1);
   });
 
   it('keeps the close affordance outside the provider iframe host', async () => {
     const playerPort: PlaybackPlayerPort = { load: async () => ({ destroy: vi.fn() }) };
+    await renderProvider(playerPort);
+
     await act(async () => {
-      root.render(
-        <PlaybackProvider
-          preferenceStore={preferenceStore}
-          readinessPort={readinessPort}
-          playerPort={playerPort}
-          requestIdFactory={() => 'request-a'}
-          now={() => NOW}
-        >
-          <Probe />
-        </PlaybackProvider>,
-      );
-      await Promise.resolve();
-      await authority!.start(ITEM);
+      await currentAuthority().start(ITEM);
       await Promise.resolve();
     });
-    const surface = container.querySelector('.playback-player-surface')!;
-    const host = surface.querySelector('.playback-player-host')!;
-    expect(surface.querySelector('.playback-player-close')).not.toBeNull();
-    expect(host.querySelector('.playback-player-close')).toBeNull();
+
+    const surface = container.querySelector('.playback-player-surface');
+    expect(surface).not.toBeNull();
+    const host = surface!.querySelector('.playback-player-host');
+    expect(host).not.toBeNull();
+    expect(surface!.querySelector('.playback-player-close')).not.toBeNull();
+    expect(host!.querySelector('.playback-player-close')).toBeNull();
   });
 
   it('enforces fixed viewport placement below the sidebar layer and a 200px player minimum', () => {

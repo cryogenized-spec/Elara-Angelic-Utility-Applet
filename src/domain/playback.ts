@@ -12,6 +12,27 @@ export function normalizeMediaPlaybackPreference(value: unknown): MediaPlaybackP
   return isMediaPlaybackPreference(value) ? value : DEFAULT_MEDIA_PLAYBACK_PREFERENCE;
 }
 
+export type PlaybackReadinessBlockedReason =
+  | 'unsupported'
+  | 'invalid-target'
+  | 'unavailable'
+  | 'not-embeddable'
+  | 'made-for-kids';
+
+export type PlaybackReadinessFailureReason =
+  | 'no-api-key'
+  | 'quota-exceeded'
+  | 'rate-limited'
+  | 'network'
+  | 'invalid-response'
+  | 'unknown';
+
+export type PlaybackReadinessDecision =
+  | { readonly status: 'ready' }
+  | { readonly status: 'blocked'; readonly reason: PlaybackReadinessBlockedReason; readonly message: string }
+  | { readonly status: 'failed'; readonly reason: PlaybackReadinessFailureReason; readonly message: string }
+  | { readonly status: 'aborted' };
+
 export const PLAYBACK_PHASES = ['idle', 'requested', 'checking', 'ready', 'loading', 'playing', 'paused', 'ended', 'failed'] as const;
 export type PlaybackPhase = (typeof PLAYBACK_PHASES)[number];
 

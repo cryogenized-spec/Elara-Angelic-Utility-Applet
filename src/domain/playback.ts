@@ -54,10 +54,11 @@ function snapshotMediaItem(item: MediaItem): MediaItem {
 
 function boundedPlaybackError(value: unknown): string {
   if (typeof value !== 'string') return 'Playback failed.';
-  const normalized = value
-    .replace(/[\u0000-\u001f\u007f]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  const withoutControls = [...value].map((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f ? ' ' : character;
+  }).join('');
+  const normalized = withoutControls.replace(/\s+/g, ' ').trim();
   return (normalized || 'Playback failed.').slice(0, MAX_PLAYBACK_ERROR_LENGTH);
 }
 

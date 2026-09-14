@@ -76,6 +76,10 @@ async function waitForPlaybackPreferenceReady(): Promise<HTMLButtonElement[]> {
   throw new Error('Playback preference did not finish loading in the settings test.');
 }
 
+function playbackOption(options: readonly HTMLButtonElement[], label: string): HTMLButtonElement | undefined {
+  return options.find((button) => button.querySelector('.playback-preference-option__label')?.textContent === label);
+}
+
 beforeEach(() => {
   savedPreference = 'ask';
   savePreference.mockClear();
@@ -170,13 +174,13 @@ describe('Chat settings — media playback', () => {
       expect.stringContaining('Play here'),
       expect.stringContaining('Open YouTube'),
     ]));
-    expect(options.find((button) => button.textContent?.includes('Ask each time'))?.getAttribute('aria-checked')).toBe('true');
+    expect(playbackOption(options, 'Ask each time')?.getAttribute('aria-checked')).toBe('true');
   });
 
   it('persists a new route through PlaybackProvider.setPreference', async () => {
     await act(async () => { root.render(<Harness initial />); await Promise.resolve(); });
     const options = await waitForPlaybackPreferenceReady();
-    const playHere = options.find((button) => button.textContent?.includes('Play here'))!;
+    const playHere = playbackOption(options, 'Play here')!;
 
     await act(async () => { playHere.click(); await Promise.resolve(); await Promise.resolve(); });
     expect(savePreference).toHaveBeenCalledTimes(1);

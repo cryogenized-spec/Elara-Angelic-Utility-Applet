@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { resetMediaProvider, searchMedia } from './search';
-import { resetSearchBudget, searchBudget } from './budget';
+import { resetDailySearchBudget, resetSearchBudget, searchBudget } from './budget';
 import { clearMediaCache, readMediaCache, writeMediaCache } from './cache';
 import { mediaCacheKey } from './normalize';
 import { YouTubeSearchError } from './youtube/service';
@@ -46,6 +46,7 @@ const OPTIONS = { now: () => NOW };
 
 beforeEach(async () => {
   await clearMediaCache();
+  await resetDailySearchBudget();
   resetSearchBudget();
   resetMediaProvider();
 });

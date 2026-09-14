@@ -37,6 +37,11 @@ function Probe() {
   return <output data-phase={current.state.phase} data-preference={current.preference} data-status={current.preferenceStatus} />;
 }
 
+function currentAuthority(): PlaybackAuthority {
+  if (!authority) throw new Error('Playback authority probe has not mounted.');
+  return authority;
+}
+
 function memoryStore(initial: MediaPlaybackPreference = 'ask'): PlaybackPreferenceStore & { current: MediaPlaybackPreference } {
   const store = {
     current: initial,
@@ -196,8 +201,8 @@ describe('Phase 2 PlaybackProvider authority', () => {
     root = createRoot(container);
     authority = null;
     await renderProvider(store, ['request-c']);
-    expect(authority?.preference).toBe('external');
-    expect(authority?.state).toMatchObject({ phase: 'idle', requestId: null, item: null, error: null });
+    expect(currentAuthority().preference).toBe('external');
+    expect(currentAuthority().state).toMatchObject({ phase: 'idle', requestId: null, item: null, error: null });
   });
 
   it('rejects a second nested PlaybackProvider instead of creating competing playback state', async () => {

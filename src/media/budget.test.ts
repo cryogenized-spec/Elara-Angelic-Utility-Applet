@@ -12,6 +12,7 @@ import {
   searchBudget,
   youtubeQuotaDay,
 } from './budget';
+import { mediaDb } from './storage';
 
 const NOW = Date.parse('2026-09-14T12:00:00Z');
 
@@ -86,6 +87,33 @@ describe('YouTube search budget', () => {
     expect(reservations.filter((entry) => !entry.granted)).toEqual([{ granted: false, scope: 'daily' }]);
     expect((await dailySearchBudget(NOW)).spent).toBe(2);
     expect(searchBudget().spent).toBe(2);
+  });
+
+  it('treats a corrupt same-day persistent counter as exhausted rather than granting quota', async () => {
+    await mediaDb.dailySearchBudget.put({
+      id: 'youtube-search',
+      quotaDay: youtubeQuotaDay(NOW),
+      spent: -999,
+      updatedAt: NOW,
+    });
+
+    const observed = await dailySearchBudget(NOW);
+    expect(observed.spent).toBe(SEARCH_BUDGET_PER_DEVICE_DAY);
+    expect(observed.remaining).toBe(0);
+    expect(await reserveSearch(NOW)).toEqual({ granted: false, scope: 'daily' });
+    expect(searchBudget().spent).toBe(0);
+  });
+
+  it('ignores even malformed spending from an old quota day when the provider day rolls over', async () => {
+    await mediaDb.dailySearchBudget.put({
+      id: 'youtube-search',
+      quotaDay: '2026-09-13',
+      spent: -999,
+      updatedAt: NOW - 86_400_000,
+    });
+
+    expect((await reserveSearch(NOW)).granted).toBe(true);
+    expect((await dailySearchBudget(NOW)).spent).toBe(1);
   });
 
   it('refunds both ledgers when a provider request provably never left the browser', async () => {

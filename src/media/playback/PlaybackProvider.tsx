@@ -17,15 +17,22 @@ import {
   normalizeMediaPlaybackPreference,
   playbackReducer,
   type MediaPlaybackPreference,
+  type PlaybackReadinessDecision,
   type PlaybackState,
 } from '../../domain/playback';
 import { loadMediaPlaybackPreference, saveMediaPlaybackPreference } from '../../persistence/preferences';
+import { playbackReadinessPort, type PlaybackReadinessPort } from './readiness';
 
 export type PlaybackPreferenceStatus = 'loading' | 'ready' | 'failed';
 
 export interface PlaybackPreferenceStore {
   load(): Promise<MediaPlaybackPreference>;
   save(value: MediaPlaybackPreference): Promise<MediaPlaybackPreference>;
+}
+
+export interface PlaybackPreparation {
+  readonly requestId: string;
+  readonly decision: PlaybackReadinessDecision;
 }
 
 export interface PlaybackAuthority {
@@ -35,6 +42,7 @@ export interface PlaybackAuthority {
   readonly preferenceError: string | null;
   setPreference(value: MediaPlaybackPreference): Promise<MediaPlaybackPreference>;
   select(item: MediaItem): string | null;
+  prepare(item: MediaItem): Promise<PlaybackPreparation | null>;
   beginCheck(requestId: string): void;
   markReady(requestId: string): void;
   beginLoad(requestId: string): void;
@@ -59,18 +67,25 @@ function defaultRequestIdFactory(): string {
 export function PlaybackProvider({
   children,
   preferenceStore = persistentPreferenceStore,
+  readinessPort = playbackReadinessPort,
   requestIdFactory = defaultRequestIdFactory,
   now = Date.now,
 }: {
   readonly children: ReactNode;
   readonly preferenceStore?: PlaybackPreferenceStore;
+  readonly readinessPort?: PlaybackReadinessPort;
   readonly requestIdFactory?: () => string;
   readonly now?: () => number;
 }) {
   const parent = useContext(PlaybackContext);
   if (parent) throw new Error('PlaybackProvider cannot be nested; one global playback authority is required.');
   return (
-    <PlaybackProviderRoot preferenceStore={preferenceStore} requestIdFactory={requestIdFactory} now={now}>
+    <PlaybackProviderRoot
+      preferenceStore={preferenceStore}
+      readinessPort={readinessPort}
+      requestIdFactory={requestIdFactory}
+      now={now}
+    >
       {children}
     </PlaybackProviderRoot>
   );
@@ -79,11 +94,13 @@ export function PlaybackProvider({
 function PlaybackProviderRoot({
   children,
   preferenceStore,
+  readinessPort,
   requestIdFactory,
   now,
 }: {
   readonly children: ReactNode;
   readonly preferenceStore: PlaybackPreferenceStore;
+  readonly readinessPort: PlaybackReadinessPort;
   readonly requestIdFactory: () => string;
   readonly now: () => number;
 }) {
@@ -94,11 +111,16 @@ function PlaybackProviderRoot({
   const preferenceRevisionRef = useRef(0);
   const durablePreferenceRef = useRef<MediaPlaybackPreference>(DEFAULT_MEDIA_PLAYBACK_PREFERENCE);
   const preferenceWriteQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const readinessAttemptRef = useRef<{ requestId: string; controller: AbortController } | null>(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+      readinessAttemptRef.current?.controller.abort();
+      readinessAttemptRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -178,9 +200,47 @@ function PlaybackProviderRoot({
       return null;
     }
     if (!isPlaybackRequestId(requestId)) return null;
+
+    // A newer accepted selection owns the one readiness lane. Aborting old work
+    // saves a provider call where possible; request lineage remains the actual
+    // correctness boundary if an abort races with a late response.
+    readinessAttemptRef.current?.controller.abort();
+    readinessAttemptRef.current = null;
     dispatch({ type: 'select', requestId, item });
     return requestId;
   }, [now, requestIdFactory]);
+
+  const prepare = useCallback(async (item: MediaItem): Promise<PlaybackPreparation | null> => {
+    const requestId = select(item);
+    if (!requestId) return null;
+
+    const controller = new AbortController();
+    const attempt = { requestId, controller };
+    readinessAttemptRef.current = attempt;
+    dispatch({ type: 'begin-check', requestId });
+
+    let decision: PlaybackReadinessDecision;
+    try {
+      decision = await readinessPort.check(item, controller.signal);
+    } catch {
+      decision = Object.freeze({
+        status: 'failed' as const,
+        reason: 'unknown' as const,
+        message: 'Internal playback readiness could not be checked.',
+      });
+    }
+
+    if (!mountedRef.current || readinessAttemptRef.current !== attempt) return null;
+    readinessAttemptRef.current = null;
+
+    if (decision.status === 'ready') {
+      dispatch({ type: 'ready', requestId });
+    } else if (decision.status === 'blocked' || decision.status === 'failed') {
+      dispatch({ type: 'fail', requestId, error: decision.message });
+    }
+
+    return Object.freeze({ requestId, decision });
+  }, [readinessPort, select]);
 
   const beginCheck = useCallback((requestId: string) => dispatch({ type: 'begin-check', requestId }), []);
   const markReady = useCallback((requestId: string) => dispatch({ type: 'ready', requestId }), []);
@@ -189,7 +249,11 @@ function PlaybackProviderRoot({
   const markPaused = useCallback((requestId: string) => dispatch({ type: 'pause', requestId }), []);
   const markEnded = useCallback((requestId: string) => dispatch({ type: 'end', requestId }), []);
   const markFailed = useCallback((requestId: string, error: unknown) => dispatch({ type: 'fail', requestId, error }), []);
-  const reset = useCallback(() => dispatch({ type: 'reset' }), []);
+  const reset = useCallback(() => {
+    readinessAttemptRef.current?.controller.abort();
+    readinessAttemptRef.current = null;
+    dispatch({ type: 'reset' });
+  }, []);
 
   const value = useMemo<PlaybackAuthority>(() => ({
     state,
@@ -198,6 +262,7 @@ function PlaybackProviderRoot({
     preferenceError,
     setPreference,
     select,
+    prepare,
     beginCheck,
     markReady,
     beginLoad,
@@ -217,6 +282,7 @@ function PlaybackProviderRoot({
     preference,
     preferenceError,
     preferenceStatus,
+    prepare,
     reset,
     select,
     setPreference,

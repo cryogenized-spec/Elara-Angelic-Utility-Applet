@@ -10,8 +10,9 @@ import { mediaDb, type MediaDailySearchBudgetEntry } from './storage';
  *    reloads and additional tabs from repeatedly resetting that safety ceiling.
  *
  * IndexedDB is authoritative across tabs because read/write transactions on the
- * one budget row serialize reservations. BroadcastChannel only mirrors updates
- * promptly to sibling tabs; correctness never depends on receiving a message.
+ * one budget row serialize reservations. BroadcastChannel mirrors successful
+ * observations so an already-exhausted sibling can refuse without another DB
+ * transaction, but correctness never depends on receiving a message.
  */
 
 /** Network searches allowed per page session. Cached answers are free. */
@@ -123,11 +124,6 @@ export function hasSearchBudget(): boolean {
   return spent < allowance;
 }
 
-/** Last locally observed daily state; useful for diagnostics without a DB read. */
-export function observedDailySearchBudget(): DailySearchBudget | undefined {
-  return mirroredDaily;
-}
-
 /** Read the authoritative device-local daily search ledger. */
 export async function dailySearchBudget(now: number = Date.now()): Promise<DailySearchBudget> {
   const quotaDay = youtubeQuotaDay(now);
@@ -156,6 +152,14 @@ export async function reserveSearch(now: number = Date.now()): Promise<SearchRes
   } catch {
     spent = Math.max(0, spent - 1);
     return Object.freeze({ granted: false, scope: 'daily-unavailable' });
+  }
+
+  // Start listening before the authoritative transaction. A mirror can only
+  // refuse early; it can never grant budget, so a stale message cannot overspend.
+  ensureBudgetChannel();
+  if (mirroredDaily?.quotaDay === quotaDay && mirroredDaily.remaining <= 0) {
+    spent = Math.max(0, spent - 1);
+    return Object.freeze({ granted: false, scope: 'daily' });
   }
 
   let granted = false;

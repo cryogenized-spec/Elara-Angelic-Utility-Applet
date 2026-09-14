@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react';
+import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MEDIA_API_DATA_MAX_AGE_MS, type MediaItem } from '../../domain/media';
@@ -32,8 +32,9 @@ let root: Root;
 let authority: PlaybackAuthority | null;
 
 function Probe() {
-  authority = usePlaybackAuthority();
-  return <output data-phase={authority.state.phase} data-preference={authority.preference} data-status={authority.preferenceStatus} />;
+  const current = usePlaybackAuthority();
+  useEffect(() => { authority = current; }, [current]);
+  return <output data-phase={current.state.phase} data-preference={current.preference} data-status={current.preferenceStatus} />;
 }
 
 function memoryStore(initial: MediaPlaybackPreference = 'ask'): PlaybackPreferenceStore & { current: MediaPlaybackPreference } {

@@ -1,129 +1,186 @@
 # YouTube Search in Elara
 
-This guide explains what happens when you ask Elara for a song, album, music mix, or video, why the feature uses the YouTube Data API, what it costs in API quota, how long search metadata is kept, and what Elara does **not** do.
+This guide explains how Elara finds YouTube music and video results, how it protects the YouTube search allowance, what is sent back to Gemini, how long YouTube metadata is kept, and what happens when you tap a result.
 
-The short version is simple: Elara can search YouTube and show YouTube results as cards. It does not download, stream, remix, proxy, or secretly play the media. When you tap a valid card, playback belongs to YouTube or to a compatible app chosen by the operating system.
+The short version is simple: **Elara searches YouTube and shows structured result cards. It does not currently stream, download, proxy, remix, or secretly play YouTube media.** A valid card hands the canonical YouTube URL to the browser or operating system.
 
-> This document describes the implementation and the compliance checks made against YouTube's published developer rules. It is not legal advice. Google's and YouTube's current terms and policies always take priority over this guide.
+> This is an implementation and compliance guide, not legal advice. Google's and YouTube's current terms and policies always take priority.
 
-## 1. What happens when you ask for music
+## 1. From your request to a YouTube card
 
-A request such as “put on some dark ambient” begins as an ordinary Gemini conversation turn. Elara does not run a YouTube search merely because a message contains the word “music.” Gemini first decides whether the `youtube.search` tool is actually needed.
-
-The normal path is:
+A request such as “put on some dark ambient” begins as an ordinary Gemini turn. Elara does not search merely because the word “music” appears. Gemini decides whether the `youtube.search` tool is actually useful.
 
 ```text
-You ask for music or a video
-        ↓
-Gemini understands the request
-        ↓
-Gemini calls youtube.search when a search is needed
-        ↓
-Elara validates the tool arguments
-        ↓
-Duplicate queries are collapsed
-        ↓
-Elara checks its short-lived local search cache
-        ↓
-Only a cache miss can spend YouTube search quota
-        ↓
-The YouTube Data API returns search results
-        ↓
-Elara timestamps and preserves valid returned metadata
-        ↓
-The results become YouTube-attributed cards
-        ↓
-You tap a validated card and leave Elara for YouTube
+You ask for music
+       ↓
+Gemini decides
+       ↓
+youtube.search
+       ↓
+validate + dedupe
+       ↓
+cache check
+       ↓
+quota guards
+       ↓
+YouTube API
+       ↓
+result cards
 ```
 
-The `watch` and `listen` intents are presentation hints. They change the card action from **Watch** to **Listen**, but they do not change the YouTube search request, provider URL, or cache identity. Asking to listen to a result and later asking to watch the same search can therefore reuse one API result.
+Gemini is instructed to use **one concise query by default**. One tool call may contain no more than three distinct searches. Equivalent queries are normalized and collapsed before cache or network work.
 
-Media cards are first-class assistant content. They can appear as soon as the structured search result resolves, even if Gemini is still producing a continuation, and a completed assistant turn may consist of media without prose. Text, media and artifacts share one live assistant projection and one terminal persistence boundary.
+The `watch` and `listen` intents are presentation hints. They do not change the provider request or cache identity, so asking to listen to a search and later asking to watch the same search can reuse the same provider result.
 
-## 2. The request Elara sends to YouTube
+Media cards are first-class assistant content. A card can appear before Gemini finishes its written continuation, and a completed answer may contain media without prose. Text, media and artifacts share one live assistant projection and one terminal persistence boundary.
 
-Elara uses the YouTube Data API v3 `search.list` endpoint directly from the browser. A normal search request contains:
+## 2. What Elara sends to YouTube
+
+Elara uses the YouTube Data API v3 `search.list` endpoint directly from the browser:
 
 ```text
-GET https://www.googleapis.com/youtube/v3/search
 part=snippet
 type=video
-q=<the concise search query>
+q=<concise query>
 maxResults=5
 safeSearch=strict
 ```
 
-The API key is sent in the `x-goog-api-key` request header. It is not placed in the URL, search cache, Gemini tool payload, conversation data, or diagnostics.
+The API key is sent in the `x-goog-api-key` header. It is not placed in the URL, conversation, media card, Gemini result, cache row, or diagnostics.
 
-Elara does **not** follow `nextPageToken`. One query therefore means at most one `search.list` request. It also does not make a follow-up `videos.list` request merely to decorate every search card with a duration. `search.list` does not provide video duration, so Elara leaves it out instead of inventing one or spending unnecessary quota.
+Elara does not follow `nextPageToken`, so one cache miss produces at most one search request. It also does not spend a `videos.list` request merely to decorate every result with information that `search.list` did not return.
 
-## 3. How Elara protects the daily search allowance
+## 3. Search quota protection
 
-YouTube currently gives a project a default dedicated allowance of **100 `search.list` calls per day**. Each `search.list` request spends one call from that bucket, and additional result pages would spend additional calls. The bucket resets at midnight Pacific Time.
+YouTube currently documents a default dedicated allowance of **100 `search.list` calls per day**, with the quota day resetting at midnight Pacific Time. Elara treats those calls as scarce.
 
-Elara treats those calls as scarce. Gemini is instructed to use **one concise search query by default**. One tool invocation can contain at most **three distinct queries**, and multiple queries are only appropriate when your request genuinely asks for separate searches. The runtime rejects attempts to exceed that cap.
+There are two local safety ceilings:
 
-A page session can spend at most **eight network searches** before Elara stops and reports that its local search budget is exhausted. Cache hits do not spend that allowance. An overeager maximum-sized Gemini call can therefore consume at most 3% of the default daily search bucket, and two such calls at most 6%.
+```text
+fresh search
+    ↓
+8 / page session
+    ↓
+24 / device
+Pacific quota day
+    ↓
+YouTube
+```
 
-Before any network request, Elara also normalizes and deduplicates equivalent queries, checks the local cache, reuses the same cached search for `watch` and `listen`, avoids pagination, limits each query to five surfaced results, and stops when the session allowance is exhausted.
+The **8-search session ceiling** stops one runaway Gemini tool loop from rapidly consuming the allowance.
 
-A successful search result is cached locally for seven days. An empty result is cached for ten minutes so repeatedly asking for the same unavailable query does not hammer the API. The cache stores result metadata only — never video/audio bytes and never an API key.
+The **24-search device/day ceiling** survives page reloads and is shared by tabs on the same browser profile. It is deliberately well below the default 100-call project allowance.
 
-The provider's own quota remains authoritative. Elara's limits are defensive ceilings for this installation, not a replacement for Google Cloud quota reporting.
+The daily counter lives in the existing `elara-media-cache` IndexedDB database. IndexedDB transactions are authoritative, so two tabs cannot independently reserve the same remaining slot. `BroadcastChannel` is used only as a fast notification mechanism; a missed or stale message cannot grant quota.
 
-## 4. API key setup and the Lockbox
+If Elara cannot safely read or update the daily ledger, a fresh network search fails closed rather than spending an unaccounted YouTube call. Corrupt same-day counters are treated as exhausted instead of becoming accidental extra allowance.
 
-The YouTube key lives in Elara's local Lockbox as a secondary encrypted credential. The decrypted key is available only while the Lockbox session is unlocked.
+A cache hit is free. Successful searches are cached for seven days; genuine empty results are cached for ten minutes so repeated unavailable searches do not hammer the API.
 
-Use a YouTube Data API v3 key belonging to the Google Cloud project that operates your installation of Elara. Do not commit the key to this repository, paste it into source code, publish it in screenshots, or share it as a public credential.
+These are **local defensive ceilings**, not a replacement for Google Cloud quota reporting. Another device using the same API project is outside this browser's local ledger.
 
-For a production deployment, restrict the key in Google Cloud as tightly as the deployment allows, including API restrictions to the YouTube Data API v3 and appropriate website/referrer restrictions for the deployed origin.
+## 4. What Gemini receives
 
-The **Test Key** action deliberately uses a small `videos.list?part=id` request rather than `search.list`, so validating the credential does not consume one of the dedicated daily search calls.
+Elara deliberately does not send the full browser card back through the Gemini continuation.
 
-Public YouTube video search does not require a user's Google OAuth authorization. Elara therefore does not ask for a YouTube account token merely to perform public searches.
+Gemini receives a compact result containing the information needed to reason about the choices:
 
-## 5. What is shown on a card
+```text
+provider
+intent
+query
+id
+kind
+title
+channel
+bounded failures
+```
 
-Each result card visibly identifies **YouTube** as its source and uses title, channel and thumbnail metadata supplied by the API when those values are valid. Elara does not trim a title for aesthetics, rewrite a channel name, substitute another image, or invent missing thumbnail dimensions.
+The browser keeps the heavier card-only information:
 
-Unexpected fields are not accepted as trusted media metadata. This matters for security as well as correctness: a corrupted IndexedDB row cannot smuggle an API key or unrelated private field into a `MediaItem` simply because the normal fields also look valid.
+```text
+thumbnail
+canonical URL
+embed metadata
+provider-fetch time
+full MediaItem
+```
 
-If required provider data is malformed or outside defensive bounds, Elara rejects it instead of modifying it into something plausible. If a thumbnail later fails to load, the card keeps its reserved geometry and falls back to a neutral empty thumbnail area; it does not replace the YouTube image with unrelated content.
+Both views come from the **same tool-result object**. Browser-only fields are non-enumerable, so ordinary JSON serialization cannot accidentally send thumbnails, URLs, timestamps, or the flattened duplicate card collection back to Gemini.
 
-Cards stack into one column on narrow phone layouts. Wider displays may show several cards in a responsive grid. The cards are links, not embedded players: no YouTube iframe, audio element or video element is created by the media-result component.
+This reduces model-input traffic without creating a second media authority.
 
-## 6. What happens when you tap a result
+## 5. API key and Lockbox
 
-Both **Watch** and **Listen** use the exact canonical YouTube URL Elara constructed for that provider result. Elara does not rewrite a listen request to a guessed `music.youtube.com` URL.
+The YouTube API key is a secondary encrypted credential in Elara's local Lockbox. The decrypted value is available only while the Lockbox session is unlocked.
 
-Persisted media is treated as untrusted input. Before a card becomes clickable, Elara reconstructs the only URL allowed for its YouTube `provider + kind + id` and requires the stored `webUrl` to match exactly. A `javascript:` URL, `data:` URL, ordinary HTTP URL, hostile HTTPS host, malformed URL, mismatched video ID, non-canonical host alias, or unexpected extra query string therefore fails closed. The user sees an **Unavailable** result with no `href` rather than a repaired or guessed destination.
+Use a YouTube Data API v3 key belonging to the Google Cloud project that operates your Elara installation. Do not commit it to the repository or paste it into source code.
 
-On ordinary browsers, a valid card opens the canonical HTTPS YouTube URL. On supported Chromium-family Android browsers, Elara may make an unpinned Android `intent://` attempt from the user's tap so Android can choose among compatible handlers. The exact same HTTPS YouTube URL remains the browser fallback. Elara does not pin the intent to one app.
+For a deployed installation, restrict the key as tightly as practical, including an API restriction to YouTube Data API v3 and appropriate website/referrer restrictions.
 
-The operating system or browser ultimately decides which installed application handles the link. Elara must not claim that a song is playing, queued, liked, saved, or added to a library merely because it surfaced a result card.
+The **Test Key** action uses a small `videos.list?part=id` request rather than `search.list`, so validating the credential does not consume one of the dedicated search calls.
 
-## 7. Storage, retention and privacy
+Public YouTube search does not require a user's Google OAuth authorization.
 
-YouTube search metadata is stored locally on the device in two places when needed: the dedicated search cache and, when a card belongs to a saved assistant response, that conversation message. Elara does not send this local cache to an Elara server and does not store YouTube video/audio bytes.
+## 6. Result cards and attribution
 
-Every fresh API result is stamped with `apiDataFetchedAt`, the time that metadata came from YouTube. Successful search-cache rows expire after seven days and negative rows after ten minutes. Conversation media has a separate hard freshness boundary: applicable YouTube API metadata is no longer displayable once it reaches **30 days** from its provider-fetch timestamp. Exactly 30 days is treated as expired.
+Each card visibly says **Source: YouTube** and uses valid title, channel and thumbnail metadata returned by the API.
 
-Old records created before this timestamp existed are treated as untrusted rather than being granted a fresh 30-day period. Future-dated, malformed and structurally corrupted records also fail closed.
+Elara does not cosmetically rewrite provider titles, invent missing thumbnail dimensions, or replace a failed YouTube thumbnail with unrelated artwork. Invalid provider data is rejected rather than “fixed” into something plausible.
 
-At application startup Elara physically sweeps the media cache and conversation database for stale or corrupt media. Conversation reads independently apply the same check before returning anything to the UI. If media expires, Elara removes only the structured YouTube card metadata: the user's message, the assistant's written answer, and the conversation itself remain intact. Retention cleanup also does not pretend the conversation was newly edited by changing its thread timestamp.
+On narrow phone layouts the cards stack into one column. The card rail reserves geometry while its lazy component loads, and failed thumbnails degrade in place instead of collapsing the conversation layout.
 
-This defense-in-depth arrangement means an IndexedDB cleanup write could fail without making stale data displayable: the read path still withholds it.
+The attribution is intentionally plain text. Elara does not draw or approximate a YouTube logo. If an official graphical Brand Feature is added later, it must come from YouTube's approved resources and follow the current branding rules.
 
-Elara does not build an offline media library, proxy streams, strip advertising, bypass YouTube playback controls, or retain an API key inside media records.
+## 7. What happens when you tap a card
 
-## 8. Terms, privacy and production compliance
+Both **Watch** and **Listen** currently use the canonical YouTube URL for the selected result. Elara does not guess a `music.youtube.com` URL from an ordinary YouTube Data API result.
 
-Settings → Lockbox includes direct links to this guide, the **YouTube Terms of Service**, and the **Google Privacy Policy**. This guide explains the search request, quota use, local caching, conversation persistence, retention, external handoff, and credential boundary in human-readable form.
+Persisted card data is treated as untrusted input. Before a card becomes clickable, Elara reconstructs the allowed destination from the provider, kind and media ID and requires the stored URL to match exactly.
 
-The implementation has been reviewed against YouTube's current developer documentation and policies, including API-data handling, attribution, search quota, and credential rules. The visible card uses the unmodified `YouTube` trade name as source attribution. Elara deliberately does not draw, recolour, distort or imitate a YouTube logo. If an official logo asset is added later, it must come from YouTube's approved branding resources and follow the then-current branding rules.
+These fail closed:
 
-A public deployment still needs whatever operator-level terms/privacy policy, consent treatment, Google Cloud credential ownership/restrictions, and formal YouTube compliance/audit process apply to that deployed API Client. Repository code cannot certify those facts about an operator's deployment by itself.
+- `javascript:` and `data:` URLs;
+- ordinary HTTP;
+- hostile or unexpected HTTPS hosts;
+- malformed destinations;
+- mismatched video IDs;
+- unexpected query parameters or aliases.
+
+An invalid result becomes an inert **Unavailable** card instead of being repaired into a guessed destination.
+
+On ordinary browsers, a valid card opens the canonical HTTPS YouTube URL. On supported Android Chromium-family browsers, Elara may attempt an unpinned Android `intent://` handoff from the user's tap. The same canonical HTTPS URL remains the browser fallback.
+
+Android decides which compatible installed app handles the URL. Elara does not claim that YouTube Music, YouTube, or any other particular application will win that choice.
+
+## 8. Storage and freshness
+
+Elara stores YouTube search metadata locally when needed in the search cache and, for a completed assistant response, in the conversation record. It does not store YouTube video or audio bytes.
+
+Fresh API results carry `apiDataFetchedAt`, recording when the metadata came from YouTube.
+
+Search-cache entries are intentionally much shorter lived than the policy maximum. Persisted YouTube API metadata in conversations is displayable only while valid and younger than **30 days**. Exactly 30 days is treated as expired.
+
+Legacy records without a trustworthy timestamp, future-dated records, malformed records, and stale records fail closed.
+
+Startup maintenance physically sweeps stale/corrupt media from the media cache and conversation database. Conversation reads independently enforce the same freshness rule before returning data to the UI. If a card expires, the surrounding conversation text remains.
+
+## 9. Compliance boundary
+
+The current implementation has been reviewed against YouTube's published developer material for search, quota, API-data handling, credentials, attribution and external handoff.
+
+Elara does not currently:
+
+- download YouTube media;
+- create an offline media library;
+- proxy or extract streams;
+- isolate audio from video;
+- strip advertising;
+- bypass YouTube controls;
+- create a hidden player;
+- create an iframe/player from the search-card component.
+
+A public deployment still has operator-level obligations that repository code cannot certify by itself: application privacy/terms treatment, consent where applicable, Google Cloud project/key ownership and restrictions, and any formal YouTube compliance or quota-audit process applicable to that deployed API Client.
 
 Official references:
 
@@ -135,40 +192,42 @@ Official references:
 - [YouTube Data API `search.list` reference](https://developers.google.com/youtube/v3/docs/search/list)
 - [YouTube branding guidelines](https://developers.google.com/youtube/terms/branding-guidelines)
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
-**“No YouTube API key is configured.”** Open Settings → Lockbox, unlock the Lockbox, and save a YouTube Data API v3 key.
+**No YouTube API key is configured.** Open Settings → Lockbox, unlock it, and save a YouTube Data API v3 key.
 
-**“The YouTube API key was rejected.”** Check that the key belongs to the intended Google Cloud project, that the YouTube Data API v3 is enabled, and that key restrictions allow the deployed Elara origin and YouTube Data API.
+**The YouTube API key was rejected.** Confirm the API is enabled for the intended project and that key restrictions permit the deployed Elara origin.
 
-**“Quota exhausted.”** YouTube's search allowance is provider-side. The default dedicated search bucket resets at midnight Pacific Time. Elara cannot bypass that limit.
+**YouTube quota is exhausted.** That is provider-side. Elara cannot bypass Google's project allowance.
 
-**“Search budget exhausted.”** Elara's page-session safety ceiling has stopped further network searches. Cached searches can still be reused.
+**Elara's search budget is exhausted.** Either the eight-search page-session ceiling or the 24-search device/Pacific-day ceiling has refused another network search. Cached searches remain usable.
 
-**A thumbnail is blank.** The image may have failed to load or lacked complete dimensions. Elara deliberately does not substitute fabricated provider metadata.
+**A thumbnail is blank.** The image failed or provider metadata was incomplete. Elara intentionally does not fabricate replacement provider data.
 
-**A historical card says Unavailable or disappears after a later reload.** The stored destination may have failed canonical validation, or its API metadata may have crossed the retention boundary. The surrounding conversation text should remain.
+**An old card disappeared.** Its structured YouTube metadata may have expired or failed canonical validation. The conversation prose should remain.
 
-**Tapping Listen opens YouTube rather than a music-specific URL.** That is intentional. Listen is a user-intent label, not permission to rewrite a YouTube result onto another surface.
+**Listen opens ordinary YouTube.** Intent changes the action label, not the provider destination. Elara intentionally does not manufacture a YouTube Music URL.
 
-## 10. Developer map
+## 11. Developer map
 
 | Concern | Source |
 | --- | --- |
-| Media domain, hard caps and freshness | `src/domain/media.ts` |
-| Gemini tool declaration | `src/google/tools/gemini-declarations.ts` |
-| Tool registry description | `src/google/tools/registry.ts` |
+| Media domain / freshness / identity | `src/domain/media.ts` |
+| Gemini declaration | `src/google/tools/gemini-declarations.ts` |
 | Tool argument validation | `src/media/youtube-schema.ts` |
-| Tool execution | `src/media/tool-handler.ts` |
+| Tool execution + lean model projection | `src/media/tool-handler.ts` |
 | Query orchestration | `src/media/search.ts` |
-| Session search budget | `src/media/budget.ts` |
-| IndexedDB search cache | `src/media/cache.ts` |
-| Startup retention coordinator | `src/media/retention.ts` |
-| Conversation retention cleanup | `src/persistence/conversation.ts` |
-| YouTube `search.list` adapter | `src/media/youtube/service.ts` |
+| Session + daily budget | `src/media/budget.ts` |
+| Shared media IndexedDB schema | `src/media/storage.ts` |
+| Search cache | `src/media/cache.ts` |
+| YouTube adapter | `src/media/youtube/service.ts` |
 | Key validation | `src/media/youtube/validate.ts` |
 | Safe external handoff | `src/media/handoff.ts` |
-| Cards / responsive rail | `src/app/components/media/` |
-| Browser proof | `e2e/media-handoff.spec.ts`, `e2e/media-delivery.phase3.spec.ts`, and `e2e/media-lifecycle.acceptance.spec.ts` |
+| Startup retention | `src/media/retention.ts` |
+| Conversation retention | `src/persistence/conversation.ts` |
+| Card UI | `src/app/components/media/` |
+| Browser acceptance | `e2e/media-efficiency.phase1.spec.ts`, `e2e/media-handoff.spec.ts`, `e2e/media-delivery.phase3.spec.ts`, `e2e/media-lifecycle.acceptance.spec.ts` |
 
-The canonical low-token system document remains [`../media.md`](../media.md). This README is the human-readable operational guide.
+The compact engineering authority is [`../media.md`](../media.md).
+
+Phase-1 behavioral certification passed the complete CI matrix as run #1673 on `f888bb18da2563a32bcc4cfaceab8d0651c2c016`. The documentation commit that contains this guide is certified separately on its own exact head before Phase 2 begins.

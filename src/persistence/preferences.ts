@@ -1,12 +1,14 @@
 import Dexie, { type Table } from 'dexie';
 import { BUILT_IN_FONTS, googleFontFamilyFromCss2Url, type FontSelection } from '../ui/fontRegistry';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_AUTONOMY, DEFAULT_ROLEPLAY, type AppUiPreferences, type AutonomyPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
+import { DEFAULT_MEDIA_PLAYBACK_PREFERENCE, normalizeMediaPlaybackPreference, type MediaPlaybackPreference } from '../domain/playback';
 
 type PreferenceRecord =
   | { id: 'app-ui'; value: AppUiPreferences; updatedAt: number }
   | { id: 'chat-appearance'; value: ChatAppearancePreferences; updatedAt: number }
   | { id: 'roleplay'; value: RoleplayPreferences; updatedAt: number }
   | { id: 'autonomy'; value: AutonomyPreferences; updatedAt: number }
+  | { id: 'media-playback'; value: MediaPlaybackPreference; updatedAt: number }
   | { id: 'onboarding'; value: { completed: boolean }; updatedAt: number };
 
 const ONBOARDING_STORAGE_KEY = 'elara.onboarding.completed';
@@ -129,6 +131,19 @@ export async function loadAutonomyPreferences(): Promise<AutonomyPreferences> {
 export async function saveAutonomyPreferences(value: AutonomyPreferences): Promise<AutonomyPreferences> {
   const nextValue = normalizeAutonomy(value);
   await db.preferences.put({ id: 'autonomy', value: nextValue, updatedAt: Date.now() });
+  return nextValue;
+}
+
+export async function loadMediaPlaybackPreference(): Promise<MediaPlaybackPreference> {
+  const record = await db.preferences.get('media-playback');
+  return record?.id === 'media-playback'
+    ? normalizeMediaPlaybackPreference(record.value)
+    : DEFAULT_MEDIA_PLAYBACK_PREFERENCE;
+}
+
+export async function saveMediaPlaybackPreference(value: MediaPlaybackPreference): Promise<MediaPlaybackPreference> {
+  const nextValue = normalizeMediaPlaybackPreference(value);
+  await db.preferences.put({ id: 'media-playback', value: nextValue, updatedAt: Date.now() });
   return nextValue;
 }
 

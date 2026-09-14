@@ -40,10 +40,9 @@ function MediaCardBody({ item, action, unavailable = false }: {
   return <>
     <span className="media-card__thumb-wrap">
       <MediaThumbnail key={item.thumbnail?.url ?? 'no-thumbnail'} thumbnail={item.thumbnail} />
-      {/* Search cards display only metadata returned by the provider. */}
-      <span className="media-card__badge">YouTube</span>
     </span>
     <span className="media-card__meta">
+      <span className="media-card__source">Source: YouTube</span>
       <span className="media-card__title">{item.title}</span>
       {item.channel ? <span className="media-card__channel">{item.channel}</span> : null}
     </span>
@@ -65,9 +64,10 @@ function MediaCardBody({ item, action, unavailable = false }: {
  * corrupted stored destinations are rendered as inert cards with no anchor/href;
  * the UI never repairs an external URL into something that merely looks plausible.
  *
- * The visible YouTube trade name identifies the API-data source without drawing,
- * recolouring or otherwise manufacturing a YouTube logo asset. On valid results
- * the whole attributed card links to the canonical YouTube content.
+ * Source attribution is deliberately literal text rather than an imitation logo.
+ * This makes YouTube's role explicit without manufacturing/recolouring a graphical
+ * Brand Feature. On valid results the whole attributed card links to the canonical
+ * YouTube content.
  */
 export function MediaCard({ item, platform }: {
   readonly item: MediaItem;

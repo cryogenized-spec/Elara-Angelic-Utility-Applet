@@ -147,16 +147,32 @@ test.describe('Phase 1 media efficiency', () => {
 
     const continuation = modelRequests.find((payload) => JSON.stringify(payload).includes(VIDEO_ID));
     expect(continuation).toBeTruthy();
-    const continuationWire = JSON.stringify(continuation);
-    expect(continuationWire).toContain(TITLE);
-    expect(continuationWire).toContain('Efficiency Channel');
-    expect(continuationWire).toContain('phase one efficiency track');
-    expect(continuationWire).not.toContain('thumbnail');
-    expect(continuationWire).not.toContain('webUrl');
-    expect(continuationWire).not.toContain('embedUrl');
-    expect(continuationWire).not.toContain('apiDataFetchedAt');
-    expect(continuationWire).not.toContain('i.ytimg.com');
-    expect(continuationWire).not.toContain('youtube.com/watch');
+    const input = continuation?.input;
+    expect(Array.isArray(input)).toBe(true);
+    const functionResult = (input as Array<Record<string, unknown>>).find(
+      (entry) => entry.type === 'function_result' && entry.name === 'youtube.search',
+    );
+    expect(functionResult).toBeTruthy();
+    expect(typeof functionResult?.result).toBe('string');
+
+    const resultWire = String(functionResult?.result ?? '');
+    expect(JSON.parse(resultWire)).toEqual({
+      ok: true,
+      provider: 'youtube',
+      intent: 'listen',
+      results: [{
+        query: 'phase one efficiency track',
+        source: 'network',
+        items: [{ id: VIDEO_ID, kind: 'video', title: TITLE, channel: 'Efficiency Channel' }],
+      }],
+      failures: [],
+    });
+    expect(resultWire).not.toContain('thumbnail');
+    expect(resultWire).not.toContain('webUrl');
+    expect(resultWire).not.toContain('embedUrl');
+    expect(resultWire).not.toContain('apiDataFetchedAt');
+    expect(resultWire).not.toContain('i.ytimg.com');
+    expect(resultWire).not.toContain('youtube.com/watch');
   });
 
   test('the device-day ledger survives reload and is shared by a sibling tab', async ({ page, context }) => {

@@ -53,6 +53,10 @@ function resolvedApi(): YouTubeIframeApi | null {
   return api && typeof api.Player === 'function' ? api : null;
 }
 
+function asError(cause: unknown, fallback: string): Error {
+  return cause instanceof Error ? cause : new Error(fallback);
+}
+
 function loadIframeApi(): Promise<YouTubeIframeApi> {
   const existing = resolvedApi();
   if (existing) return Promise.resolve(existing);
@@ -83,12 +87,14 @@ function loadIframeApi(): Promise<YouTubeIframeApi> {
       script.async = true;
       script.dataset.elaraYoutubeIframeApi = 'true';
       createdScript = true;
+      script.addEventListener('error', onError, { once: true });
       document.head.appendChild(script);
+    } else {
+      script.addEventListener('error', onError, { once: true });
     }
-    script.addEventListener('error', onError, { once: true });
   }).catch((cause: unknown) => {
     iframeApiPromise = null;
-    throw cause;
+    throw asError(cause, 'The YouTube player API could not be loaded.');
   });
 
   return iframeApiPromise;
@@ -112,7 +118,7 @@ async function waitForIframeApi(signal: AbortSignal): Promise<YouTubeIframeApi> 
       },
       (cause: unknown) => {
         signal.removeEventListener('abort', onAbort);
-        reject(cause);
+        reject(asError(cause, 'The YouTube player API could not be loaded.'));
       },
     );
   });

@@ -149,21 +149,26 @@ export async function checkYouTubePlaybackReadiness(
     return failed('invalid-response', 'YouTube returned an invalid readiness response.');
   }
 
-  const matching = payload.items.find((candidate) => isRecord(candidate) && candidate.id === videoId);
+  const items: unknown[] = payload.items;
+  const matching: unknown = items.find((candidate) => isRecord(candidate) && candidate.id === videoId);
   let decision: PlaybackReadinessDecision;
 
-  if (!matching || !isRecord(matching)) {
+  if (!isRecord(matching)) {
     decision = blocked('unavailable', 'This YouTube video is no longer available for internal playback.');
-  } else if (!isRecord(matching.status)
-    || typeof matching.status.embeddable !== 'boolean'
-    || typeof matching.status.madeForKids !== 'boolean') {
-    return failed('invalid-response', 'YouTube did not return enough status information to verify internal playback safely.');
-  } else if (matching.status.madeForKids) {
-    decision = blocked('made-for-kids', 'This Made for Kids video will open on YouTube instead of playing inside Elara.');
-  } else if (!matching.status.embeddable) {
-    decision = blocked('not-embeddable', 'This YouTube video does not allow embedded playback.');
   } else {
-    decision = Object.freeze({ status: 'ready' as const });
+    const status = matching.status;
+    if (!isRecord(status)
+      || typeof status.embeddable !== 'boolean'
+      || typeof status.madeForKids !== 'boolean') {
+      return failed('invalid-response', 'YouTube did not return enough status information to verify internal playback safely.');
+    }
+    if (status.madeForKids) {
+      decision = blocked('made-for-kids', 'This Made for Kids video will open on YouTube instead of playing inside Elara.');
+    } else if (!status.embeddable) {
+      decision = blocked('not-embeddable', 'This YouTube video does not allow embedded playback.');
+    } else {
+      decision = Object.freeze({ status: 'ready' as const });
+    }
   }
 
   if (cacheable(decision)) readinessCache.set(videoId, decision);

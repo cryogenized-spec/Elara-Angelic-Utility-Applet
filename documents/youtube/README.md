@@ -1,79 +1,51 @@
 # YouTube Media in Elara
 
-This guide explains how Elara finds YouTube music/video results, protects search allowance, sends compact results back to Gemini, validates safe external destinations, and now performs a narrow playback-readiness check for the future internal player.
+This guide explains YouTube search, cards, quota protection, external handoff, playback readiness and the official internal player engine.
 
-The short version: **search cards still open YouTube externally today.** Elara now also has one global playback authority and a readiness boundary that can verify a selected video before a later internal-player phase, but there is still no YouTube iframe/player, stream extraction, hidden/background playback or card-level mini-player.
+The current boundary is important: **Elara now contains one official YouTube IFrame Player engine, but result cards still open YouTube externally.** The player engine is ready underneath the existing global playback authority; card/chooser routing comes in a later phase. There are no card-level mini-players, stream extractors, hidden players or second playback systems.
 
-> This is an implementation/compliance guide, not legal advice. Current Google/YouTube terms and policies take priority.
+> Implementation/compliance guide only. Current Google/YouTube terms and policies take priority.
 
-## 1. From a request to a YouTube card
+## 1. Search flow
 
-A request such as “put on some dark ambient” begins as an ordinary Gemini turn. Gemini decides whether `youtube.search` is useful.
+A media request stays on the existing search path:
 
 ```text
-You ask for music
-       ↓
-Gemini decides
-       ↓
-youtube.search
-       ↓
-validate + dedupe
-       ↓
-cache
-       ↓
-search quota guards
-       ↓
-YouTube search.list
-       ↓
-result cards
+request
+-> Gemini decides whether youtube.search is useful
+-> validate + normalize/dedupe
+-> cache
+-> 8-search page-session guard
+-> 24-search device/Pacific-day guard
+-> YouTube search.list
+-> structured cards + lean Gemini result
 ```
 
-Gemini is instructed to use one concise query by default. One tool call may contain at most three distinct searches. Equivalent queries collapse before cache/network work.
+Gemini should use one concise query by default; a tool call accepts at most three distinct normalized queries. One cache miss creates at most one `search.list` request with no pagination.
 
-`watch` and `listen` are presentation hints. They do not change the provider request/cache identity, so the same search can be reused across intents.
+`watch` and `listen` are presentation intent, not different provider identities or caches.
 
-Cards are first-class assistant content. They can appear before Gemini finishes prose, and a completed response can contain media without prose. Text, media and artifacts share one live assistant projection and one terminal persistence boundary.
+## 2. Search request and quota
 
-## 2. What search sends to YouTube
-
-Elara uses YouTube Data API v3 `search.list` directly from the browser:
+The browser uses YouTube Data API v3:
 
 ```text
 part=snippet
 type=video
-q=<concise query>
+q=<query>
 maxResults=5
 safeSearch=strict
 ```
 
-The API key is sent in `x-goog-api-key`, never in the URL, conversation, media card, Gemini result, cache row or diagnostics.
+The named YouTube Lockbox credential is sent in `x-goog-api-key`, never in the URL, conversation, Gemini continuation, media object, cache row or diagnostics.
 
-Elara never follows `nextPageToken`, so one cache miss produces at most one search request. It does not call `videos.list` to decorate every search result.
+Two local guards apply only to fresh `search.list` calls: eight per page session and 24 per device/Pacific quota day. IndexedDB transactions own the daily reservation; `BroadcastChannel` is advisory. A cache hit spends neither guard. If safe accounting is unavailable, a fresh search fails closed.
 
-## 3. Search quota protection
+These are local defensive limits, not substitutes for Google Cloud project quota.
 
-Two local guards protect real `search.list` requests:
+## 3. One media object, two views
 
-```text
-fresh search
-    ↓
-8 / page session
-    ↓
-24 / device
-Pacific quota day
-    ↓
-YouTube search.list
-```
-
-The eight-search page-session ceiling limits runaway tool loops. The 24-search device/day ceiling survives reloads and coordinates tabs in the same browser profile.
-
-The daily counter is part of the existing `elara-media-cache` IndexedDB authority. Transactions serialize reservations; `BroadcastChannel` is advisory only. If Elara cannot safely account for a fresh search, the search fails closed. Cache hits spend neither local guard.
-
-Successful searches are cached seven days; genuine empty results ten minutes. These are local defensive ceilings, not substitutes for Google Cloud project quota.
-
-## 4. What Gemini receives
-
-Gemini receives only the compact fields needed to reason about choices:
+The search tool result has one application object. Gemini receives the compact enumerable projection:
 
 ```text
 provider
@@ -86,47 +58,25 @@ channel
 bounded failures
 ```
 
-The browser retains heavier card data such as thumbnails, canonical URLs, compatibility embed metadata, provider-fetch time and the full `MediaItem`.
+The browser retains full card metadata such as thumbnail, canonical URL, compatibility `embedUrl`, provider fetch timestamp and full `MediaItem`. Those heavier fields are not serialized back into the Gemini continuation.
 
-Both views come from one tool-result object. Browser-only fields are non-enumerable so normal JSON serialization cannot accidentally send them back through the Gemini continuation.
+There is no separate model-side media authority.
 
-## 5. API key and Lockbox
+## 4. Result cards today
 
-The YouTube API key is a named secondary credential inside Elara's existing encrypted Lockbox. The decrypted value is available only through the Lockbox session and named accessor; there is no general media secret store.
+Cards remain external controls in Phase 4. **Watch** and **Listen** both use the exact canonical ordinary YouTube URL; Elara does not manufacture a `music.youtube.com` destination.
 
-Use a YouTube Data API v3 key belonging to the deployment's intended Google Cloud project and restrict it as tightly as practical. Do not commit it or paste it into source.
+Persisted card data is untrusted. Before handoff, Elara reconstructs the allowed destination from `provider + kind + id` and requires stored `webUrl` to match exactly. Hostile schemes/hosts, HTTP, aliases, malformed URLs, mismatched IDs and unexpected query parameters fail closed into an inert result.
 
-The Settings **Test Key** action uses a small `videos.list?part=id` request rather than `search.list`, so testing the credential does not spend a dedicated search call.
+On ordinary browsers the validated HTTPS URL opens normally. Supported Android Chromium-family flows may attempt an unpinned Android intent from the user tap with the same HTTPS URL as fallback. Android chooses the installed handler.
 
-Public YouTube search/readiness does not require a user's Google OAuth authorization.
+Phase 4 deliberately does not replace this card path with internal playback yet.
 
-## 6. Result cards and attribution
+## 5. One global playback authority
 
-Each card visibly says **Source: YouTube** and presents valid title/channel/thumbnail metadata from the API. Provider titles are not cosmetically rewritten, missing dimensions are not invented, and failed thumbnails degrade without unrelated replacement artwork.
-
-On narrow phone layouts cards stack into one column. Lazy-card geometry is reserved so image/component delivery does not unexpectedly collapse the conversation layout.
-
-The attribution remains literal text. Elara does not draw or approximate a YouTube logo. Any later graphical Brand Feature must use YouTube-approved resources/rules.
-
-## 7. What happens when you tap a card today
-
-Both **Watch** and **Listen** still use the canonical ordinary YouTube URL. Elara does not manufacture a `music.youtube.com` URL from an ordinary Data API result.
-
-Persisted card data is untrusted. Before a card becomes clickable, Elara reconstructs the allowed destination from provider + kind + media ID and requires stored `webUrl` to match exactly.
-
-These fail closed: hostile schemes/hosts, HTTP, malformed URLs, mismatched IDs, aliases and unexpected query parameters. An invalid result becomes an inert **Unavailable** card rather than being repaired into a guess.
-
-Ordinary browsers open the canonical HTTPS destination. Supported Android Chromium-family flows may attempt an unpinned `intent://` handoff from the user tap, carrying that same HTTPS URL as fallback. Android decides which installed application handles it.
-
-Phase 3 does **not** change card click behavior. Internal readiness is an application seam for the upcoming chooser/player phase, not a second card implementation.
-
-## 8. The playback authority now present
-
-Elara mounts exactly one global `PlaybackProvider`. It owns the one playback lifecycle and the user's playback preference:
+Elara mounts exactly one `PlaybackProvider` above the application. It owns one reducer, selected media, request lineage, readiness and player election:
 
 ```text
-preference: ask | embedded | external
-
 idle
  ↓
 requested
@@ -137,153 +87,206 @@ ready
  ↓
 loading
  ↓
-playing ↔ paused
+paused ↔ playing
  ↓
-ended
+ended ──► playing   # native replay
 
-active state → failed
+active phase -> failed
+reset -> idle
 ```
 
-Only the preference is persisted in the existing preferences database. Selected track, request ID, readiness result, playback phase/position and failures are session-only.
+Only the preference `ask | embedded | external` is persisted, using the existing preferences database. The selected video, request ID, readiness decision, player instance, current phase/position and failures are session-only.
 
-Every accepted selection receives one request ID. A newer valid selection supersedes the previous request. Late readiness/player callbacks from the older request cannot alter the newer state. Reset/unmount clears active session state.
+Every accepted selection receives one request ID. The newest accepted request wins. Late provider callbacks from an older request cannot alter the current one.
 
-There is no second media state machine, playback database, queue or event bus.
+There is no second playback reducer, database, queue, event bus or card-local controller.
 
-## 9. Playback readiness
+## 6. Readiness remains the gate
 
-When the existing playback authority is explicitly asked to prepare a fresh YouTube video for future internal playback, it enters `checking` and calls one provider-neutral readiness port. That port first applies the same canonical identity trust boundary used by external handoff.
+`PlaybackProvider.prepare(item)` is still readiness-only. It **does not create an iframe**.
 
-Only then is the YouTube-specific module loaded. It sends:
+It validates the same canonical provider identity used by external handoff, then lazily calls YouTube `videos.list`:
 
 ```text
-GET youtube/v3/videos
 part=id,status
-id=<exact video id>
+id=<exact 11-character video id>
 maxResults=1
-x-goog-api-key: <Lockbox key>
+x-goog-api-key: <named Lockbox key>
 ```
 
-This `videos.list` call is separate from `search.list` and does not consume or mutate Elara's 8-session/24-device search guards.
-
-The response must contain the exact requested video ID and explicit boolean values for `status.embeddable` and `status.madeForKids`.
+The exact requested ID must return explicit boolean `status.embeddable` and `status.madeForKids` values.
 
 ```text
-exists + embeddable + not MFK -> internally ready
-missing video                  -> internal playback blocked
-embeddable=false               -> internal playback blocked
-madeForKids=true               -> internal playback blocked for now
-missing/invalid status         -> readiness failure
-network/key/quota failure      -> readiness failure
-cancelled request              -> aborted, no late state mutation
+exists + embeddable + !MFK -> ready
+missing                      -> blocked/unavailable
+embeddable=false             -> blocked/not-embeddable
+madeForKids=true             -> blocked/made-for-kids
+invalid status               -> readiness failure
+key/quota/network failure    -> readiness failure
+cancelled                    -> aborted
 ```
 
-YouTube notes that `embeddable=true` still does not guarantee a future iframe will actually play: platform rules/content claims can reject playback later. Therefore Phase 3 means **eligible to attempt internal playback**, not guaranteed playback.
+These `videos.list` readiness calls do not consume or mutate the search-specific 8/24 guards.
 
-Made-for-Kids content remains external-only in this phase. YouTube requires special handling for an embedded MFK player, so Elara will not elect that content internally ready until the later player phase explicitly implements and tests the required behavior.
+Made-for-Kids remains external-only and therefore never reaches the player engine.
 
-Ready/blocked decisions may be memoized only in memory for the current browser session. They are not written to IndexedDB or conversations. Transient failures/cancellation are not cached.
+## 7. Starting internal playback
 
-## 10. `embedUrl` is not trusted
-
-Older/current `MediaItem` rows still contain an `embedUrl` compatibility field from the search adapter. The new readiness path deliberately ignores it.
-
-Internal authority is:
+Phase 4 adds one explicit composed path:
 
 ```text
-provider
-+
-validated video ID
-+
-canonical stored web identity check
+PlaybackProvider.start(item)
+-> existing prepare(item)
+-> if ready: existing begin-load event
+-> one global PlaybackPlayerHost
+-> provider-neutral player port
+-> official YouTube IFrame Player adapter
 ```
 
-A malicious but syntactically HTTPS persisted `embedUrl` therefore has no route into readiness or the future player. Player URLs will be derived at the player boundary rather than read from persisted media data.
+This is the important anti-parallel-system rule: `start()` does not duplicate selection/readiness logic. It calls the already-certified `prepare()` path and then uses the existing reducer's `loading` phase.
 
-## 11. Storage and freshness
+Current cards do not call `start()` yet. That routing decision belongs to the later chooser/card phase.
 
-Elara stores YouTube search metadata locally in the search cache and, for completed assistant responses, conversation records. It does not store video/audio bytes.
+## 8. Official YouTube IFrame Player
 
-Fresh provider results carry `apiDataFetchedAt`. Persisted YouTube API metadata is displayable only while valid and younger than 30 days; exactly 30 days is expired. Legacy undated, future-dated, malformed and stale rows fail closed.
+The player port validates the canonical media identity again before provider loading. It then dynamically imports the YouTube adapter. Persisted `embedUrl` is ignored entirely; the player is derived from the validated YouTube video ID.
 
-Startup maintenance physically sweeps stale/corrupt media from media cache/conversation storage, while conversation reads independently enforce the same freshness boundary.
+The adapter loads the official page-global SDK:
 
-Playback preference uses the existing preferences database. Playback/readiness state is not persisted. The readiness memoization is session memory only.
+```text
+https://www.youtube.com/iframe_api
+```
 
-## 12. Compliance boundary
+Concurrent player requests share one SDK-load promise rather than injecting duplicate scripts. The elected player uses YouTube's native controls with:
 
-Current implementation has been reviewed against YouTube material relevant to search, API-data handling, credentials, attribution, MFK status, embeddability and external handoff.
+```text
+autoplay=0
+controls=1
+playsinline=1
+origin=<current HTTP(S) Elara origin when available>
+```
 
-Elara still does not:
+Elara explicitly keeps page referrer policy at `strict-origin-when-cross-origin` so embedded requests retain normal client/origin identity. The player surface is 16:9 and never smaller than YouTube's 200px minimum. Elara puts no custom overlay in front of the iframe and does not replace YouTube's transport controls.
 
-- download YouTube media;
-- create an offline media library;
-- proxy/extract streams;
+Autoplay is off. The official player's `onReady` therefore maps to Elara's existing `paused` state: loaded and ready for the user's native play gesture, but not yet playing.
+
+Provider state mapping is:
+
+```text
+YT ready   -> paused
+YT state 1 -> playing
+YT state 2 -> paused
+YT state 0 -> ended
+```
+
+A native replay may move `ended -> playing` without electing a new application request.
+
+## 9. Cancellation and single-player ownership
+
+There is one global player host. When a newer valid selection wins, the older request is aborted and its player session is destroyed. Reset and provider unmount perform the same teardown.
+
+Abort is an efficiency mechanism; request ID lineage is the correctness mechanism. If the provider sends a late callback after request A has been superseded by B, the callback still carries A's request ID and the reducer ignores it.
+
+The player mount also carries a host-owner token. A stale session's cleanup cannot remove the DOM owned by a newer session.
+
+Destroy is idempotent.
+
+## 10. Player errors
+
+Known YouTube IFrame API errors are translated into bounded application messages rather than raw provider details. Examples include invalid video ID, unavailable video, embedded playback disabled and missing client identity/referrer information.
+
+If the SDK or adapter cannot load, Elara moves the existing request into the existing `failed` phase using a safe generic message. It does not create a fallback player system.
+
+A failed internal attempt does not mutate the original valid card. External handoff remains a separately validated path.
+
+## 11. `embedUrl` compatibility field
+
+`MediaItem.embedUrl` still exists for compatibility with older/current media rows, but it has **no playback authority**.
+
+Neither readiness nor the player adapter reads it to choose a destination. Even a syntactically valid hostile HTTPS `embedUrl` cannot become an internal iframe target.
+
+Current authority is:
+
+```text
+provider + kind + video id
++
+exact canonical stored webUrl validation
+```
+
+Removal of the compatibility field is a separate persistence/migration decision.
+
+## 12. Storage and retention
+
+Elara does not store YouTube video/audio bytes. Search metadata may exist in the search cache and in completed conversation records.
+
+Provider metadata carries `apiDataFetchedAt`. Persisted YouTube API metadata is displayable only while valid and younger than 30 days; exactly 30 days is expired. Undated legacy, malformed and future-dated media fail closed. Startup maintenance and conversation reads both enforce the boundary.
+
+Player state is never written to conversations or IndexedDB. Readiness's positive/blocked memoization is browser-session memory only; transient failures are not cached.
+
+## 13. What Elara does not do
+
+Phase 4 still does not:
+
+- download, proxy or extract YouTube streams;
 - isolate audio from video;
-- strip advertising;
-- bypass YouTube controls;
-- create a hidden/background player;
-- create an iframe/player from media cards;
-- load the YouTube IFrame Player API;
-- persist active playback/readiness state.
+- create an offline media library;
+- remove or cover YouTube controls/branding;
+- autoplay the embedded player;
+- create hidden/background playback;
+- create card-level players;
+- add custom transport controls or iframe overlays;
+- persist active playback state;
+- route result-card taps to the internal player yet;
+- maintain a second playback lifecycle alongside `PlaybackProvider`.
 
-A public deployment still has operator-level privacy/terms/consent, Google Cloud ownership/restriction and applicable YouTube audit/compliance obligations that repository code cannot certify alone.
+## 14. Troubleshooting
 
-Official references:
+**No API key / rejected key.** Unlock the Lockbox and verify a YouTube Data API v3 key for the intended Google Cloud project, with suitable API/origin restrictions.
 
-- [YouTube API Services Developer Policies](https://developers.google.com/youtube/terms/developer-policies)
-- [YouTube API Services Terms of Service](https://developers.google.com/youtube/terms/api-services-terms-of-service)
-- [YouTube Terms of Service](https://www.youtube.com/t/terms)
-- [Google Privacy Policy](https://policies.google.com/privacy)
-- [YouTube Data API quota/compliance audits](https://developers.google.com/youtube/v3/guides/quota_and_compliance_audits)
-- [YouTube Data API `search.list`](https://developers.google.com/youtube/v3/docs/search/list)
-- [YouTube Data API `videos.list`](https://developers.google.com/youtube/v3/docs/videos/list)
-- [Video resource/status fields](https://developers.google.com/youtube/v3/docs/videos)
-- [Finding Made-for-Kids status](https://developers.google.com/youtube/v3/guides/made_for_kids_status)
-- [YouTube branding guidelines](https://developers.google.com/youtube/terms/branding-guidelines)
+**Search budget exhausted.** This is Elara's eight-session or 24-device/Pacific-day `search.list` protection. It is separate from readiness.
 
-## 13. Troubleshooting
+**Readiness says unavailable / not embeddable / Made for Kids.** Internal playback is blocked. The original valid card can still use normal external handoff.
 
-**No YouTube API key is configured / readiness says key unavailable.** Unlock the Lockbox and confirm a YouTube Data API v3 key is stored.
+**Player API fails to load.** The existing request becomes `failed`; no alternate or hidden player is created.
 
-**The YouTube API key was rejected.** Confirm YouTube Data API v3 is enabled and key restrictions permit the deployed Elara origin.
+**Player is loaded but not playing.** That is expected in Phase 4: autoplay is off and official `onReady` maps to `paused` until the user acts on native YouTube controls.
 
-**YouTube quota is exhausted.** That is provider/project-side; Elara cannot bypass it.
+**Listen still opens ordinary YouTube.** Expected today. Cards have not yet been routed through the `ask | embedded | external` chooser.
 
-**Elara's search budget is exhausted.** The eight-search page-session or 24-search device/Pacific-day guard refused another `search.list` request. Cached searches still work; this is distinct from playback-readiness checking.
+**Old card disappeared.** Its provider metadata may have expired or failed canonical validation; surrounding conversation text should remain.
 
-**Internal readiness says unavailable/not embeddable/Made for Kids.** The result card itself is not destroyed. The normal external YouTube handoff remains independently validated.
-
-**A thumbnail is blank.** Provider image delivery failed or metadata was incomplete; Elara intentionally does not fabricate replacement provider data.
-
-**An old card disappeared.** Its structured YouTube metadata may have expired or failed canonical validation; surrounding conversation prose should remain.
-
-**Listen opens ordinary YouTube.** Intent changes the label, not provider destination. Elara does not invent a YouTube Music URL.
-
-## 14. Developer map
+## 15. Developer map
 
 | Concern | Source |
 | --- | --- |
-| Media domain / freshness / identity | `src/domain/media.ts` |
-| Playback domain / lifecycle | `src/domain/playback.ts` |
-| Global playback authority | `src/media/playback/PlaybackProvider.tsx` |
+| Media identity/freshness | `src/domain/media.ts` |
+| Playback lifecycle | `src/domain/playback.ts` |
+| Global authority / `prepare` / `start` | `src/media/playback/PlaybackProvider.tsx` |
 | Readiness port | `src/media/playback/readiness.ts` |
-| YouTube readiness adapter | `src/media/youtube/readiness.ts` |
-| Gemini declaration | `src/google/tools/gemini-declarations.ts` |
-| Tool execution + lean model projection | `src/media/tool-handler.ts` |
-| Query orchestration | `src/media/search.ts` |
-| Session + daily search budget | `src/media/budget.ts` |
-| Shared search IndexedDB schema | `src/media/storage.ts` |
-| Search cache | `src/media/cache.ts` |
-| YouTube search adapter | `src/media/youtube/service.ts` |
-| Key validation | `src/media/youtube/validate.ts` |
-| Safe external handoff | `src/media/handoff.ts` |
+| YouTube readiness | `src/media/youtube/readiness.ts` |
+| Player port | `src/media/playback/player.ts` |
+| Single global host | `src/media/playback/PlaybackPlayerHost.tsx` |
+| Host geometry | `src/media/playback/player-host.css` |
+| Official iframe adapter | `src/media/youtube/player.ts` |
 | Playback preference | `src/persistence/preferences.ts` |
-| Startup/conversation retention | `src/media/retention.ts`, `src/persistence/conversation.ts` |
+| External handoff | `src/media/handoff.ts` |
+| Search / cache / budgets | `src/media/search.ts`, `src/media/cache.ts`, `src/media/budget.ts` |
+| Search provider | `src/media/youtube/service.ts` |
 | Card UI | `src/app/components/media/` |
-| Playback/readiness tests | `src/media/playback/*.test.ts*`, `src/media/youtube/readiness.test.ts` |
-| Browser acceptance | `e2e/media-efficiency.phase1.spec.ts`, `e2e/media-handoff.spec.ts`, `e2e/media-delivery.phase3.spec.ts`, `e2e/media-lifecycle.acceptance.spec.ts` |
+| Phase-4 tests | `src/domain/playback.phase4.test.ts`, `src/media/playback/player.test.ts`, `src/media/playback/PlaybackProvider.phase4.test.tsx`, `src/media/youtube/player.test.ts` |
 
-The compact engineering authority is [`../media.md`](../media.md).
+Compact engineering authority: [`../media.md`](../media.md).
 
-Phase-3 behavioral certification candidate is `6ec51b582713bbc65e50590706984f48f663e1da`; the final documentation head is certified separately before this phase is closed.
+Phase-4 behavioral certification: CI #1687 passed the complete repository matrix on `34382bc5c01ab486444920c39df487d17f03e8b3`.
+
+## Official references
+
+- [YouTube IFrame Player API Reference](https://developers.google.com/youtube/iframe_api_reference)
+- [YouTube Embedded Players and Player Parameters](https://developers.google.com/youtube/player_parameters)
+- [YouTube API Services Required Minimum Functionality](https://developers.google.com/youtube/terms/required-minimum-functionality)
+- [YouTube API Services Developer Policies](https://developers.google.com/youtube/terms/developer-policies)
+- [YouTube Data API `search.list`](https://developers.google.com/youtube/v3/docs/search/list)
+- [YouTube Data API `videos.list`](https://developers.google.com/youtube/v3/docs/videos/list)
+- [Video status fields](https://developers.google.com/youtube/v3/docs/videos)
+- [Made-for-Kids status](https://developers.google.com/youtube/v3/guides/made_for_kids_status)
+- [YouTube branding guidelines](https://developers.google.com/youtube/terms/branding-guidelines)

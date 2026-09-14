@@ -209,9 +209,6 @@ function PlaybackProviderRoot({
     }
     if (!isPlaybackRequestId(requestId)) return null;
 
-    // A newer accepted selection owns the one readiness/player lane. Aborting
-    // old readiness saves provider work where possible; player teardown follows
-    // the same elected request id inside the one global host.
     readinessAttemptRef.current?.controller.abort();
     readinessAttemptRef.current = null;
     dispatch({ type: 'select', requestId, item });
@@ -250,9 +247,6 @@ function PlaybackProviderRoot({
     return Object.freeze({ requestId, decision });
   }, [readinessPort, select]);
 
-  // Phase 4 composes the already-certified readiness path with the reducer's
-  // existing load phase. The player host observes only `loading`; prepare()
-  // therefore remains a readiness-only operation and creates no iframe.
   const start = useCallback(async (item: MediaItem): Promise<PlaybackPreparation | null> => {
     const preparation = await prepare(item);
     if (!preparation || preparation.decision.status !== 'ready') return preparation;
@@ -319,6 +313,7 @@ function PlaybackProviderRoot({
         markPaused={markPaused}
         markEnded={markEnded}
         markFailed={markFailed}
+        reset={reset}
       />
     </PlaybackContext.Provider>
   );

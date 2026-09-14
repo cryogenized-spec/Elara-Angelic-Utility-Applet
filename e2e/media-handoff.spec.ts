@@ -75,6 +75,10 @@ async function ask(page: Page, text: string): Promise<void> {
   await page.getByRole('button', { name: 'Send message' }).click();
 }
 
+function mediaCard(page: Page, index = 0) {
+  return page.locator('.media-card').filter({ hasText: 'Lo-Fi Roadtrip — 1 Hour' }).nth(index);
+}
+
 async function persistedMediaTimestampCount(page: Page): Promise<number> {
   return page.evaluate(async () => {
     const database = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -210,7 +214,7 @@ test.describe('YouTube media results', () => {
     await unlockTestLockbox(page);
 
     await ask(page, 'put on some lofi');
-    const firstCard = page.getByRole('link', { name: /Lo-Fi Roadtrip/ });
+    const firstCard = mediaCard(page);
     await expect(firstCard).toBeVisible();
     expect(providerRequests).toHaveLength(1);
 
@@ -245,7 +249,6 @@ test.describe('YouTube media results', () => {
     expect(providerUrl.searchParams.has('pageToken')).toBe(false);
 
     await expect(page.locator('.media-rail iframe, .media-rail video, .media-rail audio')).toHaveCount(0);
-    await expect(firstCard).toHaveAttribute('href', 'https://www.youtube.com/watch?v=lofiVid1');
     await expect(firstCard).toContainText('Listen');
     await expect(firstCard).toContainText('YouTube');
     await expect(firstCard).toContainText('Chill Wave Radio');
@@ -253,10 +256,9 @@ test.describe('YouTube media results', () => {
     await expect.poll(() => persistedMediaTimestampCount(page)).toBeGreaterThan(0);
 
     await ask(page, 'show me that lofi video');
-    const secondCard = page.getByRole('link', { name: /Lo-Fi Roadtrip/ }).nth(1);
+    const secondCard = mediaCard(page, 1);
     await expect(secondCard).toBeVisible();
     expect(providerRequests).toHaveLength(1);
-    await expect(secondCard).toHaveAttribute('href', 'https://www.youtube.com/watch?v=lofiVid1');
     await expect(secondCard).toContainText('Watch');
 
     const cacheIntents = await page.evaluate(async () => {
@@ -298,7 +300,7 @@ test.describe('YouTube media results', () => {
     await page.goto('');
     await unlockTestLockbox(page);
     await ask(page, 'put on some lofi');
-    await expect(page.getByRole('link', { name: /Lo-Fi Roadtrip/ })).toBeVisible();
+    await expect(mediaCard(page)).toBeVisible();
     await expect(page.getByText('Historical recommendation remains readable.')).toBeVisible();
     await expect.poll(() => persistedMediaTimestampCount(page)).toBeGreaterThan(0);
 
@@ -349,13 +351,16 @@ test.describe('YouTube media results', () => {
       await unlockTestLockbox(page);
       await ask(page, 'put on some lofi');
 
-      const card = page.getByRole('link', { name: /Lo-Fi Roadtrip/ });
+      const card = mediaCard(page);
       await expect(card).toBeVisible();
       expect(providerCalls).toHaveLength(1);
-      await expect(card).toHaveAttribute('href', 'https://www.youtube.com/watch?v=lofiVid1');
-      await expect(card).toHaveAttribute('title', /on YouTube$/);
+      await card.locator('.media-card__primary').click();
 
-      const intentHref = await card.getAttribute('data-intent-href');
+      const external = card.getByRole('link', { name: 'Open YouTube' });
+      await expect(external).toBeVisible();
+      await expect(external).toHaveAttribute('href', 'https://www.youtube.com/watch?v=lofiVid1');
+
+      const intentHref = await external.getAttribute('data-intent-href');
       expect(intentHref).toContain('intent://www.youtube.com/watch?v=lofiVid1#Intent;');
       expect(intentHref).toContain('scheme=https;');
       expect(intentHref).toContain('category=android.intent.category.BROWSABLE');

@@ -249,7 +249,7 @@ test.describe('YouTube media results', () => {
     expect(providerUrl.searchParams.has('pageToken')).toBe(false);
 
     await expect(page.locator('.media-rail iframe, .media-rail video, .media-rail audio')).toHaveCount(0);
-    await expect(firstCard).toContainText('Listen');
+    await expect(firstCard).toHaveClass(/media-card--listen/);
     await expect(firstCard).toContainText('YouTube');
     await expect(firstCard).toContainText('Chill Wave Radio');
 
@@ -259,7 +259,7 @@ test.describe('YouTube media results', () => {
     const secondCard = mediaCard(page, 1);
     await expect(secondCard).toBeVisible();
     expect(providerRequests).toHaveLength(1);
-    await expect(secondCard).toContainText('Watch');
+    await expect(secondCard).toHaveClass(/media-card--watch/);
 
     const cacheIntents = await page.evaluate(async () => {
       const database = await new Promise<IDBDatabase>((resolve, reject) => {

@@ -82,9 +82,10 @@ describe('MediaCard', () => {
     expect(renderToStaticMarkup(<MediaCard item={item({ channel: undefined })} />)).not.toContain('media-card__channel');
   });
 
-  it('visibly attributes the API result to YouTube', () => {
+  it('visibly attributes the API result to YouTube without imitating a logo', () => {
     const html = renderToStaticMarkup(<MediaCard item={item()} />);
-    expect(html).toContain('media-card__badge">YouTube');
+    expect(html).toContain('media-card__source">Source: YouTube');
+    expect(html).not.toContain('media-card__badge');
   });
 
   it.each([
@@ -226,6 +227,11 @@ describe('MediaCard stylesheet contract', () => {
 
   it('keeps the action row at a thumb-sized tap target', () => {
     expect(css).toMatch(/\.media-card__cta\s*\{[^}]*min-height:\s*44px/s);
+  });
+
+  it('styles attribution as ordinary source text rather than an imitation badge', () => {
+    expect(css).toMatch(/\.media-card__source\s*\{/);
+    expect(css).not.toMatch(/\.media-card__badge\s*\{/);
   });
 
   it('makes unavailable cards visibly non-interactive', () => {

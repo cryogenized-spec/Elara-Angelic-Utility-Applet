@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, type MouseEvent } from 'react';
 import type { MediaItem } from '../../../domain/media';
 import { mediaIntentOf } from '../../../domain/media';
+import { usePlaybackAuthority } from '../../../media/playback/PlaybackProvider';
 import {
   detectHandoffPlatform,
   mediaDestinationUrl,
@@ -32,10 +33,11 @@ function MediaThumbnail({ thumbnail }: { thumbnail: MediaItem['thumbnail'] }) {
   );
 }
 
-function MediaCardBody({ item, action, unavailable = false }: {
+function MediaCardBody({ item, action, unavailable = false, target }: {
   readonly item: MediaItem;
   readonly action: string;
   readonly unavailable?: boolean;
+  readonly target?: string;
 }) {
   return <>
     <span className="media-card__thumb-wrap">
@@ -48,37 +50,52 @@ function MediaCardBody({ item, action, unavailable = false }: {
     </span>
     <span className="media-card__cta">
       <span className="media-card__action">{unavailable ? 'Unavailable' : action}</span>
-      {!unavailable && <span className="media-card__target" aria-hidden="true">↗</span>}
+      {!unavailable && target ? <span className="media-card__target" aria-hidden="true">{target}</span> : null}
     </span>
   </>;
 }
 
+function playbackStatusLabel(phase: ReturnType<typeof usePlaybackAuthority>['state']['phase']): string | null {
+  if (phase === 'requested' || phase === 'checking' || phase === 'ready') return 'Checking playback…';
+  if (phase === 'loading') return 'Loading player…';
+  if (phase === 'paused') return 'Player ready';
+  if (phase === 'playing') return 'Playing here';
+  if (phase === 'ended') return 'Playback ended';
+  return null;
+}
+
 /**
- * One resolved media result.
+ * One resolved media result routed through the singular playback authority.
  *
- * Deliberately a link, not a player. There is no iframe and no player script, so
- * the card costs an image and nothing else — and accidental audio is impossible by
- * construction rather than prevented by a flag someone can later flip.
- *
- * The whole settled card is the control rather than a button inside it. Unsafe or
- * corrupted stored destinations are rendered as inert cards with no anchor/href;
- * the UI never repairs an external URL into something that merely looks plausible.
- *
- * Source attribution is deliberately literal text rather than an imitation logo.
- * This makes YouTube's role explicit without manufacturing/recolouring a graphical
- * Brand Feature. On valid results the whole attributed card links to the canonical
- * YouTube content.
+ * The MediaItem remains one representation regardless of destination. `external`
+ * preserves the existing canonical handoff; `embedded` calls the already-owned
+ * PlaybackProvider.start() path; `ask` exposes only a local disclosure choice
+ * between those same two routes. The card never owns player lifecycle state.
  */
 export function MediaCard({ item, platform }: {
   readonly item: MediaItem;
   readonly platform?: HandoffPlatform;
 }) {
+  const [chooserOpen, setChooserOpen] = useState(false);
+  const playback = usePlaybackAuthority();
   const listen = mediaIntentOf(item) === 'listen';
   const resolved = platform ?? detectHandoffPlatform();
   const href = mediaHandoffHref(item, resolved);
   const destination = mediaDestinationUrl(item);
   const intentHref = mediaHandoffIntentHref(item, resolved);
   const label = mediaHandoffLabel(item);
+  const route = playback.preferenceStatus === 'ready' ? playback.preference : 'ask';
+  const ownsPlayback = playback.state.item?.provider === item.provider && playback.state.item.id === item.id;
+  const statusLabel = ownsPlayback ? playbackStatusLabel(playback.state.phase) : null;
+  const internalBusy = ownsPlayback && (
+    playback.state.phase === 'requested'
+    || playback.state.phase === 'checking'
+    || playback.state.phase === 'ready'
+    || playback.state.phase === 'loading'
+    || playback.state.phase === 'paused'
+    || playback.state.phase === 'playing'
+    || playback.state.phase === 'ended'
+  );
 
   if (!href || !destination) {
     return (
@@ -91,35 +108,91 @@ export function MediaCard({ item, platform }: {
     );
   }
 
-  function handleClick(event: React.MouseEvent<HTMLAnchorElement>): void {
+  function handleExternalClick(event: MouseEvent<HTMLAnchorElement>): void {
     if (!resolved.isAndroid || !intentHref) return;
     event.preventDefault();
     try {
       window.location.href = intentHref;
     } catch {
-      window.open(destination, '_blank', 'noopener,noreferrer');
+      window.open(destination!, '_blank', 'noopener,noreferrer');
       return;
     }
     // If the browser stayed visible after the Android intent attempt, preserve a
     // safe path to the exact same canonical HTTPS destination.
     window.setTimeout(() => {
       if (document.visibilityState === 'visible') {
-        window.open(destination, '_blank', 'noopener,noreferrer');
+        window.open(destination!, '_blank', 'noopener,noreferrer');
       }
     }, 700);
   }
 
-  return (
+  function startEmbedded(): void {
+    setChooserOpen(false);
+    void playback.start(item).catch(() => undefined);
+  }
+
+  const externalLink = (className: string, text: string) => (
     <a
-      className={`media-card media-card--${listen ? 'listen' : 'watch'}`}
+      className={className}
       href={href}
       target="_blank"
       rel="noreferrer noopener"
-      title={`Open “${item.title}” on YouTube`}
       data-intent-href={intentHref}
-      onClick={handleClick}
+      onClick={handleExternalClick}
     >
-      <MediaCardBody item={item} action={label} />
+      {text}
     </a>
+  );
+
+  if (route === 'external') {
+    return (
+      <a
+        className={`media-card media-card--${listen ? 'listen' : 'watch'}`}
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        title={`Open “${item.title}” on YouTube`}
+        data-intent-href={intentHref}
+        onClick={handleExternalClick}
+      >
+        <MediaCardBody item={item} action={label} target="↗" />
+      </a>
+    );
+  }
+
+  const chooserId = `media-playback-${item.provider}-${item.id}`;
+  const failed = ownsPlayback && playback.state.phase === 'failed' && playback.state.error;
+
+  return (
+    <article className={`media-card media-card--${listen ? 'listen' : 'watch'} media-card--routed`}>
+      <button
+        className="media-card__primary"
+        type="button"
+        disabled={internalBusy}
+        aria-expanded={route === 'ask' ? chooserOpen : undefined}
+        aria-controls={route === 'ask' ? chooserId : undefined}
+        onClick={route === 'embedded' ? startEmbedded : () => setChooserOpen((open) => !open)}
+      >
+        <MediaCardBody
+          item={item}
+          action={statusLabel ?? (route === 'embedded' ? `Play ${listen ? 'here' : 'here'}` : 'Choose playback')}
+          target={route === 'ask' ? '›' : undefined}
+        />
+      </button>
+
+      {route === 'ask' && chooserOpen ? (
+        <div className="media-card__chooser" id={chooserId} role="group" aria-label={`Choose how to play ${item.title}`}>
+          <button type="button" className="media-card__choice" onClick={startEmbedded}>Play here</button>
+          {externalLink('media-card__choice media-card__choice--external', 'Open YouTube')}
+        </div>
+      ) : null}
+
+      {failed ? (
+        <div className="media-card__failure" role="status">
+          <span>{playback.state.error}</span>
+          {externalLink('media-card__fallback', 'Open YouTube instead')}
+        </div>
+      ) : null}
+    </article>
   );
 }

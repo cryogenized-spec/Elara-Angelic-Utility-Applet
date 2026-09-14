@@ -8,9 +8,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlaybackAuthority } from '../../../media/playback/PlaybackProvider';
 import type { MediaItem } from '../../../domain/media';
 
-const playbackHolder = vi.hoisted(() => ({ current: null as unknown }));
+const playbackHolder = vi.hoisted((): { current: PlaybackAuthority | null } => ({ current: null }));
 vi.mock('../../../media/playback/PlaybackProvider', () => ({
-  usePlaybackAuthority: () => playbackHolder.current,
+  usePlaybackAuthority: (): PlaybackAuthority => {
+    const current = playbackHolder.current;
+    if (!current) throw new Error('Playback authority test fixture is not installed.');
+    return current;
+  },
 }));
 
 import { MediaCard } from './MediaCard';
@@ -18,6 +22,7 @@ import { MessageMedia } from './MessageMedia';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
+const NOW = 1_800_000_000_000;
 const cssSheet = readFileSync(resolve(process.cwd(), 'src/app/components/media/media-card.css'), 'utf8');
 
 function item(overrides: Partial<MediaItem> = {}): MediaItem {
@@ -31,7 +36,7 @@ function item(overrides: Partial<MediaItem> = {}): MediaItem {
     thumbnail: { url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg', width: 480, height: 360 },
     webUrl: 'https://www.youtube.com/watch?v=abc123',
     embedUrl: 'https://www.youtube-nocookie.com/embed/abc123?autoplay=0',
-    apiDataFetchedAt: Date.now() - 1_000,
+    apiDataFetchedAt: NOW - 1_000,
     ...overrides,
   };
 }
@@ -42,18 +47,18 @@ function playbackAuthority(overrides: Partial<PlaybackAuthority> = {}): Playback
     preference: 'external',
     preferenceStatus: 'ready',
     preferenceError: null,
-    setPreference: vi.fn(async (value) => value),
-    select: vi.fn(() => null),
-    prepare: vi.fn(async () => null),
-    start: vi.fn(async () => null),
-    beginCheck: vi.fn(),
-    markReady: vi.fn(),
-    beginLoad: vi.fn(),
-    markPlaying: vi.fn(),
-    markPaused: vi.fn(),
-    markEnded: vi.fn(),
-    markFailed: vi.fn(),
-    reset: vi.fn(),
+    setPreference: vi.fn<PlaybackAuthority['setPreference']>(async (value) => value),
+    select: vi.fn<PlaybackAuthority['select']>(() => null),
+    prepare: vi.fn<PlaybackAuthority['prepare']>(async () => null),
+    start: vi.fn<PlaybackAuthority['start']>(async () => null),
+    beginCheck: vi.fn<PlaybackAuthority['beginCheck']>(),
+    markReady: vi.fn<PlaybackAuthority['markReady']>(),
+    beginLoad: vi.fn<PlaybackAuthority['beginLoad']>(),
+    markPlaying: vi.fn<PlaybackAuthority['markPlaying']>(),
+    markPaused: vi.fn<PlaybackAuthority['markPaused']>(),
+    markEnded: vi.fn<PlaybackAuthority['markEnded']>(),
+    markFailed: vi.fn<PlaybackAuthority['markFailed']>(),
+    reset: vi.fn<PlaybackAuthority['reset']>(),
     ...overrides,
   };
 }
@@ -126,8 +131,8 @@ describe('MediaCard routed playback', () => {
   });
 
   it('routes embedded preference only through PlaybackProvider.start()', async () => {
-    const authority = playbackAuthority({ preference: 'embedded' });
-    playbackHolder.current = authority;
+    const start = vi.fn<PlaybackAuthority['start']>(async () => null);
+    playbackHolder.current = playbackAuthority({ preference: 'embedded', start });
     const selected = playable();
 
     await act(async () => { root.render(<MediaCard item={selected} platform={{ isAndroid: false }} />); });
@@ -136,13 +141,13 @@ describe('MediaCard routed playback', () => {
     expect(container.querySelector('a')).toBeNull();
 
     await act(async () => { button!.click(); await Promise.resolve(); });
-    expect(authority.start).toHaveBeenCalledTimes(1);
-    expect(authority.start).toHaveBeenCalledWith(selected);
+    expect(start).toHaveBeenCalledTimes(1);
+    expect(start).toHaveBeenCalledWith(selected);
   });
 
   it('uses ask as a disclosure choice between the same embedded and external routes', async () => {
-    const authority = playbackAuthority({ preference: 'ask' });
-    playbackHolder.current = authority;
+    const start = vi.fn<PlaybackAuthority['start']>(async () => null);
+    playbackHolder.current = playbackAuthority({ preference: 'ask', start });
     const selected = playable();
 
     await act(async () => { root.render(<MediaCard item={selected} platform={{ isAndroid: false }} />); });
@@ -158,7 +163,7 @@ describe('MediaCard routed playback', () => {
     const playHere = [...container.querySelectorAll<HTMLButtonElement>('.media-card__choice')]
       .find((button) => button.textContent === 'Play here');
     await act(async () => { playHere!.click(); await Promise.resolve(); });
-    expect(authority.start).toHaveBeenCalledWith(selected);
+    expect(start).toHaveBeenCalledWith(selected);
     expect(container.querySelector('.media-card__chooser')).toBeNull();
   });
 
@@ -171,18 +176,19 @@ describe('MediaCard routed playback', () => {
 
   it('reflects current player state from the global authority and does not start a second request', async () => {
     const selected = playable();
-    const authority = playbackAuthority({
+    const start = vi.fn<PlaybackAuthority['start']>(async () => null);
+    playbackHolder.current = playbackAuthority({
       preference: 'embedded',
+      start,
       state: { phase: 'playing', requestId: 'request-a', item: selected, error: null },
     });
-    playbackHolder.current = authority;
 
     await act(async () => { root.render(<MediaCard item={selected} />); });
     const button = container.querySelector<HTMLButtonElement>('.media-card__primary')!;
     expect(button.disabled).toBe(true);
     expect(container.textContent).toContain('Playing here');
     act(() => button.click());
-    expect(authority.start).not.toHaveBeenCalled();
+    expect(start).not.toHaveBeenCalled();
   });
 
   it('shows the authority failure with a separately validated external fallback', async () => {

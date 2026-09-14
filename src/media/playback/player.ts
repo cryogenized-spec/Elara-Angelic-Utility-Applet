@@ -2,15 +2,15 @@ import type { MediaItem } from '../../domain/media';
 import { mediaDestinationUrl } from '../handoff';
 
 export interface PlaybackPlayerCallbacks {
-  onReady(): void;
-  onPlaying(): void;
-  onPaused(): void;
-  onEnded(): void;
-  onError(message: string): void;
+  readonly onReady: () => void;
+  readonly onPlaying: () => void;
+  readonly onPaused: () => void;
+  readonly onEnded: () => void;
+  readonly onError: (message: string) => void;
 }
 
 export interface PlaybackPlayerSession {
-  destroy(): void;
+  readonly destroy: () => void;
 }
 
 export interface PlaybackPlayerPort {
@@ -32,7 +32,12 @@ function aborted(): DOMException {
  * provider player session.
  */
 export const playbackPlayerPort: PlaybackPlayerPort = Object.freeze({
-  async load(item, host, signal, callbacks): Promise<PlaybackPlayerSession> {
+  async load(
+    item: MediaItem,
+    host: HTMLElement,
+    signal: AbortSignal,
+    callbacks: PlaybackPlayerCallbacks,
+  ): Promise<PlaybackPlayerSession> {
     if (signal.aborted) throw aborted();
     if (item.provider !== 'youtube' || item.kind !== 'video' || !mediaDestinationUrl(item)) {
       throw new Error('This media result cannot be trusted for internal playback.');

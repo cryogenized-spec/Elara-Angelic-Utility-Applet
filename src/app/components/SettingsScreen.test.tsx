@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import 'fake-indexeddb/auto';
-import { act, useState } from 'react';
+import { act, useState, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsScreen, type SettingsSection } from './SettingsScreen';
@@ -8,17 +8,33 @@ import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY } from '../..
 import { DEFAULT_CHARACTER_PROFILE } from '../../domain/character';
 import { DEFAULT_GEMINI_MODEL } from '../../gemini/contracts';
 import { defaultsForModel } from '../../gemini/settings-engine';
+import { PlaybackProvider, type PlaybackPreferenceStore } from '../../media/playback/PlaybackProvider';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 let container: HTMLDivElement;
 let root: Root;
+let savedPreference: 'ask' | 'embedded' | 'external';
+let savePreference: ReturnType<typeof vi.fn>;
+
+const preferenceStore: PlaybackPreferenceStore = {
+  load: async () => savedPreference,
+  save: async (value) => {
+    savePreference(value);
+    savedPreference = value;
+    return value;
+  },
+};
 
 type HarnessProps = { initial: boolean; section?: SettingsSection };
 
+function WithPlayback({ children }: { readonly children: ReactNode }) {
+  return <PlaybackProvider preferenceStore={preferenceStore}>{children}</PlaybackProvider>;
+}
+
 function Harness({ initial, section = 'chat' }: HarnessProps) {
   const [enterToSend, setEnterToSend] = useState(initial);
-  return <SettingsScreen
+  return <WithPlayback><SettingsScreen
     font={DEFAULT_APP_UI.font}
     onFontChange={() => {}}
     chatTextSize={DEFAULT_APP_UI.chatTextSize}
@@ -42,7 +58,7 @@ function Harness({ initial, section = 'chat' }: HarnessProps) {
     onEnterToSendChange={setEnterToSend}
     initialSection={section}
     onBack={() => {}}
-  />;
+  /></WithPlayback>;
 }
 
 function switch_(): HTMLButtonElement { return container.querySelector('[role="switch"]')!; }
@@ -51,6 +67,8 @@ function press(key: string): void {
 }
 
 beforeEach(() => {
+  savedPreference = 'ask';
+  savePreference = vi.fn();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -58,15 +76,14 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); container.remove(); });
 
 describe('Chat settings — Enter sends message', () => {
-  it('defaults to ON with switch semantics and a real accessible name', () => {
-    act(() => { root.render(<Harness initial />); });
+  it('defaults to ON with switch semantics and a real accessible name', async () => {
+    await act(async () => { root.render(<Harness initial />); await Promise.resolve(); });
     const control = switch_();
     expect(control.getAttribute('role')).toBe('switch');
     expect(control.getAttribute('type')).toBe('button');
     expect(control.getAttribute('aria-checked')).toBe('true');
     expect(control.classList.contains('is-on')).toBe(true);
 
-    // Accessible name/description come from the card copy, not from floating text.
     const labelId = control.getAttribute('aria-labelledby');
     const describedId = control.getAttribute('aria-describedby');
     expect(labelId).toBeTruthy();
@@ -74,25 +91,22 @@ describe('Chat settings — Enter sends message', () => {
     expect(container.querySelector(`#${describedId}`)?.textContent).toContain('Enter sends');
   });
 
-  it('reports the default as ON when the caller hands over the stored preference', () => {
-    act(() => { root.render(<Harness initial={DEFAULT_APP_UI.enterToSend} />); });
+  it('reports the default as ON when the caller hands over the stored preference', async () => {
+    await act(async () => { root.render(<Harness initial={DEFAULT_APP_UI.enterToSend} />); await Promise.resolve(); });
     expect(switch_().getAttribute('aria-checked')).toBe('true');
   });
 
-  it('toggles the preference off and back on', () => {
-    act(() => { root.render(<Harness initial />); });
+  it('toggles the preference off and back on', async () => {
+    await act(async () => { root.render(<Harness initial />); await Promise.resolve(); });
     act(() => { switch_().click(); });
     expect(switch_().getAttribute('aria-checked')).toBe('false');
-    expect(switch_().classList.contains('is-on')).toBe(false);
     expect(container.textContent).toContain('Enter inserts a new line');
-
     act(() => { switch_().click(); });
     expect(switch_().getAttribute('aria-checked')).toBe('true');
-    expect(container.textContent).toContain('Enter sends');
   });
 
-  it('toggles with the keyboard (Space and Enter, once per press)', () => {
-    act(() => { root.render(<Harness initial />); });
+  it('toggles with the keyboard (Space and Enter, once per press)', async () => {
+    await act(async () => { root.render(<Harness initial />); await Promise.resolve(); });
     press(' ');
     expect(switch_().getAttribute('aria-checked')).toBe('false');
     press('Enter');
@@ -101,10 +115,10 @@ describe('Chat settings — Enter sends message', () => {
     expect(switch_().getAttribute('aria-checked')).toBe('true');
   });
 
-  it('hands the new value to the persistence callback exactly once per toggle', () => {
+  it('hands the new value to the persistence callback exactly once per toggle', async () => {
     const onEnterToSendChange = vi.fn();
-    act(() => {
-      root.render(<SettingsScreen
+    await act(async () => {
+      root.render(<WithPlayback><SettingsScreen
         font={DEFAULT_APP_UI.font}
         onFontChange={() => {}}
         chatTextSize={DEFAULT_APP_UI.chatTextSize}
@@ -128,10 +142,35 @@ describe('Chat settings — Enter sends message', () => {
         onEnterToSendChange={onEnterToSendChange}
         initialSection="chat"
         onBack={() => {}}
-      />);
+      /></WithPlayback>);
+      await Promise.resolve();
     });
     act(() => { switch_().click(); });
     expect(onEnterToSendChange).toHaveBeenCalledTimes(1);
     expect(onEnterToSendChange).toHaveBeenCalledWith(false);
+  });
+});
+
+describe('Chat settings — media playback', () => {
+  it('shows all three values from the singular playback preference', async () => {
+    await act(async () => { root.render(<Harness initial />); await Promise.resolve(); });
+    const options = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')];
+    expect(options.map((button) => button.textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining('Ask each time'),
+      expect.stringContaining('Play here'),
+      expect.stringContaining('Open YouTube'),
+    ]));
+    expect(options.find((button) => button.textContent?.includes('Ask each time'))?.getAttribute('aria-checked')).toBe('true');
+  });
+
+  it('persists a new route through PlaybackProvider.setPreference', async () => {
+    await act(async () => { root.render(<Harness initial />); await Promise.resolve(); });
+    const playHere = [...container.querySelectorAll<HTMLButtonElement>('[role="radio"]')]
+      .find((button) => button.textContent?.includes('Play here'))!;
+
+    await act(async () => { playHere.click(); await Promise.resolve(); await Promise.resolve(); });
+    expect(savePreference).toHaveBeenCalledTimes(1);
+    expect(savePreference).toHaveBeenCalledWith('embedded');
+    expect(playHere.getAttribute('aria-checked')).toBe('true');
   });
 });

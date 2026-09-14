@@ -1,6 +1,59 @@
 import type { GoogleToolHandlers } from '../google/tools/executor';
 import { isMediaIntent, mergeMediaItems, type MediaItem } from '../domain/media';
 
+const MEDIA_MODEL_RESULT = Symbol('elara.media.model-result');
+
+interface MediaModelItem {
+  readonly id: string;
+  readonly kind: MediaItem['kind'];
+  readonly title: string;
+  readonly channel?: string;
+}
+
+interface MediaModelResult {
+  readonly ok: true;
+  readonly provider: 'youtube';
+  readonly intent?: MediaItem['intent'];
+  readonly results: readonly {
+    readonly query: string;
+    readonly items: readonly MediaModelItem[];
+  }[];
+  readonly failures: readonly {
+    readonly query: string;
+    readonly reason: string;
+    readonly message: string;
+  }[];
+}
+
+type ApplicationMediaToolResult = Record<string, unknown> & {
+  readonly [MEDIA_MODEL_RESULT]: MediaModelResult;
+};
+
+function modelItem(item: MediaItem): MediaModelItem {
+  return Object.freeze({
+    id: item.id,
+    kind: item.kind,
+    title: item.title,
+    ...(item.channel ? { channel: item.channel } : {}),
+  });
+}
+
+/**
+ * Explicit model-facing projection for the media tool.
+ *
+ * The application result carries thumbnails, canonical URLs, retention stamps
+ * and flattened card state. Gemini needs none of those fields. Keeping this
+ * projection on a non-enumerable Symbol means ordinary serialization cannot
+ * accidentally duplicate the full browser payload into the continuation.
+ */
+export function mediaToolResultForModel(value: unknown): unknown {
+  if (typeof value !== 'object' || value === null) {
+    return Object.freeze({ ok: false, error: 'MEDIA_RESULT_UNAVAILABLE' });
+  }
+  const projection = (value as Partial<ApplicationMediaToolResult>)[MEDIA_MODEL_RESULT];
+  return projection ?? Object.freeze({ ok: false, error: 'MEDIA_RESULT_UNAVAILABLE' });
+}
+
 /**
  * Tool handler for `youtube.search`.
  *
@@ -9,9 +62,10 @@ import { isMediaIntent, mergeMediaItems, type MediaItem } from '../domain/media'
  * `import()` and therefore land in a lazy chunk instead of the initial bundle.
  * Nothing about media search loads until the model actually calls the tool.
  *
- * The result carries a `mediaProvider` marker. The tool loop derives the
- * `media-resolved` stream event from it, so the card is driven by structured
- * data and never by parsing the assistant's prose.
+ * The application result carries a `mediaProvider` marker. The tool loop derives
+ * the `media-resolved` stream event from it, so the card is driven by structured
+ * data and never by parsing the assistant's prose. A separate non-enumerable
+ * projection is the only representation returned to Gemini.
  */
 export const mediaToolHandlers: GoogleToolHandlers = {
   'youtube.search': async (context) => {
@@ -33,32 +87,43 @@ export const mediaToolHandlers: GoogleToolHandlers = {
       signal: context.signal,
     });
 
-    // Per-query provider results below remain untouched for the model. Only the
-    // flattened presentation collection is collapsed by provider-scoped identity;
-    // first sighting owns the slot while the latest representation owns its data.
+    // The flattened browser collection is collapsed by provider-scoped identity;
+    // first sighting owns the slot while the latest valid representation owns its
+    // data. The model projection below remains per-query and therefore faithful to
+    // each provider outcome rather than reconstructing associations from the merge.
     const flattened: MediaItem[] = outcomes.flatMap((outcome) => [...outcome.items]);
     const items = mergeMediaItems([], flattened);
+    const compactFailures = Object.freeze(failures.map((failure) => Object.freeze({
+      query: failure.query,
+      reason: failure.reason,
+      message: failure.message,
+    })));
+    const modelResult: MediaModelResult = Object.freeze({
+      ok: true,
+      provider: 'youtube',
+      ...(intent ? { intent } : {}),
+      results: Object.freeze(outcomes.map((outcome) => Object.freeze({
+        query: outcome.query,
+        items: Object.freeze(outcome.items.map(modelItem)),
+      }))),
+      failures: compactFailures,
+    });
 
-    return {
+    const applicationResult: Record<string, unknown> = {
       ok: true,
       mediaProvider: 'youtube',
-      // Echoed so the model can see which hand-off actually took effect rather
-      // than remembering what it asked for. Absent when it defaulted, because a
-      // result is not evidence that the caller supplied anything.
       ...(intent ? { intent } : {}),
       queries: outcomes.map((outcome) => outcome.query),
-      results: outcomes.map((outcome) => ({
-        query: outcome.query,
-        source: outcome.source,
-        items: outcome.items,
-      })),
-      failures: failures.map((failure) => ({
-        query: failure.query,
-        reason: failure.reason,
-        message: failure.message,
-      })),
-      // Flattened for convenience, and the field the media card reads.
+      failures: compactFailures,
+      // Full metadata exists exactly once for the browser/card projection.
       items,
     };
+    Object.defineProperty(applicationResult, MEDIA_MODEL_RESULT, {
+      configurable: false,
+      enumerable: false,
+      value: modelResult,
+      writable: false,
+    });
+    return applicationResult as ApplicationMediaToolResult;
   },
 };

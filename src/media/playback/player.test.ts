@@ -1,3 +1,4 @@
+// @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaItem } from '../../domain/media';
 import type { PlaybackPlayerCallbacks, PlaybackPlayerSession } from './player';

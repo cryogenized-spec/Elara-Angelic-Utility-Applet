@@ -61,6 +61,13 @@ ended
 - DOM audit: provider alone renders no iframe/audio/video;
 - full existing Chromium, Android portrait and onboarding Playwright regression suite.
 
+## Certification history
+
+- `87242e0a9723712712700b95d7a952274ac1d1b3` — CI #1677 stopped at two Phase-2 lint errors; both were corrected without weakening lint.
+- `fc14aac972a8c0bbffdf86e0bc883e7635bfa0a1` — lint passed; CI #1678 exposed a test-only type-narrowing issue after provider remount.
+- `e533214fc6b4acad7c2048ec824085fe018b1c5f` — lint + typecheck passed; CI #1680 reached units with 1,157 passing and one failing test-only assertion that required incidental React `console.error` logging in addition to the actual nested-provider exception contract.
+- Current behavior keeps the nested-provider exception and removes only that incidental logging assertion. Full exact-head certification remains required.
+
 ## Exit criteria
 
 - playback reducer/domain tests green;

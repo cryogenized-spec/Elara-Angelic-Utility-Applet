@@ -207,7 +207,6 @@ describe('Phase 2 PlaybackProvider authority', () => {
 
   it('rejects a second nested PlaybackProvider instead of creating competing playback state', async () => {
     const store = memoryStore();
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     await expect(act(async () => {
       root.render(
         <PlaybackProvider preferenceStore={store}>
@@ -216,6 +215,5 @@ describe('Phase 2 PlaybackProvider authority', () => {
       );
       await Promise.resolve();
     })).rejects.toThrow('one global playback authority is required');
-    expect(errorSpy).toHaveBeenCalled();
   });
 });

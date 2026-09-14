@@ -38,6 +38,8 @@ You tap a validated card and leave Elara for YouTube
 
 The `watch` and `listen` intents are presentation hints. They change the card action from **Watch** to **Listen**, but they do not change the YouTube search request, provider URL, or cache identity. Asking to listen to a result and later asking to watch the same search can therefore reuse one API result.
 
+Media cards are first-class assistant content. They can appear as soon as the structured search result resolves, even if Gemini is still producing a continuation, and a completed assistant turn may consist of media without prose. Text, media and artifacts share one live assistant projection and one terminal persistence boundary.
+
 ## 2. The request Elara sends to YouTube
 
 Elara uses the YouTube Data API v3 `search.list` endpoint directly from the browser. A normal search request contains:
@@ -167,6 +169,6 @@ Official references:
 | Key validation | `src/media/youtube/validate.ts` |
 | Safe external handoff | `src/media/handoff.ts` |
 | Cards / responsive rail | `src/app/components/media/` |
-| Browser proof | `e2e/media-handoff.spec.ts` and `e2e/media-delivery.phase3.spec.ts` |
+| Browser proof | `e2e/media-handoff.spec.ts`, `e2e/media-delivery.phase3.spec.ts`, and `e2e/media-lifecycle.acceptance.spec.ts` |
 
 The canonical low-token system document remains [`../media.md`](../media.md). This README is the human-readable operational guide.

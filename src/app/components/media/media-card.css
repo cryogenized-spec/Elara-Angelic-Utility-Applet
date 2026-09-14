@@ -44,7 +44,16 @@
 
 .media-card__thumb--empty { aspect-ratio: 16 / 9; }
 
-.media-card__meta { display: grid; gap: 2px; padding: 8px 10px 10px; }
+.media-card__meta { display: grid; gap: 3px; padding: 8px 10px 10px; }
+
+/* Literal source attribution, intentionally not styled to imitate a YouTube
+   logo/wordmark. The whole valid card is already the canonical YouTube link. */
+.media-card__source {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+  font-weight: 600;
+}
 
 .media-card__title {
   font-size: 12px;
@@ -65,19 +74,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.media-card__badge {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: rgba(10,11,16,.78);
-  color: rgba(255,255,255,.82);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .04em;
 }
 
 @media (prefers-reduced-motion: reduce) {

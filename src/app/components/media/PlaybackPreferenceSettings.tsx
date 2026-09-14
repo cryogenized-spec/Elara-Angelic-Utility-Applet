@@ -18,12 +18,12 @@ const OPTIONS: Readonly<Record<MediaPlaybackPreference, { label: string; descrip
 });
 
 export function PlaybackPreferenceSettings() {
-  const { preference, preferenceStatus, preferenceError, setPreference } = usePlaybackAuthority();
-  const saving = preferenceStatus === 'loading';
+  const playback = usePlaybackAuthority();
+  const saving = playback.preferenceStatus === 'loading';
 
   function choose(value: MediaPlaybackPreference): void {
-    if (saving || value === preference) return;
-    void setPreference(value).catch(() => undefined);
+    if (saving || value === playback.preference) return;
+    void playback.setPreference(value).catch(() => undefined);
   }
 
   return (
@@ -33,7 +33,7 @@ export function PlaybackPreferenceSettings() {
       <div className="playback-preference-options" role="radiogroup" aria-label="Default YouTube playback action">
         {MEDIA_PLAYBACK_PREFERENCES.map((value) => {
           const option = OPTIONS[value];
-          const selected = preference === value;
+          const selected = playback.preference === value;
           return (
             <button
               key={value}
@@ -51,7 +51,7 @@ export function PlaybackPreferenceSettings() {
         })}
       </div>
       {saving ? <small className="playback-preference-status" role="status">Saving playback preference…</small> : null}
-      {preferenceError ? <small className="playback-preference-error" role="alert">{preferenceError}</small> : null}
+      {playback.preferenceError ? <small className="playback-preference-error" role="alert">{playback.preferenceError}</small> : null}
     </div>
   );
 }

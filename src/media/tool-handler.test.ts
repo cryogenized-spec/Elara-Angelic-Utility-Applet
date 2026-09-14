@@ -16,7 +16,7 @@ function request(): Record<string, unknown> {
   return searchMedia.mock.calls[0][0] as Record<string, unknown>;
 }
 
-function outcome(query: string, id: string): MediaSearchOutcome {
+function outcome(query: string, id: string, title: string = `Result ${id}`): MediaSearchOutcome {
   return {
     query,
     normalizedQuery: query.toLowerCase(),
@@ -26,9 +26,12 @@ function outcome(query: string, id: string): MediaSearchOutcome {
       provider: 'youtube',
       id,
       kind: 'video',
-      title: `Result ${id}`,
+      title,
+      channel: 'Channel',
+      thumbnail: { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, width: 480, height: 360 },
       webUrl: `https://www.youtube.com/watch?v=${id}`,
       embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
+      apiDataFetchedAt: 1_800_000_000_000,
     }],
   };
 }
@@ -39,13 +42,11 @@ beforeEach(() => {
 
 describe('youtube.search tool handler', () => {
   it('exists and is callable by the executor', () => {
-    // The handler is looked up by name, so a missing key here is a silent
-    // "model called a tool that does nothing" failure at runtime.
     expect(typeof handler).toBe('function');
   });
 
   it('forwards the queries and abort signal it was given', async () => {
-    searchMedia.mockResolvedValue({ outcomes: [outcome('lofi beats', 'a1')], failures: [] });
+    searchMedia.mockResolvedValue({ outcomes: [outcome('lofi beats', 'a1')], failures: [], networkCalls: 1 });
     const controller = new AbortController();
 
     const result = await handler?.({ arguments: { queries: ['lofi beats'] }, signal: controller.signal } as never);
@@ -55,68 +56,103 @@ describe('youtube.search tool handler', () => {
     expect((result as { items: unknown[] }).items).toHaveLength(1);
   });
 
-  it('passes the intent through to search, which is what stamps the cards', async () => {
-    searchMedia.mockResolvedValue({ outcomes: [outcome('jazz', 'a1')], failures: [] });
+  it('passes the intent through to search and exposes only the effective intent to Gemini', async () => {
+    searchMedia.mockResolvedValue({ outcomes: [outcome('jazz', 'a1')], failures: [], networkCalls: 1 });
 
-    await handler?.({ arguments: { queries: ['jazz'], intent: 'listen' } } as never);
+    const result = await handler?.({ arguments: { queries: ['jazz'], intent: 'listen' } } as never) as Record<string, unknown>;
 
     expect(request().queries).toEqual(['jazz']);
     expect(request().intent).toBe('listen');
+    expect(result.intent).toBe('listen');
+    expect(result.provider).toBe('youtube');
+    expect((result as { mediaProvider: string }).mediaProvider).toBe('youtube');
   });
 
   it('omits an intent the model did not send rather than inventing one', async () => {
-    searchMedia.mockResolvedValue({ outcomes: [outcome('jazz', 'a1')], failures: [] });
+    searchMedia.mockResolvedValue({ outcomes: [outcome('jazz', 'a1')], failures: [], networkCalls: 1 });
 
-    const result = await handler?.({ arguments: { queries: ['jazz'] } } as never);
+    const result = await handler?.({ arguments: { queries: ['jazz'] } } as never) as Record<string, unknown>;
 
-    // `intent` is deliberately absent from the request, not set to a default: a
-    // missing field is what keeps the untagged-item fast path allocation-free.
     expect('intent' in request() ? request().intent : undefined).toBeUndefined();
-    expect('intent' in (result as Record<string, unknown>)).toBe(false);
+    expect('intent' in result).toBe(false);
   });
 
   it('drops an intent the domain does not recognise', async () => {
-    // The handler is also reachable from the local executor with unvalidated
-    // arguments, so a nonsense value must not become a render directive.
-    searchMedia.mockResolvedValue({ outcomes: [outcome('jazz', 'a1')], failures: [] });
+    searchMedia.mockResolvedValue({ outcomes: [outcome('jazz', 'a1')], failures: [], networkCalls: 1 });
 
     await handler?.({ arguments: { queries: ['jazz'], intent: 'karaoke' } } as never);
 
     expect(request().intent).toBeUndefined();
   });
 
-  it('echoes the effective intent so the model can see what was applied', async () => {
-    searchMedia.mockResolvedValue({ outcomes: [outcome('jazz', 'a1')], failures: [] });
-
-    const result = await handler?.({ arguments: { queries: ['jazz'], intent: 'listen' } } as never);
-
-    expect((result as { intent: string }).intent).toBe('listen');
-    expect((result as { mediaProvider: string }).mediaProvider).toBe('youtube');
-  });
-
-  it('flattens every query result into the items field the card reads', async () => {
+  it('keeps full browser media accessible while excluding it from JSON sent to Gemini', async () => {
     searchMedia.mockResolvedValue({
       outcomes: [outcome('jazz', 'a1'), outcome('blues', 'b2')],
       failures: [{ query: 'broken', normalizedQuery: 'broken', reason: 'no-results', message: 'Nothing found.' }],
+      networkCalls: 2,
     });
 
-    const result = await handler?.({ arguments: { queries: ['jazz', 'blues'] } } as never) as {
-      items: { id: string; intent?: string }[];
-      results: unknown[];
-      failures: { reason: string }[];
-      ok: boolean;
+    const result = await handler?.({ arguments: { queries: ['jazz', 'blues'] } } as never) as Record<string, unknown> & {
+      items: Array<{ id: string }>;
+      queries: string[];
     };
 
-    expect(result.ok).toBe(true);
     expect(result.items.map((item) => item.id)).toEqual(['a1', 'b2']);
-    expect(result.results).toHaveLength(2);
-    // A partial miss is reported, never thrown: one empty query must not sink
-    // the results the user was offered.
+    expect(result.queries).toEqual(['jazz', 'blues']);
+    expect(Object.prototype.propertyIsEnumerable.call(result, 'items')).toBe(false);
+    expect(Object.prototype.propertyIsEnumerable.call(result, 'queries')).toBe(false);
+    expect(Object.prototype.propertyIsEnumerable.call(result, 'mediaProvider')).toBe(false);
+
+    const wire = JSON.stringify(result);
+    expect(wire).toContain('"provider":"youtube"');
+    expect(wire).toContain('"title":"Result a1"');
+    expect(wire).not.toContain('thumbnail');
+    expect(wire).not.toContain('webUrl');
+    expect(wire).not.toContain('embedUrl');
+    expect(wire).not.toContain('apiDataFetchedAt');
+    expect(wire).not.toContain('mediaProvider');
+    expect(wire).not.toContain('"items":[{"provider"');
+  });
+
+  it('preserves per-query provider representations while browser dedupe keeps the newest one', async () => {
+    searchMedia.mockResolvedValue({
+      outcomes: [
+        outcome('first', 'same-id', 'First representation'),
+        outcome('second', 'same-id', 'Refreshed representation'),
+      ],
+      failures: [],
+      networkCalls: 2,
+    });
+
+    const result = await handler?.({ arguments: { queries: ['first', 'second'] } } as never) as Record<string, unknown> & {
+      items: Array<{ id: string; title: string }>;
+      results: Array<{ query: string; items: Array<{ title: string }> }>;
+    };
+
+    expect(result.items).toEqual([expect.objectContaining({ id: 'same-id', title: 'Refreshed representation' })]);
+    expect(result.results.map((entry) => entry.items[0].title)).toEqual([
+      'First representation',
+      'Refreshed representation',
+    ]);
+  });
+
+  it('reports partial failures in the lean model payload without duplicating full results', async () => {
+    searchMedia.mockResolvedValue({
+      outcomes: [outcome('jazz', 'a1')],
+      failures: [{ query: 'broken', normalizedQuery: 'broken', reason: 'no-results', message: 'Nothing found.' }],
+      networkCalls: 1,
+    });
+
+    const result = await handler?.({ arguments: { queries: ['jazz', 'broken'] } } as never) as Record<string, unknown> & {
+      failures: Array<{ reason: string }>;
+    };
+
     expect(result.failures).toEqual([{ query: 'broken', reason: 'no-results', message: 'Nothing found.' }]);
+    expect(Object.keys(result).sort()).toEqual(['failures', 'ok', 'provider', 'results']);
   });
 
   it('filters non-string and blank queries before calling search', async () => {
-    searchMedia.mockResolvedValue({ outcomes: [], failures: [] });
+    searchMedia.mockResolvedValue({ outcomes: [], failures: [], networkCalls: 0 });
 
     await handler?.({ arguments: { queries: ['lofi', 42, '   ', null] } } as never);
 

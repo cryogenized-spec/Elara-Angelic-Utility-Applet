@@ -18,24 +18,64 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     host.setAttribute('aria-modal', 'true');
     host.setAttribute('aria-label', requests.length === 1 ? 'Google action confirmation' : 'Google action confirmations');
 
-    const cards = requests.map((request, index) => {
-      const riskLabel = request.risk === 'send' ? 'Send' : request.risk === 'destructive' ? 'Destructive change' : 'Change';
-      return `<label class="google-confirmation-item">
-        <input type="checkbox" data-confirm-index="${index}" checked aria-label="Approve ${escapeHtml(request.tool)}" />
-        <span class="google-confirmation-item__body">
-          <strong>${escapeHtml(riskLabel)} · ${escapeHtml(request.tool)}</strong>
-          <span>${escapeHtml(request.resourceSummary)}</span>
-        </span>
-      </label>`;
-    }).join('');
+    const heading = document.createElement('div');
+    heading.className = 'roleplay-confirmation__heading';
+    const mark = document.createElement('span');
+    mark.textContent = '✦';
+    const title = document.createElement('strong');
+    title.textContent = requests.length === 1 ? 'Elara proposes a change' : `Elara proposes ${requests.length} changes`;
+    heading.append(mark, title);
 
-    host.innerHTML = `
-      <div class="roleplay-confirmation__heading"><span>✦</span><strong>${requests.length === 1 ? 'Elara proposes a change' : `Elara proposes ${requests.length} changes`}</strong></div>
-      <div class="google-confirmation-list">${cards}</div>
-      <div class="roleplay-confirmation__actions">
-        <button type="button" data-decision="decline" class="roleplay-confirmation__decline">✕ Decline</button>
-        ${requests.length > 1 ? '<button type="button" data-decision="selected" class="roleplay-confirmation__accept">✓ Approve selected</button><button type="button" data-decision="all" class="roleplay-confirmation__accept">✓ Approve all</button>' : '<button type="button" data-decision="selected" class="roleplay-confirmation__accept">✓ Approve</button>'}
-      </div>`;
+    const list = document.createElement('div');
+    list.className = 'google-confirmation-list';
+    requests.forEach((request, index) => {
+      const riskLabel = request.risk === 'send' ? 'Send' : request.risk === 'destructive' ? 'Destructive change' : 'Change';
+      const card = document.createElement('label');
+      card.className = 'google-confirmation-item';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.confirmIndex = String(index);
+      checkbox.checked = true;
+      checkbox.setAttribute('aria-label', `Approve ${request.tool}`);
+
+      const body = document.createElement('span');
+      body.className = 'google-confirmation-item__body';
+      const strong = document.createElement('strong');
+      strong.textContent = `${riskLabel} · ${request.tool}`;
+      const summary = document.createElement('span');
+      summary.textContent = request.resourceSummary;
+      body.append(strong, summary);
+      card.append(checkbox, body);
+      list.appendChild(card);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'roleplay-confirmation__actions';
+    const decline = document.createElement('button');
+    decline.type = 'button';
+    decline.dataset.decision = 'decline';
+    decline.className = 'roleplay-confirmation__decline';
+    decline.textContent = '✕ Decline';
+    actions.appendChild(decline);
+
+    const selected = document.createElement('button');
+    selected.type = 'button';
+    selected.dataset.decision = 'selected';
+    selected.className = 'roleplay-confirmation__accept';
+    selected.textContent = requests.length > 1 ? '✓ Approve selected' : '✓ Approve';
+    actions.appendChild(selected);
+
+    if (requests.length > 1) {
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.dataset.decision = 'all';
+      all.className = 'roleplay-confirmation__accept';
+      all.textContent = '✓ Approve all';
+      actions.appendChild(all);
+    }
+
+    host.append(heading, list, actions);
 
     let settled = false;
     const finish = (decisions: boolean[]) => {
@@ -61,7 +101,7 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) { finish(requests.map(() => false)); return; }
     document.body.appendChild(host);
-    (host.querySelector('[data-decision="selected"]') as HTMLButtonElement | null)?.focus();
+    selected.focus();
   });
 }
 
@@ -70,8 +110,4 @@ export function dismissGoogleToolConfirmation(): void {
   const host = document.getElementById(HOST_ID);
   const count = host?.querySelectorAll('[data-confirm-index]').length ?? 0;
   pendingFinish(Array.from({ length: count }, () => false));
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character] ?? character));
 }

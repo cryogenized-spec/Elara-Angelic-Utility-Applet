@@ -33,23 +33,13 @@ function walk(path) {
 const relativePath = (absolute) => relative(root, absolute).replaceAll('\\', '/');
 const count = (source, pattern) => (source.match(pattern) ?? []).length;
 
-// A green test suite is not evidence if the suite can silently be focused,
-// skipped, expected-to-fail, or narrowed. Keep this dependency-free so it can
-// run before npm ci and protect the verification harness itself.
 const forbiddenTestControl = /\b(?:test|it|describe|test\.describe)\.(?:skip|only|fixme|fail|todo)\s*\(/;
 for (const testFile of [...walk('src'), ...walk('worker/test'), ...walk('e2e')]) {
   if (!/(?:\.test\.(?:ts|tsx)|\.spec\.ts)$/.test(testFile)) continue;
   const source = readFileSync(testFile, 'utf8');
-  if (forbiddenTestControl.test(source)) {
-    fail(`${relativePath(testFile)} contains a disabled, focused, or expected-failure test control`);
-  }
+  if (forbiddenTestControl.test(source)) fail(`${relativePath(testFile)} contains a disabled, focused, or expected-failure test control`);
 }
 
-// E2E must drive user/public boundaries. Direct app imports and writable IDB
-// fixtures can let a browser test forge state that the real application could
-// not. Two reviewed media tests deliberately mutate already-created persisted
-// rows to prove retention/adversarial behavior; exact path/count allowlisting
-// makes any additional writable fixture an explicit architecture event.
 const e2eFiles = walk('e2e').filter((path) => /(?:\.spec\.ts|global-setup\.ts)$/.test(path));
 const forbiddenSourceImport = /(?:from\s+['"](?:\.\.\/)+src\/|import\s*\(\s*['"](?:\.\.\/)+src\/|['"]\/(?:Elara-Angelic-Utility-Applet\/)?src\/)/;
 const writableIndexedDb = /['"]readwrite['"]/g;
@@ -72,26 +62,17 @@ for (const file of e2eFiles) {
   if (forbiddenSourceImport.test(source)) fail(`${path} imports application source directly instead of driving a public/user boundary`);
   if (retiredBrowserProvider.test(source)) fail(`${path} references the retired browser /api/gemini provider route`);
   if (directDatabaseDeletion.test(source)) fail(`${path} deletes IndexedDB directly; E2E must not erase application stores behind the public boundary`);
-
   const writableTransactions = count(source, writableIndexedDb);
   const allowedWritableTransactions = allowedWritableIndexedDb.get(path) ?? 0;
-  if (writableTransactions !== allowedWritableTransactions) {
-    fail(`${path} contains ${writableTransactions} writable IndexedDB transaction(s); expected ${allowedWritableTransactions}. Review any browser-state mutation explicitly.`);
-  }
-
+  if (writableTransactions !== allowedWritableTransactions) fail(`${path} contains ${writableTransactions} writable IndexedDB transaction(s); expected ${allowedWritableTransactions}. Review any browser-state mutation explicitly.`);
   const writes = count(source, /(?:window\.)?localStorage\.setItem\s*\(/g);
   const allowed = allowedLocalStorageWrites.get(path) ?? 0;
-  if (writes !== allowed) {
-    fail(`${path} contains ${writes} localStorage write(s); expected ${allowed}. Review any browser-state seeding explicitly.`);
-  }
+  if (writes !== allowed) fail(`${path} contains ${writes} localStorage write(s); expected ${allowed}. Review any browser-state seeding explicitly.`);
 }
-
 for (const [path] of [...allowedWritableIndexedDb, ...allowedLocalStorageWrites]) {
   if (!e2eFiles.some((file) => relativePath(file) === path)) fail(`approved E2E fixture is missing: ${path}`);
 }
 
-// The E2E compiler surface must stay strict and must not grow a shortcut back
-// into application source.
 const tsconfigSource = read('tsconfig.e2e.json');
 try {
   const config = JSON.parse(tsconfigSource);
@@ -105,9 +86,7 @@ try {
 }
 
 const playwright = read('playwright.config.ts');
-for (const project of ["name: 'chromium'", "name: 'android-portrait'", "name: 'onboarding'"]) {
-  if (!playwright.includes(project)) fail(`Playwright configuration is missing ${project}`);
-}
+for (const project of ["name: 'chromium'", "name: 'android-portrait'", "name: 'onboarding'"]) if (!playwright.includes(project)) fail(`Playwright configuration is missing ${project}`);
 if (!playwright.includes("globalSetup: './e2e/global-setup.ts'")) fail('Playwright must keep the explicit global setup');
 if (!playwright.includes('storageState: { cookies: [], origins: [] }')) fail('Onboarding must start with clean browser storage');
 if (!playwright.includes('reuseExistingServer: !process.env.CI')) fail('CI must not reuse an arbitrary pre-existing Playwright web server');
@@ -116,14 +95,7 @@ if (/\bpassWithNoTests\s*:/.test(playwright)) fail('Playwright must not allow an
 const vitest = read('vitest.config.ts');
 if (!vitest.includes("environment: 'jsdom'")) fail('main Vitest suite must keep the jsdom environment');
 if (/\b(?:testNamePattern|passWithNoTests)\s*:/.test(vitest)) fail('main Vitest config may not narrow discovery or allow an empty suite');
-for (const marker of [
-  "provider: 'v8'",
-  "reporter: ['text', 'json-summary']",
-  "reportsDirectory: 'coverage'",
-  "include: ['src/**/*.{ts,tsx}']",
-  "'src/**/*.test.{ts,tsx}'",
-  "'src/**/*.spec.{ts,tsx}'",
-]) {
+for (const marker of ["provider: 'v8'", "reporter: ['text', 'json-summary']", "reportsDirectory: 'coverage'", "include: ['src/**/*.{ts,tsx}']", "'src/**/*.test.{ts,tsx}'", "'src/**/*.spec.{ts,tsx}'"]) {
   if (!vitest.includes(marker)) fail(`Vitest whole-source coverage contract changed or disappeared: ${marker}`);
 }
 
@@ -132,7 +104,6 @@ if (!workerVitest.includes("include: ['worker/test/**/*.test.ts']")) fail('Worke
 if (!workerVitest.includes('isolatedStorage: true')) fail('Worker tests must keep per-test storage isolation');
 if (/\b(?:testNamePattern|passWithNoTests)\s*:/.test(workerVitest)) fail('Worker Vitest may not narrow named tests or allow an empty suite');
 
-// Pin the commands that constitute the repository's verification contract.
 const packageSource = read('package.json');
 try {
   const pkg = JSON.parse(packageSource);
@@ -140,7 +111,7 @@ try {
     'docs:check': 'node scripts/check-docs.mjs',
     'verify:gates': 'node scripts/check-verification-integrity.mjs',
     'security:check': 'node scripts/security-architecture-gate.mjs',
-    'test:quality': 'node scripts/test-quality-gate.mjs',
+    'test:quality': 'node scripts/test-quality-gate.mjs && node scripts/verify-coverage-gate.mjs',
     lint: 'eslint . --max-warnings 0',
     typecheck: 'tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit',
     'typecheck:ts7': 'node node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc -p worker/tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc -p tsconfig.e2e.json --noEmit',
@@ -152,25 +123,14 @@ try {
     e2e: 'playwright test',
     'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && npm run test:quality && node scripts/reliability-gate.mjs',
   };
-  for (const [name, expected] of Object.entries(expectedScripts)) {
-    if (pkg.scripts?.[name] !== expected) fail(`npm script ${name} changed from the reviewed command`);
-  }
+  for (const [name, expected] of Object.entries(expectedScripts)) if (pkg.scripts?.[name] !== expected) fail(`npm script ${name} changed from the reviewed command`);
   if (pkg.devDependencies?.['@vitest/coverage-v8'] !== '4.1.11') fail('@vitest/coverage-v8 must stay exactly aligned with Vitest 4.1.11');
 } catch (error) {
   fail(`package.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 }
 
-// Lint exceptions are themselves capabilities. Keep the globally hardened
-// rules at error severity, and freeze the exact reviewed file-scoped exceptions
-// instead of allowing a future agent to broaden them unnoticed.
 const eslintConfig = read('eslint.config.js');
-for (const hardRule of [
-  "'@typescript-eslint/no-explicit-any': 'error'",
-  "'react-hooks/set-state-in-effect': 'error'",
-  "'react-hooks/purity': 'error'",
-  "'react-hooks/exhaustive-deps': 'error'",
-  "'no-unsafe-finally': 'error'",
-]) {
+for (const hardRule of ["'@typescript-eslint/no-explicit-any': 'error'", "'react-hooks/set-state-in-effect': 'error'", "'react-hooks/purity': 'error'", "'react-hooks/exhaustive-deps': 'error'", "'no-unsafe-finally': 'error'"]) {
   if (!eslintConfig.includes(hardRule)) fail(`eslint hard rule is missing or weakened: ${hardRule}`);
 }
 const reviewedLintExceptions = [
@@ -182,116 +142,49 @@ for (const [pattern, expected, label] of reviewedLintExceptions) {
   const actual = count(eslintConfig, pattern);
   if (actual !== expected) fail(`${label} count changed: expected ${expected}, found ${actual}`);
 }
-for (const reviewedPath of [
-  "files: ['src/app/App.tsx']",
-  "files: ['src/app/components/GeminiApiLockbox.tsx', 'src/app/components/Sidebar.tsx']",
-  "files: ['worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts']",
-]) {
+for (const reviewedPath of ["files: ['src/app/App.tsx']", "files: ['src/app/components/GeminiApiLockbox.tsx', 'src/app/components/Sidebar.tsx']", "files: ['worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts']"]) {
   if (!eslintConfig.includes(reviewedPath)) fail(`reviewed lint exception scope changed or disappeared: ${reviewedPath}`);
 }
 
-// App.tsx receives one conservative React-purity exception because the rule
-// follows nested event/async handlers and treats clock acquisition as if it were
-// render work. Freeze the clock surface from certified main@4735610: 11 Date.now
-// calls and 2 performance.now calls. Any increase or decrease is an explicit
-// review event rather than an unnoticed expansion under the scoped exception.
 const appSource = read('src/app/App.tsx');
 const appDateNowCount = count(appSource, /Date\.now\(\)/g);
 const appPerformanceNowCount = count(appSource, /performance\.now\(\)/g);
 if (appDateNowCount !== 11) fail(`src/app/App.tsx Date.now() surface changed: expected 11, found ${appDateNowCount}`);
 if (appPerformanceNowCount !== 2) fail(`src/app/App.tsx performance.now() surface changed: expected 2, found ${appPerformanceNowCount}`);
 
-// The security gate is itself part of the verification harness. These markers
-// prove that the checked-in gate still contains each reviewed capability class;
-// deeper external enforcement arrives with the CI/ruleset hardening pass.
 const securityGate = read('scripts/security-architecture-gate.mjs');
-for (const marker of [
-  'forbiddenCapabilities',
-  'forbiddenNodeAuthority',
-  'XMLHttpRequest transport',
-  'sendBeacon transport',
-  'remote dynamic module import',
-  'reviewedScriptLoaders',
-  'reviewedWorkerAuthorities',
-  'reviewedDexieAuthorities',
-  'reviewedLockboxConsumers',
-  'reviewedAutonomyCredentialConsumers',
-  'reviewedPairingTokenConsumers',
-  'reviewedRawFetchAuthorities',
-  'reviewedGlobalFetchReferences',
-  'reviewedGoogleServiceImporters',
-  'reviewedConfirmationBrokerConsumers',
-  'StoredAutonomyPairing',
-]) {
+for (const marker of ['forbiddenCapabilities', 'forbiddenNodeAuthority', 'XMLHttpRequest transport', 'sendBeacon transport', 'remote dynamic module import', 'reviewedScriptLoaders', 'reviewedWorkerAuthorities', 'reviewedDexieAuthorities', 'reviewedLockboxConsumers', 'reviewedAutonomyCredentialConsumers', 'reviewedPairingTokenConsumers', 'reviewedRawFetchAuthorities', 'reviewedGlobalFetchReferences', 'reviewedGoogleServiceImporters', 'reviewedConfirmationBrokerConsumers', 'StoredAutonomyPairing']) {
   if (!securityGate.includes(marker)) fail(`security architecture gate lost required capability check: ${marker}`);
 }
 
-// Phase 3: protect test quality and coverage against fake-green rewrites.
 const testQualityGate = read('scripts/test-quality-gate.mjs');
-for (const marker of [
-  'forbiddenSourceInspection',
-  'streamAssistantTurn',
-  'statusAfterNavigation',
-  'geometryOwners',
-  'playback-player-host iframe',
-]) {
+for (const marker of ['forbiddenSourceInspection', 'streamAssistantTurn', 'statusAfterNavigation', 'geometryOwners', 'playback-player-host iframe']) {
   if (!testQualityGate.includes(marker)) fail(`test quality gate lost required structural check: ${marker}`);
 }
 const coverageGate = read('scripts/check-coverage.mjs');
 for (const marker of ['coverage/coverage-summary.json', 'coverage-baseline.json', 'baseline.directories', 'baseline.files']) {
   if (!coverageGate.includes(marker)) fail(`coverage gate lost required ratchet check: ${marker}`);
 }
+const coverageSentinel = read('scripts/verify-coverage-gate.mjs');
+for (const marker of ['spawnSync', 'check-coverage.mjs', 'deliberately regressed branch metric']) {
+  if (!coverageSentinel.includes(marker)) fail(`coverage adversarial sentinel lost required proof: ${marker}`);
+}
 try {
   const baseline = JSON.parse(read('scripts/coverage-baseline.json'));
   const minimumGlobal = { lines: 63.83, statements: 58.39, functions: 54.02, branches: 53.21 };
-  for (const [metric, minimum] of Object.entries(minimumGlobal)) {
-    if (typeof baseline.global?.[metric] !== 'number' || baseline.global[metric] < minimum) {
-      fail(`coverage baseline ${metric} was lowered below the certified Phase 3 floor ${minimum}`);
-    }
-  }
-  for (const directory of ['autonomy', 'chat', 'domain', 'gemini', 'media', 'memory', 'persistence']) {
-    if (!baseline.directories?.[directory]) fail(`coverage baseline lost critical directory: ${directory}`);
-  }
-  for (const path of [
-    'src/autonomy/cloud/credential.ts',
-    'src/autonomy/cloud/pairing.ts',
-    'src/persistence/gemini-api-key.ts',
-    'src/chat/generation-sync.ts',
-    'src/gemini/provider.ts',
-    'src/media/playback/PlaybackProvider.tsx',
-    'src/memory/store.ts',
-  ]) {
-    if (!baseline.files?.[path]) fail(`coverage baseline lost critical file: ${path}`);
-  }
+  for (const [metric, minimum] of Object.entries(minimumGlobal)) if (typeof baseline.global?.[metric] !== 'number' || baseline.global[metric] < minimum) fail(`coverage baseline ${metric} was lowered below the certified Phase 3 floor ${minimum}`);
+  for (const directory of ['autonomy', 'chat', 'domain', 'gemini', 'media', 'memory', 'persistence']) if (!baseline.directories?.[directory]) fail(`coverage baseline lost critical directory: ${directory}`);
+  for (const path of ['src/autonomy/cloud/credential.ts', 'src/autonomy/cloud/pairing.ts', 'src/persistence/gemini-api-key.ts', 'src/chat/generation-sync.ts', 'src/gemini/provider.ts', 'src/media/playback/PlaybackProvider.tsx', 'src/memory/store.ts']) if (!baseline.files?.[path]) fail(`coverage baseline lost critical file: ${path}`);
 } catch (error) {
   fail(`scripts/coverage-baseline.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 }
 if (existsSync(join(root, '.github/workflows/phase3-baseline.yml'))) fail('temporary Phase 3 bootstrap workflow must not remain in the repository');
 
-// CI itself is inside the threat model. It must run the protected commands in
-// order, with lockfile-strict installation and read-only repository access.
 const workflow = read('.github/workflows/ci.yml');
-for (const marker of ['continue-on-error', 'if: always()', '|| true', 'set +e']) {
-  if (workflow.includes(marker)) fail(`CI workflow contains forbidden bypass marker: ${marker}`);
-}
+for (const marker of ['continue-on-error', 'if: always()', '|| true', 'set +e']) if (workflow.includes(marker)) fail(`CI workflow contains forbidden bypass marker: ${marker}`);
 if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci rather than npm install');
 if (!workflow.includes('permissions:\n  contents: read')) fail('CI repository permissions must remain read-only');
-const orderedCommands = [
-  'npm run docs:check',
-  'npm run verify:gates',
-  'npm run security:check',
-  'npm run test:quality',
-  'npm ci --no-audit --no-fund',
-  'npm run lint',
-  'npm run typecheck',
-  'npm run typecheck:ts7',
-  'npm run test:coverage',
-  'npm run test:workers',
-  'npm run build',
-  'npm exec -- playwright install --with-deps chromium',
-  'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding',
-  'npm run reliability:check',
-];
+const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:coverage', 'npm run test:workers', 'npm run build', 'npm exec -- playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
 let previousIndex = -1;
 for (const command of orderedCommands) {
   const index = workflow.indexOf(command, previousIndex + 1);
@@ -299,8 +192,6 @@ for (const command of orderedCommands) {
   else previousIndex = index;
 }
 
-// Cheap suppression hygiene: TypeScript suppression is prohibited, and every
-// actual ESLint-disable comment must carry an inline reason after `--`.
 const eslintDisableComment = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?\b/;
 const reasonedEslintDisableComment = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?\s+[^\n]+\s--\s\S/;
 for (const file of [...walk('src'), ...walk('worker'), ...walk('e2e'), ...walk('scripts')]) {
@@ -320,5 +211,4 @@ if (errors.length) {
   process.stderr.write(`Verification integrity failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
   process.exit(1);
 }
-
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, test-quality, whole-source coverage ratchet, and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, test-quality, adversarial coverage sentinel, whole-source coverage ratchet, and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

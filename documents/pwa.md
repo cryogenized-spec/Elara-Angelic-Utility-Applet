@@ -1,9 +1,9 @@
 ---
 id: SYS-PWA
 status: active
-verified_commit: cab20253ef448dd96e4feb82bf917729b27404a3
-scope: installable web app, service-worker lifecycle and Pages deployment
-paths: [src/pwa.ts, vite.config.ts, .github/workflows/deploy.yml]
+verified_commit: 0b5fd5623962c1d737ec6f5a793428bc42cc8649
+scope: installable web app, service-worker lifecycle and certified Pages deployment
+paths: [src/pwa.ts, vite.config.ts, .github/workflows/ci.yml]
 keywords: [pwa, service-worker, pages, deployment, update]
 ---
 
@@ -11,15 +11,18 @@ keywords: [pwa, service-worker, pages, deployment, update]
 
 ## 1. Purpose and boundary
 
-`SYS-PWA` owns Elara's installable browser shell, service-worker update lifecycle and static GitHub Pages deployment. It does not own the Cloudflare runtime; see `SYS-WORKER / worker.md`.
+`SYS-PWA` owns Elara's installable browser shell, service-worker update lifecycle and static GitHub Pages deployment. Cloudflare runtime behavior remains owned by `SYS-WORKER / worker.md`.
 
 ## 2. Runtime architecture
 
 ```text
 main push
--> GitHub Actions build
--> Vite dist/
--> GitHub Pages artifact
+-> Runtime verification
+-> production build
+-> final reliability gate
+-> Pages artifact from dist/
+-> deploy job
+-> GitHub Pages
 
 open/installed client
 -> register service worker
@@ -29,7 +32,7 @@ open/installed client
 -> SKIP_WAITING + reload
 ```
 
-The service worker uses a prompt strategy. Discovery is aggressive, activation is not: a deploy must not reload an active conversation behind the user's back.
+The service worker uses a prompt strategy. Discovery is aggressive, activation is not: deployment must not reload an active conversation behind the user's back.
 
 ## 3. Source map
 
@@ -37,7 +40,7 @@ The service worker uses a prompt strategy. Discovery is aggressive, activation i
 | --- | --- |
 | Update lifecycle | `src/pwa.ts` |
 | Manifest/Workbox/base path | `vite.config.ts` |
-| Pages deployment | `.github/workflows/deploy.yml` |
+| Certification and Pages deployment | `.github/workflows/ci.yml` |
 | App icons | `public/icons/` |
 
 ## 4. Data and contracts
@@ -46,24 +49,25 @@ Vite base, manifest `id/start_url/scope` use `/Elara-Angelic-Utility-Applet/`. T
 
 `initPwaUpdater()` registers once even under React StrictMode, checks for updates on load, every 30 minutes, when the document becomes visible and when the window regains focus. `onNeedRefresh` only notifies the app. `applyPwaUpdate()` applies the waiting worker explicitly.
 
-GitHub Pages builds from `main`, uploads `dist/`, then deploys the Pages artifact. It does not serve the source tree or require a compiled-output branch.
+Pages deployment is part of the certified CI workflow. Only a `main` push may package `dist/`, and the deploy job depends on the successful runtime-verification job. The site never deploys source-tree output or an independently rebuilt artifact.
 
 ## 5. Invariants
 
-- Never auto-activate a new worker over a running page with unsaved/in-flight UI state.
+- Never auto-activate a new worker over a running page with unsaved or in-flight UI state.
 - `registerType:'prompt'` is deliberate; do not replace it with `autoUpdate` without revisiting UX/state safety.
 - The repository base path must remain aligned across Vite and manifest settings.
-- Pages publishes only built output.
-- PWA caching must not turn credentials/provider responses into a general offline cache.
+- Pages publishes only the certified `dist/` artifact.
+- PWA caching must not turn credentials or provider responses into a general offline cache.
+- An uncertified `main` commit must not reach the Pages deploy job.
 
 ## 6. Security and failure semantics
 
-Service-worker registration/update failures are non-fatal to normal browser use and are logged as safe PWA errors. Worker-autonomy credentials are unrelated to this service worker. Deployment assets must not embed Gemini or Google OAuth secrets.
+Service-worker registration/update failures are non-fatal to normal browser use and are logged as safe PWA errors. Worker-autonomy credentials are unrelated to this service worker. Deployment assets must not embed Gemini or Google OAuth secrets. Pages write and OIDC permissions are confined to the deploy job.
 
 ## 7. Verification and tests
 
-Use `npm run build`, PWA/update component tests and deployed Pages smoke tests. CI verifies the application before the independent Pages workflow builds/deploys. Installed-app update behavior should be tested on a real Android device because long-lived standalone sessions differ from ordinary navigation.
+Use `npm run build`, PWA/update component tests and deployed Pages smoke tests. CI builds, verifies and packages one artifact in the runtime job; deployment consumes that artifact only after runtime certification succeeds. Installed-app update behavior should still be tested on a real Android device because long-lived standalone sessions differ from ordinary navigation.
 
 ## 8. Known gaps
 
-Offline behavior is intentionally limited to the installable/static shell; Elara's network providers still require connectivity. Any expanded offline data policy must be designed per subsystem rather than achieved by broad service-worker caching.
+Offline behavior is intentionally limited to the installable/static shell; Elara's network providers still require connectivity. Expanded offline data policy must be designed per subsystem rather than achieved by broad service-worker caching.

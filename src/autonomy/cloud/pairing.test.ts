@@ -21,9 +21,15 @@ beforeEach(() => {
 });
 
 describe('pairing store', () => {
-  it('round-trips the pairing (token stays client-side, local-only)', () => {
+  it('round-trips the runtime pairing without serializing the credential', () => {
     savePairing(PAIRING);
+
+    const raw = window.localStorage.getItem('elara.autonomy.pairing.v1');
+    expect(raw).not.toBeNull();
+    expect(raw).not.toContain(PAIRING.token);
+    expect((JSON.parse(raw ?? '{}') as { token?: unknown }).token).toBeUndefined();
     expect(loadPairing()).toEqual(PAIRING);
+
     clearPairing();
     expect(loadPairing()).toBeNull();
   });

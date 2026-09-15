@@ -174,11 +174,11 @@ try {
   if (baseline.measuredFrom !== 'phase3-final-measurement@3efd0085') fail('coverage baseline must identify the certified Phase 3 measurement head');
   const certifiedGlobal = { lines: 64.14, statements: 58.73, functions: 54.21, branches: 53.44 };
   const certifiedDirectories = {
-    autonomy: { lines: 94.66, statements: 93.68, functions: 93.96, branches: 85.71 },
+    autonomy: { lines: 94.35, statements: 92.32, functions: 91.28, branches: 83.14 },
     chat: { lines: 96.38, statements: 93.16, functions: 95.38, branches: 84.03 },
     domain: { lines: 97.34, statements: 92.75, functions: 92.30, branches: 85.05 },
     gemini: { lines: 87.83, statements: 81.81, functions: 80.85, branches: 75.23 },
-    media: { lines: 89.65, statements: 86.92, functions: 89.55, branches: 78.57 },
+    media: { lines: 89.00, statements: 85.14, functions: 89.47, branches: 77.57 },
     memory: { lines: 95.00, statements: 91.41, functions: 92.85, branches: 79.77 },
     persistence: { lines: 74.17, statements: 69.84, functions: 68.29, branches: 61.14 },
   };

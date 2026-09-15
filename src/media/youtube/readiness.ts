@@ -92,6 +92,10 @@ export async function checkYouTubePlaybackReadiness(
   } catch {
     return failed('no-api-key', 'The YouTube API key is unavailable. Unlock the Lockbox to check internal playback.');
   }
+  // Credential retrieval may itself be asynchronous. If the elected playback
+  // request was superseded or reset during that await, do not start provider
+  // work for a request that no longer owns the readiness lane.
+  if (signal.aborted) return { status: 'aborted' };
   if (!key) {
     return failed('no-api-key', 'The YouTube API key is unavailable. Unlock the Lockbox to check internal playback.');
   }
@@ -135,6 +139,7 @@ export async function checkYouTubePlaybackReadiness(
   if (!response.ok) {
     let payload: unknown;
     try { payload = await response.json(); } catch { payload = undefined; }
+    if (signal.aborted) return { status: 'aborted' };
     return classifyHttpFailure(response.status, reasonOf(payload));
   }
 
@@ -142,8 +147,10 @@ export async function checkYouTubePlaybackReadiness(
   try {
     payload = await response.json();
   } catch {
+    if (signal.aborted) return { status: 'aborted' };
     return failed('invalid-response', 'YouTube returned an unreadable readiness response.');
   }
+  if (signal.aborted) return { status: 'aborted' };
 
   if (!isRecord(payload) || !Array.isArray(payload.items)) {
     return failed('invalid-response', 'YouTube returned an invalid readiness response.');

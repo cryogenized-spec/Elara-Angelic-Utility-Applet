@@ -53,6 +53,9 @@ jobs:
       - name: Security & architecture boundary
         run: npm run security:check
 
+      - name: Secret boundary
+        run: npm run secrets:check
+
       - name: Supply-chain boundary
         run: npm run supply-chain:check
 

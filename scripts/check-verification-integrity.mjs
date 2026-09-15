@@ -129,6 +129,7 @@ try {
   const expectedScripts = {
     'docs:check': 'node scripts/check-docs.mjs',
     'verify:gates': 'node scripts/check-verification-integrity.mjs',
+    'security:check': 'node scripts/security-architecture-gate.mjs',
     lint: 'eslint . --max-warnings 0',
     typecheck: 'tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit',
     'typecheck:ts7': 'node node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc -p worker/tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc -p tsconfig.e2e.json --noEmit',
@@ -136,7 +137,7 @@ try {
     'test:workers': 'vitest run --config vitest.workers.config.ts',
     build: 'tsc -p tsconfig.json --noEmit && vite build',
     e2e: 'playwright test',
-    'reliability:check': 'npm run docs:check && npm run verify:gates && node scripts/reliability-gate.mjs',
+    'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && node scripts/reliability-gate.mjs',
   };
   for (const [name, expected] of Object.entries(expectedScripts)) {
     if (pkg.scripts?.[name] !== expected) fail(`npm script ${name} changed from the reviewed command`);
@@ -186,6 +187,22 @@ const appPerformanceNowCount = count(appSource, /performance\.now\(\)/g);
 if (appDateNowCount !== 11) fail(`src/app/App.tsx Date.now() surface changed: expected 11, found ${appDateNowCount}`);
 if (appPerformanceNowCount !== 2) fail(`src/app/App.tsx performance.now() surface changed: expected 2, found ${appPerformanceNowCount}`);
 
+// The security gate is itself part of the verification harness. These markers
+// prove that the checked-in gate still contains each reviewed capability class;
+// deeper external enforcement arrives with the CI/ruleset hardening pass.
+const securityGate = read('scripts/security-architecture-gate.mjs');
+for (const marker of [
+  'forbiddenCapabilities',
+  'reviewedDexieAuthorities',
+  'reviewedLockboxConsumers',
+  'reviewedRawFetchAuthorities',
+  'reviewedGoogleServiceImporters',
+  'reviewedConfirmationBrokerConsumers',
+  'StoredAutonomyPairing',
+]) {
+  if (!securityGate.includes(marker)) fail(`security architecture gate lost required capability check: ${marker}`);
+}
+
 // CI itself is inside the threat model. It must run the protected commands in
 // order, with lockfile-strict installation and read-only repository access.
 const workflow = read('.github/workflows/ci.yml');
@@ -197,6 +214,7 @@ if (!workflow.includes('permissions:\n  contents: read')) fail('CI repository pe
 const orderedCommands = [
   'npm run docs:check',
   'npm run verify:gates',
+  'npm run security:check',
   'npm ci --no-audit --no-fund',
   'npm run lint',
   'npm run typecheck',
@@ -237,4 +255,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security architecture gate and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

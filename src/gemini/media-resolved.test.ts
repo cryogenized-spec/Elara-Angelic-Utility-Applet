@@ -10,8 +10,6 @@ const { createInteraction, getGeminiApiKey, getGeminiLockboxStatus, GoogleGenAI,
 
 vi.mock('@google/genai', () => ({ GoogleGenAI }));
 vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey, getGeminiLockboxStatus }));
-// Mock the orchestrator only. The real tool handler, the real executor, the real
-// Zod argument schema, and the real event derivation all run beneath the loop.
 vi.mock('../media/search', () => ({ searchMedia, resetMediaProvider: () => undefined }));
 
 import { streamGoogleToolLoop } from './google-tool-loop';
@@ -30,7 +28,6 @@ function mediaItem(id: string, title: string): MediaItem {
     title,
     channel: 'Ambient Channel',
     webUrl: `https://www.youtube.com/watch?v=${id}`,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
   };
 }
 
@@ -55,8 +52,6 @@ const oauth = {
   disconnect: async () => undefined,
 };
 
-// `_queries` is accepted for call-site shape: the loop input is fixed per
-// test, and the argument documents which search the caller intended.
 async function run(_queries: unknown): Promise<GeminiStreamEvent[]> {
   const collected: GeminiStreamEvent[] = [];
   for await (const event of streamGoogleToolLoop(
@@ -89,8 +84,6 @@ describe('media-resolved stream event', () => {
     });
 
     const collected = await run(['dark ambient']);
-
-    // The card is driven by this event, never by parsing the assistant's prose.
     const media = collected.find((event) => event.type === 'media-resolved');
     expect(media).toMatchObject({
       type: 'media-resolved',
@@ -108,7 +101,6 @@ describe('media-resolved stream event', () => {
     searchMedia.mockResolvedValue({ outcomes: [], failures: [], networkCalls: 0 });
 
     await run(['dark ambient', 'lofi beats']);
-
     expect(searchMedia).toHaveBeenCalledWith(expect.objectContaining({ queries: ['dark ambient', 'lofi beats'] }));
   });
 
@@ -119,7 +111,6 @@ describe('media-resolved stream event', () => {
       .mockResolvedValueOnce(scriptReply());
 
     const collected = await run(tooMany);
-
     expect(searchMedia).not.toHaveBeenCalled();
     expect(collected.some((event) => event.type === 'media-resolved')).toBe(false);
   });
@@ -135,9 +126,6 @@ describe('media-resolved stream event', () => {
     });
 
     const collected = await run(['zzzz']);
-
-    // An empty search is not a card, and certainly not a fallback search link
-    // dressed up as a resolved video.
     expect(collected.some((event) => event.type === 'media-resolved')).toBe(false);
   });
 
@@ -159,7 +147,6 @@ describe('media-resolved stream event', () => {
     });
 
     const collected = await run(['x']);
-
     const media = collected.find((event) => event.type === 'media-resolved');
     expect(media && media.type === 'media-resolved' ? media.items.map((item) => item.id) : []).toEqual(['good']);
   });
@@ -175,9 +162,6 @@ describe('media-resolved stream event', () => {
     });
 
     await run(['dark ambient']);
-
-    // Whatever is returned to the model becomes prompt context and can end up in
-    // logs, so it must carry rendered media only.
     const continuation = createInteraction.mock.calls[1][0] as {
       input: { type: string; result: { type: string; text: string }[] }[];
     };
@@ -185,6 +169,7 @@ describe('media-resolved stream event', () => {
     expect(sent).toContain('Dark Ambient Mix');
     expect(sent).not.toMatch(/AIza/);
     expect(sent).not.toMatch(/apiKey|api_key|x-goog|authorization/i);
+    expect(sent).not.toContain('embedUrl');
   });
 
   it('still completes the turn when a search fails outright', async () => {
@@ -198,7 +183,6 @@ describe('media-resolved stream event', () => {
     });
 
     const collected = await run(['x']);
-
     expect(collected.some((event) => event.type === 'media-resolved')).toBe(false);
     expect(collected.some((event) => event.type === 'completed')).toBe(true);
   });

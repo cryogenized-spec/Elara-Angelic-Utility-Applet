@@ -162,23 +162,48 @@ for (const marker of ['forbiddenSourceInspection', 'streamAssistantTurn', 'statu
   if (!testQualityGate.includes(marker)) fail(`test quality gate lost required structural check: ${marker}`);
 }
 const coverageGate = read('scripts/check-coverage.mjs');
-for (const marker of ['coverage/coverage-summary.json', 'coverage-baseline.json', 'baseline.directories', 'baseline.files']) {
+for (const marker of ['coverage/coverage-summary.json', 'coverage-baseline.json', 'baseline.directories', 'baseline.files', 'eligible source disappeared from coverage report']) {
   if (!coverageGate.includes(marker)) fail(`coverage gate lost required ratchet check: ${marker}`);
 }
 const coverageSentinel = read('scripts/verify-coverage-gate.mjs');
-for (const marker of ['spawnSync', 'check-coverage.mjs', 'deliberately regressed branch metric']) {
+for (const marker of ['spawnSync', 'check-coverage.mjs', 'deliberately regressed branch metric', 'source-inventory disappearance']) {
   if (!coverageSentinel.includes(marker)) fail(`coverage adversarial sentinel lost required proof: ${marker}`);
 }
 try {
   const baseline = JSON.parse(read('scripts/coverage-baseline.json'));
-  const minimumGlobal = { lines: 63.83, statements: 58.39, functions: 54.02, branches: 53.21 };
-  for (const [metric, minimum] of Object.entries(minimumGlobal)) if (typeof baseline.global?.[metric] !== 'number' || baseline.global[metric] < minimum) fail(`coverage baseline ${metric} was lowered below the certified Phase 3 floor ${minimum}`);
-  for (const directory of ['autonomy', 'chat', 'domain', 'gemini', 'media', 'memory', 'persistence']) if (!baseline.directories?.[directory]) fail(`coverage baseline lost critical directory: ${directory}`);
-  for (const path of ['src/autonomy/cloud/credential.ts', 'src/autonomy/cloud/pairing.ts', 'src/persistence/gemini-api-key.ts', 'src/chat/generation-sync.ts', 'src/gemini/provider.ts', 'src/media/playback/PlaybackProvider.tsx', 'src/memory/store.ts']) if (!baseline.files?.[path]) fail(`coverage baseline lost critical file: ${path}`);
+  if (baseline.measuredFrom !== 'phase3-final-measurement@3efd0085') fail('coverage baseline must identify the certified Phase 3 measurement head');
+  const certifiedGlobal = { lines: 64.14, statements: 58.73, functions: 54.21, branches: 53.44 };
+  const certifiedDirectories = {
+    autonomy: { lines: 94.66, statements: 93.68, functions: 93.96, branches: 85.71 },
+    chat: { lines: 96.38, statements: 93.16, functions: 95.38, branches: 84.03 },
+    domain: { lines: 97.34, statements: 92.75, functions: 92.30, branches: 85.05 },
+    gemini: { lines: 87.83, statements: 81.81, functions: 80.85, branches: 75.23 },
+    media: { lines: 89.65, statements: 86.92, functions: 89.55, branches: 78.57 },
+    memory: { lines: 95.00, statements: 91.41, functions: 92.85, branches: 79.77 },
+    persistence: { lines: 74.17, statements: 69.84, functions: 68.29, branches: 61.14 },
+  };
+  const certifiedFiles = {
+    'src/autonomy/cloud/credential.ts': { lines: 93.93, statements: 94.59, functions: 100.00, branches: 75.00 },
+    'src/autonomy/cloud/pairing.ts': { lines: 100.00, statements: 95.77, functions: 90.47, branches: 81.63 },
+    'src/persistence/gemini-api-key.ts': { lines: 91.12, statements: 86.25, functions: 85.33, branches: 78.80 },
+    'src/chat/generation-sync.ts': { lines: 92.98, statements: 90.14, functions: 94.44, branches: 80.00 },
+    'src/gemini/provider.ts': { lines: 86.76, statements: 78.76, functions: 72.97, branches: 68.67 },
+    'src/media/playback/PlaybackProvider.tsx': { lines: 95.61, statements: 93.18, functions: 92.30, branches: 84.31 },
+    'src/memory/store.ts': { lines: 97.05, statements: 89.79, functions: 92.30, branches: 70.96 },
+  };
+  const protectFloor = (label, actual, expected) => {
+    for (const [metric, minimum] of Object.entries(expected)) {
+      if (typeof actual?.[metric] !== 'number' || actual[metric] < minimum) fail(`${label} ${metric} was lowered below the certified Phase 3 floor ${minimum}`);
+    }
+  };
+  protectFloor('coverage baseline global', baseline.global, certifiedGlobal);
+  for (const [directory, floors] of Object.entries(certifiedDirectories)) protectFloor(`coverage baseline directory ${directory}`, baseline.directories?.[directory], floors);
+  for (const [path, floors] of Object.entries(certifiedFiles)) protectFloor(`coverage baseline file ${path}`, baseline.files?.[path], floors);
 } catch (error) {
   fail(`scripts/coverage-baseline.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 }
 if (existsSync(join(root, '.github/workflows/phase3-baseline.yml'))) fail('temporary Phase 3 bootstrap workflow must not remain in the repository');
+if (existsSync(join(root, '.github/workflows/phase3-freeze.yml'))) fail('temporary Phase 3 final-freeze workflow must not remain in the repository');
 
 const workflow = read('.github/workflows/ci.yml');
 for (const marker of ['continue-on-error', 'if: always()', '|| true', 'set +e']) if (workflow.includes(marker)) fail(`CI workflow contains forbidden bypass marker: ${marker}`);
@@ -211,4 +236,4 @@ if (errors.length) {
   process.stderr.write(`Verification integrity failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
   process.exit(1);
 }
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, test-quality, adversarial coverage sentinel, whole-source coverage ratchet, and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

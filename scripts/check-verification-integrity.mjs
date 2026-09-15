@@ -111,6 +111,7 @@ try {
     'docs:check': 'node scripts/check-docs.mjs',
     'verify:gates': 'node scripts/check-verification-integrity.mjs',
     'security:check': 'node scripts/security-architecture-gate.mjs',
+    'supply-chain:check': 'node scripts/supply-chain-gate.mjs',
     'test:quality': 'node scripts/test-quality-gate.mjs && node scripts/verify-coverage-gate.mjs',
     lint: 'eslint . --max-warnings 0',
     typecheck: 'tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit',
@@ -121,13 +122,15 @@ try {
     'test:workers': 'vitest run --config vitest.workers.config.ts',
     build: 'tsc -p tsconfig.json --noEmit && vite build',
     e2e: 'playwright test',
-    'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && npm run test:quality && node scripts/reliability-gate.mjs',
+    'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && npm run supply-chain:check && npm run test:quality && node scripts/reliability-gate.mjs',
   };
   for (const [name, expected] of Object.entries(expectedScripts)) if (pkg.scripts?.[name] !== expected) fail(`npm script ${name} changed from the reviewed command`);
   if (pkg.devDependencies?.['@vitest/coverage-v8'] !== '4.1.11') fail('@vitest/coverage-v8 must stay exactly aligned with Vitest 4.1.11');
 } catch (error) {
   fail(`package.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 }
+
+if (read('.nvmrc').trim() !== '24.21.0') fail('.nvmrc must remain exactly pinned to Node 24.21.0');
 
 const eslintConfig = read('eslint.config.js');
 for (const hardRule of ["'@typescript-eslint/no-explicit-any': 'error'", "'react-hooks/set-state-in-effect': 'error'", "'react-hooks/purity': 'error'", "'react-hooks/exhaustive-deps': 'error'", "'no-unsafe-finally': 'error'"]) {
@@ -155,6 +158,11 @@ if (appPerformanceNowCount !== 2) fail(`src/app/App.tsx performance.now() surfac
 const securityGate = read('scripts/security-architecture-gate.mjs');
 for (const marker of ['forbiddenCapabilities', 'forbiddenNodeAuthority', 'XMLHttpRequest transport', 'sendBeacon transport', 'remote dynamic module import', 'reviewedScriptLoaders', 'reviewedWorkerAuthorities', 'reviewedDexieAuthorities', 'reviewedLockboxConsumers', 'reviewedAutonomyCredentialConsumers', 'reviewedPairingTokenConsumers', 'reviewedRawFetchAuthorities', 'reviewedGlobalFetchReferences', 'reviewedGoogleServiceImporters', 'reviewedConfirmationBrokerConsumers', 'StoredAutonomyPairing']) {
   if (!securityGate.includes(marker)) fail(`security architecture gate lost required capability check: ${marker}`);
+}
+
+const supplyChainGate = read('scripts/supply-chain-gate.mjs');
+for (const marker of ['reviewedActions', 'reviewedDirectDependencies', 'reviewedInstallScripts', 'lockfileVersion', 'strict-allow-scripts=true', 'persist-credentials', 'upload-pages-artifact', 'deploy-pages', 'npm audit --audit-level=high']) {
+  if (!supplyChainGate.includes(marker)) fail(`supply-chain gate lost required control: ${marker}`);
 }
 
 const testQualityGate = read('scripts/test-quality-gate.mjs');
@@ -204,17 +212,21 @@ try {
 }
 if (existsSync(join(root, '.github/workflows/phase3-baseline.yml'))) fail('temporary Phase 3 bootstrap workflow must not remain in the repository');
 if (existsSync(join(root, '.github/workflows/phase3-freeze.yml'))) fail('temporary Phase 3 final-freeze workflow must not remain in the repository');
+if (existsSync(join(root, '.github/workflows/deploy.yml'))) fail('standalone Pages deployment workflow must not return; deployment is owned by certified CI');
 
 const workflow = read('.github/workflows/ci.yml');
 for (const marker of ['continue-on-error', 'if: always()', '|| true', 'set +e']) if (workflow.includes(marker)) fail(`CI workflow contains forbidden bypass marker: ${marker}`);
 if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci rather than npm install');
-if (!workflow.includes('permissions:\n  contents: read')) fail('CI repository permissions must remain read-only');
-const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:coverage', 'npm run test:workers', 'npm run build', 'npm exec -- playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
+if (!workflow.includes('permissions: {}')) fail('workflow-wide GITHUB_TOKEN permissions must default to none');
+const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run supply-chain:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm audit --audit-level=high', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:coverage', 'npm run test:workers', 'npm run build', './node_modules/.bin/playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
 let previousIndex = -1;
 for (const command of orderedCommands) {
   const index = workflow.indexOf(command, previousIndex + 1);
   if (index === -1) fail(`CI workflow is missing or reorders required command: ${command}`);
   else previousIndex = index;
+}
+for (const marker of ['persist-credentials: false', 'cancel-in-progress: true', 'needs: runtime', 'pages: write', 'id-token: write', 'fail-on-severity: high']) {
+  if (!workflow.includes(marker)) fail(`CI workflow lost Phase 4 control: ${marker}`);
 }
 
 const eslintDisableComment = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?\b/;
@@ -236,4 +248,4 @@ if (errors.length) {
   process.stderr.write(`Verification integrity failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
   process.exit(1);
 }
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node release controls, and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

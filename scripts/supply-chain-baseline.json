@@ -68,7 +68,6 @@
     "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
     "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02",
     "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9",
-    "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346",
-    "actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294"
+    "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346"
   ]
 }

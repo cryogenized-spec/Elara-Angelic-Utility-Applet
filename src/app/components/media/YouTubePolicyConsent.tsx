@@ -47,9 +47,9 @@ export function YouTubePolicyConsent() {
         {' · '}
         <a href={termsUrl} target="_blank" rel="noreferrer noopener">Elara Terms of Use</a>
         {' · '}
-        <a href={YOUTUBE_TERMS_URL} target="_blank" rel="noreferrer noopener">YouTube Terms</a>
+        <a aria-label="Official YouTube service terms" href={YOUTUBE_TERMS_URL} target="_blank" rel="noreferrer noopener">YouTube Terms</a>
         {' · '}
-        <a href={GOOGLE_PRIVACY_URL} target="_blank" rel="noreferrer noopener">Google Privacy Policy</a>
+        <a aria-label="Official Google privacy statement" href={GOOGLE_PRIVACY_URL} target="_blank" rel="noreferrer noopener">Google Privacy Policy</a>
       </p>
       {status === 'accepted' ? (
         <span role="status">Accepted · policy version {YOUTUBE_POLICY_CONSENT_VERSION}</span>

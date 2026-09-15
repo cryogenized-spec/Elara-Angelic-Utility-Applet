@@ -3,20 +3,17 @@ import { pwaRegisterProbe, resetPwaRegisterProbe } from '../test/virtual-pwa-reg
 import { applyPwaUpdate, initPwaUpdater } from './pwa';
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   resetPwaRegisterProbe();
 });
 
 describe('PWA update coordinator', () => {
   it('registers once, keeps the latest refresh callback, checks on lifecycle signals, and applies explicitly', async () => {
+    vi.useFakeTimers();
     resetPwaRegisterProbe();
     const firstRefresh = vi.fn();
     const latestRefresh = vi.fn();
-    let intervalHandler: TimerHandler | null = null;
-    const interval = vi.spyOn(window, 'setInterval').mockImplementation((handler: TimerHandler) => {
-      intervalHandler = handler;
-      return 1;
-    });
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
     const registrationUpdate = vi.fn<() => Promise<void>>().mockResolvedValue(undefined);
     const registration = { update: registrationUpdate } as unknown as ServiceWorkerRegistration;
@@ -34,16 +31,15 @@ describe('PWA update coordinator', () => {
     expect(latestRefresh).toHaveBeenCalledTimes(1);
 
     probe.options?.onRegisteredSW?.('/sw.js', registration);
-    expect(interval).toHaveBeenCalledTimes(1);
-    expect(intervalHandler).not.toBeNull();
-    if (typeof intervalHandler === 'function') intervalHandler();
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
     document.dispatchEvent(new Event('visibilitychange'));
     window.dispatchEvent(new Event('focus'));
     await Promise.resolve();
     expect(registrationUpdate).toHaveBeenCalledTimes(3);
 
     probe.options?.onRegisteredSW?.('/sw.js', undefined);
-    expect(interval).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(30 * 60 * 1000);
+    expect(registrationUpdate).toHaveBeenCalledTimes(4);
 
     const failure = new Error('registration failed');
     probe.options?.onRegisterError?.(failure);

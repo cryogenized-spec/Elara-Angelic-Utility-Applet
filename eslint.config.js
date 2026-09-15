@@ -59,6 +59,11 @@ export default tseslint.config(
       '@typescript-eslint/require-await': 'off',
       '@typescript-eslint/no-unnecessary-type-assertion': 'off',
       '@typescript-eslint/no-base-to-string': 'off',
+      // IndexedDB event handlers expose DOMException | null. Playwright storage
+      // fixtures intentionally mirror that browser API; synthesizing replacement
+      // Error instances at every reject site would not strengthen the behavior
+      // under test. Other type-aware promise rules remain enabled.
+      '@typescript-eslint/prefer-promise-reject-errors': 'off',
     },
   },
   {

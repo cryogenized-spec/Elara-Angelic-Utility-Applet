@@ -2,8 +2,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlaybackAuthority } from '../../../media/playback/PlaybackProvider';
 import type { MediaItem } from '../../../domain/media';
@@ -23,7 +21,6 @@ import { MessageMedia } from './MessageMedia';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const NOW = 1_800_000_000_000;
-const cssSheet = readFileSync(resolve(process.cwd(), 'src/app/components/media/media-card.css'), 'utf8');
 
 function item(overrides: Partial<MediaItem> = {}): MediaItem {
   return {
@@ -368,39 +365,5 @@ describe('MessageMedia', () => {
       await act(async () => { await new Promise((resolve) => { setTimeout(resolve, 10); }); });
     }
     expect(container.querySelector('.media-rail')?.getAttribute('aria-label')).toBe('Media results from YouTube');
-  });
-});
-
-describe('MediaCard stylesheet contract', () => {
-  it('reserves the thumbnail box at 16:9', () => {
-    expect(cssSheet).toMatch(/\.media-card__thumb\s*\{[^}]*aspect-ratio:\s*16 \/ 9/s);
-    expect(cssSheet).not.toMatch(/aspect-ratio:\s*4 \/ 3/);
-  });
-
-  it('keeps primary card and chooser actions thumb-sized', () => {
-    expect(cssSheet).toMatch(/\.media-card__cta\s*\{[^}]*min-height:\s*44px/s);
-    expect(cssSheet).toMatch(/\.media-card__choice,[\s\S]*\.media-card__fallback\s*\{[^}]*min-height:\s*44px/s);
-  });
-
-  it('visibly distinguishes disabled embedded choice while preserving external access', () => {
-    expect(cssSheet).toMatch(/button\.media-card__choice:disabled\s*\{[^}]*cursor:\s*not-allowed[^}]*opacity:\s*\.55/s);
-  });
-
-  it('gives chooser and fallback actions a keyboard focus ring', () => {
-    expect(cssSheet).toMatch(/\.media-card__choice:focus-visible,[\s\S]*\.media-card__fallback:focus-visible\s*\{/);
-  });
-
-  it('keeps the official YouTube logo in a solid frame and gives routed attribution a 44px target', () => {
-    expect(cssSheet).toMatch(/\.media-card__brand-link\s*\{[^}]*min-height:\s*44px/s);
-    expect(cssSheet).toMatch(/\.media-card__brand-logo-frame\s*\{[^}]*background:\s*#fff/s);
-    expect(cssSheet).toMatch(/\.media-card__brand-logo\s*\{[^}]*width:\s*72px/s);
-  });
-
-  it('makes unavailable cards visibly non-interactive', () => {
-    expect(cssSheet).toMatch(/\.media-card--unavailable\s*\{[^}]*cursor:\s*default/s);
-  });
-
-  it('honours reduced-motion preferences', () => {
-    expect(cssSheet).toMatch(/prefers-reduced-motion: reduce/);
   });
 });

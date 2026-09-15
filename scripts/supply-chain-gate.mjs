@@ -1,0 +1,114 @@
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
+const root = process.cwd();
+const errors = [];
+const fail = (message) => errors.push(message);
+const read = (path) => readFileSync(join(root, path), 'utf8');
+const json = (path) => JSON.parse(read(path));
+const same = (actual, expected, label) => {
+  if (JSON.stringify(actual ?? {}) !== JSON.stringify(expected ?? {})) fail(`${label} changed from the reviewed supply-chain baseline`);
+};
+
+const baseline = json('scripts/supply-chain-baseline.json');
+const reviewedDirectDependencies = { dependencies: baseline.dependencies, devDependencies: baseline.devDependencies };
+const reviewedInstallScripts = baseline.allowScripts;
+const reviewedActions = new Set(baseline.actions);
+
+if (read('.nvmrc').trim() !== baseline.node) fail(`.nvmrc must pin Node exactly to ${baseline.node}`);
+const npmrc = read('.npmrc').split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+same(npmrc, baseline.npmrc, '.npmrc');
+if (!baseline.npmrc.includes('strict-allow-scripts=true')) fail('reviewed baseline lost strict-allow-scripts=true');
+if (npmrc.some((line) => /^(?:ignore-scripts|dangerously-allow-all-scripts)\s*=\s*true$/i.test(line))) fail('.npmrc may not bypass install-script policy');
+
+const pkg = json('package.json');
+same(pkg.overrides, baseline.overrides, 'package.json security overrides');
+same(pkg.dependencies, reviewedDirectDependencies.dependencies, 'package.json dependencies');
+same(pkg.devDependencies, reviewedDirectDependencies.devDependencies, 'package.json devDependencies');
+same(pkg.allowScripts, reviewedInstallScripts, 'package.json allowScripts');
+if (pkg.scripts?.['supply-chain:check'] !== 'node scripts/supply-chain-gate.mjs') fail('package.json supply-chain:check changed');
+if (!pkg.scripts?.['reliability:check']?.includes('npm run supply-chain:check')) fail('final reliability gate must rerun supply-chain policy');
+
+const lock = json('package-lock.json');
+if (lock.lockfileVersion !== 3) fail(`package-lock.json lockfileVersion must remain 3; found ${lock.lockfileVersion}`);
+same(lock.packages?.['']?.dependencies, reviewedDirectDependencies.dependencies, 'package-lock root dependencies');
+same(lock.packages?.['']?.devDependencies, reviewedDirectDependencies.devDependencies, 'package-lock root devDependencies');
+const sharp = lock.packages?.['node_modules/sharp'];
+if (sharp?.version !== baseline.overrides?.sharp) fail(`lockfile must resolve sharp to reviewed patched version ${baseline.overrides?.sharp}`);
+
+const installScriptIdentities = new Set();
+for (const [path, metadata] of Object.entries(lock.packages ?? {})) {
+  if (!path) continue;
+  if (metadata?.resolved) {
+    if (!metadata.resolved.startsWith('https://registry.npmjs.org/')) fail(`${path} resolves outside the npm registry`);
+    if (typeof metadata.integrity !== 'string' || !metadata.integrity.startsWith('sha512-')) fail(`${path} lacks sha512 registry integrity`);
+  }
+  if (metadata?.hasInstallScript === true && metadata?.version) {
+    const marker = 'node_modules/';
+    const index = path.lastIndexOf(marker);
+    if (index !== -1) installScriptIdentities.add(`${path.slice(index + marker.length)}@${metadata.version}`);
+  }
+}
+const actualInstallScripts = [...installScriptIdentities].sort();
+const expectedInstallScripts = [...baseline.installScriptIdentities].sort();
+same(actualInstallScripts, expectedInstallScripts, 'reviewed install-script capability inventory');
+
+const workflowFiles = readdirSync(join(root, '.github/workflows')).filter((name) => /\.ya?ml$/.test(name)).sort();
+same(workflowFiles, ['ci.yml'], 'workflow file inventory');
+const ci = read('.github/workflows/ci.yml');
+const actionUses = [...ci.matchAll(/\buses:\s*([^\s#]+)/g)].map((match) => match[1]);
+for (const action of actionUses) {
+  if (!/^[^\s@]+@[0-9a-f]{40}$/.test(action)) fail(`GitHub Action is not pinned to a full SHA: ${action}`);
+  if (!reviewedActions.has(action)) fail(`unreviewed GitHub Action authority: ${action}`);
+}
+for (const action of reviewedActions) if (!actionUses.includes(action)) fail(`reviewed GitHub Action disappeared: ${action}`);
+
+const checkout = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
+const checkoutCount = actionUses.filter((action) => action === checkout).length;
+const persistedOff = (ci.match(/persist-credentials:\s*false/g) ?? []).length;
+const exactRefCount = (ci.match(/ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/g) ?? []).length;
+if (checkoutCount !== persistedOff || checkoutCount !== exactRefCount) fail('every checkout must use the exact event SHA and persist-credentials: false');
+if (!ci.includes(`test "$(node --version)" = "v${baseline.node}"`)) fail('CI must assert the exact Node runtime');
+if (!ci.includes(`test "$(npm --version)" = "${baseline.npm}"`)) fail('CI must assert the exact npm runtime');
+if (/check-latest:\s*true/.test(ci)) fail('CI may not float Node via check-latest');
+if (/\bnpm\s+install\b/.test(ci)) fail('CI may not use npm install; use npm ci');
+if (/\b(?:ignore-scripts|dangerously-allow-all-scripts)\b/.test(ci)) fail('CI may not bypass install-script policy');
+if (ci.includes('actions/dependency-review-action@')) fail('dependency-review action requires repository Dependency Graph and is not part of the supported CI surface');
+
+const runsOn = (ci.match(/^\s+runs-on:/gm) ?? []).length;
+const timeouts = (ci.match(/^\s+timeout-minutes:/gm) ?? []).length;
+if (runsOn !== timeouts) fail(`every CI job needs an explicit timeout: ${runsOn} jobs, ${timeouts} timeouts`);
+if (!ci.includes('permissions: {}')) fail('workflow-wide token permissions must default to none');
+if (!ci.includes('group: ci-${{ github.workflow }}-${{ github.ref }}') || !ci.includes('cancel-in-progress: true')) fail('CI concurrency policy changed');
+
+const ordered = [
+  'npm run supply-chain:check',
+  'npm ci --no-audit --no-fund',
+  'npm audit signatures',
+  'npm audit --audit-level=high',
+  'npm run reliability:check',
+  'actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9',
+];
+let previous = -1;
+for (const marker of ordered) {
+  const index = ci.indexOf(marker, previous + 1);
+  if (index === -1) fail(`CI lost required ordered control: ${marker}`);
+  else previous = index;
+}
+if (!ci.includes("if: github.event_name == 'push' && github.ref == 'refs/heads/main'")) fail('Pages artifact must be main-push only');
+if (!ci.includes('needs: runtime')) fail('Pages deploy must depend on Runtime verification');
+if (!ci.includes('pages: write') || !ci.includes('id-token: write')) fail('deploy-pages job lost explicit Pages/OIDC authority');
+if (!ci.includes('environment:\n      name: github-pages')) fail('deploy-pages job must use the github-pages environment');
+
+if (!existsSync(join(root, '.github/dependabot.yml'))) fail('Dependabot configuration is required');
+else {
+  const dependabot = read('.github/dependabot.yml');
+  for (const marker of ['package-ecosystem: npm', 'package-ecosystem: github-actions', 'interval: weekly']) if (!dependabot.includes(marker)) fail(`Dependabot lost required marker: ${marker}`);
+}
+
+if (errors.length) {
+  process.stderr.write(`Supply-chain gate failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
+  process.exit(1);
+}
+
+process.stdout.write(`Supply-chain gate passed: Node ${baseline.node} / npm ${baseline.npm}; sharp ${baseline.overrides.sharp} security override; ${Object.keys(reviewedDirectDependencies.dependencies).length + Object.keys(reviewedDirectDependencies.devDependencies).length} direct specs; ${installScriptIdentities.size} reviewed install-script packages; ${actionUses.length} immutable Action invocations; lockfile registry/integrity, registry signatures, high-severity audit, Dependabot, exact-head certification and certified-before-deploy ordering verified.\n`);

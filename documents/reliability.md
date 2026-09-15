@@ -1,100 +1,85 @@
 ---
 id: SYS-REL
 status: active
-verified_commit: 02ae039eda51715f2950cf268a6fc0d55e65065c
-scope: CI, automated verification, test quality, coverage, diagnostics and release-quality gates
-paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, vitest.config.ts, .github/workflows/ci.yml, e2e]
-keywords: [reliability, testing, coverage, ratchet, ci, diagnostics, performance, e2e, lint, typecheck, structural-gate]
+verified_commit: 0b5fd5623962c1d737ec6f5a793428bc42cc8649
+scope: CI, verification integrity, test quality, coverage, secret scanning, supply-chain controls and certified deployment
+paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/secret-scan.mjs, scripts/supply-chain-gate.mjs, scripts/supply-chain-baseline.json, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, .github/workflows/ci.yml, .github/dependabot.yml, package.json, package-lock.json, .npmrc, .nvmrc, e2e]
+keywords: [reliability, ci, exact-head, supply-chain, secret-scan, audit, signature, dependency, coverage, deployment]
 ---
 
-# Reliability, testing and diagnostics
+# Reliability and certification
 
 ## 1. Purpose and boundary
 
-`SYS-REL` defines the evidence required to keep `main` shippable. Verification is layered deliberately: repository structure is checked as structure, runtime behavior is tested as behavior, unit coverage is measured across the complete `src/` tree, Worker behavior has its own isolated suite, and Playwright is the authority for browser-visible geometry and interaction.
+`SYS-REL` defines the evidence required before repository work is called complete or shipped. Repository structure is checked as structure; runtime behavior is tested as behavior; dependency capabilities are explicit; credential-shaped material is scanned before installation; and Pages deployment consumes only an artifact produced after the same `main` commit passes certification.
 
-A test is not counted as behavioral evidence merely because it is stored in a `*.test.ts(x)` file. Unit/Worker tests must execute code. Source-text/CSS architecture assertions belong in dependency-free repository gates and therefore do not inflate unit-test or coverage numbers.
+A green result certifies one exact SHA. A PR merge creates a different `main` SHA, so post-merge certification is required before a hardening phase is closed.
 
-## 2. Runtime architecture
+## 2. Certification pipeline
 
 ```text
-change
+exact PR head / main push SHA
 -> documentation integrity
 -> verification-integrity / anti-fake-green
 -> security & architecture capability gate
+-> secret scan
+-> supply-chain gate
 -> test-quality / structural-contract gate
--> npm ci
+-> locked npm ci
+-> npm registry-signature verification
+-> high-severity dependency audit
 -> zero-warning lint
 -> TS6 primary typecheck
 -> TS7 compatibility typecheck
--> unit tests + whole-source V8 coverage ratchet
+-> unit tests + whole-source coverage ratchet
 -> Worker / Durable Object tests
 -> production build
 -> Playwright: Chromium + Android portrait + onboarding
 -> final reliability gate
+-> main only: package certified dist/
+-> deploy job after Runtime verification succeeds
 ```
 
-CI targets Node 24. All dependency-free policy gates run before package installation. The final reliability command reruns documentation, verification-integrity, security and test-quality checks before the older runtime invariant gate.
+CI pins Node `24.21.0` and npm `11.19.0`. Pull-request checkout explicitly uses `github.event.pull_request.head.sha`; push certification uses `github.sha`. Checkout credentials are not persisted.
 
-## 3. Source map
+## 3. Authorities
 
 | Concern | Authority |
 | --- | --- |
 | Documentation integrity | `scripts/check-docs.mjs`, `documents/manifest.json` |
-| Verification / fake-green integrity | `scripts/check-verification-integrity.mjs` |
-| Security capability boundary | `scripts/security-architecture-gate.mjs` |
-| Structural test-quality boundary | `scripts/test-quality-gate.mjs` |
-| Coverage measurement | `vitest.config.ts`, `@vitest/coverage-v8` |
-| Coverage ratchet | `scripts/check-coverage.mjs`, `scripts/coverage-baseline.json` |
-| CI pipeline | `.github/workflows/ci.yml` |
+| Anti-fake-green integrity | `scripts/check-verification-integrity.mjs` |
+| Runtime/security capability boundary | `scripts/security-architecture-gate.mjs` |
+| High-confidence committed-secret scan | `scripts/secret-scan.mjs` |
+| Dependency/release capability boundary | `scripts/supply-chain-gate.mjs`, `scripts/supply-chain-baseline.json` |
+| Structural test-quality rules | `scripts/test-quality-gate.mjs` |
+| Coverage measurement/ratchet | `vitest.config.ts`, `scripts/check-coverage.mjs`, `scripts/coverage-baseline.json` |
 | Runtime invariant gate | `scripts/reliability-gate.mjs` |
-| Unit/integration behavior | colocated `*.test.ts(x)` |
-| Worker behavior | `worker/test/`, `vitest.workers.config.ts` |
+| CI and Pages release | `.github/workflows/ci.yml` |
+| Automated dependency proposals | `.github/dependabot.yml` |
 | Browser behavior | `e2e/`, `playwright.config.ts` |
-| Typecheck | `tsconfig.json`, `worker/tsconfig.json`, `tsconfig.e2e.json` |
-| Lint | `eslint.config.js` |
+| Worker behavior | `worker/test/`, `vitest.workers.config.ts` |
 
-## 4. Verification contract
+## 4. Supply-chain contract
 
-The broad completion path is ordered and must not be shortened when repository-level work is reported complete:
+`.npmrc` denies git, remote-tarball and file dependency sources and requires explicit install-script review. `package.json` `allowScripts` is a capability list: new packages with install scripts do not acquire execution authority implicitly.
 
-```text
-npm run docs:check
-npm run verify:gates
-npm run security:check
-npm run test:quality
-npm ci --no-audit --no-fund
-npm run lint
-npm run typecheck
-npm run typecheck:ts7
-npm run test:coverage
-npm run test:workers
-npm run build
-npm run e2e -- --project=chromium --project=android-portrait --project=onboarding
-npm run reliability:check
-```
+`scripts/supply-chain-baseline.json` freezes reviewed direct dependency specifications, install-script identities, immutable GitHub Action SHAs, Node/npm versions and security overrides. The gate requires registry packages to resolve from `registry.npmjs.org` with SHA-512 lockfile integrity.
 
-`npm test` remains a fast local iteration command. It is not the repository certification command because it does not enforce the coverage ratchet. `npm run test:coverage` executes the same unit suite with V8 instrumentation and then runs `coverage:check`.
+CI runs `npm audit signatures` and then `npm audit --audit-level=high`. Phase 4 surfaced a high-severity Sharp/libheif path in Cloudflare development tooling; the repository now pins the patched `sharp 0.35.4` through a reviewed root override, and the lockfile must resolve that version. The override is part of the baseline and meta-gate rather than an undocumented lockfile accident.
 
-## 5. Behavioral tests versus structural contracts
+Dependabot may propose npm and GitHub Actions updates. Such PRs are expected to fail the frozen capability baseline until the dependency/action change is reviewed and the baseline is deliberately updated.
 
-Behavioral tests call exported logic, render components, exercise storage, simulate failures/cancellation, or drive the app through Playwright. They should fail because observable behavior changed.
+GitHub Dependency Review is not currently a repository-side certification dependency because the repository's Dependency Graph feature is not enabled. This is not hidden with `continue-on-error`; supported controls remain mandatory instead.
 
-Structural rules that are genuinely about what code is allowed to exist are owned by `scripts/test-quality-gate.mjs`. Current structural contracts include:
+## 5. Secret boundary
 
-- unit/Worker tests may not read implementation/CSS files through `node:fs`/`node:path` and present those strings as runtime test evidence;
-- Workspace shortcuts may not synthesize hidden model turns;
-- App navigation/mutation paths must retain the terminal-save ownership boundary whose pure behavior is unit-tested in `src/chat/`;
-- shell geometry selectors retain one reviewed owner while Playwright measures actual boxes;
-- Elara-owned YouTube player presets may style the outer surface but may not overlay or manipulate the provider iframe.
+`npm run secrets:check` runs before dependency installation and again through final reliability. It rejects tracked private `.env` files and high-confidence credential formats including Google API keys, GitHub tokens, AWS access keys and private-key material. Clearly marked dummy values are tolerated only in test/spec/fixture paths.
 
-This separation prevents source-grep tests from padding test counts or coverage while retaining cheap architecture enforcement where source structure is the actual invariant.
+The scanner reports path and line but does not echo matched credential material. It complements runtime Lockbox protections; it does not replace provider-side key revocation or GitHub's own secret-scanning features.
 
-## 6. Coverage ratchet
+## 6. Coverage and behavioral evidence
 
-Vitest V8 coverage includes the complete `src/**/*.{ts,tsx}` tree and excludes only test/spec files and declarations. Untested application files therefore count against the total; weak areas are visible rather than hidden through an exclusion list.
-
-The certified whole-source Phase-3 floor is:
+Vitest V8 coverage includes the complete `src/**/*.{ts,tsx}` tree, excluding only test/spec files and declarations. The certified Phase-3 global floor remains:
 
 | Metric | Floor |
 | --- | ---: |
@@ -103,26 +88,24 @@ The certified whole-source Phase-3 floor is:
 | Functions | 54.21% |
 | Branches | 53.44% |
 
-`scripts/coverage-baseline.json` also sets independent floors for `autonomy`, `chat`, `domain`, `gemini`, `media`, `memory` and `persistence`, plus security/authority-critical files such as the autonomy credential/pairing stores, Gemini Lockbox, generation sync, provider, global playback authority and memory store. This prevents increased coverage in an easy subsystem from masking a regression in a critical one.
+The coverage checker requires all 185 eligible source files to appear in the report and applies independent floors to critical directories/files. Structural source rules live in repository gates rather than pseudo-unit tests, so they do not inflate behavioral test counts or coverage.
 
-The verification-integrity gate carries the exact certified global, critical-directory and critical-file Phase-3 floors. The coverage checker also requires all 185 eligible source files to remain present in the report, while the adversarial sentinel proves both metric regression and silent source disappearance fail closed. Raising a floor is allowed. Quietly lowering/removing the ratchet is not.
+Persistence/credential changes require failure-path and migration evidence. Worker changes are verified through the isolated Worker/Durable Object suite. Browser-visible geometry and interaction are owned by Playwright rather than source-string assertions.
 
-Coverage is one signal, not a correctness score. `App.tsx` and browser geometry rely heavily on Playwright; whole-source coverage intentionally exposes that unit-test gap rather than pretending E2E execution was unit coverage.
+## 7. CI authority and release semantics
 
-## 7. Failure, migration and persistence evidence
+Workflow-wide `GITHUB_TOKEN` permissions default to none. Runtime certification receives read-only repository contents. The permanent certification workflow rejects repository write authority and persisted checkout credentials. GitHub Actions are pinned to reviewed full commit SHAs; each job has an explicit timeout and superseded runs for the same ref are cancelled.
 
-Persistence changes require failure-path evidence, not only successful round trips. Central database version bumps require migration tests from an existing schema. Credential migration must prove loss safety: plaintext legacy material is removed only after a protected write succeeds and remains recoverable when that write fails.
+Pages write and OIDC authority exist only in the downstream deploy job. On a `main` push, the runtime job builds and certifies the commit first, then uploads `dist/`; the deploy job has `needs: runtime` and cannot run when certification fails. The former independent Pages workflow must not return.
 
-Generation/persistence tests must cover cancellation, terminal state, delayed settlement and navigation boundaries where applicable. Tests should use controlled failure injection at a real authority seam instead of asserting that an implementation string exists.
+## 8. Branch/ruleset boundary
 
-## 8. Security and diagnostics
+Repository rules protect the default branch against deletion and non-fast-forward updates and require changes through pull requests. These server-side controls matter because an in-repo script cannot protect itself from an actor who can rewrite both the script and the workflow.
 
-Diagnostics redact credentials, OAuth material, raw attachment payloads and private reasoning. Test fixtures never use production credentials. E2E failure artifacts may contain application state; retention stays bounded.
+The preferred final configuration also requires the `Runtime verification` status check before merge. If the ruleset's required-check list is empty, the PR requirement exists but CI is not yet server-enforced as a merge prerequisite; treat that as an external configuration gap rather than pretending an in-repo gate can solve it.
 
-CI repository permissions remain read-only. Workflow/ruleset and dependency supply-chain hardening are separate repository-control concerns; the in-repo gates cannot protect themselves against an actor who is authorized to rewrite every workflow and branch rule simultaneously.
+## 9. Completion rule
 
-## 9. Completion and certification
+Never inherit green status across SHAs. Temporary bootstrap/write-capable workflows or jobs are not certification evidence and must be removed before the candidate run. Focused tests are useful for iteration but do not replace the ordered full matrix.
 
-Never claim a check passed if it was not run. A green PR head certifies that exact SHA only. Merge completion is followed by the same CI matrix on the resulting `main` commit before a hardening phase is called fully certified.
-
-Focused checks are useful during implementation but do not replace the broad matrix. If a required environment cannot execute a layer, record the gap explicitly rather than inferring success from another layer.
+Phase completion requires: exact PR-head certification, merge locked to that head, successful post-merge `main` certification, and successful certified Pages deployment when deployment is part of the change.

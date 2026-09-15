@@ -273,6 +273,7 @@ test.describe('Generation Activity', () => {
 
   test('rolls back an optimistic completed assistant when terminal persistence fails', async ({ page }) => {
     await page.addInitScript(() => {
+      // eslint-disable-next-line @typescript-eslint/unbound-method -- Captured only for Reflect.apply with an explicit IDBObjectStore receiver below.
       const originalPut = IDBObjectStore.prototype.put;
       let failedTerminalSave = false;
       IDBObjectStore.prototype.put = function patchedPut(this: IDBObjectStore, value: unknown, key?: IDBValidKey) {

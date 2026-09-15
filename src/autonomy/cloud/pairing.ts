@@ -84,19 +84,29 @@ function storedPairing(pairing: AutonomyPairing): StoredAutonomyPairing {
   };
 }
 
+function migrateLegacyToken(value: Record<string, unknown>, legacyToken: string): void {
+  sessionToken = legacyToken;
+  queueCredentialWrite(async () => {
+    // Do not destroy the legacy plaintext until the protected write actually
+    // succeeds. A storage/crypto failure must leave a recoverable pairing.
+    await saveAutonomyInstallationToken(legacyToken);
+    const current = readJson(PAIRING_KEY);
+    if (!current || current.token !== legacyToken) return;
+    const { token: _legacyToken, ...metadata } = current;
+    void _legacyToken;
+    writeJson(PAIRING_KEY, metadata);
+  });
+}
+
 export function loadPairing(): AutonomyPairing | null {
   const value = readJson(PAIRING_KEY);
   if (!value || typeof value.workerUrl !== 'string' || typeof value.installationId !== 'string') return null;
 
-  // One-time migration from the pre-hardening format. The legacy token is
-  // sealed first, then the plaintext field is removed from localStorage.
+  // One-time migration from the pre-hardening format. The legacy token remains
+  // available for this session and is removed from localStorage only after the
+  // protected credential write succeeds.
   const legacyToken = typeof value.token === 'string' ? value.token.trim() : '';
-  if (legacyToken) {
-    persistToken(legacyToken);
-    const { token: _legacyToken, ...metadata } = value;
-    void _legacyToken;
-    writeJson(PAIRING_KEY, metadata);
-  }
+  if (legacyToken) migrateLegacyToken(value, legacyToken);
 
   return {
     workerUrl: value.workerUrl,

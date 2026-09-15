@@ -29,6 +29,9 @@ import { normalizeMediaQuery } from '../normalize';
  * The API key is supplied per call by a resolver and sent as the
  * `x-goog-api-key` header rather than a query parameter. The key is not placed
  * in the URL and is not intentionally logged or propagated by this adapter.
+ *
+ * This adapter deliberately emits no iframe/embed URL. Internal playback
+ * reconstructs the official player target from provider + kind + id only.
  */
 
 const SEARCH_ENDPOINT = 'https://www.googleapis.com/youtube/v3/search';
@@ -133,7 +136,6 @@ function toMediaItem(raw: unknown, apiDataFetchedAt: number): MediaItem | undefi
     ...(publishedAt ? { publishedAt } : {}),
     ...(thumbnail ? { thumbnail } : {}),
     webUrl,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${encodeURIComponent(resourceId)}?autoplay=0`,
     apiDataFetchedAt,
   };
 }
@@ -203,7 +205,7 @@ export function createYouTubeProvider(options: YouTubeSearchOptions): MediaProvi
 
     const key = (await options.apiKey()).trim();
     if (!key) {
-      throw new YouTubeSearchError('no-api-key', 'No YouTube API key is configured. Add one in Settings to search YouTube.');
+      throw new YouTubeSearchError('no-api-key', 'No YouTube API key is configured or YouTube policy consent has not been accepted. Check Settings before searching YouTube.');
     }
 
     const url = new URL(SEARCH_ENDPOINT);

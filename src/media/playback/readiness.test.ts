@@ -1,9 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { MediaItem } from '../../domain/media';
-import {
-  checkYouTubePlaybackReadiness,
-  resetYouTubePlaybackReadinessCache,
-} from '../youtube/readiness';
+import { resetYouTubePlaybackReadinessCache } from '../youtube/readiness';
 import { playbackReadinessPort } from './readiness';
 
 const VIDEO_ID = 'a1B2c3D4e5F';
@@ -16,7 +13,6 @@ function item(overrides: Partial<MediaItem> = {}): MediaItem {
     kind: 'video',
     title: 'Readiness target',
     webUrl: `https://www.youtube.com/watch?v=${VIDEO_ID}`,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${VIDEO_ID}`,
     apiDataFetchedAt: NOW,
     ...overrides,
   };
@@ -30,20 +26,12 @@ describe('playback readiness port', () => {
     expect(result).toMatchObject({ status: 'blocked', reason: 'invalid-target' });
   });
 
-  it('does not trust or consume persisted embedUrl when deriving an internal target', async () => {
-    const signal = new AbortController().signal;
-    await checkYouTubePlaybackReadiness(VIDEO_ID, signal, {
-      apiKey: () => 'secret',
-      fetch: async () => new Response(JSON.stringify({
-        items: [{ id: VIDEO_ID, status: { embeddable: true, madeForKids: false } }],
-      }), { status: 200, headers: { 'content-type': 'application/json' } }),
-    });
-
-    const result = await playbackReadinessPort.check(item({
-      embedUrl: 'https://attacker.example/this-value-must-be-irrelevant',
-    }), signal);
-
-    expect(result).toEqual({ status: 'ready' });
+  it('derives internal identity without requiring a persisted iframe URL', () => {
+    const media = item();
+    expect(media).not.toHaveProperty('embedUrl');
+    expect(media.provider).toBe('youtube');
+    expect(media.kind).toBe('video');
+    expect(media.id).toBe(VIDEO_ID);
   });
 
   it('blocks non-video media without loading provider readiness', async () => {

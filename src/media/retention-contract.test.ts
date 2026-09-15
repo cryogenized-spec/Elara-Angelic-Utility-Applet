@@ -17,7 +17,6 @@ function item(overrides: Partial<MediaItem> = {}): MediaItem {
     title: 'Result',
     thumbnail: { url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg', width: 480, height: 360 },
     webUrl: 'https://www.youtube.com/watch?v=abc123',
-    embedUrl: 'https://www.youtube-nocookie.com/embed/abc123?autoplay=0',
     apiDataFetchedAt: NOW - 1,
     ...overrides,
   };

@@ -14,7 +14,10 @@
   bottom: max(86px, calc(env(safe-area-inset-bottom) + 86px));
   z-index: 35;
   width: min(calc(100vw - 28px), var(--player-shell-max-width));
-  min-width: 200px;
+  /* Global border-box sizing means the 1px shell border consumes two pixels.
+     Reserve those pixels here so the actual YouTube host never drops below
+     the required 200px viewport width. */
+  min-width: 202px;
   border: var(--player-shell-border);
   border-radius: var(--player-shell-radius);
   overflow: hidden;
@@ -99,6 +102,7 @@
 
 .playback-player-host {
   width: 100%;
+  min-width: 200px;
   min-height: 200px;
   aspect-ratio: 16 / 9;
   background: #000;
@@ -110,6 +114,15 @@
   height: 100%;
   min-height: 200px;
   border: 0;
+}
+
+/* At the exact provider minimum width, sacrifice Elara's decorative border
+   rather than clipping two pixels from the official player viewport. */
+@media (max-width: 201px) {
+  .playback-player-surface {
+    min-width: 200px;
+    border: 0;
+  }
 }
 
 @media (max-height: 560px) {

@@ -35,7 +35,6 @@ function item(overrides: Partial<MediaItem> = {}): MediaItem {
     publishedAt: '2024-05-01T00:00:00Z',
     thumbnail: { url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg', width: 480, height: 360 },
     webUrl: 'https://www.youtube.com/watch?v=abc123',
-    embedUrl: 'https://www.youtube-nocookie.com/embed/abc123?autoplay=0',
     apiDataFetchedAt: NOW - 1_000,
     ...overrides,
   };
@@ -127,7 +126,6 @@ describe('MediaCard routed playback', () => {
   const playable = () => item({
     id: 'a1B2c3D4e5F',
     webUrl: 'https://www.youtube.com/watch?v=a1B2c3D4e5F',
-    embedUrl: 'https://hostile.example/ignored',
   });
 
   it('routes embedded preference only through PlaybackProvider.start()', async () => {
@@ -138,7 +136,9 @@ describe('MediaCard routed playback', () => {
     await act(async () => { root.render(<MediaCard item={selected} platform={{ isAndroid: false }} />); });
     const button = container.querySelector<HTMLButtonElement>('.media-card__primary');
     expect(button).not.toBeNull();
-    expect(container.querySelector('a')).toBeNull();
+    const brandLink = container.querySelector<HTMLAnchorElement>('.media-card__brand-link');
+    expect(brandLink?.href).toBe('https://www.youtube.com/watch?v=a1B2c3D4e5F');
+    expect(container.querySelector('.media-card__choice--external')).toBeNull();
 
     await act(async () => { button!.click(); await Promise.resolve(); });
     expect(start).toHaveBeenCalledTimes(1);
@@ -161,7 +161,7 @@ describe('MediaCard routed playback', () => {
     expect(external?.href).toBe('https://www.youtube.com/watch?v=a1B2c3D4e5F');
 
     const playHere = [...container.querySelectorAll<HTMLButtonElement>('.media-card__choice')]
-      .find((button) => button.textContent === 'Play here');
+      .find((choice) => choice.textContent === 'Play here');
     await act(async () => { playHere!.click(); await Promise.resolve(); });
     expect(start).toHaveBeenCalledWith(selected);
     expect(container.querySelector('.media-card__chooser')).toBeNull();
@@ -222,7 +222,7 @@ describe('MediaCard routed playback', () => {
     act(() => primary.click());
 
     const playHere = [...container.querySelectorAll<HTMLButtonElement>('.media-card__choice')]
-      .find((button) => button.textContent === 'Play here')!;
+      .find((choice) => choice.textContent === 'Play here')!;
     expect(playHere.disabled).toBe(true);
     expect(container.querySelector<HTMLAnchorElement>('.media-card__choice--external')?.href)
       .toBe('https://www.youtube.com/watch?v=a1B2c3D4e5F');
@@ -301,14 +301,16 @@ describe('MediaCard trust and presentation', () => {
 
   it('renders a placeholder instead of a broken image when there is no thumbnail', () => {
     const html = renderToStaticMarkup(<MediaCard item={item({ thumbnail: undefined })} />);
-    expect(html).not.toContain('<img');
+    expect(html).not.toContain('<img class="media-card__thumb"');
     expect(html).toContain('media-card__thumb--empty');
   });
 
-  it('visibly attributes the API result to YouTube without imitating a logo', () => {
+  it('visibly attributes a trusted API result with the official YouTube brand asset', () => {
     const html = renderToStaticMarkup(<MediaCard item={item()} />);
-    expect(html).toContain('media-card__source">Source: YouTube');
-    expect(html).not.toContain('media-card__badge');
+    expect(html).toContain('media-card__brand-logo');
+    expect(html).toContain('https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg');
+    expect(html).toContain('alt="YouTube"');
+    expect(html).toContain('>Source<');
   });
 
   it.each(['external', 'embedded', 'ask'] as const)(
@@ -388,9 +390,10 @@ describe('MediaCard stylesheet contract', () => {
     expect(cssSheet).toMatch(/\.media-card__choice:focus-visible,[\s\S]*\.media-card__fallback:focus-visible\s*\{/);
   });
 
-  it('styles attribution as ordinary source text rather than an imitation badge', () => {
-    expect(cssSheet).toMatch(/\.media-card__source\s*\{/);
-    expect(cssSheet).not.toMatch(/\.media-card__badge\s*\{/);
+  it('keeps the official YouTube logo in a solid frame and gives routed attribution a 44px target', () => {
+    expect(cssSheet).toMatch(/\.media-card__brand-link\s*\{[^}]*min-height:\s*44px/s);
+    expect(cssSheet).toMatch(/\.media-card__brand-logo-frame\s*\{[^}]*background:\s*#fff/s);
+    expect(cssSheet).toMatch(/\.media-card__brand-logo\s*\{[^}]*width:\s*72px/s);
   });
 
   it('makes unavailable cards visibly non-interactive', () => {

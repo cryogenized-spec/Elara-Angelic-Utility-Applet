@@ -2,52 +2,63 @@
 
 Elara has one YouTube media system: one search path, one validated `MediaItem`, one durable playback preference, one global `PlaybackProvider`, one readiness path, one official YouTube IFrame Player host, and one validated external handoff path.
 
-Phase 5 makes the routing user-facing. A card now follows the saved `ask | embedded | external` preference without creating a second player/controller.
+Phase 6 unifies the user-facing behavior of the existing `ask | embedded | external` routes. It does **not** add another player, route authority or state machine.
 
 > Implementation/compliance guide only. Current Google/YouTube policies take priority.
 
-## 1. Search remains unchanged
+## 1. The three routes
+
+Shared labels come from `src/media/playback/presentation.ts`:
+
+- **Ask each time**
+- **Play here**
+- **Open YouTube**
+
+The durable values remain `ask | embedded | external`.
+
+Every route starts from the same canonical validation of `provider + kind + id + webUrl`. Invalid or hostile persisted cards remain inert.
+
+## 2. Preference loading and saving
+
+`PlaybackProvider` remains the only preference authority.
+
+It distinguishes initial loading from a write in progress:
 
 ```text
-request
--> Gemini decides whether youtube.search is useful
--> normalize/dedupe
--> cache
--> 8-search page-session guard
--> 24-search device/Pacific-day guard
--> YouTube search.list
--> MediaItem[] + lean Gemini projection
--> MediaCard
+loading -> stored preference has not resolved yet
+saving  -> new preference is being written; old durable route stays active
+ready   -> durable preference is confirmed
+failed  -> provider retains the safe durable value and reports the error
 ```
 
-One cache miss creates at most one `search.list` request, with no pagination. `watch` and `listen` are presentation intent, not different provider identities or caches.
+The provider initializes to Ask, so initial loading is safe without the card inventing a second fallback rule.
 
-## 2. Card routing
+When a user changes the setting, cards **continue using the last durable route until the save succeeds**. A failed save does not make cards temporarily switch to Ask; the previous saved choice remains active.
 
-Every route starts by validating the persisted card against the canonical destination derived from `provider + kind + id`. Invalid or hostile persisted destinations are inert.
+Settings and cards consume the same presentation vocabulary and the same provider state.
 
-The saved preference is:
+## 3. Ask each time
+
+Ask mode is only a disclosure UI. The card itself does not own playback state.
 
 ```text
-ask      -> card opens a chooser
-embedded -> card starts internal playback
-external -> card opens YouTube externally
+card -> chooser
+       |- Play here    -> PlaybackProvider.start(item)
+       `- Open YouTube -> validated external handoff
 ```
 
-If preference loading is not ready, the card fails safe to `ask` rather than silently choosing a destination.
+Accessibility behavior:
 
-### Ask each time
+- every mounted card gets a unique chooser id for `aria-controls`;
+- Escape closes an open chooser;
+- focus returns to the card's primary control after Escape;
+- chooser/fallback controls have explicit keyboard focus styling.
 
-The card exposes exactly two choices:
+If that same item is already checking/loading/ready/paused/playing/ended internally, Ask mode still opens. **Play here** is disabled to prevent a duplicate internal request, but **Open YouTube** remains available as an escape route.
 
-- **Play here** → existing `PlaybackProvider.start(item)` path.
-- **Open YouTube** → existing validated external handoff path.
+## 4. Play here
 
-The open/closed chooser is local UI disclosure state only. It does not own readiness, player state, errors or request lineage.
-
-### Play here
-
-Internal playback calls the same singular path already certified before Phase 5:
+Internal playback still uses the single existing path:
 
 ```text
 PlaybackProvider.start(item)
@@ -59,73 +70,65 @@ PlaybackProvider.start(item)
 -> official YouTube IFrame Player
 ```
 
-The card reads checking/loading/playing/paused/ended/failed status from `PlaybackProvider.state`. It does not duplicate that state.
+`prepare()` remains readiness-only. No card creates an iframe or player instance.
 
-### Open YouTube
+Made-for-Kids, unavailable and non-embeddable videos remain blocked before the player adapter. Persisted `embedUrl` remains non-authoritative.
 
-External routing retains the canonical ordinary YouTube URL. On ordinary browsers it opens HTTPS normally. On supported Android Chromium-family flows Elara may attempt the existing **unpinned** Android VIEW intent, with the exact same canonical HTTPS destination retained as fallback. No YouTube package is forced.
+The official player keeps native YouTube controls, no autoplay, inline playback and normal origin/referrer identity. The global **Close player** control sits outside the iframe and calls existing `reset()`.
 
-## 3. Reversible preference
+## 5. Open YouTube
 
-Chat settings expose all three existing durable values:
+External handoff is one route alongside internal playback; it does not own internal player state.
 
-- Ask each time
-- Play here
-- Open YouTube
+The external authority reconstructs the exact canonical YouTube URL and requires persisted `webUrl` to match it.
 
-They persist through the existing playback preference authority. No new settings store was added.
+On ordinary browsers Elara uses that canonical HTTPS URL. On supported Android Chromium-family browsers it may attempt an **unpinned Android VIEW intent** from the user gesture. The intent:
 
-Only the preference is durable. The selected item, chooser state, request ID, readiness result, playback phase/position and player instance remain session-only.
+- does not specify a YouTube package;
+- keeps `android.intent.action.VIEW`;
+- keeps the browsable category;
+- carries the exact canonical HTTPS URL as browser fallback.
 
-## 4. Readiness still gates internal playback
+This behavior is unchanged by Phase 6.
 
-`prepare(item)` remains readiness-only and creates no iframe. It calls YouTube `videos.list` with exact video ID and `part=id,status`.
+## 6. Failure fallback
+
+If internal playback fails, the card may expose **Open YouTube instead**. That action uses the independently validated external route; it does not trust the failed iframe target or stored `embedUrl`.
+
+Ask mode also keeps Open YouTube available while the same item is already playing internally.
+
+## 7. Search, quota and storage remain unchanged
+
+Search remains:
 
 ```text
-exists + embeddable + !MFK -> ready
-missing                      -> blocked/unavailable
-embeddable=false             -> blocked/not-embeddable
-madeForKids=true             -> blocked/made-for-kids
-invalid/provider failure     -> failed
-cancelled                    -> aborted
+Gemini youtube.search decision
+-> normalize/dedupe
+-> cache
+-> 8-search page-session guard
+-> 24-search device/Pacific-day guard
+-> one search.list request per cache miss
+-> MediaItem[]
 ```
 
-Made-for-Kids remains external-only. Readiness calls do not spend the search-specific 8/24 guards.
+Playback/readiness does not spend the search-specific 8/24 guards.
 
-## 5. Internal playback
+Only the playback preference is durable. Chooser disclosure, selected media, request ID, readiness result, active player and playback position remain session-only.
 
-There is exactly one global player host. It uses the official YouTube IFrame Player API with native controls, no autoplay, inline playback, and normal origin/referrer identity.
+YouTube provider metadata must still be valid and younger than 30 days. Elara does not store YouTube video/audio bytes.
 
-Persisted `embedUrl` is not player authority. The player target is derived from validated provider identity and video ID.
-
-The player surface is visible inside Elara's fixed viewport and has one **Close player** action outside the iframe. Close calls the existing `reset()` authority. Elara adds no custom play/pause/seek controls and no overlay over YouTube controls.
-
-A newer accepted media request, reset or provider unmount tears down obsolete work. Late callbacks keep their old request ID and cannot mutate a newer selection.
-
-## 6. Failures and fallback
-
-If internal playback fails, the card may show **Open YouTube instead**. That fallback does not reuse a failed iframe target or invent a URL; it uses the same independently validated external handoff authority.
-
-Hostile/non-canonical `webUrl` values fail before either route. Hostile `embedUrl` values are ignored by readiness/player construction.
-
-## 7. Storage and retention
-
-Elara does not store YouTube video/audio bytes. Search metadata may exist in the media cache and completed conversation records.
-
-Provider metadata must be valid and younger than 30 days. Exactly 30 days is expired; malformed, future-dated and undated legacy media fail closed.
-
-Active playback is never persisted.
-
-## 8. What Phase 5 does not add
+## 8. What Phase 6 does not add
 
 - no second playback reducer/store/queue/event bus;
+- no second route preference authority;
 - no card-level iframe/player;
 - no custom transport controls;
+- no iframe overlay;
 - no autoplay;
 - no stream extraction or audio isolation;
 - no background/hidden playback;
 - no offline media library;
-- no package-pinned Android YouTube launch;
+- no package-pinned Android launch;
 - no authority for persisted `embedUrl`.
 
 ## 9. Developer map
@@ -134,25 +137,20 @@ Active playback is never persisted.
 | --- | --- |
 | Media identity/freshness | `src/domain/media.ts` |
 | Playback lifecycle | `src/domain/playback.ts` |
-| Global authority / `prepare` / `start` | `src/media/playback/PlaybackProvider.tsx` |
-| Readiness port | `src/media/playback/readiness.ts` |
-| YouTube readiness | `src/media/youtube/readiness.ts` |
-| Player port | `src/media/playback/player.ts` |
+| Global authority / preference status / `prepare` / `start` | `src/media/playback/PlaybackProvider.tsx` |
+| Shared route labels/descriptions | `src/media/playback/presentation.ts` |
+| Readiness | `src/media/playback/readiness.ts`, `src/media/youtube/readiness.ts` |
 | Single global player | `src/media/playback/PlaybackPlayerHost.tsx` |
 | Official iframe adapter | `src/media/youtube/player.ts` |
-| Card routing | `src/app/components/media/MediaCard.tsx` |
-| Playback settings UI | `src/app/components/SettingsScreen.tsx` |
-| Playback preference persistence | `src/persistence/preferences.ts` |
+| Card routing + chooser | `src/app/components/media/MediaCard.tsx` |
+| Playback settings UI | `src/app/components/media/PlaybackPreferenceSettings.tsx` |
+| Preference persistence | `src/persistence/preferences.ts` |
 | External handoff | `src/media/handoff.ts` |
 | Search/cache/budgets | `src/media/search.ts`, `src/media/cache.ts`, `src/media/budget.ts` |
 
-Behavioral Phase-5 head `0369919202f79eba1cff69ea9148d86129023d81` passed CI #1696 across the complete repository matrix.
+Behavioral Phase-6 head `e1b7ede3fd9c7308edd89d9a44ed1c26cb5afa7d` passed CI #1698 across the complete repository matrix.
 
 Compact engineering authority: [`../media.md`](../media.md).
-
-## 10. Next pass
-
-The next pass should refine the **same** routing UX rather than invent another path: terminology consistency across settings/card/fallback, accessibility and chooser behavior, and preserving the current unpinned Android handoff semantics.
 
 ## Official references
 

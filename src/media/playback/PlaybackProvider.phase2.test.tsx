@@ -22,7 +22,6 @@ const freshItem: MediaItem = {
   channel: 'Provider Channel',
   thumbnail: { url: 'https://i.ytimg.com/vi/phase2ProviderVideo/hqdefault.jpg', width: 480, height: 360 },
   webUrl: 'https://www.youtube.com/watch?v=phase2ProviderVideo',
-  embedUrl: 'https://www.youtube-nocookie.com/embed/phase2ProviderVideo',
   apiDataFetchedAt: NOW - 1_000,
   intent: 'listen',
 };
@@ -109,8 +108,8 @@ describe('Phase 2 PlaybackProvider authority', () => {
     expect(requestId).toBe('request-a');
     expect(authority?.state).toMatchObject({ phase: 'requested', requestId: 'request-a' });
 
-    const stale = { ...freshItem, id: 'stale', apiDataFetchedAt: NOW - MEDIA_API_DATA_MAX_AGE_MS, webUrl: 'https://www.youtube.com/watch?v=stale', embedUrl: 'https://www.youtube-nocookie.com/embed/stale' };
-    const future = { ...freshItem, id: 'future', apiDataFetchedAt: NOW + 1, webUrl: 'https://www.youtube.com/watch?v=future', embedUrl: 'https://www.youtube-nocookie.com/embed/future' };
+    const stale = { ...freshItem, id: 'stale', apiDataFetchedAt: NOW - MEDIA_API_DATA_MAX_AGE_MS, webUrl: 'https://www.youtube.com/watch?v=stale' };
+    const future = { ...freshItem, id: 'future', apiDataFetchedAt: NOW + 1, webUrl: 'https://www.youtube.com/watch?v=future' };
     expect(authority!.select(stale)).toBeNull();
     expect(authority!.select(future)).toBeNull();
     expect(authority?.state).toMatchObject({ phase: 'requested', requestId: 'request-a', item: { id: freshItem.id } });
@@ -122,7 +121,7 @@ describe('Phase 2 PlaybackProvider authority', () => {
       authority!.select(freshItem);
       authority!.beginCheck('request-a');
     });
-    const second = { ...freshItem, id: 'phase2ProviderVideoB', title: 'B', webUrl: 'https://www.youtube.com/watch?v=phase2ProviderVideoB', embedUrl: 'https://www.youtube-nocookie.com/embed/phase2ProviderVideoB' };
+    const second = { ...freshItem, id: 'phase2ProviderVideoB', title: 'B', webUrl: 'https://www.youtube.com/watch?v=phase2ProviderVideoB' };
     act(() => { authority!.select(second); });
     expect(authority?.state).toMatchObject({ phase: 'requested', requestId: 'request-b', item: { id: second.id } });
 

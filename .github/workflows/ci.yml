@@ -38,6 +38,9 @@ jobs:
       - name: Documentation integrity
         run: npm run docs:check
 
+      - name: Verification integrity
+        run: npm run verify:gates
+
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 

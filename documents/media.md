@@ -1,21 +1,21 @@
 ---
 id: SYS-MEDIA
 status: active
-verified_commit: 808d9d78dd090a71b8349ba1947aa5ab8042b7af
-scope: media search, delivery, playback routing/authority/readiness/player, player appearance, persistence, cache, quota, retention and external handoff
+verified_commit: 18c7678f59780eb1db6cbaa064dacf6e3c378cf8
+scope: media search, delivery, playback routing/authority/readiness/player, appearance, compliance, persistence, cache, quota, retention and external handoff
 paths: [src/media, src/domain/media.ts, src/domain/playback.ts, src/app/components/media]
-keywords: [media, youtube, search, video, music, playback, routing, preference, readiness, iframe, player, appearance, preset, handoff, cache, quota, compliance, retention]
+keywords: [media, youtube, search, video, music, playback, routing, preference, readiness, iframe, player, appearance, preset, handoff, cache, quota, compliance, consent, retention]
 ---
 
 # Media / YouTube
 
 ## 1. Boundary
 
-`SYS-MEDIA` owns YouTube discovery, structured media delivery, search-quota protection, API-data freshness, card routing, one global playback authority, playback readiness, the official YouTube IFrame Player adapter, the Elara-owned presentation shell around that player, and validated external platform handoff.
+`SYS-MEDIA` owns YouTube discovery, structured media delivery, search-quota protection, API-data freshness, policy consent, card attribution/routing, one global playback authority, playback readiness, the official YouTube IFrame Player adapter, the Elara-owned presentation shell around that player, and validated external platform handoff.
 
 There is **one playback system**. `PlaybackProvider` owns durable-route state, selection, request lineage, reducer state, readiness orchestration, player election and the single global player host. `MediaCard` owns only temporary chooser disclosure. Readiness/player/handoff adapters remain boundaries, not alternate authorities.
 
-The three durable route values remain:
+The durable route values remain:
 
 ```text
 ask      -> disclose Play here / Open YouTube
@@ -23,17 +23,21 @@ embedded -> PlaybackProvider.start(item)
 external -> validated external handoff
 ```
 
-Phase 8 hardens and adversarially verifies this existing architecture. It adds no route, player, reducer, playback preference, player state store, iframe variant, queue or event bus.
+The nine-phase YouTube playback roadmap is complete at behavioral head `18c7678f59780eb1db6cbaa064dacf6e3c378cf8`. Phase 9 closes compliance/migration debt without adding another player, route, controller, queue, state machine or persistence authority.
 
 Human/operator guide: [`youtube/README.md`](./youtube/README.md).
 
 ## 2. Runtime map
 
-### 2.1 Search and route selection
+### 2.1 Consent, search and routing
 
 ```text
+Settings / Lockbox
+-> versioned YouTube policy acceptance in existing preferences DB
+
 user request
--> Gemini youtube.search decision
+-> youtube.search
+-> current policy accepted?
 -> normalize/dedupe
 -> cache
 -> 8-search page-session guard
@@ -45,15 +49,16 @@ user request
 -> ask | embedded | external
 ```
 
-Search remains browser-only and unchanged by playback work.
+YouTube network functionality fails closed until the current policy notice is accepted. Acceptance is durable versioned state in the existing preferences database; it is deliberately separate from the encrypted YouTube API credential.
 
-Before either playback route is usable, `MediaCard` reconstructs and validates the canonical YouTube destination. Invalid/hostile persisted media is inert. `PlaybackProvider` remains the only route-preference and playback-lifecycle authority.
+Before either playback route is usable, Elara reconstructs and validates the canonical YouTube destination. Invalid/hostile persisted media is inert. Cards visibly attribute YouTube using the official brand asset plus explicit `Source: YouTube` text.
 
 ### 2.2 Internal playback
 
 ```text
 PlaybackProvider.start(item)
--> existing prepare(item)
+-> prepare(item)
+-> current policy accepted?
 -> canonical identity validation
 -> videos.list(part=id,status)
 -> existing begin-load event
@@ -62,57 +67,36 @@ PlaybackProvider.start(item)
 -> native callbacks with same requestId
 ```
 
-The player remains singular, native-controlled and non-autoplaying. Close player calls existing `reset()`.
+The player remains singular, native-controlled and non-autoplaying. Made-for-Kids, unavailable and non-embeddable results remain outside the internal-player path. Close player calls existing `reset()`.
 
-Phase-8 hardening keeps failure and cancellation inside those same boundaries:
+Cancellation remains authoritative before and during provider work. Synchronous adapter `load()` throws resolve to the existing failed phase; provider `destroy()` is best-effort cleanup; stale native callbacks retain their old request ID and cannot mutate a newer/reset request.
 
-- asynchronous Lockbox credential resolution is followed by an abort re-check before provider work begins;
-- cancellation remains authoritative while a provider request or response parse is pending;
-- synchronous adapter `load()` throws resolve to the existing failed phase;
-- provider `destroy()` is best-effort cleanup and cannot escape the global player boundary;
-- stale native callbacks keep their old request ID and cannot mutate a newer or reset request.
+### 2.3 Data contract and migrations
 
-### 2.3 Appearance projection
+`MediaItem` persists only the canonical external `webUrl`; internal playback reconstructs its target from `provider + kind + id`. The obsolete `embedUrl` field is no longer emitted, trusted or part of the domain contract.
 
-The player appearance is part of the existing `ChatAppearancePreferences` record, not playback state:
+Legacy conversation and media-cache rows are migrated by removing only `embedUrl`, after which the normal strict media validator remains authoritative. The migration does not create a compatibility schema or trust arbitrary legacy fields.
+
+Non-authorized YouTube API metadata must be refreshed or removed before 30 calendar days. Elara does not persist YouTube video/audio bytes.
+
+### 2.4 Appearance and minimum-player boundary
+
+`mediaPlayerSurfacePreset` remains part of the existing `chat-appearance` preference record:
 
 ```text
-chat-appearance record
--> mediaPlayerSurfacePreset
--> existing Dexie liveQuery
--> document-root data-elara-media-player-preset
+chat-appearance
+-> Dexie liveQuery
+-> data-elara-media-player-preset
 -> CSS variables on .playback-player-surface
 ```
 
-Allowed values are:
+`minimal | glass | cinema` alter only Elara-owned shell presentation. They cannot select, start, stop or reroute media and cannot decorate/cover native YouTube controls.
 
-```text
-minimal -> compact/subtle outer shell
- glass  -> existing/default shell
-cinema  -> wider, higher-emphasis outer shell
-```
-
-Old, missing or invalid persisted values normalize to `glass`.
-
-`src/media/playback/surface-preset.ts` is a derived presentation bridge only. It observes the existing durable `chat-appearance` authority and projects one root attribute. It does not own a second preference store, React context, playback state, queue or event bus.
-
-### 2.4 Styling and minimum-player boundary
-
-Presets may change only Elara-owned presentation outside the iframe: shell width, border, radius, shadow and toolbar treatment.
-
-They **must not**:
-
-- target or restyle YouTube player controls;
-- place overlays, pseudo-elements or frames over any part of the iframe;
-- alter iframe opacity, transforms, clipping, pointer behavior or stacking;
-- create a different iframe/player instance per preset;
-- reduce the actual provider viewport below 200×200 pixels.
-
-The player host remains 16:9 with a 200px minimum width/height contract. Because global border-box sizing makes the Elara shell border consume interior pixels, the ordinary bordered surface reserves 202px minimum width so the provider host still receives a true 200px interior. At viewport widths of 201px or less, Elara removes its decorative shell border and preserves the 200px player viewport instead. The toolbar remains outside the iframe.
+The actual provider viewport remains at least 200×200 pixels. The ordinary bordered shell reserves 202px minimum width so border-box sizing still leaves a true 200px host. At <=201px viewport width Elara drops the decorative border before sacrificing provider geometry.
 
 ### 2.5 External handoff
 
-External routing reconstructs the exact canonical URL from provider/kind/id and requires persisted `webUrl` to match. Ordinary browsers receive canonical HTTPS. Supported Android Chromium-family flows may attempt the existing **unpinned** Android VIEW intent with the same canonical HTTPS URL encoded as fallback. Elara does not pin a YouTube package.
+External routing reconstructs the exact canonical URL from provider/kind/id and requires persisted `webUrl` to match. Ordinary browsers receive canonical HTTPS. Supported Android Chromium-family flows may attempt the existing **unpinned** Android VIEW intent with the same canonical HTTPS URL encoded as fallback. Elara never package-pins YouTube.
 
 ## 3. Source map
 
@@ -120,96 +104,76 @@ External routing reconstructs the exact canonical URL from provider/kind/id and 
 | --- | --- |
 | Media schema / identity / freshness | `src/domain/media.ts` |
 | Playback lifecycle / decisions | `src/domain/playback.ts` |
-| One global playback authority + durable route preference | `src/media/playback/PlaybackProvider.tsx` |
-| Shared route presentation vocabulary | `src/media/playback/presentation.ts` |
+| Global playback authority + durable route preference | `src/media/playback/PlaybackProvider.tsx` |
 | Readiness | `src/media/playback/readiness.ts`, `src/media/youtube/readiness.ts` |
-| Player port / adapter | `src/media/playback/player.ts`, `src/media/youtube/player.ts` |
-| One global player host | `src/media/playback/PlaybackPlayerHost.tsx` |
-| Player shell preset projection | `src/media/playback/surface-preset.ts` |
-| Player shell styling | `src/media/playback/player-host.css` |
-| Existing appearance schema / defaults | `src/domain/preferences.ts` |
-| Existing preference persistence | `src/persistence/preferences.ts` |
-| Appearance settings UI | `src/app/components/ChatAppearanceSettings.tsx` |
-| Card routing / chooser | `src/app/components/media/MediaCard.tsx` |
-| Route settings | `src/app/components/media/PlaybackPreferenceSettings.tsx` |
+| Official iframe adapter | `src/media/youtube/player.ts` |
+| Global player host | `src/media/playback/PlaybackPlayerHost.tsx` |
+| Appearance projection / shell | `src/media/playback/surface-preset.ts`, `src/media/playback/player-host.css` |
+| Card attribution / route chooser | `src/app/components/media/MediaCard.tsx` |
+| Policy consent UI | `src/app/components/media/YouTubePolicyConsent.tsx` |
+| Consent + other preference persistence | `src/persistence/preferences.ts` |
+| Conversation media migration/retention | `src/persistence/conversation.ts` |
+| Search cache migration/storage | `src/media/storage.ts` |
+| Search/cache/budget | `src/media/search.ts`, `src/media/cache.ts`, `src/media/budget.ts` |
 | External handoff | `src/media/handoff.ts` |
-| Search/cache/budget | `src/media/search.ts`, `src/media/cache.ts`, `src/media/budget.ts`, `src/media/storage.ts` |
-| Retention | `src/media/retention.ts`, `src/persistence/conversation.ts` |
+| Public privacy / terms | `public/privacy.html`, `public/terms.html` |
 
 ## 4. Invariants
 
-- Exactly one global `PlaybackProvider` and one reducer/request lineage.
-- Exactly one global player host; no card-level iframe/player.
-- Exactly one durable route preference authority.
-- Player visual preset lives in the existing `chat-appearance` record, not playback persistence.
-- `minimal | glass | cinema` are presentation only; `glass` is the backward-compatible default.
-- The root preset attribute is a derived projection, not state authority.
-- Presets style only `.playback-player-surface` and the Elara toolbar outside the iframe.
-- No preset selector may target the iframe/host to add decoration or overlays.
-- YouTube native controls remain visible and unobscured.
-- Existing `autoplay=0`, origin/referrer behavior and official IFrame Player adapter remain unchanged.
-- The **actual provider viewport**, not merely the outer shell, remains at least 200×200 pixels.
-- `embedded` routes only through `PlaybackProvider.start()`.
-- `external` routes only through canonical handoff validation.
-- `ask` exposes only those two routes.
+- Exactly one global `PlaybackProvider`, reducer/request lineage and visible player host.
+- Exactly one durable playback-route preference authority.
+- Player appearance stays in existing appearance state, never playback state.
+- YouTube network features require current versioned policy acceptance.
+- Policy acceptance does not decrypt, replace or duplicate the YouTube API credential.
+- YouTube result cards visibly identify their source and keep the official brand asset unobscured.
+- Internal playback uses only the official IFrame Player with native controls and `autoplay=0`.
+- No overlay/custom control may cover any portion of the iframe.
+- The actual provider viewport, not merely the outer shell, remains >=200×200.
+- `embedded` routes only through `PlaybackProvider.start()`; `external` routes only through canonical handoff validation; `ask` exposes only those two choices.
 - Android handoff remains an unpinned VIEW intent with canonical HTTPS fallback.
-- Hostile/non-canonical persisted destinations remain inert before either route.
-- Persisted `embedUrl` has no readiness/player authority.
-- Search/cache/quota/retention architecture is unchanged.
-- Active playback and chooser state are not persisted.
-- Transient readiness failures are not cached; a later user retry may recover.
-- Superseded/reset readiness attempts must not begin or continue provider work after cancellation is observed.
+- Persisted `webUrl` is untrusted and must exactly match the canonical provider destination.
+- `embedUrl` is retired from the trusted/persisted media contract; legacy rows are stripped before strict validation.
+- Active playback, chooser state, request lineage and playback position are not persisted.
+- Transient readiness failures are not cached; later explicit retry may recover.
+- Non-authorized YouTube API metadata is refreshed or removed before 30 days.
+- Elara never stores YouTube video/audio content.
 
-## 5. Security, compatibility and failure semantics
+## 5. Security, privacy and failure semantics
 
-Persisted media is untrusted. A malicious `webUrl` cannot become an internal or external target; a malicious `embedUrl` is ignored by readiness/player construction.
+The browser sends the user-supplied YouTube API key directly to Google/YouTube from the unlocked local Lockbox; Elara does not intentionally place it in request URLs, chat content, analytics or logs. Search, key validation and playback-readiness network work remain disabled before policy acceptance.
 
-Appearance persistence is normalized independently of playback. Old rows with no player preset and rows containing unknown values resolve to `glass`.
+The first-party [`privacy.html`](../public/privacy.html) and [`terms.html`](../public/terms.html) surfaces describe current data handling and link to the official YouTube Terms of Service and Google Privacy Policy. Removing the YouTube credential, deleting conversations, and clearing app/site storage provide the current local-data controls; the integration does not request YouTube OAuth Authorized Data.
 
-If the appearance subscription cannot read the durable record, the document-root projection falls back to `glass`. This changes decoration only; it cannot start, stop, select or reroute media.
+Persisted media is untrusted. A malicious/non-canonical `webUrl` cannot become an internal target or external link. Legacy `embedUrl` has been removed rather than retained as dormant authority.
 
-Provider/readiness/player failures remain bounded application errors. A superseded player/readiness attempt receives abort/destroy; late callbacks retain their old request ID and cannot mutate the newer request. Adapter teardown is deliberately best-effort so a provider cleanup exception cannot destabilize React or prevent the next request from becoming authoritative.
-
-Readiness uses an eight-second default provider timeout. Ready/blocked outcomes may be cached for the browser session; transient failures are not. An elected request cancelled while the Lockbox key is being resolved returns `aborted` before issuing `videos.list`.
+Provider/readiness/player failures remain bounded application errors. Cancellation is re-checked after asynchronous Lockbox credential retrieval and while provider responses are pending. Adapter teardown is deliberately best-effort so cleanup exceptions cannot destabilize React or prevent the next elected request from becoming authoritative.
 
 ## 6. Verification
 
-Phase-8 coverage extends the Phase-2–7 matrix with:
+The final roadmap matrix covers the earlier search/quota, routing, player, mobile, preference, appearance and adversarial contracts plus Phase-9 compliance/migration behavior:
 
-- synchronous player-adapter failure containment;
-- throwing provider teardown containment;
-- repeated start/reset cycles with one global host and no elected-session leakage;
-- stale native callback bursts after supersession and reset;
-- serialized rapid playback-preference writes with latest-write failure fallback to the last durable value;
-- hung readiness timeout;
-- cancellation during asynchronous credential lookup before any provider request starts;
-- cancellation propagated into an already-pending provider request;
-- transient network failure remaining retryable instead of cached;
-- rapid appearance-preset persistence/projection bursts and stale-binding disposal;
-- browser-level offline readiness failure, exact canonical external fallback and retry;
-- one visible fake-official iframe surviving live preset changes without recreation;
-- narrow 220px viewport verification of a true >=200px player host;
-- corrupted persisted `webUrl` becoming inert after reload;
-- ten repeated Ask/Escape cycles restoring focus without multiplying chooser surfaces.
+- policy consent persists durably and defaults to unaccepted;
+- fresh-browser E2E proves the consent control is disabled until checked, local privacy/terms pages load, acceptance survives reload and official policy links remain present;
+- YouTube search/readiness/key-validation paths fail closed without consent;
+- provider results carry visible YouTube attribution;
+- `embedUrl` is absent from new provider/domain data and stripped from legacy conversation/cache rows;
+- malformed migrated media still fails the normal strict validator;
+- existing hostile-URL, MFK, offline/retry, stale-callback, rapid-preference, preset, viewport, Android handoff and single-player tests remain intact.
 
-Candidate `b92fd4a4d2608834deae18c85c8226a64a297d28` passed documentation integrity, lint, TypeScript, all 1,225 unit tests, Worker/Durable Object tests and production build. Its full browser run passed 120/121 tests and deliberately exposed one real presentation defect: a 1px shell border on each side reduced the provider host to 198px at a 220px viewport.
+Phase-9 candidate `1ff05c4f8245dbbf4bcf5dc010a8adb5d874de6f` passed every non-browser gate; CI #1716 then exposed one stale browser selector after official logo attribution added a second image to each media card. The selector was narrowed to the thumbnail contract rather than weakening product behavior.
 
-The geometry was corrected at the existing CSS boundary rather than weakening the assertion. Behavioral Phase-8 head `808d9d78dd090a71b8349ba1947aa5ab8042b7af` then passed CI #1707 across documentation integrity, lint, TypeScript, 1,225 unit tests, Worker/Durable Object tests, production build, all 121 Playwright tests and the final reliability gate.
+Behavioral Phase-9 head `18c7678f59780eb1db6cbaa064dacf6e3c378cf8` passed CI #1717 across documentation integrity, lint, TypeScript, all 1,233 unit tests, Worker/Durable Object tests, production build, all 122 Playwright tests and final reliability.
 
-## 7. Final boundary
+## 7. Release state
 
-Phase 9 is the final **compliance, documentation and closeout** pass. It must not add another playback feature layer.
+The YouTube playback roadmap is closed after Phase 9. No Phase 10 feature layer is planned by this document.
 
-Phase 9 must:
+Further work belongs to normal repository evolution rather than another playback phase. In particular, repository-wide lint/TypeScript/test/CI hardening is owned by `SYS-REL`, not `SYS-MEDIA`.
 
-- re-read current YouTube API Terms, Required Minimum Functionality, IFrame API/player guidance, branding, Made-for-Kids and quota guidance;
-- audit the implemented search, card, internal playback, external handoff, privacy/retention and preference behavior against those requirements;
-- reconcile the human YouTube guide and this canonical architecture authority to final runtime truth;
-- scan the complete media path for obsolete compatibility fields/dead code, especially persisted `embedUrl`, and remove it through the existing schema/migration path if it no longer carries a legitimate compatibility requirement;
-- finish only when the exact final head passes docs, lint, TypeScript, unit, Worker, build, Chromium/Android Playwright, the adversarial media suite and reliability gate.
+Still absent by design: custom transport controls, iframe overlays, stream/audio extraction, hidden/background playback, offline YouTube media, package-pinned Android handoff, YouTube OAuth Authorized Data, and a separate playback persistence system.
 
-Still absent by design: custom transport controls, iframe overlays, stream/audio extraction, background/hidden playback, offline media, and a separate playback persistence system.
+Any future material change to YouTube data access/storage/sharing must update the privacy/terms surfaces and increment the policy-consent version before the changed functionality can be enabled.
 
 ## 8. Documentation contract
 
-This file remains the compact engineering authority for `SYS-MEDIA`. Keep the eight numbered chapters stable so documentation integrity checks and future-agent routing remain predictable. Human-facing YouTube behavior belongs in [`youtube/README.md`](./youtube/README.md); implementation details should be updated here rather than split into phase-specific memo files.
+This file is the compact engineering authority for `SYS-MEDIA`. Keep the eight numbered chapters stable so documentation integrity checks and future-agent routing remain predictable. Human-facing YouTube implementation/compliance guidance belongs in [`youtube/README.md`](./youtube/README.md); implementation truth belongs here rather than in phase-specific status or handoff documents.

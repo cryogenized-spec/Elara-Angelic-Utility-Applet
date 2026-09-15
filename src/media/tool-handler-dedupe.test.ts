@@ -15,7 +15,6 @@ function item(id: string, title: string): MediaItem {
     kind: 'video',
     title,
     webUrl: `https://www.youtube.com/watch?v=${id}`,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
   };
 }
 

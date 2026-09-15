@@ -24,7 +24,6 @@ const ITEM_A: MediaItem = {
   channel: 'Elara Test',
   thumbnail: { url: 'https://i.ytimg.com/vi/a1B2c3D4e5F/hqdefault.jpg', width: 480, height: 360 },
   webUrl: 'https://www.youtube.com/watch?v=a1B2c3D4e5F',
-  embedUrl: 'https://hostile.example/embed/not-authority',
   apiDataFetchedAt: NOW - 1_000,
   intent: 'watch',
 };

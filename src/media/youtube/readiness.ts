@@ -1,5 +1,6 @@
 import type { PlaybackReadinessDecision } from '../../domain/playback';
 import { getYouTubeApiKey } from '../../persistence/gemini-api-key';
+import { hasAcceptedYouTubePolicy } from '../../persistence/preferences';
 
 const VIDEOS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos';
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
@@ -65,13 +66,13 @@ export function resetYouTubePlaybackReadinessCache(): void {
 }
 
 /**
- * Check whether one exact YouTube video may proceed to the future iframe phase.
+ * Check whether one exact YouTube video may proceed to the official iframe.
  *
  * This uses videos.list only after the application playback authority has elected
- * a media item. It does not consume the search-specific budget, does not create a
- * player, and does not trust a stored embed URL. Made-for-Kids videos are kept
- * external-only until the iframe phase explicitly implements and certifies that
- * policy surface.
+ * a media item. It does not consume the search-specific budget and does not
+ * create a player. Runtime/default calls also fail closed until the current
+ * YouTube policy/privacy consent version has been accepted. Made-for-Kids videos
+ * remain external-only.
  */
 export async function checkYouTubePlaybackReadiness(
   videoId: string,
@@ -81,6 +82,22 @@ export async function checkYouTubePlaybackReadiness(
   if (signal.aborted) return { status: 'aborted' };
   if (!YOUTUBE_VIDEO_ID_PATTERN.test(videoId)) {
     return blocked('invalid-target', 'This YouTube video identifier is not valid for internal playback.');
+  }
+
+  // Runtime consent is checked before the session cache. A policy-version change
+  // or explicit consent clear must invalidate permission to use even a readiness
+  // decision that was derived earlier in the same browser session.
+  if (!options.apiKey) {
+    let accepted: boolean;
+    try {
+      accepted = await hasAcceptedYouTubePolicy();
+    } catch {
+      accepted = false;
+    }
+    if (signal.aborted) return { status: 'aborted' };
+    if (!accepted) {
+      return failed('no-api-key', 'Accept Elara’s YouTube privacy and terms notice in Settings before using internal playback.');
+    }
   }
 
   const cached = readinessCache.get(videoId);

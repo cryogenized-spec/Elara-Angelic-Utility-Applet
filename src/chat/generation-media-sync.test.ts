@@ -15,7 +15,6 @@ const VIDEO: MediaItem = {
   title: 'Test video',
   channel: 'Test channel',
   webUrl: 'https://www.youtube.com/watch?v=video-1',
-  embedUrl: 'https://www.youtube-nocookie.com/embed/video-1?autoplay=0',
 };
 
 function harness(active = true) {

@@ -20,7 +20,6 @@ function media(id: string, fetchedAt: number = NOW): MediaItem {
     channel: 'Channel',
     thumbnail: { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, width: 480, height: 360 },
     webUrl: `https://www.youtube.com/watch?v=${id}`,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
     apiDataFetchedAt: fetchedAt,
   };
 }

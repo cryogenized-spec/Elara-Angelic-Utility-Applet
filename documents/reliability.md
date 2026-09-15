@@ -94,18 +94,18 @@ This separation prevents source-grep tests from padding test counts or coverage 
 
 Vitest V8 coverage includes the complete `src/**/*.{ts,tsx}` tree and excludes only test/spec files and declarations. Untested application files therefore count against the total; weak areas are visible rather than hidden through an exclusion list.
 
-The certified whole-source Phase-3 starting floor is:
+The certified whole-source Phase-3 floor is:
 
 | Metric | Floor |
 | --- | ---: |
-| Lines | 63.83% |
-| Statements | 58.39% |
-| Functions | 54.02% |
-| Branches | 53.21% |
+| Lines | 64.14% |
+| Statements | 58.73% |
+| Functions | 54.21% |
+| Branches | 53.44% |
 
 `scripts/coverage-baseline.json` also sets independent floors for `autonomy`, `chat`, `domain`, `gemini`, `media`, `memory` and `persistence`, plus security/authority-critical files such as the autonomy credential/pairing stores, Gemini Lockbox, generation sync, provider, global playback authority and memory store. This prevents increased coverage in an easy subsystem from masking a regression in a critical one.
 
-The verification-integrity gate carries immutable minimum global floors and requires every critical directory/file entry to remain represented. Raising a floor is allowed. Quietly lowering/removing the ratchet is not.
+The verification-integrity gate carries the exact certified global, critical-directory and critical-file Phase-3 floors. The coverage checker also requires all 185 eligible source files to remain present in the report, while the adversarial sentinel proves both metric regression and silent source disappearance fail closed. Raising a floor is allowed. Quietly lowering/removing the ratchet is not.
 
 Coverage is one signal, not a correctness score. `App.tsx` and browser geometry rely heavily on Playwright; whole-source coverage intentionally exposes that unit-test gap rather than pretending E2E execution was unit coverage.
 

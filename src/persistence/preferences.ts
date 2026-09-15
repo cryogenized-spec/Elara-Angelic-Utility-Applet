@@ -95,12 +95,10 @@ export async function saveChatAppearance(value: ChatAppearancePreferences): Prom
 
 export function normalizeRoleplay(value: Partial<RoleplayPreferences> | null | undefined): RoleplayPreferences {
   const merged = { ...DEFAULT_ROLEPLAY, ...(value ?? {}) };
-  const allowedPresets: ChatAppearancePreferences[] = [];
-  void allowedPresets;
-  const allowedEnvironmentPresets: RoleplayPreferences['environmentPreset'][] = ['none', 'house', 'bedroom', 'living-room', 'office', 'poolside', 'outdoors', 'custom'];
+  const allowedPresets: RoleplayPreferences['environmentPreset'][] = ['none', 'house', 'bedroom', 'living-room', 'office', 'poolside', 'outdoors', 'custom'];
   return {
     enabled: Boolean(merged.enabled),
-    environmentPreset: allowedEnvironmentPresets.includes(merged.environmentPreset) ? merged.environmentPreset : 'none',
+    environmentPreset: allowedPresets.includes(merged.environmentPreset) ? merged.environmentPreset : 'none',
     environmentName: safeText(merged.environmentName, 160),
     environmentDescription: safeText(merged.environmentDescription, 2_000),
     timeOfDay: safeText(merged.timeOfDay, 120),

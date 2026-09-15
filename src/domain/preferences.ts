@@ -9,6 +9,9 @@ export interface AppUiPreferences {
   enterToSend: boolean;
 }
 
+export const MEDIA_PLAYER_SURFACE_PRESETS = ['minimal', 'glass', 'cinema'] as const;
+export type MediaPlayerSurfacePreset = (typeof MEDIA_PLAYER_SURFACE_PRESETS)[number];
+
 export interface ChatAppearancePreferences {
   chatBackgroundMode: 'solid' | 'gradient' | 'image';
   chatBackgroundValue: string;
@@ -22,6 +25,7 @@ export interface ChatAppearancePreferences {
   userSurfaceOpacity: number;
   userSurfaceStyle: 'solid' | 'frosted' | 'gradient';
   generationActivityAccent: string;
+  mediaPlayerSurfacePreset: MediaPlayerSurfacePreset;
 }
 
 export interface RoleplayPreferences {
@@ -55,6 +59,7 @@ export const DEFAULT_CHAT_APPEARANCE: ChatAppearancePreferences = {
   userSurfaceOpacity: 0.78,
   userSurfaceStyle: 'frosted',
   generationActivityAccent: '#6EA8FF',
+  mediaPlayerSurfacePreset: 'glass',
 };
 
 export const DEFAULT_ROLEPLAY: RoleplayPreferences = {

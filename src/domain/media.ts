@@ -53,8 +53,8 @@ export interface MediaItem {
   readonly publishedAt?: string;
   readonly durationSeconds?: number;
   readonly thumbnail?: MediaThumbnail;
+  /** Canonical external destination. Internal players reconstruct from provider + kind + id. */
   readonly webUrl: string;
-  readonly embedUrl: string;
   /** Wall-clock time when the provider API returned this metadata. */
   readonly apiDataFetchedAt?: number;
   readonly intent?: MediaIntent;
@@ -132,7 +132,7 @@ export const MAX_MEDIA_ITEMS_PER_QUERY = 5;
 
 const MEDIA_ITEM_KEYS = new Set([
   'provider', 'id', 'kind', 'title', 'channel', 'publishedAt', 'durationSeconds',
-  'thumbnail', 'webUrl', 'embedUrl', 'apiDataFetchedAt', 'intent',
+  'thumbnail', 'webUrl', 'apiDataFetchedAt', 'intent',
 ]);
 const MEDIA_THUMBNAIL_KEYS = new Set(['url', 'width', 'height']);
 
@@ -167,7 +167,8 @@ function isMediaThumbnail(value: unknown): value is MediaThumbnail {
  * are rejected rather than silently retained, which prevents a corrupted row
  * from smuggling credential-like material through a trusted MediaItem object.
  * `apiDataFetchedAt` may be absent only so legacy rows can be identified and
- * explicitly removed by the freshness policy.
+ * explicitly removed by the freshness policy. Legacy rows that still contain
+ * the retired `embedUrl` field are migrated before this guard is applied.
  */
 export function isMediaItem(value: unknown): value is MediaItem {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
@@ -185,7 +186,6 @@ export function isMediaItem(value: unknown): value is MediaItem {
     && (item.durationSeconds === undefined || (typeof item.durationSeconds === 'number' && Number.isFinite(item.durationSeconds) && item.durationSeconds >= 0))
     && (item.thumbnail === undefined || isMediaThumbnail(item.thumbnail))
     && isHttpsUrl(item.webUrl)
-    && isHttpsUrl(item.embedUrl)
     && (fetchedAt === undefined || (typeof fetchedAt === 'number' && Number.isFinite(fetchedAt) && fetchedAt > 0))
     && (intent === undefined || isMediaIntent(intent));
 }

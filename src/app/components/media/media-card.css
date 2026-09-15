@@ -2,8 +2,8 @@
    The rail and Suspense shell live in message-media.css so their geometry exists
    before this lazy stylesheet is downloaded.
 
-   Sized for a phone first: every navigable card is at least 44px tall at every
-   part that can be tapped, because this control is operated with a thumb. */
+   Sized for a phone first: every interactive card control is at least 44px tall
+   because this surface is operated primarily with a thumb. */
 
 .media-card {
   position: relative;
@@ -19,12 +19,72 @@
 }
 
 .media-card:hover,
-.media-card:focus-visible {
+.media-card:focus-visible,
+.media-card:focus-within {
   border-color: rgba(255,255,255,.24);
   background: rgba(255,255,255,.07);
 }
 
 .media-card:focus-visible { outline: 2px solid rgba(255,255,255,.5); outline-offset: 2px; }
+
+.media-card__primary {
+  display: block;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+
+.media-card__primary:disabled { cursor: default; opacity: 1; }
+.media-card__primary:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+
+/* YouTube requires its API presence to carry appropriate Brand Features. The
+   image itself is YouTube-hosted and unmodified; Elara only gives it a solid
+   contrasting frame. Routed cards keep this attribution link outside the
+   playback button so interactive controls are never nested. */
+.media-card__brand-link {
+  display: block;
+  min-height: 44px;
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--line);
+}
+.media-card__brand-link:focus-visible { outline: 2px solid var(--blue); outline-offset: -2px; }
+
+.media-card__brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 36px;
+  padding: 5px 10px;
+}
+.media-card__brand-link .media-card__brand { min-height: 44px; }
+
+.media-card__brand-label {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.media-card__brand-logo-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3px 5px;
+  border-radius: 4px;
+  background: #fff;
+}
+
+.media-card__brand-logo {
+  display: block;
+  width: 72px;
+  height: auto;
+}
 
 .media-card__thumb-wrap { position: relative; display: block; }
 
@@ -44,13 +104,21 @@
 
 .media-card__thumb--empty { aspect-ratio: 16 / 9; }
 
-.media-card__meta { display: grid; gap: 2px; padding: 8px 10px 10px; }
+.media-card__meta { display: grid; gap: 3px; padding: 8px 10px 10px; }
+
+/* Invalid legacy media has no trusted canonical destination and therefore no
+   clickable Brand Feature; retain literal source attribution on that inert row. */
+.media-card__source {
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+  font-weight: 600;
+}
 
 .media-card__title {
   font-size: 12px;
   line-height: 1.35;
   font-weight: 600;
-  /* Two lines, then an ellipsis: a long title must not stretch the rail. */
   display: -webkit-box;
   -webkit-line-clamp: 2;
   line-clamp: 2;
@@ -65,23 +133,6 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.media-card__badge {
-  position: absolute;
-  top: 6px;
-  right: 6px;
-  padding: 2px 6px;
-  border-radius: 999px;
-  background: rgba(10,11,16,.78);
-  color: rgba(255,255,255,.82);
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: .04em;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .media-card { transition: none; }
 }
 
 .media-card__cta {
@@ -111,10 +162,51 @@
 
 .media-card__target { font-size: 12px; line-height: 1; }
 
-.media-card:active {
-  transform: scale(.985);
-  background: rgba(255,255,255,.1);
+.media-card:active { background: rgba(255,255,255,.1); }
+a.media-card:active { transform: scale(.985); }
+
+.media-card__chooser {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 9px;
+  border-top: 1px solid var(--line);
+  background: rgba(5,5,7,.44);
 }
+
+.media-card__choice,
+.media-card__fallback {
+  min-height: 44px;
+  border: 1px solid rgba(110,168,255,.22);
+  border-radius: 10px;
+  background: rgba(110,168,255,.09);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+button.media-card__choice { padding: 0 10px; }
+a.media-card__choice,
+a.media-card__fallback { display: flex; align-items: center; justify-content: center; padding: 0 10px; }
+.media-card__choice--external { border-color: var(--line); background: rgba(255,255,255,.04); color: var(--muted); }
+button.media-card__choice:disabled { cursor: not-allowed; opacity: .55; }
+.media-card__choice:focus-visible,
+.media-card__fallback:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+
+.media-card__failure {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border-top: 1px solid rgba(240,123,220,.18);
+  background: rgba(82,24,48,.22);
+  color: #ffdfe9;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.media-card__failure > span { overflow-wrap: anywhere; }
+.media-card__fallback { justify-self: start; min-height: 40px; border-color: rgba(240,123,220,.22); background: rgba(255,255,255,.05); color: #ffdfe9; }
 
 /* Corrupt or hostile persisted URLs are information, not controls. Keep enough
    structure to explain which result was dropped without making the card look or
@@ -133,3 +225,7 @@
 
 .media-card--unavailable .media-card__action { color: var(--muted); }
 .media-card--unavailable .media-card__action::before { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .media-card { transition: none; }
+}

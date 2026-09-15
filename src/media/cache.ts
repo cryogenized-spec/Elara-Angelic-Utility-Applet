@@ -1,5 +1,7 @@
-import Dexie, { type Table } from 'dexie';
 import { freshMediaItems, isFreshMediaItem, type MediaItem } from '../domain/media';
+import { mediaDb, type MediaCacheEntry } from './storage';
+
+export type { MediaCacheEntry } from './storage';
 
 /**
  * Client-side media search cache.
@@ -16,7 +18,6 @@ import { freshMediaItems, isFreshMediaItem, type MediaItem } from '../domain/med
  *    returned nothing must not re-spend scarce `search.list` calls on retry.
  */
 
-const DB_NAME = 'elara-media-cache';
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Positive results stay useful for about a week. */
@@ -25,26 +26,6 @@ export const POSITIVE_TTL_MS = 7 * DAY_MS;
 export const NEGATIVE_TTL_MS = 10 * 60 * 1000;
 /** Keep the store bounded so a long-lived installation does not grow forever. */
 export const MAX_CACHE_ENTRIES = 200;
-
-export interface MediaCacheEntry {
-  key: string;
-  provider: string;
-  query: string;
-  normalizedQuery: string;
-  items: MediaItem[];
-  cachedAt: number;
-  expiresAt: number;
-}
-
-class MediaCacheDatabase extends Dexie {
-  entries!: Table<MediaCacheEntry, string>;
-  constructor() {
-    super(DB_NAME);
-    this.version(1).stores({ entries: 'key, expiresAt' });
-  }
-}
-
-const db = new MediaCacheDatabase();
 
 export interface ReadMediaCacheResult {
   readonly hit: boolean;
@@ -66,10 +47,10 @@ function cacheEntryIsUsable(record: MediaCacheEntry, now: number): boolean {
  * provider-data freshness boundary.
  */
 export async function readMediaCache(key: string, now: number = Date.now()): Promise<ReadMediaCacheResult> {
-  const record = await db.entries.get(key);
+  const record = await mediaDb.entries.get(key);
   if (!record) return { hit: false, items: [] };
   if (!cacheEntryIsUsable(record, now)) {
-    await db.entries.delete(key).catch(() => undefined);
+    await mediaDb.entries.delete(key).catch(() => undefined);
     return { hit: false, items: [] };
   }
   return {
@@ -105,7 +86,7 @@ export async function writeMediaCache(
     cachedAt: now,
     expiresAt: now + ttl,
   };
-  await db.entries.put(record);
+  await mediaDb.entries.put(record);
   await pruneMediaCache(now);
 }
 
@@ -119,24 +100,24 @@ export async function writeMediaCache(
  */
 export async function pruneMediaCache(now: number = Date.now()): Promise<void> {
   try {
-    const rows = await db.entries.toArray();
+    const rows = await mediaDb.entries.toArray();
     const invalidKeys = rows.filter((record) => !cacheEntryIsUsable(record, now)).map((record) => record.key);
-    if (invalidKeys.length) await db.entries.bulkDelete(invalidKeys);
+    if (invalidKeys.length) await mediaDb.entries.bulkDelete(invalidKeys);
 
-    const count = await db.entries.count();
+    const count = await mediaDb.entries.count();
     if (count <= MAX_CACHE_ENTRIES) return;
     const overflow = count - MAX_CACHE_ENTRIES;
-    const oldest = await db.entries.orderBy('expiresAt').limit(overflow).primaryKeys();
-    if (oldest.length) await db.entries.bulkDelete(oldest as string[]);
+    const oldest = await mediaDb.entries.orderBy('expiresAt').limit(overflow).primaryKeys();
+    if (oldest.length) await mediaDb.entries.bulkDelete(oldest as string[]);
   } catch {
     // Cache hygiene is not worth failing a user-visible search over.
   }
 }
 
 export async function clearMediaCache(): Promise<void> {
-  await db.entries.clear();
+  await mediaDb.entries.clear();
 }
 
 export async function mediaCacheSize(): Promise<number> {
-  return db.entries.count();
+  return mediaDb.entries.count();
 }

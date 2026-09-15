@@ -1,122 +1,179 @@
 ---
 id: SYS-MEDIA
 status: active
-verified_commit: 49db36e68195f2ee91763f0de859a7f385ac53a7
-scope: media search, live projection, persistence, cache, retention and platform handoff
-paths: [src/media, src/domain/media.ts, src/app/components/media]
-keywords: [media, youtube, search, video, music, handoff, cache, quota, compliance, retention, projection]
+verified_commit: 18c7678f59780eb1db6cbaa064dacf6e3c378cf8
+scope: media search, delivery, playback routing/authority/readiness/player, appearance, compliance, persistence, cache, quota, retention and external handoff
+paths: [src/media, src/domain/media.ts, src/domain/playback.ts, src/app/components/media]
+keywords: [media, youtube, search, video, music, playback, routing, preference, readiness, iframe, player, appearance, preset, handoff, cache, quota, compliance, consent, retention]
 ---
 
 # Media / YouTube
 
-## 1. Purpose and boundary
+## 1. Boundary
 
-`SYS-MEDIA` owns structured media discovery, live delivery, API-data freshness and external handoff. YouTube is the current provider. Elara searches and presents YouTube results, then hands a validated canonical YouTube URL to the browser/platform. It does not embed, download, proxy, or claim control of playback.
+`SYS-MEDIA` owns YouTube discovery, structured media delivery, search-quota protection, API-data freshness, policy consent, card attribution/routing, one global playback authority, playback readiness, the official YouTube IFrame Player adapter, the Elara-owned presentation shell around that player, and validated external platform handoff.
 
-The human operational guide is [`youtube/README.md`](./youtube/README.md). This file remains the compact engineering authority.
+There is **one playback system**. `PlaybackProvider` owns durable-route state, selection, request lineage, reducer state, readiness orchestration, player election and the single global player host. `MediaCard` owns only temporary chooser disclosure. Readiness/player/handoff adapters remain boundaries, not alternate authorities.
 
-## 2. Runtime architecture
+The durable route values remain:
 
 ```text
-user request
--> Gemini decides whether youtube.search is needed
--> validated args (1 query by default; hard max 3)
--> normalize/dedupe queries
--> cache freshness check
--> per-session network-search budget
--> one YouTube search.list request per cache miss
--> provider metadata stamped with apiDataFetchedAt
--> MediaItem[] / media-resolved event
--> merge by provider:id into GenerationState
--> one optimistic assistant projection for text + media + artifacts
--> terminal completion uses the existing single persistence boundary
--> startup + read-time 30-day freshness enforcement
--> lazy MediaCard
--> exact canonical YouTube URL validation
--> HTTPS / optional Android handoff
+ask      -> disclose Play here / Open YouTube
+embedded -> PlaybackProvider.start(item)
+external -> validated external handoff
 ```
 
-Search runs only in the browser execution plane. The Worker does not advertise `youtube.search` and does not contain a shadow YouTube executor.
+The nine-phase YouTube playback roadmap is complete at behavioral head `18c7678f59780eb1db6cbaa064dacf6e3c378cf8`. Phase 9 closes compliance/migration debt without adding another player, route, controller, queue, state machine or persistence authority.
 
-Live media does not wait for Gemini prose. A `media-resolved` event updates the same optimistic assistant message used by text and artifacts, so a media-only turn is valid and a card may appear while a later Gemini continuation is still running. Successful terminal completion persists that same projection. Failure/cancellation never creates a second save path: useful partial media may remain visible for the current session, but an unfinished assistant response is not made durable.
+Human/operator guide: [`youtube/README.md`](./youtube/README.md).
+
+## 2. Runtime map
+
+### 2.1 Consent, search and routing
+
+```text
+Settings / Lockbox
+-> versioned YouTube policy acceptance in existing preferences DB
+
+user request
+-> youtube.search
+-> current policy accepted?
+-> normalize/dedupe
+-> cache
+-> 8-search page-session guard
+-> 24-search device/Pacific-day guard
+-> one search.list request per cache miss
+-> MediaItem[] + lean Gemini projection
+-> message lifecycle / retention
+-> MediaCard
+-> ask | embedded | external
+```
+
+YouTube network functionality fails closed until the current policy notice is accepted. Acceptance is durable versioned state in the existing preferences database; it is deliberately separate from the encrypted YouTube API credential.
+
+Before either playback route is usable, Elara reconstructs and validates the canonical YouTube destination. Invalid/hostile persisted media is inert. Cards visibly attribute YouTube using the official brand asset plus explicit `Source: YouTube` text.
+
+### 2.2 Internal playback
+
+```text
+PlaybackProvider.start(item)
+-> prepare(item)
+-> current policy accepted?
+-> canonical identity validation
+-> videos.list(part=id,status)
+-> existing begin-load event
+-> one global PlaybackPlayerHost
+-> official YouTube IFrame Player
+-> native callbacks with same requestId
+```
+
+The player remains singular, native-controlled and non-autoplaying. Made-for-Kids, unavailable and non-embeddable results remain outside the internal-player path. Close player calls existing `reset()`.
+
+Cancellation remains authoritative before and during provider work. Synchronous adapter `load()` throws resolve to the existing failed phase; provider `destroy()` is best-effort cleanup; stale native callbacks retain their old request ID and cannot mutate a newer/reset request.
+
+### 2.3 Data contract and migrations
+
+`MediaItem` persists only the canonical external `webUrl`; internal playback reconstructs its target from `provider + kind + id`. The obsolete `embedUrl` field is no longer emitted, trusted or part of the domain contract.
+
+Legacy conversation and media-cache rows are migrated by removing only `embedUrl`, after which the normal strict media validator remains authoritative. The migration does not create a compatibility schema or trust arbitrary legacy fields.
+
+Non-authorized YouTube API metadata must be refreshed or removed before 30 calendar days. Elara does not persist YouTube video/audio bytes.
+
+### 2.4 Appearance and minimum-player boundary
+
+`mediaPlayerSurfacePreset` remains part of the existing `chat-appearance` preference record:
+
+```text
+chat-appearance
+-> Dexie liveQuery
+-> data-elara-media-player-preset
+-> CSS variables on .playback-player-surface
+```
+
+`minimal | glass | cinema` alter only Elara-owned shell presentation. They cannot select, start, stop or reroute media and cannot decorate/cover native YouTube controls.
+
+The actual provider viewport remains at least 200×200 pixels. The ordinary bordered shell reserves 202px minimum width so border-box sizing still leaves a true 200px host. At <=201px viewport width Elara drops the decorative border before sacrificing provider geometry.
+
+### 2.5 External handoff
+
+External routing reconstructs the exact canonical URL from provider/kind/id and requires persisted `webUrl` to match. Ordinary browsers receive canonical HTTPS. Supported Android Chromium-family flows may attempt the existing **unpinned** Android VIEW intent with the same canonical HTTPS URL encoded as fallback. Elara never package-pins YouTube.
 
 ## 3. Source map
 
 | Concern | Authority |
 | --- | --- |
-| Domain / identity merge / hard caps / freshness | `src/domain/media.ts` |
-| Gemini declaration | `src/google/tools/gemini-declarations.ts` |
-| Tool description / execution plane | `src/google/tools/registry.ts` |
-| Tool argument schema | `src/media/youtube-schema.ts` |
-| Query normalization | `src/media/normalize.ts` |
-| Budget | `src/media/budget.ts` |
-| Search cache | `src/media/cache.ts` |
-| Startup retention sweep | `src/media/retention.ts` |
-| Search orchestration | `src/media/search.ts` |
-| YouTube API | `src/media/youtube/service.ts` |
-| Key validation | `src/media/youtube/validate.ts` |
-| Handoff validation | `src/media/handoff.ts` |
-| Tool handler | `src/media/tool-handler.ts` |
-| Generation accumulation / optimistic projection | `src/chat/generation-state.ts`, `src/chat/generation-sync.ts` |
-| Conversation cleanup | `src/persistence/conversation.ts` |
-| Conversation delivery / viewport authority | `src/app/components/ConversationSurface.tsx` |
-| Media UI | `src/app/components/media/` |
+| Media schema / identity / freshness | `src/domain/media.ts` |
+| Playback lifecycle / decisions | `src/domain/playback.ts` |
+| Global playback authority + durable route preference | `src/media/playback/PlaybackProvider.tsx` |
+| Readiness | `src/media/playback/readiness.ts`, `src/media/youtube/readiness.ts` |
+| Official iframe adapter | `src/media/youtube/player.ts` |
+| Global player host | `src/media/playback/PlaybackPlayerHost.tsx` |
+| Appearance projection / shell | `src/media/playback/surface-preset.ts`, `src/media/playback/player-host.css` |
+| Card attribution / route chooser | `src/app/components/media/MediaCard.tsx` |
+| Policy consent UI | `src/app/components/media/YouTubePolicyConsent.tsx` |
+| Consent + other preference persistence | `src/persistence/preferences.ts` |
+| Conversation media migration/retention | `src/persistence/conversation.ts` |
+| Search cache migration/storage | `src/media/storage.ts` |
+| Search/cache/budget | `src/media/search.ts`, `src/media/cache.ts`, `src/media/budget.ts` |
+| External handoff | `src/media/handoff.ts` |
+| Public privacy / terms | `public/privacy.html`, `public/terms.html` |
 
-## 4. Data and contracts
+## 4. Invariants
 
-`youtube.search` accepts one or more queries plus optional `watch|listen` intent. Gemini is instructed to use one concise query by default. Runtime/schema enforcement permits at most three distinct queries in one tool call; duplicate normalized queries collapse before cache/network work. The page-session ceiling is eight network searches. Cache hits spend neither the session allowance nor a YouTube search call.
+- Exactly one global `PlaybackProvider`, reducer/request lineage and visible player host.
+- Exactly one durable playback-route preference authority.
+- Player appearance stays in existing appearance state, never playback state.
+- YouTube network features require current versioned policy acceptance.
+- Policy acceptance does not decrypt, replace or duplicate the YouTube API credential.
+- YouTube result cards visibly identify their source and keep the official brand asset unobscured.
+- Internal playback uses only the official IFrame Player with native controls and `autoplay=0`.
+- No overlay/custom control may cover any portion of the iframe.
+- The actual provider viewport, not merely the outer shell, remains >=200×200.
+- `embedded` routes only through `PlaybackProvider.start()`; `external` routes only through canonical handoff validation; `ask` exposes only those two choices.
+- Android handoff remains an unpinned VIEW intent with canonical HTTPS fallback.
+- Persisted `webUrl` is untrusted and must exactly match the canonical provider destination.
+- `embedUrl` is retired from the trusted/persisted media contract; legacy rows are stripped before strict validation.
+- Active playback, chooser state, request lineage and playback position are not persisted.
+- Transient readiness failures are not cached; later explicit retry may recover.
+- Non-authorized YouTube API metadata is refreshed or removed before 30 days.
+- Elara never stores YouTube video/audio content.
 
-The provider uses one `search.list` request per cache miss with `part=snippet`, `type=video`, `maxResults=5`, and `safeSearch=strict`. It never follows `nextPageToken` and does not use `videos.list` to enrich normal search cards. Current YouTube documentation gives `search.list` a dedicated default allowance of 100 calls per day; every page/request consumes one call from that search bucket.
+## 5. Security, privacy and failure semantics
 
-Media identity is `provider:id`. `mergeMediaItems` is the single merge primitive for accumulated/presented media: the first occurrence keeps its position and a later valid representation replaces that slot. Generation accumulation and flattened multi-query tool presentation use this rule. Per-query tool results returned to Gemini remain faithful to the provider rather than being rewritten into the flattened deduplicated view.
+The browser sends the user-supplied YouTube API key directly to Google/YouTube from the unlocked local Lockbox; Elara does not intentionally place it in request URLs, chat content, analytics or logs. Search, key validation and playback-readiness network work remain disabled before policy acceptance.
 
-Every provider result carries `apiDataFetchedAt`, the wall-clock time at which the API metadata was obtained. Positive search cache entries live seven days and negative entries ten minutes. Persisted YouTube media metadata is displayable only while structurally valid, timestamped, not from the future, and younger than 30 days. Exactly 30 days is expired. Legacy rows without the timestamp fail closed.
+The first-party [`privacy.html`](../public/privacy.html) and [`terms.html`](../public/terms.html) surfaces describe current data handling and link to the official YouTube Terms of Service and Google Privacy Policy. Removing the YouTube credential, deleting conversations, and clearing app/site storage provide the current local-data controls; the integration does not request YouTube OAuth Authorized Data.
 
-Startup maintenance physically purges stale/corrupt media from both media-cache and conversation storage. Conversation reads independently sanitize before returning data to React and best-effort write that cleanup back. The assistant/user message itself is retained; only the expired `media` projection is removed, and cleanup does not bump thread edit timestamps.
+Persisted media is untrusted. A malicious/non-canonical `webUrl` cannot become an internal target or external link. Legacy `embedUrl` has been removed rather than retained as dormant authority.
 
-Intent is presentation state applied after retrieval and is not part of cache identity. YouTube key validation is separate and uses a lightweight `videos.list?part=id` request, so testing a credential does not spend the dedicated `search.list` allowance. The key is a secondary encrypted Lockbox credential under `SYS-SEC / security.md`.
+Provider/readiness/player failures remain bounded application errors. Cancellation is re-checked after asynchronous Lockbox credential retrieval and while provider responses are pending. Adapter teardown is deliberately best-effort so cleanup exceptions cannot destabilize React or prevent the next elected request from becoming authoritative.
 
-## 5. Invariants
+## 6. Verification
 
-- Search path is `validate -> normalize/dedupe -> cache -> budget -> network`.
-- One cache miss equals at most one `search.list` request; no pagination.
-- API keys are sent in `x-goog-api-key`, never URLs, Gemini tool results, cache rows, media objects, conversation data, or diagnostics.
-- Media objects reject unknown fields; credential-like additions cannot survive as trusted `MediaItem` data.
-- Provider-returned display text is preserved exactly when valid; it is not aesthetically trimmed or rewritten.
-- Missing thumbnail dimensions are not fabricated. Invalid metadata fails validation rather than being repaired.
-- Freshness is based on provider-fetch time; reading from cache never refreshes the API-data clock.
-- Legacy-undated, future-dated, malformed, and >=30-day media metadata is not displayable.
-- Media results are structured application data, never parsed from assistant prose.
-- Text, media and artifacts share one `GenerationState -> ChatMessage` optimistic projection and one terminal persistence owner.
-- Media identity is `provider:id`; duplicate identities keep stable position and the newest valid representation.
-- Failed/cancelled partial assistant media is not persisted as a completed response.
-- Cards visibly identify YouTube and link outward; no iframe/audio/video player is rendered.
-- `watch` and `listen` change action wording only. Both use the exact canonical provider URL and share cache identity.
-- Android intent handoff is optional, unpinned to any package, and carries that exact HTTPS URL as fallback.
-- The conversation scroll/stream owner exists from the initial empty chat. Late card/image growth may follow only while bottom-follow owns the viewport; only explicit wheel/touch/pointer user intent may elect manual scroll authority.
+The final roadmap matrix covers the earlier search/quota, routing, player, mobile, preference, appearance and adversarial contracts plus Phase-9 compliance/migration behavior:
 
-## 6. Security and failure semantics
+- policy consent persists durably and defaults to unaccepted;
+- fresh-browser E2E proves the consent control is disabled until checked, local privacy/terms pages load, acceptance survives reload and official policy links remain present;
+- YouTube search/readiness/key-validation paths fail closed without consent;
+- provider results carry visible YouTube attribution;
+- `embedUrl` is absent from new provider/domain data and stripped from legacy conversation/cache rows;
+- malformed migrated media still fails the normal strict validator;
+- existing hostile-URL, MFK, offline/retry, stale-callback, rapid-preference, preset, viewport, Android handoff and single-player tests remain intact.
 
-The YouTube credential is resolved only at request time from the unlocked Lockbox. Provider failures map to bounded typed failures without propagating raw provider bodies or credential material.
+Phase-9 candidate `1ff05c4f8245dbbf4bcf5dc010a8adb5d874de6f` passed every non-browser gate; CI #1716 then exposed one stale browser selector after official logo attribution added a second image to each media card. The selector was narrowed to the thumbnail contract rather than weakening product behavior.
 
-Persisted URLs are untrusted input. For YouTube, a navigable card is allowed only when `provider + kind + id` reconstruct the exact URL already stored in `webUrl`. `javascript:`, `data:`, HTTP, malformed URLs, hostile HTTPS hosts, host aliases, mismatched IDs and extra query parameters fail closed. The card becomes an inert `Unavailable` result with no `href` or Android intent rather than trying to repair the destination.
+Behavioral Phase-9 head `18c7678f59780eb1db6cbaa064dacf6e3c378cf8` passed CI #1717 across documentation integrity, lint, TypeScript, all 1,233 unit tests, Worker/Durable Object tests, production build, all 122 Playwright tests and final reliability.
 
-The ordinary valid card `href` remains HTTPS. Supported Android Chromium flows may attempt an unpinned intent only from a user tap; its browser fallback is the same validated canonical URL.
+## 7. Release state
 
-## 7. Verification and tests
+The YouTube playback roadmap is closed after Phase 9. No Phase 10 feature layer is planned by this document.
 
-Use `src/media/*.test.ts`, `src/media/youtube/*.test.ts`, `src/chat/generation-media-*.test.ts`, `src/persistence/conversation-media-retention.test.ts`, tool declaration/handler tests, `src/app/components/media/*.test.tsx`, `e2e/media-handoff.spec.ts`, `e2e/media-delivery.phase3.spec.ts`, and `e2e/media-lifecycle.acceptance.spec.ts`.
+Further work belongs to normal repository evolution rather than another playback phase. In particular, repository-wide lint/TypeScript/test/CI hardening is owned by `SYS-REL`, not `SYS-MEDIA`.
 
-Adversarial lower-layer coverage includes hostile URL schemes/hosts, malformed/mismatched destinations, missing/future/exactly-expired timestamps, credential-shaped unexpected fields, malformed thumbnail geometry, oversized provider text, stale/corrupt cache rows, stale conversation media, duplicate identities, failure/cancellation, stale-generation events and preservation of historical message text during cleanup.
+Still absent by design: custom transport controls, iframe overlays, stream/audio extraction, hidden/background playback, offline YouTube media, package-pinned Android handoff, YouTube OAuth Authorized Data, and a separate playback persistence system.
 
-Playwright proves model-visible quota caps, request parameters, header-only key carriage, listen/watch cache reuse, absence of embedded players, durable `apiDataFetchedAt`, >30-day IndexedDB media removal, slow/failed thumbnails, reserved lazy-card geometry, late-layout follow/manual-scroll authority, media-only durable turns, media visible before a stalled continuation completes, failed-continuation non-durability, duplicate provider identity across separate tool calls, reload persistence, and execution of the Android JavaScript handoff branch with the canonical HTTPS fallback. Browser automation cannot prove which installed Android app the OS chooser selects; that remains physical-device acceptance.
+Any future material change to YouTube data access/storage/sharing must update the privacy/terms surfaces and increment the policy-consent version before the changed functionality can be enabled.
 
-## 8. Known gaps
+## 8. Documentation contract
 
-The search/cache/conversation retention boundary is enforced in code rather than left to documentation. The app also exposes the human YouTube guide plus direct links to YouTube Terms and Google Privacy from Settings.
-
-A public operator still owns deployment-level obligations that code in this repository cannot certify by itself: an appropriate application privacy policy/terms and consent treatment for the actual deployment, correct Google Cloud project/API-key ownership and restrictions, and any formal YouTube compliance/audit process applicable to the deployed API Client.
-
-The card uses the unmodified `YouTube` trade name as visible source attribution and deliberately does not manufacture, recolour or approximate a YouTube logo asset. If an official logo asset is introduced later, it must come from YouTube's approved branding resources and follow the current branding dimensions/link rules.
-
-There is deliberately no embedded/global playback manager. If playback is added later, provider identity, API-data policy, player requirements, bundle cost and DOM lifecycle are a new review boundary rather than an inference from this search-only design.
+This file is the compact engineering authority for `SYS-MEDIA`. Keep the eight numbered chapters stable so documentation integrity checks and future-agent routing remain predictable. Human-facing YouTube implementation/compliance guidance belongs in [`youtube/README.md`](./youtube/README.md); implementation truth belongs here rather than in phase-specific status or handoff documents.

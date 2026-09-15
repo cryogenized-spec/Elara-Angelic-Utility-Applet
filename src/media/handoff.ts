@@ -2,11 +2,12 @@ import type { MediaItem } from '../domain/media';
 import { mediaIntentOf } from '../domain/media';
 
 /**
- * Media hand-off.
+ * Validated external media hand-off.
  *
- * Elara never plays media. A tap hands the resolved item to the platform, which
- * owns playback: the user's player, their queue, background audio, picture in
- * picture, and hardware controls all come from there and cost this app nothing.
+ * This module owns only the external route. Internal playback, when selected,
+ * remains owned by the singular PlaybackProvider/player path. An external tap
+ * hands the resolved item to the platform, which then owns playback, queue,
+ * background audio, picture-in-picture and hardware controls.
  *
  * The provider result's canonical HTTPS destination is preserved for both
  * `watch` and `listen`. Intent changes the human action label, not the YouTube

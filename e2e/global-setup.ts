@@ -23,6 +23,21 @@ export default async function globalSetup(config: FullConfig): Promise<void> {
     await page.goto(baseURL, { waitUntil: 'load' });
     await page.getByRole('dialog', { name: 'Welcome.' }).waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined);
     if (await page.getByRole('dialog', { name: 'Welcome.' }).isVisible()) throw new Error('Could not establish completed onboarding state for legacy E2E tests.');
+
+    // Legacy browser tests predate the explicit YouTube policy gate. Establish
+    // their accepted baseline through the real Settings UI, then persist the
+    // existing preferences IndexedDB in Playwright storage state. Dedicated
+    // Phase-9 consent tests start from an empty storage state instead.
+    await page.getByRole('button', { name: 'Open sidebar' }).click();
+    await page.getByRole('button', { name: 'Open settings' }).click();
+    await page.getByRole('button', { name: 'Lockbox' }).click();
+    const consent = page.getByLabel('Agree to Elara YouTube privacy and terms');
+    if (await consent.isVisible()) {
+      await consent.check();
+      await page.getByRole('button', { name: 'Enable YouTube features' }).click();
+      await page.getByText(/Accepted · policy version/).waitFor({ state: 'visible' });
+    }
+
     await context.storageState({ path: storageState, indexedDB: true });
   } finally {
     await browser.close();

@@ -121,9 +121,12 @@ export function playbackReducer(state: PlaybackState, event: PlaybackEvent): Pla
     case 'begin-load':
       return state.phase === 'ready' || state.phase === 'ended' ? transition(state, 'loading') : state;
     case 'play':
-      return state.phase === 'loading' || state.phase === 'paused' ? transition(state, 'playing') : state;
+      return state.phase === 'loading' || state.phase === 'paused' || state.phase === 'ended' ? transition(state, 'playing') : state;
     case 'pause':
-      return state.phase === 'playing' ? transition(state, 'paused') : state;
+      // The official iframe reports ready before the user has pressed its native
+      // play control. `paused` therefore also represents a loaded, user-ready
+      // player that has not started yet.
+      return state.phase === 'loading' || state.phase === 'playing' ? transition(state, 'paused') : state;
     case 'end':
       return state.phase === 'playing' || state.phase === 'paused' ? transition(state, 'ended') : state;
     case 'fail': {

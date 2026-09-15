@@ -6,11 +6,17 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MediaItem } from '../../../domain/media';
+import { PlaybackProvider, type PlaybackPreferenceStore } from '../../../media/playback/PlaybackProvider';
 import { ConversationSurface } from '../ConversationSurface';
 import { MediaCard } from './MediaCard';
 import { MessageMedia } from './MessageMedia';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const preferenceStore: PlaybackPreferenceStore = {
+  load: async () => 'external',
+  save: async (value) => value,
+};
 
 function video(id: string): MediaItem {
   return {
@@ -21,7 +27,6 @@ function video(id: string): MediaItem {
     channel: 'Channel',
     thumbnail: { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, width: 480, height: 360 },
     webUrl: `https://www.youtube.com/watch?v=${id}`,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
   };
 }
 
@@ -48,7 +53,14 @@ describe('Phase 3 media delivery resilience', () => {
   });
 
   it('replaces a thumbnail that fails after render with the normal empty-thumbnail presentation', async () => {
-    await act(async () => { root.render(<MediaCard item={video('broken')} platform={{ isAndroid: false }} />); });
+    await act(async () => {
+      root.render(
+        <PlaybackProvider preferenceStore={preferenceStore}>
+          <MediaCard item={video('broken')} platform={{ isAndroid: false }} />
+        </PlaybackProvider>,
+      );
+      await Promise.resolve();
+    });
     const image = container.querySelector('img.media-card__thumb');
     expect(image).not.toBeNull();
 

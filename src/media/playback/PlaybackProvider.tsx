@@ -21,9 +21,11 @@ import {
   type PlaybackState,
 } from '../../domain/playback';
 import { loadMediaPlaybackPreference, saveMediaPlaybackPreference } from '../../persistence/preferences';
+import { PlaybackPlayerHost } from './PlaybackPlayerHost';
+import { playbackPlayerPort, type PlaybackPlayerPort } from './player';
 import { playbackReadinessPort, type PlaybackReadinessPort } from './readiness';
 
-export type PlaybackPreferenceStatus = 'loading' | 'ready' | 'failed';
+export type PlaybackPreferenceStatus = 'loading' | 'saving' | 'ready' | 'failed';
 
 export interface PlaybackPreferenceStore {
   load(): Promise<MediaPlaybackPreference>;
@@ -43,6 +45,7 @@ export interface PlaybackAuthority {
   setPreference(value: MediaPlaybackPreference): Promise<MediaPlaybackPreference>;
   select(item: MediaItem): string | null;
   prepare(item: MediaItem): Promise<PlaybackPreparation | null>;
+  start(item: MediaItem): Promise<PlaybackPreparation | null>;
   beginCheck(requestId: string): void;
   markReady(requestId: string): void;
   beginLoad(requestId: string): void;
@@ -68,12 +71,14 @@ export function PlaybackProvider({
   children,
   preferenceStore = persistentPreferenceStore,
   readinessPort = playbackReadinessPort,
+  playerPort = playbackPlayerPort,
   requestIdFactory = defaultRequestIdFactory,
   now = Date.now,
 }: {
   readonly children: ReactNode;
   readonly preferenceStore?: PlaybackPreferenceStore;
   readonly readinessPort?: PlaybackReadinessPort;
+  readonly playerPort?: PlaybackPlayerPort;
   readonly requestIdFactory?: () => string;
   readonly now?: () => number;
 }) {
@@ -83,6 +88,7 @@ export function PlaybackProvider({
     <PlaybackProviderRoot
       preferenceStore={preferenceStore}
       readinessPort={readinessPort}
+      playerPort={playerPort}
       requestIdFactory={requestIdFactory}
       now={now}
     >
@@ -95,12 +101,14 @@ function PlaybackProviderRoot({
   children,
   preferenceStore,
   readinessPort,
+  playerPort,
   requestIdFactory,
   now,
 }: {
   readonly children: ReactNode;
   readonly preferenceStore: PlaybackPreferenceStore;
   readonly readinessPort: PlaybackReadinessPort;
+  readonly playerPort: PlaybackPlayerPort;
   readonly requestIdFactory: () => string;
   readonly now: () => number;
 }) {
@@ -148,7 +156,7 @@ function PlaybackProviderRoot({
     const revision = preferenceRevisionRef.current + 1;
     preferenceRevisionRef.current = revision;
     if (mountedRef.current) {
-      setPreferenceStatus('loading');
+      setPreferenceStatus('saving');
       setPreferenceError(null);
     }
 
@@ -201,9 +209,6 @@ function PlaybackProviderRoot({
     }
     if (!isPlaybackRequestId(requestId)) return null;
 
-    // A newer accepted selection owns the one readiness lane. Aborting old work
-    // saves a provider call where possible; request lineage remains the actual
-    // correctness boundary if an abort races with a late response.
     readinessAttemptRef.current?.controller.abort();
     readinessAttemptRef.current = null;
     dispatch({ type: 'select', requestId, item });
@@ -242,6 +247,13 @@ function PlaybackProviderRoot({
     return Object.freeze({ requestId, decision });
   }, [readinessPort, select]);
 
+  const start = useCallback(async (item: MediaItem): Promise<PlaybackPreparation | null> => {
+    const preparation = await prepare(item);
+    if (!preparation || preparation.decision.status !== 'ready') return preparation;
+    dispatch({ type: 'begin-load', requestId: preparation.requestId });
+    return preparation;
+  }, [prepare]);
+
   const beginCheck = useCallback((requestId: string) => dispatch({ type: 'begin-check', requestId }), []);
   const markReady = useCallback((requestId: string) => dispatch({ type: 'ready', requestId }), []);
   const beginLoad = useCallback((requestId: string) => dispatch({ type: 'begin-load', requestId }), []);
@@ -263,6 +275,7 @@ function PlaybackProviderRoot({
     setPreference,
     select,
     prepare,
+    start,
     beginCheck,
     markReady,
     beginLoad,
@@ -286,10 +299,24 @@ function PlaybackProviderRoot({
     reset,
     select,
     setPreference,
+    start,
     state,
   ]);
 
-  return <PlaybackContext.Provider value={value}>{children}</PlaybackContext.Provider>;
+  return (
+    <PlaybackContext.Provider value={value}>
+      {children}
+      <PlaybackPlayerHost
+        state={state}
+        playerPort={playerPort}
+        markPlaying={markPlaying}
+        markPaused={markPaused}
+        markEnded={markEnded}
+        markFailed={markFailed}
+        reset={reset}
+      />
+    </PlaybackContext.Provider>
+  );
 }
 
 export function usePlaybackAuthority(): PlaybackAuthority {

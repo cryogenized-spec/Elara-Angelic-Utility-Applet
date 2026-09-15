@@ -15,7 +15,6 @@ const ITEM: MediaItem = {
   channel: 'Authority Channel',
   thumbnail: { url: 'https://i.ytimg.com/vi/phase2Video/hqdefault.jpg', width: 480, height: 360 },
   webUrl: 'https://www.youtube.com/watch?v=phase2Video',
-  embedUrl: 'https://www.youtube-nocookie.com/embed/phase2Video',
   apiDataFetchedAt: 1_800_000_000_000,
   intent: 'listen',
 };
@@ -62,7 +61,7 @@ describe('Phase 2 playback domain', () => {
   it('makes a newer selection authoritative over every late event from the old request', () => {
     const a = playbackReducer(INITIAL_PLAYBACK_STATE, { type: 'select', requestId: 'request-a', item: ITEM });
     const aChecking = playbackReducer(a, { type: 'begin-check', requestId: 'request-a' });
-    const bItem = { ...ITEM, id: 'phase2VideoB', title: 'Track B', webUrl: 'https://www.youtube.com/watch?v=phase2VideoB', embedUrl: 'https://www.youtube-nocookie.com/embed/phase2VideoB' };
+    const bItem = { ...ITEM, id: 'phase2VideoB', title: 'Track B', webUrl: 'https://www.youtube.com/watch?v=phase2VideoB' };
     const b = playbackReducer(aChecking, { type: 'select', requestId: 'request-b', item: bItem });
 
     expect(b).toMatchObject({ phase: 'requested', requestId: 'request-b' });

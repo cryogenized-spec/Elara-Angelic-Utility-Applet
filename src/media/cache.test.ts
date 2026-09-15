@@ -22,7 +22,6 @@ function item(id: string, apiDataFetchedAt: number = NOW): MediaItem {
     title: `Result ${id}`,
     channel: 'Channel',
     webUrl: `https://www.youtube.com/watch?v=${id}`,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
     apiDataFetchedAt,
   };
 }
@@ -124,15 +123,16 @@ describe('media search cache', () => {
     expect(await mediaCacheSize()).toBeLessThanOrEqual(MAX_CACHE_ENTRIES);
   });
 
-  it('never stores credential material', async () => {
+  it('never stores credential material or retired embed URLs', async () => {
     await writeMediaCache('youtube:v1:secret-check', { ...VALUE, items: [item('a')] }, NOW);
 
     const read = await readMediaCache('youtube:v1:secret-check', NOW);
     const serialized = JSON.stringify(read.items);
     expect(serialized).not.toMatch(/AIza/);
     expect(serialized).not.toMatch(/apiKey|api_key|x-goog/i);
+    expect(serialized).not.toContain('embedUrl');
     expect(Object.keys(read.items[0]).sort()).toEqual([
-      'apiDataFetchedAt', 'channel', 'embedUrl', 'id', 'kind', 'provider', 'title', 'webUrl',
+      'apiDataFetchedAt', 'channel', 'id', 'kind', 'provider', 'title', 'webUrl',
     ]);
   });
 });

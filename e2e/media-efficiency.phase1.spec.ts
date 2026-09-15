@@ -50,9 +50,6 @@ async function unlockTestLockbox(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
-  await page.getByLabel('Agree to Elara YouTube privacy and terms').check();
-  await page.getByRole('button', { name: 'Enable YouTube features' }).click();
-  await expect(page.getByText(/Accepted · policy version/)).toBeVisible();
   await page.getByLabel('Gemini API key').fill(TEST_GEMINI_KEY);
   await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill(TEST_PIN);
   await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill(TEST_PIN);

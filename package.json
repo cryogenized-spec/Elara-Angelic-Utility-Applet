@@ -10,6 +10,8 @@
     "@google/genai": false,
     "protobufjs": false,
     "tesseract.js": false,
+    "fsevents@2.3.2": false,
+    "fsevents@2.3.3": false,
     "esbuild@0.28.1": true,
     "workerd@1.20260815.1": true,
     "workerd@1.20260903.1": true

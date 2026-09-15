@@ -19,7 +19,6 @@ function item(overrides: Partial<MediaItem> = {}): MediaItem {
     kind: 'video',
     title: 'Lo-Fi Study Session',
     webUrl: 'https://www.youtube.com/watch?v=abc123',
-    embedUrl: 'https://www.youtube-nocookie.com/embed/abc123?autoplay=0',
     ...overrides,
   };
 }

@@ -30,7 +30,6 @@ function outcome(query: string, id: string, title: string = `Result ${id}`): Med
       channel: 'Channel',
       thumbnail: { url: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, width: 480, height: 360 },
       webUrl: `https://www.youtube.com/watch?v=${id}`,
-      embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
       apiDataFetchedAt: 1_800_000_000_000,
     }],
   };

@@ -65,6 +65,14 @@ describe('preference normalization', () => {
     expect(value.userSurfaceOpacity).toBe(0.2);
     expect(value.userSurfaceStyle).toBe('frosted');
     expect(value.generationActivityAccent).toBe('#34D399');
+    expect(value.mediaPlayerSurfacePreset).toBe('glass');
+  });
+
+  it('defaults old or invalid player appearance rows to Glass', () => {
+    expect(normalizeChatAppearance({}).mediaPlayerSurfacePreset).toBe('glass');
+    expect(normalizeChatAppearance({ mediaPlayerSurfacePreset: 'unknown' as never }).mediaPlayerSurfacePreset).toBe('glass');
+    expect(normalizeChatAppearance({ mediaPlayerSurfacePreset: 'minimal' }).mediaPlayerSurfacePreset).toBe('minimal');
+    expect(normalizeChatAppearance({ mediaPlayerSurfacePreset: 'cinema' }).mediaPlayerSurfacePreset).toBe('cinema');
   });
 
   it('rejects malformed Generation Activity accent values', () => {
@@ -102,6 +110,16 @@ describe('Generation Activity appearance persistence', () => {
     expect(loaded.generationActivityAccent).toBe('#34D399');
     expect(loaded.assistantTextColor).toBe(DEFAULT_CHAT_APPEARANCE.assistantTextColor);
     expect(loaded.userSurfaceColor).toBe(DEFAULT_CHAT_APPEARANCE.userSurfaceColor);
+  });
+
+  it('persists the player surface preset in that same appearance record', async () => {
+    const saved = await saveChatAppearance({ ...DEFAULT_CHAT_APPEARANCE, mediaPlayerSurfacePreset: 'cinema' });
+    expect(saved.mediaPlayerSurfacePreset).toBe('cinema');
+
+    const loaded = await loadChatAppearance();
+    expect(loaded.mediaPlayerSurfacePreset).toBe('cinema');
+    expect(loaded.generationActivityAccent).toBe(DEFAULT_CHAT_APPEARANCE.generationActivityAccent);
+    expect(loaded.userSurfaceStyle).toBe(DEFAULT_CHAT_APPEARANCE.userSurfaceStyle);
   });
 });
 

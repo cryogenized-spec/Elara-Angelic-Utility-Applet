@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="color-scheme" content="dark" />
+  <title>Elara Privacy Notice</title>
+  <style>
+    :root { font-family: Inter, system-ui, sans-serif; color: #f5f3ff; background: #0f0c1e; }
+    body { margin: 0; }
+    main { max-width: 780px; margin: 0 auto; padding: 32px 20px 64px; line-height: 1.65; }
+    h1, h2 { line-height: 1.2; }
+    h2 { margin-top: 2rem; }
+    a { color: #c8b8ff; }
+    .meta { color: #b9b2cf; }
+    code { font-family: ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Elara Privacy Notice</h1>
+  <p class="meta">Effective 15 September 2026 · YouTube policy consent version 1</p>
+
+  <p>This notice explains how Elara — Angelic Utility Applet handles information when you use its YouTube features. Elara uses YouTube API Services. By enabling those features, you acknowledge this notice and the <a href="./terms.html">Elara Terms of Use</a>.</p>
+
+  <h2>1. Information Elara accesses</h2>
+  <p>Elara currently uses the YouTube Data API for public video search and playback-readiness checks. It may receive public YouTube metadata such as a video identifier, title, channel name, publication time, thumbnail information, canonical YouTube URL, and embeddability / Made-for-Kids status.</p>
+  <p>Elara does not currently use YouTube OAuth to access your YouTube account or other Authorized Data, and it does not request or store your YouTube username or password.</p>
+
+  <h2>2. Your YouTube API key</h2>
+  <p>You supply your own YouTube Data API key. Elara stores that key encrypted in the local Lockbox in this browser. The decrypted value is held only for the active unlocked session. When Elara makes a YouTube Data API request, the browser sends the key directly to Google/YouTube in the request header. Elara does not intentionally place the key in request URLs, chat messages, analytics, or logs.</p>
+
+  <h2>3. Local storage and retention</h2>
+  <p>YouTube search metadata may be cached locally in IndexedDB to reduce repeat API calls. Positive search-cache entries are normally retained for about seven days. YouTube metadata attached to conversation history is freshness-checked and is removed or refreshed before it reaches 30 calendar days. Malformed, stale, or non-canonical media data fails closed.</p>
+  <p>Elara does not download or store YouTube video or audio content. Internal playback uses the official YouTube IFrame Player.</p>
+
+  <h2>4. Sharing and third-party content</h2>
+  <p>When you search YouTube, validate a key, or check whether a selected video can play internally, your browser communicates with Google/YouTube. When you choose <em>Play here</em>, the official YouTube embedded player is loaded; YouTube or Google may receive player/network information and may serve YouTube content, including advertising where applicable. When you choose <em>Open YouTube</em>, Elara hands you to the canonical YouTube page.</p>
+  <p>Google and YouTube handle information under the <a href="https://policies.google.com/privacy">Google Privacy Policy</a> and <a href="https://www.youtube.com/t/terms">YouTube Terms of Service</a>.</p>
+
+  <h2>5. Your controls</h2>
+  <p>YouTube API network features remain disabled until the current Elara YouTube privacy/terms notice is accepted in Settings. You can remove the encrypted YouTube API key at any time from Settings → Lockbox. Deleting a conversation removes its locally stored conversation data, including media metadata associated with that conversation. Clearing this site's/app's local storage removes local caches and policy-consent state.</p>
+  <p>Elara's current YouTube integration does not request YouTube OAuth authorization. If a future version adds Authorized Data, this notice and the consent version must be updated before that functionality is enabled. Google's connected-app permissions are available at <a href="https://security.google.com/settings/security/permissions">Google Security Settings</a>.</p>
+
+  <h2>6. Made for Kids and playback</h2>
+  <p>Elara checks the YouTube status returned for a selected video before internal playback. Videos marked Made for Kids are not embedded by Elara's current implementation; the user can instead open the video on YouTube.</p>
+
+  <h2>7. Changes to this notice</h2>
+  <p>If Elara materially changes how its YouTube features access, collect, store, use, or share data, the versioned consent gate must be updated so the changed notice is accepted before the new behavior is used.</p>
+
+  <h2>8. Questions</h2>
+  <p>Questions or privacy concerns about this project can be raised through the <a href="https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/issues">Elara project issue tracker</a>.</p>
+</main>
+</body>
+</html>

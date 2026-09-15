@@ -1,5 +1,6 @@
 name: Phase 3 final coverage freeze
 
+# One-shot PR bootstrap. The job deletes this workflow before committing.
 on:
   pull_request:
     branches: [main]

@@ -84,12 +84,12 @@ function permissionsForJob(jobName) {
   const result = {};
   for (let index = permissionStart + 1; index < lines.length; index += 1) {
     const line = lines[index];
-    const match = line.match(/^      ([A-Za-z0-9-]+):\s*(read|write|none)\s*$/);
+    const match = line.match(/^ {6}([A-Za-z0-9-]+):\s*(read|write|none)\s*$/);
     if (match) {
       result[match[1]] = match[2];
       continue;
     }
-    if (/^    \S/.test(line) || /^  \S/.test(line) || /^\S/.test(line)) break;
+    if (/^ {4}\S/.test(line) || /^ {2}\S/.test(line) || /^\S/.test(line)) break;
   }
   return result;
 }

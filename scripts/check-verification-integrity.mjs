@@ -129,7 +129,7 @@ try {
   const expectedScripts = {
     'docs:check': 'node scripts/check-docs.mjs',
     'verify:gates': 'node scripts/check-verification-integrity.mjs',
-    lint: 'eslint .',
+    lint: 'eslint . --max-warnings 0',
     typecheck: 'tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit',
     test: 'vitest run',
     'test:workers': 'vitest run --config vitest.workers.config.ts',
@@ -143,6 +143,46 @@ try {
 } catch (error) {
   fail(`package.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 }
+
+// Lint exceptions are themselves capabilities. Keep the globally hardened
+// rules at error severity, and freeze the exact reviewed file-scoped exceptions
+// instead of allowing a future agent to broaden them unnoticed.
+const eslintConfig = read('eslint.config.js');
+for (const hardRule of [
+  "'@typescript-eslint/no-explicit-any': 'error'",
+  "'react-hooks/set-state-in-effect': 'error'",
+  "'react-hooks/purity': 'error'",
+  "'react-hooks/exhaustive-deps': 'error'",
+  "'no-unsafe-finally': 'error'",
+]) {
+  if (!eslintConfig.includes(hardRule)) fail(`eslint hard rule is missing or weakened: ${hardRule}`);
+}
+const reviewedLintExceptions = [
+  [/'react-hooks\/purity': 'off'/g, 1, 'React purity exception'],
+  [/'react-hooks\/set-state-in-effect': 'off'/g, 1, 'set-state-in-effect exception'],
+  [/'@typescript-eslint\/no-explicit-any': 'off'/g, 1, 'no-explicit-any exception'],
+];
+for (const [pattern, expected, label] of reviewedLintExceptions) {
+  const actual = count(eslintConfig, pattern);
+  if (actual !== expected) fail(`${label} count changed: expected ${expected}, found ${actual}`);
+}
+for (const reviewedPath of [
+  "files: ['src/app/App.tsx']",
+  "files: ['src/app/components/GeminiApiLockbox.tsx', 'src/app/components/Sidebar.tsx']",
+  "files: ['worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts']",
+]) {
+  if (!eslintConfig.includes(reviewedPath)) fail(`reviewed lint exception scope changed or disappeared: ${reviewedPath}`);
+}
+
+// App.tsx receives one conservative React-purity exception because the rule
+// follows nested event/async handlers and treats clock acquisition as if it were
+// render work. Freeze the already-reviewed clock surface so the exception does
+// not become a place to hide new time-dependent behavior.
+const appSource = read('src/app/App.tsx');
+const appDateNowCount = count(appSource, /Date\.now\(\)/g);
+const appPerformanceNowCount = count(appSource, /performance\.now\(\)/g);
+if (appDateNowCount !== 8) fail(`src/app/App.tsx Date.now() surface changed: expected 8, found ${appDateNowCount}`);
+if (appPerformanceNowCount !== 1) fail(`src/app/App.tsx performance.now() surface changed: expected 1, found ${appPerformanceNowCount}`);
 
 // CI itself is inside the threat model. It must run the protected commands in
 // order, with lockfile-strict installation and read-only repository access.
@@ -194,4 +234,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

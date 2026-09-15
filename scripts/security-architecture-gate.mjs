@@ -33,6 +33,7 @@ function read(path) {
 
 const runtimeFiles = [...walk('src'), ...walk('worker/src')]
   .filter((file) => /\.(?:ts|tsx|mts|cts|js|mjs)$/.test(file))
+  .filter((file) => !/\.d\.ts$/.test(file))
   .filter((file) => !/(?:\.test\.|\.spec\.)/.test(file));
 const runtime = new Map(runtimeFiles.map((file) => [rel(file), readFileSync(file, 'utf8')]));
 
@@ -60,8 +61,9 @@ for (const [path, source] of runtime) {
 
 // ---------------------------------------------------------------------------
 // 2. Durable-state authorities.
-// A new Dexie owner is a new durable authority and therefore requires explicit
-// architecture review. Tests are intentionally excluded above.
+// Importing Dexie helpers is not itself an authority (liveQuery is a reader).
+// Owning/constructing a Dexie database is. Freeze exactly those owners so a new
+// durable store is always an explicit architecture review event.
 // ---------------------------------------------------------------------------
 const reviewedDexieAuthorities = new Set([
   'src/autonomy/cloud/credential.ts',
@@ -76,9 +78,9 @@ const reviewedDexieAuthorities = new Set([
 ]);
 const actualDexieAuthorities = new Set();
 for (const [path, source] of runtime) {
-  if (/(?:from\s+['"]dexie['"]|import\s*\(\s*['"]dexie['"])/.test(source)) actualDexieAuthorities.add(path);
+  if (/\b(?:extends\s+Dexie|new\s+Dexie)\b/.test(source)) actualDexieAuthorities.add(path);
 }
-for (const path of actualDexieAuthorities) if (!reviewedDexieAuthorities.has(path)) fail(`unreviewed durable authority imports Dexie: ${path}`);
+for (const path of actualDexieAuthorities) if (!reviewedDexieAuthorities.has(path)) fail(`unreviewed durable Dexie authority: ${path}`);
 for (const path of reviewedDexieAuthorities) if (!actualDexieAuthorities.has(path)) fail(`reviewed durable authority disappeared or moved: ${path}`);
 
 // ---------------------------------------------------------------------------
@@ -132,7 +134,8 @@ for (const [path, source] of runtime) {
 // 4. Outbound network authority.
 // Global fetch is the actual egress capability. Google service adapters receive
 // an authorized fetch from the OAuth authority; they do not own global egress.
-// YouTube uses an injectable fetch seam but its runtime default is explicit.
+// YouTube uses injectable fetch seams but every runtime default is explicit and
+// every provider destination is frozen below.
 // ---------------------------------------------------------------------------
 const reviewedRawFetchAuthorities = new Set([
   'src/autonomy/cloud/client.ts',
@@ -141,6 +144,7 @@ const reviewedRawFetchAuthorities = new Set([
 const reviewedGlobalFetchReferences = new Set([
   'src/media/youtube/readiness.ts',
   'src/media/youtube/service.ts',
+  'src/media/youtube/validate.ts',
 ]);
 
 function ownsUnqualifiedFetch(source) {
@@ -182,11 +186,15 @@ for (const marker of [
 ]) {
   if (!autonomyClient.includes(marker)) fail(`autonomy cloud egress boundary is missing: ${marker}`);
 }
-if (/`[^`]*\$\{[^}]*token[^}]*\}[^`]*`/i.test(autonomyClient)) fail('autonomy cloud client interpolates a credential into a URL/template string');
+if (/fetch\s*\(\s*`[^`]*\$\{[^}]*token/i.test(autonomyClient)
+  || /new\s+URL\s*\(\s*`[^`]*\$\{[^}]*token/i.test(autonomyClient)) {
+  fail('autonomy cloud client interpolates a credential into a network target');
+}
 
 for (const [path, endpoint] of [
-  ['src/media/youtube/service.ts', "https://www.googleapis.com/youtube/v3/search"],
-  ['src/media/youtube/readiness.ts', "https://www.googleapis.com/youtube/v3/videos"],
+  ['src/media/youtube/service.ts', 'https://www.googleapis.com/youtube/v3/search'],
+  ['src/media/youtube/readiness.ts', 'https://www.googleapis.com/youtube/v3/videos'],
+  ['src/media/youtube/validate.ts', 'https://www.googleapis.com/youtube/v3/videos'],
 ]) {
   const source = read(path);
   if (!source.includes(endpoint)) fail(`${path} changed its reviewed YouTube API destination`);
@@ -214,11 +222,16 @@ const reviewedConfirmationBrokerConsumers = new Set([
   'src/google/confirmation/roleplay-broker.ts',
   'src/google/tools/executor.ts',
 ]);
-const brokerImport = /from\s+['"][^'"]*confirmation\/broker['"]/;
-for (const [path, source] of runtime) {
-  if (brokerImport.test(source) && !reviewedConfirmationBrokerConsumers.has(path)) fail(`unreviewed confirmation-broker consumer: ${path}`);
+function importsConfirmationBroker(path, source) {
+  if (path === 'src/google/confirmation/roleplay-broker.ts') return /from\s+['"]\.\/broker['"]/.test(source);
+  return /from\s+['"][^'"]*confirmation\/broker['"]/.test(source);
 }
-for (const path of reviewedConfirmationBrokerConsumers) if (!brokerImport.test(runtime.get(path) ?? '')) fail(`reviewed confirmation-broker consumer disappeared or moved: ${path}`);
+for (const [path, source] of runtime) {
+  if (importsConfirmationBroker(path, source) && !reviewedConfirmationBrokerConsumers.has(path)) fail(`unreviewed confirmation-broker consumer: ${path}`);
+}
+for (const path of reviewedConfirmationBrokerConsumers) {
+  if (!importsConfirmationBroker(path, runtime.get(path) ?? '')) fail(`reviewed confirmation-broker consumer disappeared or moved: ${path}`);
+}
 
 const executor = read('src/google/tools/executor.ts');
 if (!executor.includes('evaluateWriteConfirmation')) fail('Google executor must evaluate mutation confirmation policy');

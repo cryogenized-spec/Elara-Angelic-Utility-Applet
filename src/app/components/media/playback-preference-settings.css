@@ -1,0 +1,47 @@
+.playback-preference-setting { margin-top: 12px; }
+
+.playback-preference-options {
+  display: grid;
+  gap: 7px;
+  margin-top: 12px;
+}
+
+.playback-preference-option {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-height: 52px;
+  padding: 10px 11px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+  color: var(--text);
+  text-align: left;
+}
+
+.playback-preference-option.is-active {
+  border-color: rgba(110,168,255,.46);
+  background: rgba(110,168,255,.08);
+  box-shadow: inset 2px 0 0 var(--pink);
+}
+
+.playback-preference-option:disabled { cursor: default; opacity: .68; }
+
+.playback-preference-option__label {
+  margin: 0 !important;
+  color: var(--text) !important;
+  font-size: 12px !important;
+  font-weight: 700;
+}
+
+.playback-preference-option small,
+.playback-preference-status,
+.playback-preference-error {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.playback-preference-status,
+.playback-preference-error { display: block; margin-top: 8px; }
+.playback-preference-error { color: #ffdfe9; }

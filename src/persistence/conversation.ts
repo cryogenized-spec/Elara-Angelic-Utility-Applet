@@ -36,6 +36,21 @@ export interface StoredFolderAssignment {
   updatedAt: number;
 }
 
+function stripLegacyEmbedUrls(value: unknown): { value: unknown; changed: boolean } {
+  if (!Array.isArray(value)) return { value, changed: false };
+  const entries: readonly unknown[] = value;
+  let changed = false;
+  const migrated = entries.map((entry): unknown => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return entry;
+    const record = entry as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(record, 'embedUrl')) return entry;
+    const { embedUrl: _retired, ...withoutEmbedUrl } = record;
+    changed = true;
+    return withoutEmbedUrl;
+  });
+  return { value: migrated, changed };
+}
+
 export class ElaraDatabase extends Dexie {
   messages!: Table<ChatMessage, string>;
   threads!: Table<StoredThread, string>;
@@ -139,6 +154,25 @@ export class ElaraDatabase extends Dexie {
       memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt, autonomyContext',
       artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
       artifactBlobs: 'id',
+    });
+    // v9 retires the old derived iframe URL. Preserve every other raw field so
+    // the ordinary strict validator still decides whether each migrated item is
+    // trustworthy; this migration only removes the now-obsolete field.
+    this.version(9).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+      memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt, autonomyContext',
+      artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
+      artifactBlobs: 'id',
+    }).upgrade(async (transaction) => {
+      await transaction.table('messages').toCollection().modify((message: Record<string, unknown>) => {
+        const migrated = stripLegacyEmbedUrls(message.media);
+        if (migrated.changed) message.media = migrated.value;
+      });
     });
   }
 }

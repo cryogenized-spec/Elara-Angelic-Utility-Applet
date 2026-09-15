@@ -146,6 +146,9 @@ button.media-card__choice { padding: 0 10px; }
 a.media-card__choice,
 a.media-card__fallback { display: flex; align-items: center; justify-content: center; padding: 0 10px; }
 .media-card__choice--external { border-color: var(--line); background: rgba(255,255,255,.04); color: var(--muted); }
+button.media-card__choice:disabled { cursor: not-allowed; opacity: .55; }
+.media-card__choice:focus-visible,
+.media-card__fallback:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
 .media-card__failure {
   display: grid;

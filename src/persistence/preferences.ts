@@ -1,12 +1,21 @@
 import Dexie, { type Table } from 'dexie';
 import { BUILT_IN_FONTS, googleFontFamilyFromCss2Url, type FontSelection } from '../ui/fontRegistry';
-import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_AUTONOMY, DEFAULT_ROLEPLAY, type AppUiPreferences, type AutonomyPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
+import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_AUTONOMY, DEFAULT_ROLEPLAY, MEDIA_PLAYER_SURFACE_PRESETS, type AppUiPreferences, type AutonomyPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
+import { DEFAULT_MEDIA_PLAYBACK_PREFERENCE, normalizeMediaPlaybackPreference, type MediaPlaybackPreference } from '../domain/playback';
+
+export const YOUTUBE_POLICY_CONSENT_VERSION = 1 as const;
+export interface YouTubePolicyConsent {
+  readonly version: typeof YOUTUBE_POLICY_CONSENT_VERSION;
+  readonly acceptedAt: number;
+}
 
 type PreferenceRecord =
   | { id: 'app-ui'; value: AppUiPreferences; updatedAt: number }
   | { id: 'chat-appearance'; value: ChatAppearancePreferences; updatedAt: number }
   | { id: 'roleplay'; value: RoleplayPreferences; updatedAt: number }
   | { id: 'autonomy'; value: AutonomyPreferences; updatedAt: number }
+  | { id: 'media-playback'; value: MediaPlaybackPreference; updatedAt: number }
+  | { id: 'youtube-policy-consent'; value: YouTubePolicyConsent; updatedAt: number }
   | { id: 'onboarding'; value: { completed: boolean }; updatedAt: number };
 
 const ONBOARDING_STORAGE_KEY = 'elara.onboarding.completed';
@@ -59,6 +68,9 @@ export async function saveAppUiPreferences(value: AppUiPreferences): Promise<App
 export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences> | null | undefined): ChatAppearancePreferences {
   const merged = { ...DEFAULT_CHAT_APPEARANCE, ...(value ?? {}) };
   const backgroundMode: ChatAppearancePreferences['chatBackgroundMode'] = merged.chatBackgroundMode === 'gradient' || merged.chatBackgroundMode === 'image' ? merged.chatBackgroundMode : 'solid';
+  const mediaPlayerSurfacePreset = (MEDIA_PLAYER_SURFACE_PRESETS as readonly string[]).includes(merged.mediaPlayerSurfacePreset)
+    ? merged.mediaPlayerSurfacePreset
+    : DEFAULT_CHAT_APPEARANCE.mediaPlayerSurfacePreset;
   return {
     ...merged,
     chatBackgroundMode: backgroundMode,
@@ -73,6 +85,7 @@ export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences
     userSurfaceOpacity: clamp(merged.userSurfaceOpacity, 0.2, 1, DEFAULT_CHAT_APPEARANCE.userSurfaceOpacity),
     userSurfaceStyle: merged.userSurfaceStyle === 'solid' || merged.userSurfaceStyle === 'gradient' ? merged.userSurfaceStyle : 'frosted',
     generationActivityAccent: safeHex(merged.generationActivityAccent, DEFAULT_CHAT_APPEARANCE.generationActivityAccent),
+    mediaPlayerSurfacePreset,
   };
 }
 
@@ -130,6 +143,52 @@ export async function saveAutonomyPreferences(value: AutonomyPreferences): Promi
   const nextValue = normalizeAutonomy(value);
   await db.preferences.put({ id: 'autonomy', value: nextValue, updatedAt: Date.now() });
   return nextValue;
+}
+
+export async function loadMediaPlaybackPreference(): Promise<MediaPlaybackPreference> {
+  const record = await db.preferences.get('media-playback');
+  return record?.id === 'media-playback'
+    ? normalizeMediaPlaybackPreference(record.value)
+    : DEFAULT_MEDIA_PLAYBACK_PREFERENCE;
+}
+
+export async function saveMediaPlaybackPreference(value: MediaPlaybackPreference): Promise<MediaPlaybackPreference> {
+  const nextValue = normalizeMediaPlaybackPreference(value);
+  await db.preferences.put({ id: 'media-playback', value: nextValue, updatedAt: Date.now() });
+  return nextValue;
+}
+
+/**
+ * YouTube policy consent is versioned durable compliance state in the existing
+ * preferences database. It is intentionally separate from the encrypted API
+ * credential: accepting policy never decrypts or rewrites the key, and a future
+ * material policy change can require a new version without creating a new store.
+ */
+export async function loadYouTubePolicyConsent(): Promise<YouTubePolicyConsent | null> {
+  const record = await db.preferences.get('youtube-policy-consent');
+  if (record?.id !== 'youtube-policy-consent') return null;
+  const value = record.value;
+  return value.version === YOUTUBE_POLICY_CONSENT_VERSION
+    && Number.isFinite(value.acceptedAt)
+    && value.acceptedAt > 0
+    ? value
+    : null;
+}
+
+export async function hasAcceptedYouTubePolicy(): Promise<boolean> {
+  return (await loadYouTubePolicyConsent()) !== null;
+}
+
+export async function acceptYouTubePolicy(now: number = Date.now()): Promise<YouTubePolicyConsent> {
+  if (!Number.isFinite(now) || now <= 0) throw new Error('YouTube policy acceptance could not be timestamped safely.');
+  const value: YouTubePolicyConsent = { version: YOUTUBE_POLICY_CONSENT_VERSION, acceptedAt: now };
+  await db.preferences.put({ id: 'youtube-policy-consent', value, updatedAt: now });
+  return value;
+}
+
+/** Test/admin seam for a future material policy-version change. */
+export async function clearYouTubePolicyConsent(): Promise<void> {
+  await db.preferences.delete('youtube-policy-consent');
 }
 
 export async function hasCompletedOnboarding(): Promise<boolean> {

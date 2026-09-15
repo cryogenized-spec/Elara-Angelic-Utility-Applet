@@ -7,6 +7,7 @@ import { Icon } from '../../ui/icons';
 import { MarkdownText } from './MarkdownText';
 import { MessageArtifacts } from './artifacts/MessageArtifacts';
 import { MessageMedia } from './media/MessageMedia';
+import { hasRenderableMessageContent } from './message-content';
 import './conversation-surface.css';
 
 const BOTTOM_STICK_THRESHOLD_PX = 32;
@@ -24,12 +25,14 @@ function responseGroupFor(message: ChatMessage): string {
  */
 export const ConversationSurface = memo(function ConversationSurface({ messages, generation, onRegenerate }: { messages: ChatMessage[]; generation: GenerationState | null; onRegenerate: (messageId: string) => void }) {
   const conversationRef = useRef<HTMLElement>(null);
+  const conversationStreamRef = useRef<HTMLDivElement>(null);
   const activityAnchorRef = useRef<HTMLDivElement>(null);
   const anchoredGenerationRef = useRef<string | null>(null);
   const restoredManualGenerationRef = useRef<string | null>(null);
   const manualScrollTopRef = useRef<number | null>(null);
   const retainActivityTailRef = useRef(false);
   const followModeRef = useRef<FollowMode>('bottom');
+  const userScrollIntentRef = useRef<object | null>(null);
   const [manualScroll, setManualScroll] = useState(false);
   const [selectedVariants, setSelectedVariants] = useState<Record<string, number>>({});
   const [deletedIds, setDeletedIds] = useState<Set<string>>(() => new Set());
@@ -47,6 +50,24 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     setManualScroll(mode === 'manual');
   }
 
+  function markUserScrollIntent(): void {
+    const token = {};
+    userScrollIntentRef.current = token;
+    // A wheel/touch/pointer gesture owns only the scroll events it immediately
+    // causes. If no scroll follows (for example at an edge), expire the intent
+    // so a later layout clamp cannot impersonate that human gesture. Identity
+    // tokens make an older expiry callback unable to clear a newer gesture.
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (userScrollIntentRef.current === token) userScrollIntentRef.current = null;
+    }));
+  }
+
+  function consumeUserScrollIntent(): boolean {
+    if (userScrollIntentRef.current === null) return false;
+    userScrollIntentRef.current = null;
+    return true;
+  }
+
   function rememberScrollPosition() {
     const element = conversationRef.current;
     if (!element) return;
@@ -57,12 +78,17 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         const offset = anchor.getBoundingClientRect().top - element.getBoundingClientRect().top;
         if (Math.abs(offset) <= ACTIVITY_ANCHOR_TOLERANCE_PX) return;
       }
+      // Geometry alone is not user intent. Activity anchoring, runway removal,
+      // lazy cards and browser clamping all emit ordinary `scroll` events. Only
+      // an explicit user gesture is allowed to take viewport authority away.
+      if (!consumeUserScrollIntent()) return;
       if (liveGeneration) retainActivityTailRef.current = true;
       manualScrollTopRef.current = element.scrollTop;
       setFollowMode('manual');
       return;
     }
 
+    if (!consumeUserScrollIntent()) return;
     if (atEnd(element)) {
       manualScrollTopRef.current = null;
       setFollowMode('bottom');
@@ -81,6 +107,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
   function jumpToLatest() {
     retainActivityTailRef.current = false;
     manualScrollTopRef.current = null;
+    userScrollIntentRef.current = null;
     setFollowMode('bottom');
     scrollToEnd();
   }
@@ -104,7 +131,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         entries.push({ message, variants: [message] });
         continue;
       }
-      if (!message.text.trim()) continue;
+      if (!hasRenderableMessageContent(message)) continue;
       const key = responseGroupFor(message);
       const variants = groups.get(key);
       if (variants) {
@@ -167,7 +194,13 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
       ) {
         element.scrollTop = manualScrollTopRef.current;
         restoredManualGenerationRef.current = generationId;
-      } else if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current && followModeRef.current === 'activity') {
+      } else if (anchoredGenerationRef.current === generationId && !retainActivityTailRef.current) {
+        // Completion removes the one-viewport activity runway and can itself emit
+        // scroll events. Those events carry no user-intent token, so bottom can
+        // be elected here without a timer/suppression race and without yanking
+        // the accepted activity position immediately.
+        manualScrollTopRef.current = null;
+        userScrollIntentRef.current = null;
         setFollowMode('bottom');
       }
       return;
@@ -183,6 +216,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
     restoredManualGenerationRef.current = null;
     retainActivityTailRef.current = false;
     manualScrollTopRef.current = null;
+    userScrollIntentRef.current = null;
     setFollowMode('activity');
     element.scrollTop = Math.max(0, element.scrollTop + offset);
   }, [generationId, liveGeneration, visibleMessages.length]);
@@ -193,21 +227,45 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
   useEffect(() => {
     const element = conversationRef.current;
-    if (!element || typeof ResizeObserver === 'undefined') return undefined;
+    const stream = conversationStreamRef.current;
+    if (!element || !stream) return undefined;
 
+    let frame = 0;
     const reconcileViewport = () => {
+      frame = 0;
       // The Generation Activity runway is exactly one real conversation
       // viewport tall. This gives the browser enough physical scroll range to
       // place a final activity card at the top without phone/desktop constants.
       element.style.setProperty('--conversation-viewport-height', `${element.clientHeight}px`);
+      // Bottom-follow is an elected authority, not a geometric guess. Lazy card
+      // resolution, image fallback and other late content may grow scrollHeight
+      // without a React message update. Reconcile only while bottom mode owns the
+      // viewport; deliberate manual/activity modes must never be yanked.
       if (followModeRef.current !== 'bottom') return;
       element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
     };
+    const scheduleReconcile = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(reconcileViewport);
+    };
 
     reconcileViewport();
-    const observer = new ResizeObserver(reconcileViewport);
-    observer.observe(element);
-    return () => observer.disconnect();
+
+    // ResizeObserver catches real box-size changes (viewport resize, image/card
+    // layout). MutationObserver catches late DOM/content insertions even when the
+    // stream's observed border box does not report a resize in that browser.
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(scheduleReconcile);
+    resizeObserver?.observe(element);
+    resizeObserver?.observe(stream);
+
+    const mutationObserver = typeof MutationObserver === 'undefined' ? undefined : new MutationObserver(scheduleReconcile);
+    mutationObserver?.observe(stream, { childList: true, subtree: true, characterData: true });
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+    };
   }, []);
 
   async function handleDelete(message: ChatMessage) {
@@ -221,12 +279,19 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
   const hasLivePanel = liveGeneration;
   const showActivityTail = hasLivePanel || (manualScroll && retainActivityTailRef.current);
-  if (visibleMessages.length === 0 && !hasLivePanel) {
-    return <section className="conversation" aria-label="Conversation"><div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div></section>;
-  }
 
-  return <section ref={conversationRef} className="conversation" aria-label="Conversation" onScroll={rememberScrollPosition}>
-    <div className="conversation__stream">
+  return <section
+    ref={conversationRef}
+    className="conversation"
+    aria-label="Conversation"
+    onScroll={rememberScrollPosition}
+    onWheel={markUserScrollIntent}
+    onTouchMove={markUserScrollIntent}
+    onPointerMove={(event) => { if (event.buttons !== 0) markUserScrollIntent(); }}
+  >
+    <div ref={conversationStreamRef} className="conversation__stream">
+      {visibleMessages.length === 0 && !hasLivePanel && <div className="empty-state"><span className="empty-state__kicker">ELARA / READY</span><h2>What shall we work on?</h2><p>Your conversation starts here. Elara's presence stays central while utility surfaces remain out of the visible chat.</p></div>}
+
       {grouped.map(({ message, variants }) => {
         if (message.role !== 'assistant') {
           return <article className="message message-user user-surface-frosted" key={message.id}>
@@ -251,7 +316,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
             <span className="response-variants__pagination" aria-live="polite">{selectedIndex + 1}/{variants.length}</span>
             <button type="button" className="response-variants__button" aria-label="Next response" disabled={selectedIndex === variants.length - 1} onClick={() => setSelectedVariants((current) => ({ ...current, [groupId]: Math.min(variants.length - 1, selectedIndex + 1) }))}>›</button>
           </div>}
-          <div className="message-body"><MarkdownText text={selected.text} /></div>
+          {selected.text.trim() && <div className="message-body"><MarkdownText text={selected.text} /></div>}
           <MessageArtifacts attachmentIds={selected.attachments} artifactIds={selected.artifacts} messageId={selected.id} conversationId={selected.conversationId} />
           <MessageMedia items={selected.media} />
           <div className="message-actions" aria-label="Message actions">
@@ -263,9 +328,11 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
 
       {hasLivePanel && generation && <div ref={activityAnchorRef}><GenerationActivity key={generation.generationId} generation={generation} /></div>}
 
-      {activeAssistant?.text.trim() && <article className="message message-assistant message-assistant--streaming" key={activeAssistant.id}>
+      {activeAssistant && hasRenderableMessageContent(activeAssistant) && <article className="message message-assistant message-assistant--streaming" key={activeAssistant.id}>
         <header className="message-meta"><span>ELARA</span><time dateTime={new Date(activeAssistant.createdAt).toISOString()}>{new Date(activeAssistant.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
-        <div className="message-body"><MarkdownText text={activeAssistant.text} /></div>
+        {activeAssistant.text.trim() && <div className="message-body"><MarkdownText text={activeAssistant.text} /></div>}
+        <MessageArtifacts attachmentIds={activeAssistant.attachments} artifactIds={activeAssistant.artifacts} messageId={activeAssistant.id} conversationId={activeAssistant.conversationId} />
+        <MessageMedia items={activeAssistant.media} />
       </article>}
 
       {showActivityTail && <div className="conversation__activity-tail" aria-hidden="true" />}

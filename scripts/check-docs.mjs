@@ -45,6 +45,16 @@ if (manifest && (!Array.isArray(manifest.authority) || manifest.authority.join('
 }
 
 const allowedCanonical = new Set(['INDEX.md', 'manifest.json']);
+const supportingDocs = Array.isArray(manifest?.supporting_docs) ? manifest.supporting_docs : [];
+for (const declared of supportingDocs) {
+  if (typeof declared !== 'string' || !/^[a-z0-9]+(?:-[a-z0-9]+)*\/README\.md$/.test(declared)) {
+    fail(`manifest supporting_docs has invalid path ${String(declared)}`);
+    continue;
+  }
+  allowedCanonical.add(declared);
+  if (!existsSync(join(documentsRoot, declared))) fail(`manifest supporting_docs points to missing documents/${declared}`);
+}
+
 const seenIds = new Set();
 let activeSystems = 0;
 let verifiedPaths = 0;
@@ -148,4 +158,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Documentation integrity passed: ${activeSystems} active systems, ${allowedCanonical.size} canonical files, ${verifiedPaths} routed source paths verified.\n`);
+process.stdout.write(`Documentation integrity passed: ${activeSystems} active systems, ${allowedCanonical.size} registered documentation files, ${verifiedPaths} routed source paths verified.\n`);

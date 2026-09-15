@@ -71,10 +71,10 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'youtube.search': {
     queries: {
       type: 'array',
-      items: stringProperty('A YouTube search query.'),
+      items: stringProperty('A concise YouTube search query that reflects the user request.'),
       minItems: 1,
       maxItems: MAX_MEDIA_QUERIES_PER_CALL,
-      description: 'One to eight search queries. Batch related queries into a single call. Do not page: there is no pagination parameter.',
+      description: `Use one query by default. At most ${MAX_MEDIA_QUERIES_PER_CALL} distinct queries are accepted, only when the user explicitly asks for separate searches. Never add synonyms or rephrasings merely to broaden results. Do not page.`,
     },
     // Deliberately not in `requiredByTool`: omitting it is a valid call, and the
     // app supplies the default. The model only needs to state an intent when it
@@ -83,7 +83,7 @@ const toolProperties: Record<string, Record<string, unknown>> = {
       type: 'string',
       enum: ['watch', 'listen'],
       description:
-        "How the results will be used: 'listen' when the user asked for music or audio ('play some jazz', 'put on the album'), 'watch' for video. The app never plays media itself; it hands results to the platform, and this selects which surface is asked. Defaults to 'watch'. Applies to the whole call.",
+        "Presentation intent only: 'listen' when the user asked for music/audio and 'watch' for video. It does not change the YouTube search request or cache identity. Elara never plays media itself. Defaults to 'watch'. Applies to the whole call.",
     },
   },
 };

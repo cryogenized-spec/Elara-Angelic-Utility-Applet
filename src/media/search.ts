@@ -7,21 +7,20 @@ import type {
 } from '../domain/media';
 import { DEFAULT_MEDIA_INTENT, isMediaIntent, MAX_MEDIA_QUERIES_PER_CALL } from '../domain/media';
 import { dedupeMediaQueries, mediaCacheKey, normalizeMediaQuery } from './normalize';
-import { hasSearchBudget, reserveSearch, releaseSearch } from './budget';
+import { reserveSearch, releaseSearch } from './budget';
 import { readMediaCache, writeMediaCache, type ReadMediaCacheResult } from './cache';
 import { createYouTubeProvider, YouTubeSearchError } from './youtube/service';
 
 /**
  * Media search orchestration.
  *
- * The order of operations is the whole point: dedupe, then cache, then budget,
- * and only then the network. A batch that repeats a cached query costs nothing
- * at all, which is what makes a per-session budget survivable against a provider
- * whose search endpoint has a small dedicated daily allowance.
+ * The order of operations is load-bearing: dedupe, then cache, then both quota
+ * guards, and only then the network. A cached or duplicate query consumes
+ * neither the page-session allowance nor the device-local Pacific-day ledger.
  *
- * Failure policy: the cache is best effort in both directions. A read fault is
- * treated as a miss and a write fault is swallowed, because losing a cache entry
- * costs one API call while failing the search costs the user their answer.
+ * Failure policy: cache reads/writes remain best effort because a cache failure
+ * merely costs a future provider call. Budget persistence is different: if Elara
+ * cannot account for a fresh network search safely, that search fails closed.
  */
 
 export interface MediaSearchBatchRequest {
@@ -70,7 +69,11 @@ const realCache: MediaCachePort = {
 let cachedProvider: MediaProvider | undefined;
 
 async function defaultApiKey(): Promise<string> {
-  const { getYouTubeApiKey } = await import('../persistence/gemini-api-key');
+  const [{ getYouTubeApiKey }, { hasAcceptedYouTubePolicy }] = await Promise.all([
+    import('../persistence/gemini-api-key'),
+    import('../persistence/preferences'),
+  ]);
+  if (!(await hasAcceptedYouTubePolicy())) return '';
   return getYouTubeApiKey();
 }
 
@@ -97,6 +100,16 @@ function applyIntent(items: readonly MediaItem[], intent: MediaIntent | undefine
 function networkAttempted(error: unknown): boolean {
   if (error instanceof YouTubeSearchError) return error.networkAttempted;
   return typeof error === 'object' && error !== null && (error as { networkAttempted?: unknown }).networkAttempted === true;
+}
+
+function budgetFailureMessage(scope: 'session' | 'daily' | 'daily-unavailable'): string {
+  if (scope === 'session') {
+    return 'This page session has used its YouTube search allowance. Cached results still work.';
+  }
+  if (scope === 'daily') {
+    return 'This device has used Elara’s YouTube search safety allowance for the current YouTube quota day. Cached results still work.';
+  }
+  return 'Elara could not verify its local YouTube search budget, so no provider request was sent. Cached results still work.';
 }
 
 export async function searchMedia(
@@ -127,7 +140,7 @@ export async function searchMedia(
     try {
       cached = await cache.read(key, now());
     } catch {
-      // A broken cache is a miss, not an error: fall through to the network.
+      // A broken cache is a miss, not an error: fall through to quota authority.
     }
 
     if (cached.hit) {
@@ -141,17 +154,17 @@ export async function searchMedia(
       continue;
     }
 
-    if (!hasSearchBudget()) {
+    const reservation = await reserveSearch(now());
+    if (!reservation.granted) {
       failures.push(Object.freeze({
         query: query.trim(),
         normalizedQuery,
         reason: 'budget-exhausted',
-        message: 'This session has used its YouTube search allowance. Cached results still work; reload to reset the allowance.',
+        message: budgetFailureMessage(reservation.scope),
       }));
       continue;
     }
 
-    if (!reserveSearch()) continue;
     networkCalls += 1;
     try {
       const outcome = await provider.search({ query, limit: request.limit, signal: request.signal });
@@ -175,7 +188,7 @@ export async function searchMedia(
       const stamped = applyIntent(outcome.items, intent);
       outcomes.push(stamped === outcome.items ? outcome : Object.freeze({ ...outcome, items: stamped }));
     } catch (error) {
-      if (!networkAttempted(error)) releaseSearch();
+      if (!networkAttempted(error)) await releaseSearch(reservation, now());
       if (error instanceof YouTubeSearchError) {
         failures.push(Object.freeze({
           query: query.trim(),

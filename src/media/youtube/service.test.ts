@@ -3,6 +3,25 @@ import { createYouTubeProvider, YouTubeSearchError } from './service';
 import type { MediaItem } from '../../domain/media';
 
 const API_KEY = 'AIzaSy-test-key-that-must-never-leak';
+const NOW = 1_800_000_000_000;
+
+type ThumbnailFixture = { url: string; width?: number; height?: number };
+interface VideoFixture {
+  kind: string;
+  id: { kind: string; videoId: string };
+  snippet: {
+    publishedAt: string;
+    channelId: string;
+    title: string;
+    description: string;
+    thumbnails: {
+      default: ThumbnailFixture;
+      medium?: ThumbnailFixture;
+      high: ThumbnailFixture;
+    };
+    channelTitle: string;
+  };
+}
 
 function searchResponse(items: unknown[], nextPageToken?: string): Response {
   return new Response(JSON.stringify({
@@ -13,7 +32,7 @@ function searchResponse(items: unknown[], nextPageToken?: string): Response {
   }), { status: 200, headers: { 'content-type': 'application/json' } });
 }
 
-function videoItem(videoId: string, title: string): unknown {
+function videoItem(videoId: string, title: string): VideoFixture {
   return {
     kind: 'youtube#searchResult',
     id: { kind: 'youtube#video', videoId },
@@ -40,12 +59,12 @@ function providerWith(response: () => Response) {
     });
     return response();
   });
-  const provider = createYouTubeProvider({ apiKey: () => API_KEY, fetch: fetchMock as unknown as typeof fetch });
+  const provider = createYouTubeProvider({ apiKey: () => API_KEY, fetch: fetchMock as unknown as typeof fetch, now: () => NOW });
   return { provider, calls, fetchMock };
 }
 
 describe('YouTube search adapter', () => {
-  it('maps a search response onto the domain contract', async () => {
+  it('maps a search response onto the domain contract and timestamps API data', async () => {
     const { provider } = providerWith(() => searchResponse([videoItem('abc123', 'Dark Ambient Mix')]));
 
     const outcome = await provider.search({ query: 'dark ambient' });
@@ -61,9 +80,42 @@ describe('YouTube search adapter', () => {
       title: 'Dark Ambient Mix',
       channel: 'Ambient Channel',
       webUrl: 'https://www.youtube.com/watch?v=abc123',
+      apiDataFetchedAt: NOW,
     });
-    // The largest available thumbnail wins.
     expect(item.thumbnail?.url).toContain('hqdefault.jpg');
+  });
+
+  it('preserves YouTube-returned display text exactly instead of trimming it', async () => {
+    const raw = videoItem('exact1', '  Exact title — punctuation & spacing  ');
+    raw.snippet.channelTitle = '  Exact Channel  ';
+    const { provider } = providerWith(() => searchResponse([raw]));
+
+    const { items } = await provider.search({ query: 'exact' });
+
+    expect(items[0].title).toBe('  Exact title — punctuation & spacing  ');
+    expect(items[0].channel).toBe('  Exact Channel  ');
+  });
+
+  it('rejects an implausibly oversized required title instead of truncating provider data', async () => {
+    const raw = videoItem('oversized', 'x'.repeat(1_001));
+    const { provider } = providerWith(() => searchResponse([raw]));
+
+    const { items } = await provider.search({ query: 'oversized' });
+
+    expect(items).toEqual([]);
+  });
+
+  it('does not synthesize thumbnail dimensions when YouTube omits them', async () => {
+    const raw = videoItem('nodims', 'No dimensions');
+    raw.snippet.thumbnails.high = { url: 'https://i.ytimg.com/vi/nodims/hqdefault.jpg' };
+    raw.snippet.thumbnails.medium = { url: 'https://i.ytimg.com/vi/nodims/mqdefault.jpg' };
+    raw.snippet.thumbnails.default = { url: 'https://i.ytimg.com/vi/nodims/default.jpg' };
+    const { provider } = providerWith(() => searchResponse([raw]));
+
+    const { items } = await provider.search({ query: 'nodims' });
+
+    expect(items).toHaveLength(1);
+    expect(items[0].thumbnail).toBeUndefined();
   });
 
   it('makes exactly one call and never follows nextPageToken', async () => {
@@ -71,7 +123,6 @@ describe('YouTube search adapter', () => {
 
     const outcome = await provider.search({ query: 'lofi' });
 
-    // Paging would be a whole additional call against a small dedicated bucket.
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(outcome.items).toHaveLength(1);
   });
@@ -94,7 +145,6 @@ describe('YouTube search adapter', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].headers['x-goog-api-key']).toBe(API_KEY);
-    // Query strings reach proxy logs and DevTools history; headers do not.
     expect(calls[0].url).not.toContain(API_KEY);
     expect(calls[0].url).not.toContain('key=');
   });
@@ -118,14 +168,13 @@ describe('YouTube search adapter', () => {
     expect(params.get('part')).toBe('snippet');
   });
 
-  it('never produces an embed URL that enables autoplay', async () => {
+  it('does not emit a persisted or card-level embed URL', async () => {
     const { provider } = providerWith(() => searchResponse([videoItem('abc', 'One')]));
 
     const { items } = await provider.search({ query: 'x' });
 
-    expect(items[0].embedUrl).toContain('autoplay=0');
-    expect(items[0].embedUrl).not.toContain('autoplay=1');
-    expect(items[0].embedUrl).toContain('youtube-nocookie.com');
+    expect(items[0]).not.toHaveProperty('embedUrl');
+    expect(JSON.stringify(items[0])).not.toContain('youtube-nocookie.com/embed');
   });
 
   it('does not call the API at all when no key is configured', async () => {
@@ -215,7 +264,6 @@ describe('YouTube search adapter', () => {
     const provider = createYouTubeProvider({
       apiKey: () => API_KEY,
       fetch: vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-        // Simulate the request being cancelled mid-flight.
         init?.signal?.addEventListener('abort', () => undefined);
         controller.abort();
         throw new DOMException('Aborted', 'AbortError');

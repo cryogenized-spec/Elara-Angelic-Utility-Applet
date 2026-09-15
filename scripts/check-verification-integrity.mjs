@@ -111,6 +111,7 @@ try {
     'docs:check': 'node scripts/check-docs.mjs',
     'verify:gates': 'node scripts/check-verification-integrity.mjs',
     'security:check': 'node scripts/security-architecture-gate.mjs',
+    'secrets:check': 'node scripts/secret-scan.mjs',
     'supply-chain:check': 'node scripts/supply-chain-gate.mjs',
     'test:quality': 'node scripts/test-quality-gate.mjs && node scripts/verify-coverage-gate.mjs',
     lint: 'eslint . --max-warnings 0',
@@ -122,7 +123,7 @@ try {
     'test:workers': 'vitest run --config vitest.workers.config.ts',
     build: 'tsc -p tsconfig.json --noEmit && vite build',
     e2e: 'playwright test',
-    'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && npm run supply-chain:check && npm run test:quality && node scripts/reliability-gate.mjs',
+    'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && npm run secrets:check && npm run supply-chain:check && npm run test:quality && node scripts/reliability-gate.mjs',
   };
   for (const [name, expected] of Object.entries(expectedScripts)) if (pkg.scripts?.[name] !== expected) fail(`npm script ${name} changed from the reviewed command`);
   if (pkg.devDependencies?.['@vitest/coverage-v8'] !== '4.1.11') fail('@vitest/coverage-v8 must stay exactly aligned with Vitest 4.1.11');
@@ -159,6 +160,11 @@ if (appPerformanceNowCount !== 2) fail(`src/app/App.tsx performance.now() surfac
 const securityGate = read('scripts/security-architecture-gate.mjs');
 for (const marker of ['forbiddenCapabilities', 'forbiddenNodeAuthority', 'XMLHttpRequest transport', 'sendBeacon transport', 'remote dynamic module import', 'reviewedScriptLoaders', 'reviewedWorkerAuthorities', 'reviewedDexieAuthorities', 'reviewedLockboxConsumers', 'reviewedAutonomyCredentialConsumers', 'reviewedPairingTokenConsumers', 'reviewedRawFetchAuthorities', 'reviewedGlobalFetchReferences', 'reviewedGoogleServiceImporters', 'reviewedConfirmationBrokerConsumers', 'StoredAutonomyPairing']) {
   if (!securityGate.includes(marker)) fail(`security architecture gate lost required capability check: ${marker}`);
+}
+
+const secretScan = read('scripts/secret-scan.mjs');
+for (const marker of ['Google API key', 'GitHub token', 'AWS access key', 'Private key material', 'tracked environment file is forbidden', 'dummyMarker', 'fixturePath']) {
+  if (!secretScan.includes(marker)) fail(`secret scanner lost required detector or fixture policy: ${marker}`);
 }
 
 const supplyChainGate = read('scripts/supply-chain-gate.mjs');
@@ -232,7 +238,7 @@ if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci rather than 
 if (/contents:\s*write/.test(workflow)) fail('certification workflow may not retain repository write authority');
 if (/persist-credentials:\s*true/.test(workflow)) fail('certification workflow may not persist checkout credentials');
 if (!workflow.includes('permissions: {}')) fail('workflow-wide GITHUB_TOKEN permissions must default to none');
-const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run supply-chain:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm audit signatures', 'npm audit --audit-level=high', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:coverage', 'npm run test:workers', 'npm run build', './node_modules/.bin/playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
+const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run secrets:check', 'npm run supply-chain:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm audit signatures', 'npm audit --audit-level=high', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:coverage', 'npm run test:workers', 'npm run build', './node_modules/.bin/playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
 let previousIndex = -1;
 for (const command of orderedCommands) {
   const index = workflow.indexOf(command, previousIndex + 1);
@@ -262,4 +268,4 @@ if (errors.length) {
   process.stderr.write(`Verification integrity failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
   process.exit(1);
 }
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node/npm controls, signed-registry and high-severity audits, exact-head checkout, and certified-before-deploy ordering pinned; no repository write authority, persisted checkout credentials, skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, secret scanning, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node/npm controls, signed-registry and high-severity audits, exact-head checkout, and certified-before-deploy ordering pinned; no repository write authority, persisted checkout credentials, skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

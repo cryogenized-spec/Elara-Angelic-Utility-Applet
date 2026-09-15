@@ -16,6 +16,7 @@
     "verify:artifact-assets": "node scripts/verify-artifact-assets.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "verify:gates": "node scripts/check-verification-integrity.mjs",
+    "security:check": "node scripts/security-architecture-gate.mjs",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "typecheck:ts7": "node node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc -p worker/tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc -p tsconfig.e2e.json --noEmit",
@@ -28,7 +29,7 @@
     "worker:dev": "wrangler dev --config worker/wrangler.toml",
     "worker:types": "wrangler types --config worker/wrangler.toml worker/worker-configuration.d.ts",
     "verify:worker": "node scripts/verify-gemini-worker.mjs",
-    "reliability:check": "npm run docs:check && npm run verify:gates && node scripts/reliability-gate.mjs",
+    "reliability:check": "npm run docs:check && npm run verify:gates && npm run security:check && node scripts/reliability-gate.mjs",
     "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {

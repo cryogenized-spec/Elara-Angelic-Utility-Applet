@@ -115,7 +115,17 @@ if (/\bpassWithNoTests\s*:/.test(playwright)) fail('Playwright must not allow an
 
 const vitest = read('vitest.config.ts');
 if (!vitest.includes("environment: 'jsdom'")) fail('main Vitest suite must keep the jsdom environment');
-if (/\b(?:include|testNamePattern|passWithNoTests)\s*:/.test(vitest)) fail('main Vitest config may not narrow discovery or allow an empty suite');
+if (/\b(?:testNamePattern|passWithNoTests)\s*:/.test(vitest)) fail('main Vitest config may not narrow discovery or allow an empty suite');
+for (const marker of [
+  "provider: 'v8'",
+  "reporter: ['text', 'json-summary']",
+  "reportsDirectory: 'coverage'",
+  "include: ['src/**/*.{ts,tsx}']",
+  "'src/**/*.test.{ts,tsx}'",
+  "'src/**/*.spec.{ts,tsx}'",
+]) {
+  if (!vitest.includes(marker)) fail(`Vitest whole-source coverage contract changed or disappeared: ${marker}`);
+}
 
 const workerVitest = read('vitest.workers.config.ts');
 if (!workerVitest.includes("include: ['worker/test/**/*.test.ts']")) fail('Worker Vitest must include the complete worker/test tree');
@@ -130,18 +140,22 @@ try {
     'docs:check': 'node scripts/check-docs.mjs',
     'verify:gates': 'node scripts/check-verification-integrity.mjs',
     'security:check': 'node scripts/security-architecture-gate.mjs',
+    'test:quality': 'node scripts/test-quality-gate.mjs',
     lint: 'eslint . --max-warnings 0',
     typecheck: 'tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit',
     'typecheck:ts7': 'node node_modules/@typescript/native/bin/tsc -p tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc -p worker/tsconfig.json --noEmit && node node_modules/@typescript/native/bin/tsc -p tsconfig.e2e.json --noEmit',
     test: 'vitest run',
+    'coverage:check': 'node scripts/check-coverage.mjs',
+    'test:coverage': 'vitest run --coverage && npm run coverage:check',
     'test:workers': 'vitest run --config vitest.workers.config.ts',
     build: 'tsc -p tsconfig.json --noEmit && vite build',
     e2e: 'playwright test',
-    'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && node scripts/reliability-gate.mjs',
+    'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && npm run test:quality && node scripts/reliability-gate.mjs',
   };
   for (const [name, expected] of Object.entries(expectedScripts)) {
     if (pkg.scripts?.[name] !== expected) fail(`npm script ${name} changed from the reviewed command`);
   }
+  if (pkg.devDependencies?.['@vitest/coverage-v8'] !== '4.1.11') fail('@vitest/coverage-v8 must stay exactly aligned with Vitest 4.1.11');
 } catch (error) {
   fail(`package.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 }
@@ -212,6 +226,48 @@ for (const marker of [
   if (!securityGate.includes(marker)) fail(`security architecture gate lost required capability check: ${marker}`);
 }
 
+// Phase 3: protect test quality and coverage against fake-green rewrites.
+const testQualityGate = read('scripts/test-quality-gate.mjs');
+for (const marker of [
+  'forbiddenSourceInspection',
+  'streamAssistantTurn',
+  'statusAfterNavigation',
+  'geometryOwners',
+  'playback-player-host iframe',
+]) {
+  if (!testQualityGate.includes(marker)) fail(`test quality gate lost required structural check: ${marker}`);
+}
+const coverageGate = read('scripts/check-coverage.mjs');
+for (const marker of ['coverage/coverage-summary.json', 'coverage-baseline.json', 'baseline.directories', 'baseline.files']) {
+  if (!coverageGate.includes(marker)) fail(`coverage gate lost required ratchet check: ${marker}`);
+}
+try {
+  const baseline = JSON.parse(read('scripts/coverage-baseline.json'));
+  const minimumGlobal = { lines: 63.83, statements: 58.39, functions: 54.02, branches: 53.21 };
+  for (const [metric, minimum] of Object.entries(minimumGlobal)) {
+    if (typeof baseline.global?.[metric] !== 'number' || baseline.global[metric] < minimum) {
+      fail(`coverage baseline ${metric} was lowered below the certified Phase 3 floor ${minimum}`);
+    }
+  }
+  for (const directory of ['autonomy', 'chat', 'domain', 'gemini', 'media', 'memory', 'persistence']) {
+    if (!baseline.directories?.[directory]) fail(`coverage baseline lost critical directory: ${directory}`);
+  }
+  for (const path of [
+    'src/autonomy/cloud/credential.ts',
+    'src/autonomy/cloud/pairing.ts',
+    'src/persistence/gemini-api-key.ts',
+    'src/chat/generation-sync.ts',
+    'src/gemini/provider.ts',
+    'src/media/playback/PlaybackProvider.tsx',
+    'src/memory/store.ts',
+  ]) {
+    if (!baseline.files?.[path]) fail(`coverage baseline lost critical file: ${path}`);
+  }
+} catch (error) {
+  fail(`scripts/coverage-baseline.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+}
+if (existsSync(join(root, '.github/workflows/phase3-baseline.yml'))) fail('temporary Phase 3 bootstrap workflow must not remain in the repository');
+
 // CI itself is inside the threat model. It must run the protected commands in
 // order, with lockfile-strict installation and read-only repository access.
 const workflow = read('.github/workflows/ci.yml');
@@ -224,11 +280,12 @@ const orderedCommands = [
   'npm run docs:check',
   'npm run verify:gates',
   'npm run security:check',
+  'npm run test:quality',
   'npm ci --no-audit --no-fund',
   'npm run lint',
   'npm run typecheck',
   'npm run typecheck:ts7',
-  'npm test',
+  'npm run test:coverage',
   'npm run test:workers',
   'npm run build',
   'npm exec -- playwright install --with-deps chromium',
@@ -264,4 +321,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security architecture gate and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, test-quality, whole-source coverage ratchet, and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

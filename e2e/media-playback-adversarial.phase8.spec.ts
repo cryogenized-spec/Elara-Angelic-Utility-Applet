@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 const VIDEO_ID = 'advPlay8A1B';
 const TITLE = 'Phase 8 Playback Probe';
@@ -189,9 +189,7 @@ test.describe('Phase 8 adversarial media playback acceptance', () => {
     });
 
     await page.goto('');
-    // Lockbox validation may use videos.list too, so preserve the ready response above.
     await unlockTestLockbox(page);
-    // unlockTestLockbox removes the validation route; restore the playback readiness route.
     await page.route('**/youtube/v3/videos**', async (route) => {
       await route.fulfill({
         status: 200,

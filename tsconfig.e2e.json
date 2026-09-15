@@ -6,12 +6,7 @@
     "strict": true,
     "skipLibCheck": true,
     "noEmit": true,
-    "types": ["node"],
-    "allowImportingTsExtensions": true,
-    "paths": {
-      "/Elara-Angelic-Utility-Applet/src/*": ["./src/*"]
-    }
+    "types": ["node"]
   },
   "include": ["e2e"]
 }
-

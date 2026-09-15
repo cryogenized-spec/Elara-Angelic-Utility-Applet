@@ -49,6 +49,12 @@ const forbiddenCapabilities = [
   [/(?:\.innerHTML|\.outerHTML)\s*=/, 'direct HTML injection'],
   [/\bdocument\.write\s*\(/, 'document.write'],
   [/\bsrcDoc\s*=/, 'iframe srcDoc injection'],
+  [/\bXMLHttpRequest\b/, 'XMLHttpRequest transport'],
+  [/\bnew\s+WebSocket\b/, 'WebSocket transport'],
+  [/\bnew\s+EventSource\b/, 'EventSource transport'],
+  [/\bnavigator\.sendBeacon\s*\(/, 'sendBeacon transport'],
+  [/\bnew\s+SharedWorker\b/, 'SharedWorker authority'],
+  [/\bimport\s*\(\s*['"]https?:\/\//, 'remote dynamic module import'],
 ];
 const forbiddenNodeAuthority = /(?:from\s+|import\s*\()['"](?:node:)?(?:child_process|fs(?:\/promises)?|net|tls|dgram|vm|cluster|worker_threads|process)['"]/;
 
@@ -57,6 +63,50 @@ for (const [path, source] of runtime) {
     if (pattern.test(source)) fail(`${path} acquires forbidden capability: ${label}`);
   }
   if (forbiddenNodeAuthority.test(source)) fail(`${path} imports a forbidden Node host authority`);
+}
+
+// Dynamic script insertion is executable-network authority. Elara currently
+// needs exactly two such loaders: Google Identity Services and YouTube's
+// official IFrame API. Freeze both the owners and their provider URLs.
+const reviewedScriptLoaders = new Map([
+  ['src/google/oauth/gis.ts', [
+    "const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';",
+    "document.createElement('script')",
+    'script.src = GIS_SCRIPT_URL;',
+  ]],
+  ['src/media/youtube/player.ts', [
+    "const IFRAME_API_SRC = 'https://www.youtube.com/iframe_api';",
+    "document.createElement('script')",
+    'script.src = IFRAME_API_SRC;',
+  ]],
+]);
+const actualScriptLoaders = new Set();
+for (const [path, source] of runtime) {
+  if (/document\.createElement\(\s*['"]script['"]\s*\)/.test(source)) actualScriptLoaders.add(path);
+}
+for (const path of actualScriptLoaders) if (!reviewedScriptLoaders.has(path)) fail(`unreviewed dynamic script loader: ${path}`);
+for (const [path, markers] of reviewedScriptLoaders) {
+  const source = runtime.get(path) ?? '';
+  if (!actualScriptLoaders.has(path)) fail(`reviewed dynamic script loader disappeared or moved: ${path}`);
+  for (const marker of markers) if (!source.includes(marker)) fail(`${path} changed its reviewed executable script boundary: ${marker}`);
+}
+
+// Browser Worker construction creates a second executable runtime. The two
+// reviewed workers are local module URLs only; any new Worker owner requires
+// explicit architecture review.
+const reviewedWorkerAuthorities = new Map([
+  ['src/ocr/service.ts', "new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' })"],
+  ['src/documents/compiler.ts', "new Worker(new URL('./compiler.worker.ts', import.meta.url), { type: 'module' })"],
+]);
+const actualWorkerAuthorities = new Set();
+for (const [path, source] of runtime) {
+  if (/\bnew\s+(?:globalThis\.)?Worker\s*\(/.test(source)) actualWorkerAuthorities.add(path);
+}
+for (const path of actualWorkerAuthorities) if (!reviewedWorkerAuthorities.has(path)) fail(`unreviewed browser Worker authority: ${path}`);
+for (const [path, marker] of reviewedWorkerAuthorities) {
+  const source = runtime.get(path) ?? '';
+  if (!actualWorkerAuthorities.has(path)) fail(`reviewed browser Worker authority disappeared or moved: ${path}`);
+  if (!source.includes(marker)) fail(`${path} changed its reviewed local Worker target`);
 }
 
 // ---------------------------------------------------------------------------
@@ -132,10 +182,10 @@ for (const [path, source] of runtime) {
 
 // ---------------------------------------------------------------------------
 // 4. Outbound network authority.
-// Global fetch is the actual egress capability. Google service adapters receive
-// an authorized fetch from the OAuth authority; they do not own global egress.
-// YouTube uses injectable fetch seams but every runtime default is explicit and
-// every provider destination is frozen below.
+// Global fetch is the approved request transport. Alternative raw browser
+// transports are forbidden above; dynamic executable loaders are separately
+// frozen. Google service adapters receive an authorized fetch from the OAuth
+// authority and therefore do not own global egress.
 // ---------------------------------------------------------------------------
 const reviewedRawFetchAuthorities = new Set([
   'src/autonomy/cloud/client.ts',
@@ -244,4 +294,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Security & architecture gate passed: ${runtime.size} runtime files checked; forbidden execution/DOM/Node powers absent; ${reviewedDexieAuthorities.size} durable authorities, ${reviewedLockboxConsumers.size} Lockbox consumers, outbound egress authorities, autonomy credential handling, Google service imports, and confirmation brokers match the reviewed capability surface.\n`);
+process.stdout.write(`Security & architecture gate passed: ${runtime.size} runtime files checked; forbidden execution/DOM/Node and alternate browser transport powers absent; reviewed dynamic script and browser Worker authorities frozen; ${reviewedDexieAuthorities.size} durable authorities, ${reviewedLockboxConsumers.size} Lockbox consumers, outbound egress authorities, autonomy credential handling, Google service imports, and confirmation brokers match the reviewed capability surface.\n`);

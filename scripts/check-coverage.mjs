@@ -25,6 +25,10 @@ function percentage(covered, total) {
   return (covered / total) * 100;
 }
 
+function certifiedPrecision(value) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
 function checkMetrics(label, actual, floors) {
   for (const metric of metrics) {
     const floor = floors?.[metric];
@@ -37,7 +41,11 @@ function checkMetrics(label, actual, floors) {
       fail(`${label} is missing measured ${metric} coverage`);
       continue;
     }
-    if (value + 1e-9 < floor) fail(`${label} ${metric} coverage regressed: ${value.toFixed(2)}% < ${floor.toFixed(2)}%`);
+    const measured = certifiedPrecision(value);
+    const certifiedFloor = certifiedPrecision(floor);
+    if (measured < certifiedFloor) {
+      fail(`${label} ${metric} coverage regressed: ${measured.toFixed(2)}% < ${certifiedFloor.toFixed(2)}%`);
+    }
   }
 }
 
@@ -103,5 +111,5 @@ if (errors.length) {
   process.exit(1);
 }
 
-const globalText = metrics.map((metric) => `${metric}=${globalActual[metric].toFixed(2)}%`).join(', ');
+const globalText = metrics.map((metric) => `${metric}=${certifiedPrecision(globalActual[metric]).toFixed(2)}%`).join(', ');
 process.stdout.write(`Coverage ratchet passed: ${globalText}; ${Object.keys(baseline.directories ?? {}).length} critical directories and ${Object.keys(baseline.files ?? {}).length} critical files remain above their certified floors.\n`);

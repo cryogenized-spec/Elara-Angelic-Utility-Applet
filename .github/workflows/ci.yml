@@ -47,8 +47,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
-      - name: Typecheck
+      - name: Typecheck (TS6 primary)
         run: npm run typecheck
+
+      - name: Typecheck (TS7 compatibility)
+        run: npm run typecheck:ts7
 
       - name: Unit tests
         run: npm test

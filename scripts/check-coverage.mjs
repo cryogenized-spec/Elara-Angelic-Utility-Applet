@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
 
 const root = process.cwd();
 const summaryPath = resolve(root, 'coverage/coverage-summary.json');
@@ -49,6 +49,22 @@ function checkMetrics(label, actual, floors) {
   }
 }
 
+function eligibleSourceFiles(directory) {
+  const absolute = join(root, directory);
+  const files = [];
+  for (const entry of readdirSync(absolute, { withFileTypes: true })) {
+    const path = join(absolute, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...eligibleSourceFiles(relative(root, path)));
+      continue;
+    }
+    if (!entry.isFile() || !/\.(?:ts|tsx)$/.test(entry.name)) continue;
+    if (/\.(?:test|spec)\.(?:ts|tsx)$/.test(entry.name) || entry.name.endsWith('.d.ts')) continue;
+    files.push(relative(root, path).split(sep).join('/'));
+  }
+  return files;
+}
+
 const summary = readJson(summaryPath, 'coverage summary');
 const baseline = readJson(baselinePath, 'coverage baseline');
 if (!summary || !baseline) {
@@ -71,8 +87,21 @@ for (const [absolutePath, value] of Object.entries(summary)) {
     fail(`coverage result is outside src/: ${absolutePath}`);
     continue;
   }
-  const relative = `src/${normalized.slice(index + marker.length)}`;
-  sourceEntries.push([relative, value]);
+  const relativePath = `src/${normalized.slice(index + marker.length)}`;
+  sourceEntries.push([relativePath, value]);
+}
+
+// V8's uncovered-file remapper has previously logged a parse warning and then
+// silently omitted a valid TypeScript source file while still producing a green
+// percentage. Whole-source coverage means the inventory itself is part of the
+// contract: every eligible source file must appear exactly once in the report.
+const expectedSource = new Set(eligibleSourceFiles('src'));
+const reportedSource = new Set(sourceEntries.map(([path]) => path));
+for (const path of expectedSource) {
+  if (!reportedSource.has(path)) fail(`eligible source disappeared from coverage report: ${path}`);
+}
+for (const path of reportedSource) {
+  if (!expectedSource.has(path)) fail(`coverage report contains an unexpected source entry: ${path}`);
 }
 
 for (const [directory, floors] of Object.entries(baseline.directories ?? {})) {
@@ -112,4 +141,4 @@ if (errors.length) {
 }
 
 const globalText = metrics.map((metric) => `${metric}=${certifiedPrecision(globalActual[metric]).toFixed(2)}%`).join(', ');
-process.stdout.write(`Coverage ratchet passed: ${globalText}; ${Object.keys(baseline.directories ?? {}).length} critical directories and ${Object.keys(baseline.files ?? {}).length} critical files remain above their certified floors.\n`);
+process.stdout.write(`Coverage ratchet passed: ${globalText}; complete ${expectedSource.size}-file source inventory present; ${Object.keys(baseline.directories ?? {}).length} critical directories and ${Object.keys(baseline.files ?? {}).length} critical files remain above their certified floors.\n`);

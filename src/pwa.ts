@@ -5,8 +5,12 @@ import { registerSW } from 'virtual:pwa-register';
 // for a long time while the website (fresh navigation) picks it up at once.
 const UPDATE_CHECK_INTERVAL_MS = 30 * 60 * 1000;
 
-let applyPendingUpdate: (() => void) | null = null;
-let refreshCallback: (() => void) | null = null;
+type PwaUpdateCallback = () => void;
+
+// Named function types avoid a Rolldown/V8 coverage remapping parser edge case
+// around parenthesized function-type unions. Runtime behavior is unchanged.
+let applyPendingUpdate: PwaUpdateCallback | null = null;
+let refreshCallback: PwaUpdateCallback | null = null;
 let updaterInitialized = false;
 
 /**
@@ -19,7 +23,7 @@ let updaterInitialized = false;
  * the new worker takes control. Safe to call twice (React StrictMode
  * remounts); registration and listeners are created exactly once.
  */
-export function initPwaUpdater(onNeedRefresh: () => void): void {
+export function initPwaUpdater(onNeedRefresh: PwaUpdateCallback): void {
   refreshCallback = onNeedRefresh;
   if (updaterInitialized) return;
   updaterInitialized = true;

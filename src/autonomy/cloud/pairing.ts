@@ -1,10 +1,15 @@
+import {
+  clearAutonomyInstallationToken,
+  getAutonomyInstallationToken,
+  saveAutonomyInstallationToken,
+} from './credential';
+
 // ---------------------------------------------------------------------------
 // App-side pairing state (design §10.2). The installation token is a CLIENT
 // CREDENTIAL by design — scoped to the user's own worker deployment, set as
-// that worker's ELARA_INSTALLATION_TOKEN secret — so it is stored with the
-// same care as other client-held credentials: local-only, never in routine
-// config, never in URLs or logs. Everything here is disposable: clearing it
-// unpairs the app without touching local routine data (local-first).
+// that worker's ELARA_INSTALLATION_TOKEN secret. Pairing metadata remains in
+// localStorage, but the token itself is sealed separately with a non-extractable
+// device-local key and is never serialized into the pairing JSON.
 // ---------------------------------------------------------------------------
 
 const PAIRING_KEY = 'elara.autonomy.pairing.v1';
@@ -13,7 +18,7 @@ const GENERATION_KEY = 'elara.autonomy.configGeneration.v1';
 export interface AutonomyPairing {
   /** Worker base URL, e.g. https://elara-gemini.<account>.workers.dev */
   workerUrl: string;
-  /** The installation token (client credential for the user's own worker). */
+  /** Runtime-only installation token. It is never durable in pairing JSON. */
   token: string;
   installationId: string;
   workerVersion: string;
@@ -27,6 +32,23 @@ export interface AutonomyPairing {
   lastPulledRunsId: string;
   lastPulledEventsAt: number;
   lastPulledEventsId: string;
+}
+
+type StoredAutonomyPairing = Omit<AutonomyPairing, 'token'>;
+
+let sessionToken = '';
+let credentialQueue: Promise<void> = Promise.resolve();
+
+function queueCredentialWrite(task: () => Promise<void>): void {
+  credentialQueue = credentialQueue.catch(() => undefined).then(task);
+  void credentialQueue.catch(() => undefined);
+}
+
+function persistToken(token: string): void {
+  const value = token.trim();
+  sessionToken = value;
+  if (value) queueCredentialWrite(() => saveAutonomyInstallationToken(value));
+  else queueCredentialWrite(() => clearAutonomyInstallationToken());
 }
 
 function readJson(key: string): Record<string, unknown> | null {
@@ -46,12 +68,39 @@ function writeJson(key: string, value: Record<string, unknown>): void {
   }
 }
 
+function storedPairing(pairing: AutonomyPairing): StoredAutonomyPairing {
+  return {
+    workerUrl: pairing.workerUrl,
+    installationId: pairing.installationId,
+    workerVersion: pairing.workerVersion,
+    schemaVersion: pairing.schemaVersion,
+    pairedAt: pairing.pairedAt,
+    lastSyncedAt: pairing.lastSyncedAt,
+    lastSyncedContextHash: pairing.lastSyncedContextHash,
+    lastPulledRunsAt: pairing.lastPulledRunsAt,
+    lastPulledRunsId: pairing.lastPulledRunsId,
+    lastPulledEventsAt: pairing.lastPulledEventsAt,
+    lastPulledEventsId: pairing.lastPulledEventsId,
+  };
+}
+
 export function loadPairing(): AutonomyPairing | null {
   const value = readJson(PAIRING_KEY);
-  if (!value || typeof value.workerUrl !== 'string' || typeof value.token !== 'string' || typeof value.installationId !== 'string') return null;
+  if (!value || typeof value.workerUrl !== 'string' || typeof value.installationId !== 'string') return null;
+
+  // One-time migration from the pre-hardening format. The legacy token is
+  // sealed first, then the plaintext field is removed from localStorage.
+  const legacyToken = typeof value.token === 'string' ? value.token.trim() : '';
+  if (legacyToken) {
+    persistToken(legacyToken);
+    const { token: _legacyToken, ...metadata } = value;
+    void _legacyToken;
+    writeJson(PAIRING_KEY, metadata);
+  }
+
   return {
     workerUrl: value.workerUrl,
-    token: value.token,
+    token: sessionToken,
     installationId: value.installationId,
     workerVersion: typeof value.workerVersion === 'string' ? value.workerVersion : '',
     schemaVersion: typeof value.schemaVersion === 'number' ? value.schemaVersion : 0,
@@ -65,11 +114,27 @@ export function loadPairing(): AutonomyPairing | null {
   };
 }
 
+/** Resolve the runtime credential without ever putting it back into pairing JSON. */
+export async function resolvePairingToken(pairing: AutonomyPairing): Promise<string> {
+  const direct = pairing.token.trim();
+  if (direct) {
+    sessionToken = direct;
+    return direct;
+  }
+  if (sessionToken) return sessionToken;
+  await credentialQueue.catch(() => undefined);
+  sessionToken = (await getAutonomyInstallationToken()).trim();
+  return sessionToken;
+}
+
 export function savePairing(pairing: AutonomyPairing): void {
-  writeJson(PAIRING_KEY, { ...pairing });
+  if (pairing.token.trim()) persistToken(pairing.token);
+  writeJson(PAIRING_KEY, storedPairing(pairing));
 }
 
 export function clearPairing(): void {
+  sessionToken = '';
+  queueCredentialWrite(() => clearAutonomyInstallationToken());
   try {
     window.localStorage.removeItem(PAIRING_KEY);
   } catch {
@@ -81,7 +146,8 @@ export function updatePairing(patch: Partial<AutonomyPairing>): AutonomyPairing 
   const current = loadPairing();
   if (!current) return null;
   const next = { ...current, ...patch };
-  savePairing(next);
+  if (Object.prototype.hasOwnProperty.call(patch, 'token')) persistToken(next.token);
+  writeJson(PAIRING_KEY, storedPairing(next));
   return next;
 }
 

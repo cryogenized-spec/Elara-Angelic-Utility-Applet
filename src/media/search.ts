@@ -69,7 +69,11 @@ const realCache: MediaCachePort = {
 let cachedProvider: MediaProvider | undefined;
 
 async function defaultApiKey(): Promise<string> {
-  const { getYouTubeApiKey } = await import('../persistence/gemini-api-key');
+  const [{ getYouTubeApiKey }, { hasAcceptedYouTubePolicy }] = await Promise.all([
+    import('../persistence/gemini-api-key'),
+    import('../persistence/preferences'),
+  ]);
+  if (!(await hasAcceptedYouTubePolicy())) return '';
   return getYouTubeApiKey();
 }
 

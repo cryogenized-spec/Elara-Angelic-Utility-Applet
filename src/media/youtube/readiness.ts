@@ -88,7 +88,7 @@ export async function checkYouTubePlaybackReadiness(
   // or explicit consent clear must invalidate permission to use even a readiness
   // decision that was derived earlier in the same browser session.
   if (!options.apiKey) {
-    let accepted = false;
+    let accepted: boolean;
     try {
       accepted = await hasAcceptedYouTubePolicy();
     } catch {

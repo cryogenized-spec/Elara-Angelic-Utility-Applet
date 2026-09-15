@@ -33,7 +33,7 @@ if (lock.lockfileVersion !== 3) fail(`package-lock.json lockfileVersion must rem
 same(lock.packages?.['']?.dependencies, reviewedDirectDependencies.dependencies, 'package-lock root dependencies');
 same(lock.packages?.['']?.devDependencies, reviewedDirectDependencies.devDependencies, 'package-lock root devDependencies');
 
-const installScriptIdentities = [];
+const installScriptIdentities = new Set();
 for (const [path, metadata] of Object.entries(lock.packages ?? {})) {
   if (!path) continue;
   if (metadata?.resolved) {
@@ -43,12 +43,12 @@ for (const [path, metadata] of Object.entries(lock.packages ?? {})) {
   if (metadata?.hasInstallScript === true && metadata?.version) {
     const marker = 'node_modules/';
     const index = path.lastIndexOf(marker);
-    if (index !== -1) installScriptIdentities.push(`${path.slice(index + marker.length)}@${metadata.version}`);
+    if (index !== -1) installScriptIdentities.add(`${path.slice(index + marker.length)}@${metadata.version}`);
   }
 }
-installScriptIdentities.sort();
+const actualInstallScripts = [...installScriptIdentities].sort();
 const expectedInstallScripts = [...baseline.installScriptIdentities].sort();
-same(installScriptIdentities, expectedInstallScripts, 'reviewed install-script capability inventory');
+same(actualInstallScripts, expectedInstallScripts, 'reviewed install-script capability inventory');
 
 const workflowFiles = readdirSync(join(root, '.github/workflows')).filter((name) => /\.ya?ml$/.test(name)).sort();
 same(workflowFiles, ['ci.yml'], 'workflow file inventory');
@@ -108,4 +108,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Supply-chain gate passed: Node ${baseline.node} / npm ${baseline.npm}; ${Object.keys(reviewedDirectDependencies.dependencies).length + Object.keys(reviewedDirectDependencies.devDependencies).length} direct specs; ${installScriptIdentities.length} reviewed install-script packages; ${actionUses.length} immutable Action invocations; lockfile registry/integrity, npm audit signatures, dependency review, Dependabot, exact-head certification and certified-before-deploy ordering verified.\n`);
+process.stdout.write(`Supply-chain gate passed: Node ${baseline.node} / npm ${baseline.npm}; ${Object.keys(reviewedDirectDependencies.dependencies).length + Object.keys(reviewedDirectDependencies.devDependencies).length} direct specs; ${installScriptIdentities.size} reviewed install-script packages; ${actionUses.length} immutable Action invocations; lockfile registry/integrity, npm audit signatures, dependency review, Dependabot, exact-head certification and certified-before-deploy ordering verified.\n`);

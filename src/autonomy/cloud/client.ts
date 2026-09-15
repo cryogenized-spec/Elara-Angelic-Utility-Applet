@@ -1,7 +1,7 @@
 import { newNonce, signWrite } from '../protocol';
 import type { AutonomyContextPack } from '../context';
 import type { ElaraRoutine, RoutineRunRecord } from '../contracts';
-import type { AutonomyPairing } from './pairing';
+import { resolvePairingToken, type AutonomyPairing } from './pairing';
 
 // ---------------------------------------------------------------------------
 // App ↔ Worker API client (design §10). Reads carry the bearer token; writes
@@ -72,8 +72,27 @@ export class AutonomyCloudError extends Error {
   }
 }
 
+function normalizeWorkerBaseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new AutonomyCloudError('worker-url', 'Enter a valid worker URL.', 0);
+  }
+  if (url.protocol !== 'https:') throw new AutonomyCloudError('worker-url', 'The cloud worker must use HTTPS.', 0);
+  if (url.username || url.password) throw new AutonomyCloudError('worker-url', 'Worker URLs must not contain credentials.', 0);
+  if (url.search || url.hash) throw new AutonomyCloudError('worker-url', 'Worker URLs must not contain a query string or fragment.', 0);
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
 function base(pairing: AutonomyPairing): string {
-  return pairing.workerUrl.replace(/\/+$/, '');
+  return normalizeWorkerBaseUrl(pairing.workerUrl);
+}
+
+async function tokenFor(pairing: AutonomyPairing): Promise<string> {
+  const token = (await resolvePairingToken(pairing)).trim();
+  if (!token) throw new AutonomyCloudError('credential', 'The autonomy installation credential is unavailable. Pair this device again.', 0);
+  return token;
 }
 
 async function request(pairing: AutonomyPairing, path: string, init: RequestInit, timeoutMs = 20_000): Promise<Response> {
@@ -82,6 +101,7 @@ async function request(pairing: AutonomyPairing, path: string, init: RequestInit
   try {
     return await fetch(`${base(pairing)}${path}`, { ...init, signal: controller.signal });
   } catch (error) {
+    if (error instanceof AutonomyCloudError) throw error;
     throw new AutonomyCloudError('network', error instanceof Error ? error.message : 'The worker could not be reached.', 0);
   } finally {
     clearTimeout(timeout);
@@ -95,16 +115,20 @@ async function readError(response: Response): Promise<AutonomyCloudError> {
 
 /** Verify pairing: prove token possession and check version compatibility. */
 export async function pairWithWorker(workerUrl: string, token: string): Promise<PairResult> {
+  const workerBase = normalizeWorkerBaseUrl(workerUrl);
+  const installationToken = token.trim();
+  if (!installationToken) throw new AutonomyCloudError('credential', 'An installation token is required.', 0);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 20_000);
   let response: Response;
   try {
-    response = await fetch(`${workerUrl.replace(/\/+$/, '')}/autonomy/pair`, {
+    response = await fetch(`${workerBase}/autonomy/pair`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${installationToken}` },
       signal: controller.signal,
     });
   } catch (error) {
+    if (error instanceof AutonomyCloudError) throw error;
     throw new AutonomyCloudError('network', error instanceof Error ? error.message : 'The worker could not be reached.', 0);
   } finally {
     clearTimeout(timeout);
@@ -118,14 +142,15 @@ export async function pairWithWorker(workerUrl: string, token: string): Promise<
 }
 
 async function signedPost<T>(pairing: AutonomyPairing, path: string, body: string): Promise<T> {
+  const token = await tokenFor(pairing);
   const timestamp = Date.now();
   const nonce = newNonce();
-  const signature = await signWrite(pairing.token, 'POST', path, timestamp, nonce, body);
+  const signature = await signWrite(token, 'POST', path, timestamp, nonce, body);
   const response = await request(pairing, path, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${pairing.token}`,
+      Authorization: `Bearer ${token}`,
       'X-Elara-Timestamp': String(timestamp),
       'X-Elara-Nonce': nonce,
       'X-Elara-Signature': signature,
@@ -137,7 +162,8 @@ async function signedPost<T>(pairing: AutonomyPairing, path: string, body: strin
 }
 
 async function bearerGet<T>(pairing: AutonomyPairing, path: string): Promise<T> {
-  const response = await request(pairing, path, { method: 'GET', headers: { Authorization: `Bearer ${pairing.token}` } });
+  const token = await tokenFor(pairing);
+  const response = await request(pairing, path, { method: 'GET', headers: { Authorization: `Bearer ${token}` } });
   if (response.status !== 200) throw await readError(response);
   return await response.json() as T;
 }

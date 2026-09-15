@@ -18,6 +18,8 @@ import {
 } from '../../../media/handoff';
 import './media-card.css';
 
+const YOUTUBE_BRAND_LOGO_URL = 'https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg';
+
 function MediaThumbnail({ thumbnail }: { thumbnail: MediaItem['thumbnail'] }) {
   const [failed, setFailed] = useState(false);
 
@@ -39,18 +41,30 @@ function MediaThumbnail({ thumbnail }: { thumbnail: MediaItem['thumbnail'] }) {
   );
 }
 
-function MediaCardBody({ item, action, unavailable = false, target }: {
+function YouTubeBrandVisual() {
+  return (
+    <span className="media-card__brand">
+      <span className="media-card__brand-label">Source</span>
+      <span className="media-card__brand-logo-frame">
+        <img className="media-card__brand-logo" src={YOUTUBE_BRAND_LOGO_URL} alt="YouTube" />
+      </span>
+    </span>
+  );
+}
+
+function MediaCardBody({ item, action, unavailable = false, target, showTextSource = false }: {
   readonly item: MediaItem;
   readonly action: string;
   readonly unavailable?: boolean;
   readonly target?: string;
+  readonly showTextSource?: boolean;
 }) {
   return <>
     <span className="media-card__thumb-wrap">
       <MediaThumbnail key={item.thumbnail?.url ?? 'no-thumbnail'} thumbnail={item.thumbnail} />
     </span>
     <span className="media-card__meta">
-      <span className="media-card__source">Source: YouTube</span>
+      {showTextSource ? <span className="media-card__source">Source: YouTube</span> : null}
       <span className="media-card__title">{item.title}</span>
       {item.channel ? <span className="media-card__channel">{item.channel}</span> : null}
     </span>
@@ -115,7 +129,7 @@ export function MediaCard({ item, platform }: {
         className={`media-card media-card--${listen ? 'listen' : 'watch'} media-card--unavailable`}
         aria-label={`Unavailable YouTube result: ${item.title}`}
       >
-        <MediaCardBody item={item} action={label} unavailable />
+        <MediaCardBody item={item} action={label} unavailable showTextSource />
       </article>
     );
   }
@@ -175,6 +189,7 @@ export function MediaCard({ item, platform }: {
         data-intent-href={intentHref}
         onClick={handleExternalClick}
       >
+        <YouTubeBrandVisual />
         <MediaCardBody item={item} action={label} target="↗" />
       </a>
     );
@@ -187,6 +202,18 @@ export function MediaCard({ item, platform }: {
       className={`media-card media-card--${listen ? 'listen' : 'watch'} media-card--routed`}
       onKeyDown={handleRoutedKeyDown}
     >
+      <a
+        className="media-card__brand-link"
+        href={href}
+        target="_blank"
+        rel="noreferrer noopener"
+        aria-label={`Open “${item.title}” on YouTube`}
+        data-intent-href={intentHref}
+        onClick={handleExternalClick}
+      >
+        <YouTubeBrandVisual />
+      </a>
+
       <button
         ref={primaryRef}
         className="media-card__primary"

@@ -84,17 +84,27 @@ export async function checkYouTubePlaybackReadiness(
     return blocked('invalid-target', 'This YouTube video identifier is not valid for internal playback.');
   }
 
+  // Runtime consent is checked before the session cache. A policy-version change
+  // or explicit consent clear must invalidate permission to use even a readiness
+  // decision that was derived earlier in the same browser session.
+  if (!options.apiKey) {
+    let accepted = false;
+    try {
+      accepted = await hasAcceptedYouTubePolicy();
+    } catch {
+      accepted = false;
+    }
+    if (signal.aborted) return { status: 'aborted' };
+    if (!accepted) {
+      return failed('no-api-key', 'Accept Elara’s YouTube privacy and terms notice in Settings before using internal playback.');
+    }
+  }
+
   const cached = readinessCache.get(videoId);
   if (cached) return cached;
 
   let key: string;
   try {
-    if (!options.apiKey) {
-      if (!(await hasAcceptedYouTubePolicy())) {
-        return failed('no-api-key', 'Accept Elara’s YouTube privacy and terms notice in Settings before using internal playback.');
-      }
-      if (signal.aborted) return { status: 'aborted' };
-    }
     key = String(await (options.apiKey ?? getYouTubeApiKey)()).trim();
   } catch {
     return failed('no-api-key', 'The YouTube API key is unavailable. Unlock the Lockbox to check internal playback.');

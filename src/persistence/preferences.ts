@@ -1,6 +1,6 @@
 import Dexie, { type Table } from 'dexie';
 import { BUILT_IN_FONTS, googleFontFamilyFromCss2Url, type FontSelection } from '../ui/fontRegistry';
-import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_AUTONOMY, DEFAULT_ROLEPLAY, type AppUiPreferences, type AutonomyPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
+import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_AUTONOMY, DEFAULT_ROLEPLAY, MEDIA_PLAYER_SURFACE_PRESETS, type AppUiPreferences, type AutonomyPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 import { DEFAULT_MEDIA_PLAYBACK_PREFERENCE, normalizeMediaPlaybackPreference, type MediaPlaybackPreference } from '../domain/playback';
 
 type PreferenceRecord =
@@ -61,6 +61,9 @@ export async function saveAppUiPreferences(value: AppUiPreferences): Promise<App
 export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences> | null | undefined): ChatAppearancePreferences {
   const merged = { ...DEFAULT_CHAT_APPEARANCE, ...(value ?? {}) };
   const backgroundMode: ChatAppearancePreferences['chatBackgroundMode'] = merged.chatBackgroundMode === 'gradient' || merged.chatBackgroundMode === 'image' ? merged.chatBackgroundMode : 'solid';
+  const mediaPlayerSurfacePreset = (MEDIA_PLAYER_SURFACE_PRESETS as readonly string[]).includes(merged.mediaPlayerSurfacePreset)
+    ? merged.mediaPlayerSurfacePreset
+    : DEFAULT_CHAT_APPEARANCE.mediaPlayerSurfacePreset;
   return {
     ...merged,
     chatBackgroundMode: backgroundMode,
@@ -75,6 +78,7 @@ export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences
     userSurfaceOpacity: clamp(merged.userSurfaceOpacity, 0.2, 1, DEFAULT_CHAT_APPEARANCE.userSurfaceOpacity),
     userSurfaceStyle: merged.userSurfaceStyle === 'solid' || merged.userSurfaceStyle === 'gradient' ? merged.userSurfaceStyle : 'frosted',
     generationActivityAccent: safeHex(merged.generationActivityAccent, DEFAULT_CHAT_APPEARANCE.generationActivityAccent),
+    mediaPlayerSurfacePreset,
   };
 }
 
@@ -91,10 +95,12 @@ export async function saveChatAppearance(value: ChatAppearancePreferences): Prom
 
 export function normalizeRoleplay(value: Partial<RoleplayPreferences> | null | undefined): RoleplayPreferences {
   const merged = { ...DEFAULT_ROLEPLAY, ...(value ?? {}) };
-  const allowedPresets: RoleplayPreferences['environmentPreset'][] = ['none', 'house', 'bedroom', 'living-room', 'office', 'poolside', 'outdoors', 'custom'];
+  const allowedPresets: ChatAppearancePreferences[] = [];
+  void allowedPresets;
+  const allowedEnvironmentPresets: RoleplayPreferences['environmentPreset'][] = ['none', 'house', 'bedroom', 'living-room', 'office', 'poolside', 'outdoors', 'custom'];
   return {
     enabled: Boolean(merged.enabled),
-    environmentPreset: allowedPresets.includes(merged.environmentPreset) ? merged.environmentPreset : 'none',
+    environmentPreset: allowedEnvironmentPresets.includes(merged.environmentPreset) ? merged.environmentPreset : 'none',
     environmentName: safeText(merged.environmentName, 160),
     environmentDescription: safeText(merged.environmentDescription, 2_000),
     timeOfDay: safeText(merged.timeOfDay, 120),

@@ -145,7 +145,7 @@ test.describe('Phase 1 media efficiency', () => {
     const card = page.locator('.media-card').filter({ hasText: TITLE });
     await expect(card).toBeVisible();
     await expect(card).toContainText('Source: YouTube');
-    await expect(card.locator('img')).toHaveAttribute('src', `https://i.ytimg.com/vi/${VIDEO_ID}/hqdefault.jpg`);
+    await expect(card.locator('.media-card__thumb')).toHaveAttribute('src', `https://i.ytimg.com/vi/${VIDEO_ID}/hqdefault.jpg`);
     expect(providerCalls).toBe(1);
 
     const continuation = modelRequests.find((payload) => JSON.stringify(payload).includes(VIDEO_ID));

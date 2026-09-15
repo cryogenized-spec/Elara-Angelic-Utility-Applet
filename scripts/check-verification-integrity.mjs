@@ -180,7 +180,7 @@ for (const file of [...walk('src'), ...walk('worker'), ...walk('e2e'), ...walk('
   if (!/\.(?:ts|tsx|js|mjs|cjs)$/.test(file)) continue;
   const source = readFileSync(file, 'utf8');
   const path = relativePath(file);
-  if (/\@ts-(?:ignore|nocheck)\b/.test(source)) fail(`${path} contains a forbidden TypeScript suppression`);
+  if (/@ts-(?:ignore|nocheck)\b/.test(source)) fail(`${path} contains a forbidden TypeScript suppression`);
   for (const line of source.split(/\r?\n/)) {
     if (eslintDisableComment.test(line) && !reasonedEslintDisableComment.test(line)) {
       fail(`${path} contains an eslint-disable without an inline reason`);

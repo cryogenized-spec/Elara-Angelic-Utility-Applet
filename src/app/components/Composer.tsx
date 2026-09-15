@@ -265,12 +265,13 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
         if (mountedRef.current && vttSessionIdRef.current === sessionId) setVttState('idle');
       }, 1200);
     } finally {
-      if (vttSessionIdRef.current !== sessionId) return;
-      transcriptionAbortRef.current = null;
-      recorderRef.current = null;
-      vttTargetRef.current = null;
-      setVttRms(0);
-      setVttElapsed(0);
+      if (vttSessionIdRef.current === sessionId) {
+        transcriptionAbortRef.current = null;
+        recorderRef.current = null;
+        vttTargetRef.current = null;
+        setVttRms(0);
+        setVttElapsed(0);
+      }
     }
   }
 

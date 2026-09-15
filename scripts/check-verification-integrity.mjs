@@ -193,9 +193,16 @@ if (appPerformanceNowCount !== 2) fail(`src/app/App.tsx performance.now() surfac
 const securityGate = read('scripts/security-architecture-gate.mjs');
 for (const marker of [
   'forbiddenCapabilities',
+  'forbiddenNodeAuthority',
+  'XMLHttpRequest transport',
+  'sendBeacon transport',
+  'remote dynamic module import',
+  'reviewedScriptLoaders',
+  'reviewedWorkerAuthorities',
   'reviewedDexieAuthorities',
   'reviewedLockboxConsumers',
   'reviewedRawFetchAuthorities',
+  'reviewedGlobalFetchReferences',
   'reviewedGoogleServiceImporters',
   'reviewedConfirmationBrokerConsumers',
   'StoredAutonomyPairing',

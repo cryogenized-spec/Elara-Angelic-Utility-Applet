@@ -46,12 +46,19 @@ for (const testFile of [...walk('src'), ...walk('worker/test'), ...walk('e2e')])
 }
 
 // E2E must drive user/public boundaries. Direct app imports and writable IDB
-// fixtures let a browser test forge state that the real application could not.
+// fixtures can let a browser test forge state that the real application could
+// not. Two reviewed media tests deliberately mutate already-created persisted
+// rows to prove retention/adversarial behavior; exact path/count allowlisting
+// makes any additional writable fixture an explicit architecture event.
 const e2eFiles = walk('e2e').filter((path) => /(?:\.spec\.ts|global-setup\.ts)$/.test(path));
 const forbiddenSourceImport = /(?:from\s+['"](?:\.\.\/)+src\/|import\s*\(\s*['"](?:\.\.\/)+src\/|['"]\/(?:Elara-Angelic-Utility-Applet\/)?src\/)/;
-const directWritableIndexedDb = /['"]readwrite['"]/;
+const writableIndexedDb = /['"]readwrite['"]/g;
 const directDatabaseDeletion = /indexedDB\.deleteDatabase\s*\(/;
 const retiredBrowserProvider = /\*\*\/api\/gemini|\/api\/gemini/;
+const allowedWritableIndexedDb = new Map([
+  ['e2e/media-handoff.spec.ts', 1],
+  ['e2e/media-playback-adversarial.phase8.spec.ts', 1],
+]);
 const allowedLocalStorageWrites = new Map([
   ['e2e/global-setup.ts', 1],
   ['e2e/google-oauth-settings.spec.ts', 1],
@@ -64,9 +71,14 @@ for (const file of e2eFiles) {
   const path = relativePath(file);
   if (forbiddenSourceImport.test(source)) fail(`${path} imports application source directly instead of driving a public/user boundary`);
   if (retiredBrowserProvider.test(source)) fail(`${path} references the retired browser /api/gemini provider route`);
-  if (directWritableIndexedDb.test(source) || directDatabaseDeletion.test(source)) {
-    fail(`${path} mutates IndexedDB directly; E2E may inspect storage but must not forge application state`);
+  if (directDatabaseDeletion.test(source)) fail(`${path} deletes IndexedDB directly; E2E must not erase application stores behind the public boundary`);
+
+  const writableTransactions = count(source, writableIndexedDb);
+  const allowedWritableTransactions = allowedWritableIndexedDb.get(path) ?? 0;
+  if (writableTransactions !== allowedWritableTransactions) {
+    fail(`${path} contains ${writableTransactions} writable IndexedDB transaction(s); expected ${allowedWritableTransactions}. Review any browser-state mutation explicitly.`);
   }
+
   const writes = count(source, /(?:window\.)?localStorage\.setItem\s*\(/g);
   const allowed = allowedLocalStorageWrites.get(path) ?? 0;
   if (writes !== allowed) {
@@ -74,7 +86,7 @@ for (const file of e2eFiles) {
   }
 }
 
-for (const [path] of allowedLocalStorageWrites) {
+for (const [path] of [...allowedWritableIndexedDb, ...allowedLocalStorageWrites]) {
   if (!e2eFiles.some((file) => relativePath(file) === path)) fail(`approved E2E fixture is missing: ${path}`);
 }
 
@@ -161,14 +173,16 @@ for (const command of orderedCommands) {
 }
 
 // Cheap suppression hygiene: TypeScript suppression is prohibited, and every
-// ESLint disable must carry an inline reason after `--`.
+// actual ESLint-disable comment must carry an inline reason after `--`.
+const eslintDisableComment = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?\b/;
+const reasonedEslintDisableComment = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?\s+[^\n]+\s--\s\S/;
 for (const file of [...walk('src'), ...walk('worker'), ...walk('e2e'), ...walk('scripts')]) {
   if (!/\.(?:ts|tsx|js|mjs|cjs)$/.test(file)) continue;
   const source = readFileSync(file, 'utf8');
   const path = relativePath(file);
   if (/\@ts-(?:ignore|nocheck)\b/.test(source)) fail(`${path} contains a forbidden TypeScript suppression`);
   for (const line of source.split(/\r?\n/)) {
-    if (/eslint-disable(?:-next-line|-line)?\b/.test(line) && !/eslint-disable(?:-next-line|-line)?\s+[^\n]+\s--\s\S/.test(line)) {
+    if (eslintDisableComment.test(line) && !reasonedEslintDisableComment.test(line)) {
       fail(`${path} contains an eslint-disable without an inline reason`);
       break;
     }
@@ -180,4 +194,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; no skip/focus controls, direct app-state imports, writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

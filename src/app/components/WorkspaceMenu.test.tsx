@@ -2,12 +2,9 @@
 /**
  * Workspace rail contract:
  *  - one trigger by default, no per-service pills in the top rail
- *  - the flyout opens to the right of that trigger and stays in the viewport
  *  - disclosure/popover semantics (not a fake desktop application menu)
  *  - no stale expanded service when reopened
  */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -129,7 +126,6 @@ describe('flyout interaction', () => {
       expect(button.disabled).toBe(false);
       expect(button.getAttribute('type')).toBe('button');
     }
-    // Enter/Space activation is native; nothing intercepts it.
     act(() => { service('Calendar').click(); });
     expect(service('Calendar').getAttribute('aria-expanded')).toBe('true');
   });
@@ -168,48 +164,5 @@ describe('accessibility semantics', () => {
     act(() => { service('Tasks').click(); });
     for (const button of shortcutButtons()) expect(button.textContent?.trim().length ?? 0).toBeGreaterThan(0);
     expect(container.querySelector('button[aria-label="Close Workspace menu"]')).not.toBeNull();
-  });
-});
-
-describe('flyout geometry (CSS contract)', () => {
-  const css = readFileSync(resolve(process.cwd(), 'src/app/components/workspace-menu.css'), 'utf8');
-  const rule = css.match(/\.workspace-menu \{([^}]*)\}/)?.[1] ?? '';
-  const narrow = css.match(/@media \(max-width: (\d+)px\) \{\s*\.workspace-menu \{([^}]*)\}/)?.[0] ?? '';
-  /** Worst-case left edge documented in the stylesheet: --gutter (14) + --control-width (132) + the 8px flyout gap. */
-  const WORST_CASE_LEFT_PX = 154;
-
-  const clamp = (property: 'min-width' | 'max-width', viewport: number): number => {
-    const declaration = rule.match(new RegExp(`${property}: min\\((\\d+)px, calc\\(100vw - (\\d+)px\\)\\)`));
-    expect(declaration, `${property} clamp missing`).toBeTruthy();
-    return Math.min(Number(declaration![1]), viewport - Number(declaration![2]));
-  };
-
-  it('opens to the right of the single trigger', () => {
-    expect(rule).toMatch(/left:\s*calc\(100% \+ 8px\)/);
-  });
-
-  it('never lets min-width defeat the viewport clamp', () => {
-    for (const width of [320, 360, 390, 412, 480, 520]) {
-      expect(clamp('min-width', width)).toBeLessThanOrEqual(clamp('max-width', width));
-    }
-  });
-
-  it('stays inside common Android portrait widths (360–412px)', () => {
-    for (const width of [360, 375, 390, 401, 412]) {
-      const panelWidth = clamp('max-width', width);
-      expect(WORST_CASE_LEFT_PX + panelWidth).toBeLessThanOrEqual(width);
-      // And it never gets so narrow that a service row becomes unusable.
-      expect(clamp('min-width', width)).toBeGreaterThanOrEqual(120);
-    }
-  });
-
-  it('reuses the narrow-width fallback below 401px', () => {
-    expect(narrow).toMatch(/@media \(max-width: 400px\)/);
-    expect(narrow).toMatch(/left:\s*0/);
-    expect(narrow).toMatch(/top:\s*calc\(100% \+ 8px\)/);
-  });
-
-  it('bounds the height so the flyout cannot swallow the composer', () => {
-    expect(rule).toMatch(/max-height:\s*min\(60vh, 440px\)/);
   });
 });

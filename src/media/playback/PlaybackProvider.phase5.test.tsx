@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import { act, useEffect } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MediaItem } from '../../domain/media';
 import {
@@ -29,7 +27,6 @@ const ITEM: MediaItem = {
   intent: 'listen',
 };
 
-const css = readFileSync(resolve(process.cwd(), 'src/media/playback/player-host.css'), 'utf8');
 let container: HTMLDivElement;
 let root: Root;
 let authority: PlaybackAuthority | null;
@@ -116,12 +113,5 @@ describe('Phase 5 global player surface', () => {
     expect(host).not.toBeNull();
     expect(surface!.querySelector('.playback-player-close')).not.toBeNull();
     expect(host!.querySelector('.playback-player-close')).toBeNull();
-  });
-
-  it('enforces fixed viewport placement below the sidebar layer and a 200px player minimum', () => {
-    expect(css).toMatch(/\.playback-player-surface\s*\{[^}]*position:\s*fixed/s);
-    expect(css).toMatch(/\.playback-player-surface\s*\{[^}]*z-index:\s*35/s);
-    expect(css).toMatch(/\.playback-player-host\s*\{[^}]*min-height:\s*200px/s);
-    expect(css).toMatch(/\.playback-player-close\s*\{[^}]*width:\s*44px[^}]*height:\s*44px/s);
   });
 });

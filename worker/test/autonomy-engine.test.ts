@@ -45,6 +45,13 @@ async function ensureScheduled(routineId: string, dueAt: number): Promise<Respon
   return doFetch(await internalDo('/scheduler/ensure', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ routineId, dueAt }) }));
 }
 
+async function seedScheduleWithoutAlarm(routineId: string, dueAt: number): Promise<void> {
+  const engine = await stub() as DurableObjectStub & {
+    seedScheduleWithoutAlarm(routineId: string, dueAt: number): Promise<{ routineId: string; dueAt: number }>;
+  };
+  await engine.seedScheduleWithoutAlarm(routineId, dueAt);
+}
+
 async function heartbeat(): Promise<Record<string, unknown>> {
   const response = await doFetch(await internalDo('/heartbeat', { method: 'POST' }));
   expect(response.status).toBe(200);
@@ -175,11 +182,8 @@ describe('AutonomyEngine — single-alarm multiplexer (REAL alarms)', () => {
     const processAnchor = Date.now();
     const earlyDue = processAnchor - 2 * 60_000;
     const lateDue = processAnchor - 60_000;
-    const engine = await stub() as DurableObjectStub & {
-      seedScheduleWithoutAlarm(routineId: string, dueAt: number): Promise<{ routineId: string; dueAt: number }>;
-    };
-    await engine.seedScheduleWithoutAlarm(late.id, lateDue);
-    await engine.seedScheduleWithoutAlarm(early.id, earlyDue);
+    await seedScheduleWithoutAlarm(late.id, lateDue);
+    await seedScheduleWithoutAlarm(early.id, earlyDue);
 
     const result = await heartbeat();
     expect(result.processed).toBe(2);
@@ -240,10 +244,10 @@ describe('AutonomyEngine — repair sweep and occurrence classification', () => 
     await syncConfig(1, [routine]);
 
     // Deploy-gap state: the schedule row survived and points at an occurrence
-    // 10 minutes ago — the alarm never fired (worker down, DO evicted). The
-    // occurrence is within the 15-minute interval grace.
+    // 10 minutes ago — the alarm never fired (worker down, DO evicted). Seed
+    // without arming a real alarm so heartbeat is the sole delivery under test.
     const overdue = Date.now() - 10 * 60_000;
-    await ensureScheduled(routine.id, overdue);
+    await seedScheduleWithoutAlarm(routine.id, overdue);
 
     const result = await heartbeat();
     expect(result.processed).toBe(1);
@@ -275,7 +279,7 @@ describe('AutonomyEngine — repair sweep and occurrence classification', () => 
     const routine = makeRoutine({ schedule: { kind: 'interval', everyMinutes: 30 } });
     await syncConfig(1, [routine]);
     const beyondGrace = Date.now() - 2 * 3_600_000;
-    await ensureScheduled(routine.id, beyondGrace);
+    await seedScheduleWithoutAlarm(routine.id, beyondGrace);
     await heartbeat();
 
     const record = (await runs()).find((run) => run.scheduledFor === beyondGrace);
@@ -292,7 +296,7 @@ describe('AutonomyEngine — repair sweep and occurrence classification', () => 
     await syncConfig(1, [routine]);
     // 10 minutes overdue: past the on-time tolerance, within the interval grace.
     const dueAt = Date.now() - 10 * 60_000;
-    await ensureScheduled(routine.id, dueAt);
+    await seedScheduleWithoutAlarm(routine.id, dueAt);
     await heartbeat();
     const record = (await runs()).find((run) => run.scheduledFor === dueAt);
     expect(record).toMatchObject({ state: 'skipped', errorCode: SCHEDULER_DEVICE_DUE_CODE, executionMode: 'catch-up' });
@@ -304,12 +308,12 @@ describe('AutonomyEngine — repair sweep and occurrence classification', () => 
     await syncConfig(1, [routine]);
 
     const firstDue = Date.now() - 5 * 60_000;
-    await ensureScheduled(routine.id, firstDue);
+    await seedScheduleWithoutAlarm(routine.id, firstDue);
     await heartbeat();
     expect((await runs()).filter((run) => run.routineId === routine.id)).toHaveLength(1);
 
     const secondDue = Date.now() - 2 * 60_000;
-    await ensureScheduled(routine.id, secondDue);
+    await seedScheduleWithoutAlarm(routine.id, secondDue);
     await heartbeat();
 
     const records = (await runs()).filter((run) => run.routineId === routine.id);

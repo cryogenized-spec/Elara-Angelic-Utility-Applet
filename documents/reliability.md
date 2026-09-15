@@ -1,98 +1,128 @@
 ---
 id: SYS-REL
 status: active
-verified_commit: 14263a46095024fc37d0ac940daac430848e8dac
-scope: CI, automated verification, diagnostics and release-quality gates
-paths: [scripts/check-docs.mjs, scripts/reliability-gate.mjs, .github/workflows/ci.yml, e2e]
-keywords: [reliability, testing, ci, diagnostics, analytics, performance, e2e, lint, typecheck, documentation]
+verified_commit: 02ae039eda51715f2950cf268a6fc0d55e65065c
+scope: CI, automated verification, test quality, coverage, diagnostics and release-quality gates
+paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, vitest.config.ts, .github/workflows/ci.yml, e2e]
+keywords: [reliability, testing, coverage, ratchet, ci, diagnostics, performance, e2e, lint, typecheck, structural-gate]
 ---
 
 # Reliability, testing and diagnostics
 
 ## 1. Purpose and boundary
 
-`SYS-REL` defines the checks that keep `main` shippable and the safe diagnostics needed to understand failures. Tests are layered: documentation integrity protects the canonical knowledge surface, focused unit/contract tests prove domain rules, Worker tests prove cloud behavior, build/type/lint catch integration problems, and Playwright proves user-visible flows.
+`SYS-REL` defines the evidence required to keep `main` shippable. Verification is layered deliberately: repository structure is checked as structure, runtime behavior is tested as behavior, unit coverage is measured across the complete `src/` tree, Worker behavior has its own isolated suite, and Playwright is the authority for browser-visible geometry and interaction.
+
+A test is not counted as behavioral evidence merely because it is stored in a `*.test.ts(x)` file. Unit/Worker tests must execute code. Source-text/CSS architecture assertions belong in dependency-free repository gates and therefore do not inflate unit-test or coverage numbers.
 
 ## 2. Runtime architecture
 
 ```text
 change
 -> documentation integrity
--> lint
--> typecheck
--> unit tests
--> Worker/Durable Object tests
--> build
--> Playwright browser projects
--> reliability invariant gate (includes documentation integrity)
+-> verification-integrity / anti-fake-green
+-> security & architecture capability gate
+-> test-quality / structural-contract gate
+-> npm ci
+-> zero-warning lint
+-> TS6 primary typecheck
+-> TS7 compatibility typecheck
+-> unit tests + whole-source V8 coverage ratchet
+-> Worker / Durable Object tests
+-> production build
+-> Playwright: Chromium + Android portrait + onboarding
+-> final reliability gate
 ```
 
-CI targets Node 24 and currently runs Chromium, Android-portrait and onboarding Playwright projects. The final reliability script also inspects source text for architectural invariants that ordinary type/tests do not express cheaply.
+CI targets Node 24. All dependency-free policy gates run before package installation. The final reliability command reruns documentation, verification-integrity, security and test-quality checks before the older runtime invariant gate.
 
 ## 3. Source map
 
 | Concern | Authority |
 | --- | --- |
 | Documentation integrity | `scripts/check-docs.mjs`, `documents/manifest.json` |
+| Verification / fake-green integrity | `scripts/check-verification-integrity.mjs` |
+| Security capability boundary | `scripts/security-architecture-gate.mjs` |
+| Structural test-quality boundary | `scripts/test-quality-gate.mjs` |
+| Coverage measurement | `vitest.config.ts`, `@vitest/coverage-v8` |
+| Coverage ratchet | `scripts/check-coverage.mjs`, `scripts/coverage-baseline.json` |
 | CI pipeline | `.github/workflows/ci.yml` |
-| Architecture invariant gate | `scripts/reliability-gate.mjs` |
-| Browser E2E | `e2e/`, `playwright.config.ts` |
-| Typecheck configuration | `tsconfig.json`, `worker/tsconfig.json`, `tsconfig.e2e.json`, package scripts |
-| Lint configuration | `eslint.config.js` |
-| Unit/integration | colocated `*.test.ts(x)` |
-| Worker tests | `worker/test/`, `vitest.workers.config.ts` |
-| Artifact verification | `scripts/verify-artifact-assets.mjs` |
-| Worker verification | `scripts/verify-gemini-worker.mjs` and related scripts |
+| Runtime invariant gate | `scripts/reliability-gate.mjs` |
+| Unit/integration behavior | colocated `*.test.ts(x)` |
+| Worker behavior | `worker/test/`, `vitest.workers.config.ts` |
+| Browser behavior | `e2e/`, `playwright.config.ts` |
+| Typecheck | `tsconfig.json`, `worker/tsconfig.json`, `tsconfig.e2e.json` |
+| Lint | `eslint.config.js` |
 
-## 4. Data and contracts
+## 4. Verification contract
 
-The broad completion gate is ordered and must not be shortened when work is reported as complete:
+The broad completion path is ordered and must not be shortened when repository-level work is reported complete:
 
 ```text
 npm run docs:check
+npm run verify:gates
+npm run security:check
+npm run test:quality
+npm ci --no-audit --no-fund
 npm run lint
 npm run typecheck
-npm test
+npm run typecheck:ts7
+npm run test:coverage
 npm run test:workers
 npm run build
-npx playwright test --project=chromium --project=android-portrait --project=onboarding
+npm run e2e -- --project=chromium --project=android-portrait --project=onboarding
 npm run reliability:check
 ```
 
-`npm run docs:check` is dependency-free. It validates the manifest, active system docs/frontmatter/chapter shape, declared source paths, the closed canonical `/documents` file set, local Markdown links, and the absence of the retired `/docs`/historical filename/reference conventions. CI runs it before dependency installation. `npm run reliability:check` chains it again before the runtime invariant gate, so the final gate cannot pass while canonical documentation integrity is broken.
+`npm test` remains a fast local iteration command. It is not the repository certification command because it does not enforce the coverage ratchet. `npm run test:coverage` executes the same unit suite with V8 instrumentation and then runs `coverage:check`.
 
-`npm run typecheck` covers the web source project, Worker project and the full `e2e/` Playwright project. Focused checks include `typecheck:e2e`, `verify:artifact-assets`, `verify:worker` and subsystem tests. Focused checks are iteration aids; they do not replace the broad gate when claiming repository-level completion.
+## 5. Behavioral tests versus structural contracts
 
-The runtime invariant gate protects, among other things: no legacy Gemini `generateContent`; direct browser Interactions provider with Lockbox credential and stable `v1`; no empty-character prompt injection; registry-derived tool declarations; explicit Google confirmation controls; safe Markdown; artifact integrity; BusyTeX shell escape disabled; VTT provider boundaries; and selected autonomy/roleplay invariants.
+Behavioral tests call exported logic, render components, exercise storage, simulate failures/cancellation, or drive the app through Playwright. They should fail because observable behavior changed.
 
-Diagnostics and analytics are distinct. Diagnostics explain bounded individual failures with safe categories/correlation metadata; analytics, where used, receives privacy-approved aggregates rather than transcripts, files, secrets or raw provider traces.
+Structural rules that are genuinely about what code is allowed to exist are owned by `scripts/test-quality-gate.mjs`. Current structural contracts include:
 
-## 5. Invariants
+- unit/Worker tests may not read implementation/CSS files through `node:fs`/`node:path` and present those strings as runtime test evidence;
+- Workspace shortcuts may not synthesize hidden model turns;
+- App navigation/mutation paths must retain the terminal-save ownership boundary whose pure behavior is unit-tested in `src/chat/`;
+- shell geometry selectors retain one reviewed owner while Playwright measures actual boxes;
+- Elara-owned YouTube player presets may style the outer surface but may not overlay or manipulate the provider iframe.
 
-- Never claim a check passed if it was not run.
-- CI is the authority for branch/release verification; local results are supporting evidence.
-- Canonical documentation routing/tree integrity is executable policy, not reviewer convention.
-- A passing test that exercises the wrong state or cannot fail when its invariant is broken is not evidence; strengthen the test instead of weakening the contract.
-- Main-quality milestones must leave relevant docs/lint/type/test/build/browser gates green.
-- Architecture invariants should be executable when a cheap stable assertion exists.
-- E2E failure artifacts may contain app state; keep retention bounded and never deliberately log credentials.
-- Performance/accessibility/mobile reliability are product constraints, not decorative post-processing.
-- Removed `/docs`, pass/status/handoff/recovery/roadmap/implementation-log documentation must not return.
+This separation prevents source-grep tests from padding test counts or coverage while retaining cheap architecture enforcement where source structure is the actual invariant.
 
-## 6. Security and failure semantics
+## 6. Coverage ratchet
 
-Diagnostic records redact credentials, OAuth material, raw attachment payloads and private reasoning. Provider/tool failures are normalized before UI/export. CI permissions remain minimal. Test fixtures must not use production credentials. The documentation guard reads repository text/metadata only and performs no network access or package installation.
+Vitest V8 coverage includes the complete `src/**/*.{ts,tsx}` tree and excludes only test/spec files and declarations. Untested application files therefore count against the total; weak areas are visible rather than hidden through an exclusion list.
 
-## 7. Verification and tests
+The certified whole-source Phase-3 floor is:
 
-When changing one subsystem, run focused tests first, then the broad ordered gate above. Documentation-only changes still run `npm run docs:check`; they do not get to bypass current-state integrity. If the current environment cannot execute Playwright, report that explicitly and rely on CI for browser evidence. `npx playwright test --list` is useful for confirming discovery and syntax, but it is not browser validation.
+| Metric | Floor |
+| --- | ---: |
+| Lines | 64.14% |
+| Statements | 58.73% |
+| Functions | 54.21% |
+| Branches | 53.44% |
 
-Physical Android behavior that browser automation cannot reproduce is reported as a validation gap rather than inferred from green desktop or emulated-browser CI.
+`scripts/coverage-baseline.json` also sets independent floors for `autonomy`, `chat`, `domain`, `gemini`, `media`, `memory` and `persistence`, plus security/authority-critical files such as the autonomy credential/pairing stores, Gemini Lockbox, generation sync, provider, global playback authority and memory store. This prevents increased coverage in an easy subsystem from masking a regression in a critical one.
 
-## 8. Known gaps
+The verification-integrity gate carries the exact certified global, critical-directory and critical-file Phase-3 floors. The coverage checker also requires all 185 eligible source files to remain present in the report, while the adversarial sentinel proves both metric regression and silent source disappearance fail closed. Raising a floor is allowed. Quietly lowering/removing the ratchet is not.
 
-At the verified commit, `eslint.config.js` explicitly ignores `src/**/*.ts`, `src/**/*.tsx` and `e2e/**/*.ts`. Therefore `npm run lint` being green does not yet prove application TypeScript lint cleanliness. Treat that as verification debt until a TypeScript-aware ESLint configuration lands.
+Coverage is one signal, not a correctness score. `App.tsx` and browser geometry rely heavily on Playwright; whole-source coverage intentionally exposes that unit-test gap rather than pretending E2E execution was unit coverage.
 
-Correction (2026-09-12): the paragraph above described the state at its own verified commit and is preserved for the record. A TypeScript-aware ESLint configuration has since landed, and `npm run lint` now lints all of `src/**`, `e2e/**`, the root config files and `scripts/*.mjs`. Non-type-aware rules (`typescript-eslint` recommended plus the React hooks preset) apply to all of them; type-aware rules (via `projectService`) apply to `src/**` only, because the project service auto-discovers only a file named `tsconfig.json`, so `tsconfig.e2e.json` is invisible to it. `worker/**` is deliberately ignored with its measured backlog recorded in the config. The gate is proven capable of failing: an unused variable injected into `src/**/*.ts`, and an `await` of a non-Promise, each made `npm run lint` exit 1 and were reverted. Remaining gaps: type-aware lint for `e2e/` (needs its own project mechanism) and a dedicated `worker/**` lint pass.
+## 7. Failure, migration and persistence evidence
 
-The documentation guard validates local structure/references and source-path existence; it intentionally does not judge whether prose is semantically current. Source/tests still outrank prose, and durable behavior changes must update the owning system document in the same change.
+Persistence changes require failure-path evidence, not only successful round trips. Central database version bumps require migration tests from an existing schema. Credential migration must prove loss safety: plaintext legacy material is removed only after a protected write succeeds and remains recoverable when that write fails.
+
+Generation/persistence tests must cover cancellation, terminal state, delayed settlement and navigation boundaries where applicable. Tests should use controlled failure injection at a real authority seam instead of asserting that an implementation string exists.
+
+## 8. Security and diagnostics
+
+Diagnostics redact credentials, OAuth material, raw attachment payloads and private reasoning. Test fixtures never use production credentials. E2E failure artifacts may contain application state; retention stays bounded.
+
+CI repository permissions remain read-only. Workflow/ruleset and dependency supply-chain hardening are separate repository-control concerns; the in-repo gates cannot protect themselves against an actor who is authorized to rewrite every workflow and branch rule simultaneously.
+
+## 9. Completion and certification
+
+Never claim a check passed if it was not run. A green PR head certifies that exact SHA only. Merge completion is followed by the same CI matrix on the resulting `main` commit before a hardening phase is called fully certified.
+
+Focused checks are useful during implementation but do not replace the broad matrix. If a required environment cannot execute a layer, record the gap explicitly rather than inferring success from another layer.

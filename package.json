@@ -6,6 +6,14 @@
   "engines": {
     "node": ">=24.0.0"
   },
+  "allowScripts": {
+    "@google/genai": false,
+    "protobufjs": false,
+    "tesseract.js": false,
+    "esbuild@0.28.1": true,
+    "workerd@1.20260815.1": true,
+    "workerd@1.20260903.1": true
+  },
   "scripts": {
     "dev": "vite",
     "predev": "npm run fonts:prepare",
@@ -17,6 +25,7 @@
     "docs:check": "node scripts/check-docs.mjs",
     "verify:gates": "node scripts/check-verification-integrity.mjs",
     "security:check": "node scripts/security-architecture-gate.mjs",
+    "supply-chain:check": "node scripts/supply-chain-gate.mjs",
     "test:quality": "node scripts/test-quality-gate.mjs && node scripts/verify-coverage-gate.mjs",
     "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
@@ -32,7 +41,7 @@
     "worker:dev": "wrangler dev --config worker/wrangler.toml",
     "worker:types": "wrangler types --config worker/wrangler.toml worker/worker-configuration.d.ts",
     "verify:worker": "node scripts/verify-gemini-worker.mjs",
-    "reliability:check": "npm run docs:check && npm run verify:gates && npm run security:check && npm run test:quality && node scripts/reliability-gate.mjs",
+    "reliability:check": "npm run docs:check && npm run verify:gates && npm run security:check && npm run supply-chain:check && npm run test:quality && node scripts/reliability-gate.mjs",
     "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {

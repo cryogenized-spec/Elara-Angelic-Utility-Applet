@@ -7,22 +7,38 @@ function response(status: number, body?: unknown): Response {
   return new Response(body ? JSON.stringify(body) : '{}', { status, headers: { 'content-type': 'application/json' } });
 }
 
+function validate(fetchMock: typeof fetch) {
+  return validateYouTubeApiKey({ apiKey: API_KEY, fetch: fetchMock, consent: () => true });
+}
+
 describe('YouTube API key validation', () => {
+  it('fails closed before network when policy consent is missing', async () => {
+    const fetchMock = vi.fn(async () => response(200));
+    const result = await validateYouTubeApiKey({
+      apiKey: API_KEY,
+      fetch: fetchMock as unknown as typeof fetch,
+      consent: () => false,
+    });
+
+    expect(result).toMatchObject({ valid: false, reason: 'consent-required' });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('returns valid for a 200 response', async () => {
     const fetchMock = vi.fn(async () => response(200, { items: [{ id: 'jNQXAC9IVRw' }] }));
-    const result = await validateYouTubeApiKey({ apiKey: API_KEY, fetch: fetchMock as unknown as typeof fetch });
+    const result = await validate(fetchMock as unknown as typeof fetch);
     expect(result.valid).toBe(true);
   });
 
   it('treats quotaExceeded as valid with quotaExhausted flag', async () => {
     const fetchMock = vi.fn(async () => response(403, { error: { errors: [{ reason: 'quotaExceeded' }] } }));
-    const result = await validateYouTubeApiKey({ apiKey: API_KEY, fetch: fetchMock as unknown as typeof fetch });
+    const result = await validate(fetchMock as unknown as typeof fetch);
     expect(result).toEqual({ valid: true, quotaExhausted: true });
   });
 
   it('returns invalid for keyInvalid', async () => {
     const fetchMock = vi.fn(async () => response(403, { error: { errors: [{ reason: 'keyInvalid' }] } }));
-    const result = await validateYouTubeApiKey({ apiKey: API_KEY, fetch: fetchMock as unknown as typeof fetch });
+    const result = await validate(fetchMock as unknown as typeof fetch);
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.reason).toBe('invalid-key');
   });
@@ -33,7 +49,7 @@ describe('YouTube API key validation', () => {
       calls.push({ url: String(input), headers: Object.fromEntries(new Headers(init?.headers).entries()) });
       return response(200, { items: [] });
     });
-    await validateYouTubeApiKey({ apiKey: API_KEY, fetch: fetchMock as unknown as typeof fetch });
+    await validate(fetchMock as unknown as typeof fetch);
     expect(calls[0].headers['x-goog-api-key']).toBe(API_KEY);
     expect(calls[0].url).not.toContain(API_KEY);
     expect(calls[0].url).not.toContain('key=');
@@ -45,7 +61,7 @@ describe('YouTube API key validation', () => {
       calls.push(String(input));
       return response(200, { items: [] });
     });
-    await validateYouTubeApiKey({ apiKey: API_KEY, fetch: fetchMock as unknown as typeof fetch });
+    await validate(fetchMock as unknown as typeof fetch);
     const url = new URL(calls[0]);
     expect(url.pathname).toContain('/youtube/v3/videos');
     expect(url.searchParams.get('part')).toBe('id');
@@ -54,7 +70,7 @@ describe('YouTube API key validation', () => {
 
   it('returns network on fetch failure', async () => {
     const fetchMock = vi.fn(async () => { throw new TypeError('Failed to fetch'); });
-    const result = await validateYouTubeApiKey({ apiKey: API_KEY, fetch: fetchMock as unknown as typeof fetch });
+    const result = await validate(fetchMock as unknown as typeof fetch);
     expect(result.valid).toBe(false);
     if (!result.valid) expect(result.reason).toBe('network');
   });

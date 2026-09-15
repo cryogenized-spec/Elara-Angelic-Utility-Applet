@@ -142,10 +142,10 @@ test.describe('Phase 1 media efficiency', () => {
     await unlockTestLockbox(page);
     await ask(page, 'find me the phase one efficiency track');
 
-    const card = page.getByRole('link', { name: new RegExp(TITLE) });
+    const card = page.locator('.media-card').filter({ hasText: TITLE });
     await expect(card).toBeVisible();
     await expect(card).toContainText('Source: YouTube');
-    await expect(card.locator('img')).toHaveAttribute('src', `https://i.ytimg.com/vi/${VIDEO_ID}/hqdefault.jpg`);
+    await expect(card.locator('.media-card__thumb')).toHaveAttribute('src', `https://i.ytimg.com/vi/${VIDEO_ID}/hqdefault.jpg`);
     expect(providerCalls).toBe(1);
 
     const continuation = modelRequests.find((payload) => JSON.stringify(payload).includes(VIDEO_ID));
@@ -221,7 +221,7 @@ test.describe('Phase 1 media efficiency', () => {
     await page.goto('');
     await unlockTestLockbox(page);
     await ask(page, 'find one quota persistence track');
-    await expect(page.getByRole('link', { name: new RegExp(TITLE) })).toBeVisible();
+    await expect(page.locator('.media-card').filter({ hasText: TITLE })).toBeVisible();
     expect(providerCalls).toBe(1);
 
     const initial = await dailyBudgetRow(page);

@@ -12,6 +12,27 @@ export function normalizeMediaPlaybackPreference(value: unknown): MediaPlaybackP
   return isMediaPlaybackPreference(value) ? value : DEFAULT_MEDIA_PLAYBACK_PREFERENCE;
 }
 
+export type PlaybackReadinessBlockedReason =
+  | 'unsupported'
+  | 'invalid-target'
+  | 'unavailable'
+  | 'not-embeddable'
+  | 'made-for-kids';
+
+export type PlaybackReadinessFailureReason =
+  | 'no-api-key'
+  | 'quota-exceeded'
+  | 'rate-limited'
+  | 'network'
+  | 'invalid-response'
+  | 'unknown';
+
+export type PlaybackReadinessDecision =
+  | { readonly status: 'ready' }
+  | { readonly status: 'blocked'; readonly reason: PlaybackReadinessBlockedReason; readonly message: string }
+  | { readonly status: 'failed'; readonly reason: PlaybackReadinessFailureReason; readonly message: string }
+  | { readonly status: 'aborted' };
+
 export const PLAYBACK_PHASES = ['idle', 'requested', 'checking', 'ready', 'loading', 'playing', 'paused', 'ended', 'failed'] as const;
 export type PlaybackPhase = (typeof PLAYBACK_PHASES)[number];
 
@@ -100,9 +121,12 @@ export function playbackReducer(state: PlaybackState, event: PlaybackEvent): Pla
     case 'begin-load':
       return state.phase === 'ready' || state.phase === 'ended' ? transition(state, 'loading') : state;
     case 'play':
-      return state.phase === 'loading' || state.phase === 'paused' ? transition(state, 'playing') : state;
+      return state.phase === 'loading' || state.phase === 'paused' || state.phase === 'ended' ? transition(state, 'playing') : state;
     case 'pause':
-      return state.phase === 'playing' ? transition(state, 'paused') : state;
+      // The official iframe reports ready before the user has pressed its native
+      // play control. `paused` therefore also represents a loaded, user-ready
+      // player that has not started yet.
+      return state.phase === 'loading' || state.phase === 'playing' ? transition(state, 'paused') : state;
     case 'end':
       return state.phase === 'playing' || state.phase === 'paused' ? transition(state, 'ended') : state;
     case 'fail': {

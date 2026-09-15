@@ -44,7 +44,7 @@ function MediaThumbnail({ thumbnail }: { thumbnail: MediaItem['thumbnail'] }) {
 function YouTubeBrandVisual() {
   return (
     <span className="media-card__brand">
-      <span className="media-card__brand-label">Source: YouTube</span>
+      <span className="media-card__brand-label"><span>Source</span><span>: YouTube</span></span>
       <span className="media-card__brand-logo-frame">
         <img className="media-card__brand-logo" src={YOUTUBE_BRAND_LOGO_URL} alt="YouTube" />
       </span>

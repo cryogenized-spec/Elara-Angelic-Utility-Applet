@@ -102,7 +102,8 @@ const roleplayBrokerSource = readFileSync(join(root, 'src/google/confirmation/ro
 if (!roleplayBrokerSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Roleplay mutations must use the shared Google confirmation broker.');
 const googleBrokerSource = readFileSync(join(root, 'src/google/confirmation/broker.ts'), 'utf8');
 if (!googleBrokerSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google mutations must support grouped confirmation requests.');
-if (!googleBrokerSource.includes('data-decision="decline"') || (!googleBrokerSource.includes('data-decision="selected"') && !googleBrokerSource.includes('data-decision="all"'))) throw new Error('Reliability gate: Google mutations must expose explicit decline and approval controls.');
+if (!googleBrokerSource.includes("decline.dataset.decision = 'decline';") || !googleBrokerSource.includes("selected.dataset.decision = 'selected';") || !googleBrokerSource.includes("all.dataset.decision = 'all';")) throw new Error('Reliability gate: Google mutations must expose explicit decline, selected-approval, and approve-all controls through DOM-safe decision assignments.');
+if (googleBrokerSource.includes('innerHTML')) throw new Error('Reliability gate: Google confirmation UI must not regain raw HTML parsing authority.');
 if (!googleBrokerSource.includes('aria-label')) throw new Error('Reliability gate: Google confirmation controls must be accessible.');
 const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
 if (!toolLoopSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google tool loop must route mutation batches through the shared confirmation broker.');

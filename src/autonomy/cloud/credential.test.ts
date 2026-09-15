@@ -37,6 +37,30 @@ async function readCredentialRecord(): Promise<{
   });
 }
 
+async function corruptCredentialCiphertext(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME);
+    request.onerror = () => reject(request.error ?? new DOMException('IndexedDB open failed.', 'Error'));
+    request.onsuccess = () => {
+      const db = request.result;
+      const transaction = db.transaction('credentials', 'readwrite');
+      const store = transaction.objectStore('credentials');
+      const getRequest = store.get(RECORD_ID);
+      getRequest.onerror = () => reject(getRequest.error ?? new DOMException('IndexedDB request failed.', 'Error'));
+      getRequest.onsuccess = () => {
+        const record = getRequest.result as Record<string, unknown> | undefined;
+        if (!record) {
+          reject(new Error('Credential record missing.'));
+          return;
+        }
+        store.put({ ...record, ciphertext: 'AA==' });
+      };
+      transaction.oncomplete = () => { db.close(); resolve(); };
+      transaction.onerror = () => { db.close(); reject(transaction.error ?? new DOMException('IndexedDB transaction failed.', 'Error')); };
+    };
+  });
+}
+
 describe('autonomy installation credential boundary', () => {
   it('persists only sealed material and recovers the token through the named accessor', async () => {
     await saveAutonomyInstallationToken(TEST_TOKEN);
@@ -52,6 +76,13 @@ describe('autonomy installation credential boundary', () => {
     expect(JSON.stringify(window.sessionStorage)).not.toContain(TEST_TOKEN);
 
     expect(await getAutonomyInstallationToken()).toBe(TEST_TOKEN);
+  });
+
+  it('fails closed when sealed credential material is corrupted', async () => {
+    await saveAutonomyInstallationToken(TEST_TOKEN);
+    await corruptCredentialCiphertext();
+
+    await expect(getAutonomyInstallationToken()).resolves.toBe('');
   });
 
   it('removes the sealed credential completely when cleared', async () => {

@@ -12,7 +12,7 @@ test('YouTube policy consent is explicit, accessible, served locally and durable
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
 
-  const policy = page.getByLabel('YouTube privacy and terms');
+  const policy = page.getByLabel('YouTube privacy and terms', { exact: true });
   await expect(policy).toBeVisible();
 
   const checkbox = page.getByLabel('Agree to Elara YouTube privacy and terms');
@@ -44,6 +44,6 @@ test('YouTube policy consent is explicit, accessible, served locally and durable
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
-  await expect(page.getByLabel('YouTube privacy and terms').getByRole('status')).toContainText('Accepted · policy version');
+  await expect(page.getByLabel('YouTube privacy and terms', { exact: true }).getByRole('status')).toContainText('Accepted · policy version');
   await expect(page.getByLabel('Agree to Elara YouTube privacy and terms')).toHaveCount(0);
 });

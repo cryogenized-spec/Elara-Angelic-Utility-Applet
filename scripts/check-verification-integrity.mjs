@@ -126,6 +126,7 @@ try {
   };
   for (const [name, expected] of Object.entries(expectedScripts)) if (pkg.scripts?.[name] !== expected) fail(`npm script ${name} changed from the reviewed command`);
   if (pkg.devDependencies?.['@vitest/coverage-v8'] !== '4.1.11') fail('@vitest/coverage-v8 must stay exactly aligned with Vitest 4.1.11');
+  if (pkg.overrides?.sharp !== '0.35.4') fail('package.json must keep the reviewed sharp 0.35.4 security override');
 } catch (error) {
   fail(`package.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 }
@@ -161,8 +162,19 @@ for (const marker of ['forbiddenCapabilities', 'forbiddenNodeAuthority', 'XMLHtt
 }
 
 const supplyChainGate = read('scripts/supply-chain-gate.mjs');
-for (const marker of ['reviewedActions', 'reviewedDirectDependencies', 'reviewedInstallScripts', 'lockfileVersion', 'strict-allow-scripts=true', 'persist-credentials', 'upload-pages-artifact', 'deploy-pages', 'npm audit --audit-level=high']) {
+for (const marker of ['reviewedActions', 'reviewedDirectDependencies', 'reviewedInstallScripts', 'baseline.overrides', 'sharp?.version', 'lockfileVersion', 'strict-allow-scripts=true', 'persist-credentials', 'upload-pages-artifact', 'deploy-pages', 'npm audit signatures', 'npm audit --audit-level=high']) {
   if (!supplyChainGate.includes(marker)) fail(`supply-chain gate lost required control: ${marker}`);
+}
+try {
+  const baseline = JSON.parse(read('scripts/supply-chain-baseline.json'));
+  if (baseline.node !== '24.21.0') fail('supply-chain baseline must keep Node 24.21.0');
+  if (baseline.npm !== '11.19.0') fail('supply-chain baseline must keep npm 11.19.0');
+  if (baseline.overrides?.sharp !== '0.35.4') fail('supply-chain baseline must keep sharp 0.35.4');
+  for (const marker of ['strict-allow-scripts=true', 'allow-git=none', 'allow-remote=none', 'allow-file=none']) {
+    if (!baseline.npmrc?.includes(marker)) fail(`supply-chain baseline lost npm policy: ${marker}`);
+  }
+} catch (error) {
+  fail(`scripts/supply-chain-baseline.json is invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
 }
 
 const testQualityGate = read('scripts/test-quality-gate.mjs');
@@ -217,15 +229,17 @@ if (existsSync(join(root, '.github/workflows/deploy.yml'))) fail('standalone Pag
 const workflow = read('.github/workflows/ci.yml');
 for (const marker of ['continue-on-error', 'if: always()', '|| true', 'set +e']) if (workflow.includes(marker)) fail(`CI workflow contains forbidden bypass marker: ${marker}`);
 if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci rather than npm install');
+if (/contents:\s*write/.test(workflow)) fail('certification workflow may not retain repository write authority');
+if (/persist-credentials:\s*true/.test(workflow)) fail('certification workflow may not persist checkout credentials');
 if (!workflow.includes('permissions: {}')) fail('workflow-wide GITHUB_TOKEN permissions must default to none');
-const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run supply-chain:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm audit --audit-level=high', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:coverage', 'npm run test:workers', 'npm run build', './node_modules/.bin/playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
+const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run supply-chain:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm audit signatures', 'npm audit --audit-level=high', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:coverage', 'npm run test:workers', 'npm run build', './node_modules/.bin/playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
 let previousIndex = -1;
 for (const command of orderedCommands) {
   const index = workflow.indexOf(command, previousIndex + 1);
   if (index === -1) fail(`CI workflow is missing or reorders required command: ${command}`);
   else previousIndex = index;
 }
-for (const marker of ['persist-credentials: false', 'cancel-in-progress: true', 'needs: runtime', 'pages: write', 'id-token: write', 'fail-on-severity: high']) {
+for (const marker of ['ref: ${{ github.event.pull_request.head.sha || github.sha }}', 'persist-credentials: false', 'cancel-in-progress: true', 'needs: runtime', 'pages: write', 'id-token: write']) {
   if (!workflow.includes(marker)) fail(`CI workflow lost Phase 4 control: ${marker}`);
 }
 
@@ -248,4 +262,4 @@ if (errors.length) {
   process.stderr.write(`Verification integrity failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
   process.exit(1);
 }
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node release controls, and CI ordering pinned; reviewed lint exceptions and App clock surface frozen; no skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node/npm controls, signed-registry and high-severity audits, exact-head checkout, and certified-before-deploy ordering pinned; no repository write authority, persisted checkout credentials, skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

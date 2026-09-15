@@ -26,10 +26,18 @@ export function FolderProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    void refresh();
+    let active = true;
+    void loadFolderState().then((nextState) => {
+      if (!active) return;
+      setState(nextState);
+      setReady(true);
+    });
     const sync = () => { void refresh(); };
     window.addEventListener('elara-folders-changed', sync);
-    return () => window.removeEventListener('elara-folders-changed', sync);
+    return () => {
+      active = false;
+      window.removeEventListener('elara-folders-changed', sync);
+    };
   }, [refresh]);
 
   const value = useMemo<FolderContextValue>(() => ({

@@ -16,7 +16,6 @@ import {
   type ClaimRunRecord,
   RUN_ABANDONED_CODE,
   SCHEDULER_BUDGET_CODE,
-  SCHEDULER_OVERLAP_CODE,
   abandonedRunKey,
   buildSchedulerObservation,
   classifyDueOccurrence,
@@ -28,13 +27,12 @@ import {
   type SchedulerJournalEntry,
   type SchedulerJournalKind,
 } from '../../../src/autonomy/scheduler';
-import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type ElaraRoutine, type RoutineRunRecord } from '../../../src/autonomy/contracts';
+import { deriveExecutionLocus, elaraRoutineSchema, routineRunKey, type ElaraRoutine } from '../../../src/autonomy/contracts';
 import { routineRunEnvelopeSchema, runCompleteRequestSchema, type RoutineRunEnvelope } from '../../../src/autonomy/envelope';
 import { eventIdForRunKey, workflowInstanceIdForRunKey } from '../../../src/autonomy/workflow-identity';
 import { hashConfigPayload } from '../../../src/autonomy/config-identity';
 import { nextHistoryCursor, parseHistoryCursor } from '../../../src/autonomy/history-page';
 import { AutonomyStore } from './store';
-import type { SchedulerPort } from './ports';
 
 // ---------------------------------------------------------------------------
 // AutonomyEngine — one Durable Object per installation (idFromName of the

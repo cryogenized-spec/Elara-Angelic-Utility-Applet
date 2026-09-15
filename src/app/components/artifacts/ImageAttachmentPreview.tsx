@@ -7,6 +7,7 @@ export function ImageAttachmentPreview({ attachment, onRemove, onExtractText, co
 
   useEffect(() => {
     const nextUrl = URL.createObjectURL(attachment.data);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- The URL is an external browser resource acquired by this effect; state publishes the acquired handle and cleanup revokes it.
     setUrl(nextUrl);
     return () => {
       URL.revokeObjectURL(nextUrl);

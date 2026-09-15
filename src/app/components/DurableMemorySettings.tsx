@@ -47,13 +47,23 @@ export function DurableMemorySettings() {
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not load durable memories.'); }
     finally { setLoading(false); }
   }
-  useEffect(() => { void refresh(); }, []);
-
-  const filtered = useMemo(() => filterMemoryRecords(memories, filter, query), [filter, memories, query]);
 
   useEffect(() => {
-    if (expandedId && !filtered.some((memory) => memory.id === expandedId)) setExpandedId(null);
-  }, [expandedId, filtered]);
+    let active = true;
+    void listMemories().then((records) => {
+      if (!active) return;
+      setMemories(records);
+      setError(null);
+    }).catch((cause: unknown) => {
+      if (active) setError(cause instanceof Error ? cause.message : 'Could not load durable memories.');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
+  }, []);
+
+  const filtered = useMemo(() => filterMemoryRecords(memories, filter, query), [filter, memories, query]);
+  const visibleExpandedId = expandedId && filtered.some((memory) => memory.id === expandedId) ? expandedId : null;
 
   function openRecord(id: string) {
     setExpandedId((current) => current === id ? null : id);
@@ -111,7 +121,7 @@ export function DurableMemorySettings() {
     {(creating || editingId) && <div className="memory-editor"><div className="memory-editor__title">{editingId ? 'Edit memory' : 'Create memory'}</div><label><span>Title</span><input value={draft.title} maxLength={160} onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))} /></label><label><span>Memory body · Markdown supported</span><textarea value={draft.body} maxLength={50000} onChange={(event) => setDraft((current) => ({ ...current, body: event.target.value }))} /></label><div className="memory-editor__grid"><label><span>Kind</span><select value={draft.kind} onChange={(event) => setDraft((current) => ({ ...current, kind: event.target.value as MemoryKind }))}>{MEMORY_KINDS.map((kind) => <option key={kind} value={kind}>{kind.replace('_', ' ')}</option>)}</select></label><label><span>Scope</span><select value={draft.folderId} onChange={(event) => setDraft((current) => ({ ...current, folderId: event.target.value }))}><option value="">Global</option>{folderState.folders.map((folder) => <option key={folder.id} value={folder.id}>{folderPath(folder.id, folderState.folders)}</option>)}</select></label><label><span>Importance</span><input type="number" min="0" max="1" step="0.05" value={draft.importance} onChange={(event) => setDraft((current) => ({ ...current, importance: event.target.value }))} /></label><label><span>Confidence</span><input type="number" min="0" max="1" step="0.05" value={draft.confidence} onChange={(event) => setDraft((current) => ({ ...current, confidence: event.target.value }))} /></label></div><label><span>Tags</span><input value={draft.tags} maxLength={2048} placeholder="identity, preference, project" onChange={(event) => setDraft((current) => ({ ...current, tags: event.target.value }))} /></label><div className="memory-editor__actions"><button type="button" onClick={resetDraft}>Cancel</button><button type="button" className="primary" onClick={() => void saveDraft()}>{editingId ? 'Save changes' : 'Create memory'}</button></div></div>}
 
     {loading ? <p className="memory-settings__empty">Loading durable memories…</p> : filtered.length === 0 ? <div className="memory-settings__empty"><strong>No memories match.</strong><span>Try another search or filter, or create an explicit durable note.</span></div> : <div className="memory-list">{filtered.map((memory) => {
-      const expanded = expandedId === memory.id;
+      const expanded = visibleExpandedId === memory.id;
       return <article className={`memory-card${expanded ? ' is-expanded' : ''}`} key={memory.id} ref={expanded ? expandedRef : undefined}>
         <button className="memory-card__summary" type="button" onClick={() => openRecord(memory.id)} aria-expanded={expanded}>
           <span className="memory-card__summary-main"><strong>{memory.title}</strong><small>{memory.body.replace(/\s+/g, ' ').slice(0, 180)}{memory.body.length > 180 ? '…' : ''}</small></span>

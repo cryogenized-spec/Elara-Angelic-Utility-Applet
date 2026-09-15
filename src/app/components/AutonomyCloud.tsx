@@ -27,7 +27,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null) => void }) {
-  const [pairing, setPairing] = useState<AutonomyPairing | null>(null);
+  const [pairing, setPairing] = useState<AutonomyPairing | null>(() => loadPairing());
   const [status, setStatus] = useState<SyncStatus>({ phase: 'idle' });
   const [state, setState] = useState<CloudSchedulerState | null>(null);
   const [workerUrl, setWorkerUrl] = useState('');
@@ -73,11 +73,18 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
 
   useEffect(() => {
     const existing = loadPairing();
-    setPairing(existing);
-    if (existing) void runFullSync(existing);
-    const handler = () => { if (loadPairing()) void runConfigSync(loadPairing()!); };
+    const initialSyncTimer = existing
+      ? window.setTimeout(() => { void runFullSync(existing); }, 0)
+      : null;
+    const handler = () => {
+      const current = loadPairing();
+      if (current) void runConfigSync(current);
+    };
     window.addEventListener(CONFIG_CHANGED_EVENT, handler);
-    return () => window.removeEventListener(CONFIG_CHANGED_EVENT, handler);
+    return () => {
+      if (initialSyncTimer !== null) window.clearTimeout(initialSyncTimer);
+      window.removeEventListener(CONFIG_CHANGED_EVENT, handler);
+    };
   }, [runFullSync, runConfigSync]);
 
   const verify = useCallback(async () => {

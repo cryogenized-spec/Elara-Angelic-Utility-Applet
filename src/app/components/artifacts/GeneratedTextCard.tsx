@@ -3,28 +3,30 @@ import type { DerivedArtifact, GeneratedArtifact } from '../../../domain/artifac
 import { MarkdownText } from '../MarkdownText';
 import { ArtifactStatus } from './ArtifactStatus';
 
+type LoadedBlobText = {
+  blob: Blob;
+  content: string;
+};
+
 export function GeneratedTextCard({ artifact }: { artifact: GeneratedArtifact | DerivedArtifact }) {
   const sourceContent = artifact.sourceCode?.content;
-  const [content, setContent] = useState(sourceContent ?? '');
+  const [loadedBlob, setLoadedBlob] = useState<LoadedBlobText | null>(null);
   const markdown = artifact.mimeType === 'text/markdown' || artifact.sourceCode?.language === 'markdown';
 
   useEffect(() => {
+    const blob = artifact.outputBlob;
+    if (sourceContent !== undefined || !blob) return undefined;
     let active = true;
-    if (sourceContent !== undefined) {
-      setContent(sourceContent);
-      return () => { active = false; };
-    }
-    if (!artifact.outputBlob) {
-      setContent('');
-      return () => { active = false; };
-    }
-    void readText(artifact.outputBlob).then((text) => {
-      if (active) setContent(text);
+    void readText(blob).then((text) => {
+      if (active) setLoadedBlob({ blob, content: text });
     }).catch(() => {
-      if (active) setContent('');
+      if (active) setLoadedBlob({ blob, content: '' });
     });
     return () => { active = false; };
   }, [artifact.outputBlob, sourceContent]);
+
+  const content = sourceContent
+    ?? (artifact.outputBlob && loadedBlob?.blob === artifact.outputBlob ? loadedBlob.content : '');
 
   return <article className="artifact-card artifact-card--text" aria-label={`Generated artifact ${artifact.name}`}>
     <div className="artifact-card__meta">

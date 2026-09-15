@@ -8,6 +8,7 @@ export function GeneratedPdfCard({ artifact }: { artifact: GeneratedArtifact }) 
   useEffect(() => {
     if (!artifact.outputBlob) return undefined;
     const nextUrl = URL.createObjectURL(artifact.outputBlob);
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- The URL is an external browser resource acquired by this effect; state publishes the acquired handle and cleanup revokes it.
     setUrl(nextUrl);
     return () => {
       URL.revokeObjectURL(nextUrl);

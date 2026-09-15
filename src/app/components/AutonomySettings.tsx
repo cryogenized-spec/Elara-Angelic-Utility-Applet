@@ -110,7 +110,7 @@ function describeRunOutcome(run: RoutineRunRecord): string {
     if (run.errorCode === SCHEDULER_MISSED_CODE) return 'Missed — the occurrence\u2019s grace window passed before it could run.';
     return 'Missed.';
   }
-  if (run.state === 'cancelled') return 'Cancelled.'
+  if (run.state === 'cancelled') return 'Cancelled.';
   if (run.outcome === 'event') return 'Event delivered to the Autonomy Inbox.';
   if (run.outcome === 'cannot_act') return run.reason ? `Could not act (${run.reason}).` : 'Could not act on the frozen context.';
   if (run.outcome === 'no-op') return run.reason ? `Nothing noteworthy (${run.reason}).` : 'Nothing noteworthy.';
@@ -157,18 +157,18 @@ export function AutonomySettings() {
   const unreadCount = useMemo(() => events.filter((event) => event.readAt === null).length, [events]);
   const atLimit = routines.length >= MAX_ROUTINES;
 
+  /** Every local autonomy configuration change advances the sync generation and nudges the cloud mirror. */
+  const markConfigChanged = useCallback(() => {
+    bumpConfigGeneration();
+    window.dispatchEvent(new CustomEvent('elara-autonomy-config-changed'));
+  }, []);
+
   const updatePrefs = useCallback(async (next: Partial<AutonomyPreferences>) => {
     if (!prefs) return;
     const saved = await saveAutonomyPreferences({ ...prefs, ...next });
     setPrefs(saved);
     markConfigChanged();
-  }, [prefs]);
-
-/** Every local autonomy configuration change advances the sync generation and nudges the cloud mirror. */
-  const markConfigChanged = useCallback(() => {
-    bumpConfigGeneration();
-    window.dispatchEvent(new CustomEvent('elara-autonomy-config-changed'));
-  }, []);
+  }, [prefs, markConfigChanged]);
 
   const toggleRoutine = useCallback(async (routine: ElaraRoutine) => {
     try {

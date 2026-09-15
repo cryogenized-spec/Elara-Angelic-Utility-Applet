@@ -5,8 +5,12 @@ import globals from 'globals';
 
 // Verification lint authority.
 // - Every TypeScript surface is linted.
-// - src/** and worker/** use their nearest named tsconfig through projectService.
+// - src/** and worker/src/** use their nearest named tsconfig through projectService.
 // - e2e/** uses its non-standard tsconfig.e2e.json explicitly.
+// - worker/test/** is still linted with the non-type-aware TypeScript rules;
+//   authoritative type safety there remains worker/tsconfig.json + the Worker
+//   Vitest suite because Cloudflare's virtual test bindings are not resolved
+//   correctly by the standard ESLint type-service parser.
 // Keep coverage expansion separate from warning promotion: Pass 1 first exposes
 // and fixes real findings, then tightens the gate once the repository is clean.
 export default tseslint.config(
@@ -22,7 +26,7 @@ export default tseslint.config(
   tseslint.configs.recommended,
   reactHooks.configs.flat['recommended-latest'],
   {
-    files: ['src/**/*.ts', 'src/**/*.tsx', 'worker/**/*.ts'],
+    files: ['src/**/*.ts', 'src/**/*.tsx', 'worker/src/**/*.ts'],
     extends: tseslint.configs.recommendedTypeChecked,
     languageOptions: {
       parserOptions: {

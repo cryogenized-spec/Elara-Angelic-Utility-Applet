@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-const css = readFileSync(new URL('./player-host.css', import.meta.url), 'utf8');
+const css = readFileSync(resolve(process.cwd(), 'src/media/playback/player-host.css'), 'utf8');
 
 describe('Phase 7 player surface CSS contract', () => {
   it('defines exactly the three durable outer-shell preset selectors', () => {

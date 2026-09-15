@@ -28,8 +28,9 @@ Gemini / YouTube credential
 Autonomy installation token
 -> pairing input
 -> AES-GCM device-local credential store
--> runtime resolver
--> autonomy cloud client
+-> pairing-only credential resolver
+-> cloud-client runtime token handoff
+-> autonomy cloud request
 ```
 
 The Gemini record is the Lockbox security authority. Secondary Lockbox records inherit the primary security mode and are unlocked with the same credential/session; stale or weaker secondary mode stamps are not treated as authority.
@@ -46,6 +47,7 @@ The Gemini record is the Lockbox security authority. Secondary Lockbox records i
 | YouTube consumers | `src/media/youtube/`, `src/media/search.ts` |
 | Autonomy credential store | `src/autonomy/cloud/credential.ts` |
 | Autonomy pairing metadata/runtime resolver | `src/autonomy/cloud/pairing.ts` |
+| Autonomy plaintext request consumer | `src/autonomy/cloud/client.ts` |
 | Capability expansion gate | `scripts/security-architecture-gate.mjs` |
 | Gate/CI integrity | `scripts/check-verification-integrity.mjs` |
 
@@ -64,6 +66,8 @@ The autonomy installation token uses a dedicated Dexie store, AES-GCM-256 and a 
 - Lockbox consumers use named minimum-capability accessors.
 - YouTube keys are resolved just in time and sent only in `x-goog-api-key` headers.
 - The autonomy installation token is never serialized into new pairing JSON and is never placed in a network target.
+- Only `src/autonomy/cloud/pairing.ts` may directly import the autonomy credential store; only `src/autonomy/cloud/client.ts` may consume `resolvePairingToken` outside the pairing authority.
+- Credential-bearing autonomy modules do not gain `console.*` logging authority without explicit architecture review.
 - Secondary Lockbox credentials cannot silently remain under weaker protection after primary security changes.
 - Lock/idle enforcement clears the in-memory Lockbox unlock session.
 - Cryptographic/storage migration failures must preserve recoverable legacy state rather than deleting the only usable credential.
@@ -73,17 +77,23 @@ The autonomy installation token uses a dedicated Dexie store, AES-GCM-256 and a 
 `npm run security:check` is a dependency-free pre-install CI gate. It treats acquisition of new powers as an explicit architecture event. The reviewed surface currently freezes:
 
 - dynamic execution and raw HTML injection primitives, which are forbidden;
+- alternate raw browser transports (`XMLHttpRequest`, WebSocket, EventSource and `sendBeacon`) and remote dynamic module imports, which are forbidden;
 - Node filesystem/process/network/VM host authorities in runtime code, which are forbidden;
+- the two approved dynamic executable script loaders: Google Identity Services and the official YouTube IFrame API, including their exact provider URLs;
+- the two approved browser Worker constructors, both restricted to local module targets for OCR and document compilation;
 - Dexie database owners, so a new durable authority cannot appear silently;
 - Lockbox plaintext consumers, so secret propagation cannot expand silently;
-- global outbound fetch owners and reviewed provider destinations;
+- autonomy credential-store and runtime-token consumers, so that separate secret boundary cannot expand silently;
+- global outbound fetch owners/references and reviewed provider destinations;
 - Google service import boundaries;
 - shared Google mutation confirmation-broker consumers;
 - the autonomy token's encrypted-storage and HTTPS egress contract.
 
-The verification-integrity gate pins `security:check`, its CI order and required capability classes. CI runs documentation integrity, verification integrity and the security/architecture boundary before `npm ci`, then repeats the security gate through the final reliability command.
+The verification-integrity gate pins `security:check`, its CI order and the individual capability classes above. CI runs documentation integrity, verification integrity and the security/architecture boundary before `npm ci`, then repeats the security gate through the final reliability command.
 
 ## 7. Network and confirmation boundaries
+
+Global `fetch` is the reviewed ordinary request transport. Raw alternate transports are forbidden, while executable script loading is separately frozen to the Google GIS and official YouTube IFrame API authorities. New transport ownership is therefore a security architecture change rather than an ordinary implementation detail.
 
 Google Workspace API calls receive an authorized fetch from `src/google/oauth/authority.ts`, which enforces HTTPS and an explicit Google API hostname set. Raw service classes remain behind the reviewed tool-handler boundary. Mutation execution must continue through the shared confirmation policy/broker path.
 

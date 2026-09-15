@@ -27,7 +27,7 @@ function formatBytes(bytes: number): string {
 }
 
 export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null) => void }) {
-  const [pairing, setPairing] = useState<AutonomyPairing | null>(null);
+  const [pairing, setPairing] = useState<AutonomyPairing | null>(() => loadPairing());
   const [status, setStatus] = useState<SyncStatus>({ phase: 'idle' });
   const [state, setState] = useState<CloudSchedulerState | null>(null);
   const [workerUrl, setWorkerUrl] = useState('');
@@ -73,7 +73,6 @@ export function AutonomyCloud({ onNotice }: { onNotice: (message: string | null)
 
   useEffect(() => {
     const existing = loadPairing();
-    setPairing(existing);
     if (existing) void runFullSync(existing);
     const handler = () => { if (loadPairing()) void runConfigSync(loadPairing()!); };
     window.addEventListener(CONFIG_CHANGED_EVENT, handler);

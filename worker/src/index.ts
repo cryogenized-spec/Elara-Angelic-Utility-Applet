@@ -188,7 +188,7 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
   if (origin && !allowedOrigin(request, env)) return jsonResponse(request, env, { code: 'authz', message: 'Origin is not authorized.' }, 403);
   const contentType = request.headers.get('Content-Type') ?? '';
   if (!contentType.toLowerCase().includes('application/json')) return jsonResponse(request, env, { code: 'validation', message: 'Content-Type must be application/json.' }, 415);
-  const payload = await request.json().catch(() => null);
+  const payload: unknown = await request.json().catch(() => null);
   const parsed = requestSchema.safeParse(payload);
   if (!parsed.success) return jsonResponse(request, env, { code: 'validation', message: 'Request did not satisfy the approved Gemini contract.' }, 400);
 

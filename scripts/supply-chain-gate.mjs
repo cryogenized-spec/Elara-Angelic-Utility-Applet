@@ -75,6 +75,34 @@ if (/\bnpm\s+install\b/.test(ci)) fail('CI may not use npm install; use npm ci')
 if (/\b(?:ignore-scripts|dangerously-allow-all-scripts)\b/.test(ci)) fail('CI may not bypass install-script policy');
 if (ci.includes('actions/dependency-review-action@')) fail('dependency-review action requires repository Dependency Graph and is not part of the supported CI surface');
 
+function permissionsForJob(jobName) {
+  const lines = ci.split(/\r?\n/);
+  const jobStart = lines.findIndex((line) => line === `  ${jobName}:`);
+  if (jobStart === -1) return null;
+  const permissionStart = lines.findIndex((line, index) => index > jobStart && line === '    permissions:');
+  if (permissionStart === -1) return null;
+  const result = {};
+  for (let index = permissionStart + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    const match = line.match(/^      ([A-Za-z0-9-]+):\s*(read|write|none)\s*$/);
+    if (match) {
+      result[match[1]] = match[2];
+      continue;
+    }
+    if (/^    \S/.test(line) || /^  \S/.test(line) || /^\S/.test(line)) break;
+  }
+  return result;
+}
+
+const runtimePermissions = permissionsForJob('runtime');
+if (JSON.stringify(runtimePermissions) !== JSON.stringify({ contents: 'read' })) {
+  fail('runtime verification job may not have repository write authority');
+}
+const deployPermissions = permissionsForJob('deploy');
+if (JSON.stringify(deployPermissions) !== JSON.stringify({ contents: 'read', pages: 'write', 'id-token': 'write' })) {
+  fail('deploy job permissions changed from the reviewed minimum');
+}
+
 const runsOn = (ci.match(/^\s+runs-on:/gm) ?? []).length;
 const timeouts = (ci.match(/^\s+timeout-minutes:/gm) ?? []).length;
 if (runsOn !== timeouts) fail(`every CI job needs an explicit timeout: ${runsOn} jobs, ${timeouts} timeouts`);
@@ -111,4 +139,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Supply-chain gate passed: Node ${baseline.node} / npm ${baseline.npm}; sharp ${baseline.overrides.sharp} security override; ${Object.keys(reviewedDirectDependencies.dependencies).length + Object.keys(reviewedDirectDependencies.devDependencies).length} direct specs; ${installScriptIdentities.size} reviewed install-script packages; ${actionUses.length} immutable Action invocations; lockfile registry/integrity, registry signatures, high-severity audit, Dependabot, exact-head certification and certified-before-deploy ordering verified.\n`);
+process.stdout.write(`Supply-chain gate passed: Node ${baseline.node} / npm ${baseline.npm}; sharp ${baseline.overrides.sharp} security override; ${Object.keys(reviewedDirectDependencies.dependencies).length + Object.keys(reviewedDirectDependencies.devDependencies).length} direct specs; ${installScriptIdentities.size} reviewed install-script packages; ${actionUses.length} immutable Action invocations; exact least-privilege job permissions, lockfile registry/integrity, registry signatures, high-severity audit, Dependabot, exact-head certification and certified-before-deploy ordering verified.\n`);

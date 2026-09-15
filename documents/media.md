@@ -172,3 +172,7 @@ Behavioral Phase-6 head `e1b7ede3fd9c7308edd89d9a44ed1c26cb5afa7d` passed CI #16
 Routing UX is now unified on the existing authority. Later presentation work may style the single global player around the iframe, but must not replace native YouTube controls, cover the iframe, create card-local players, or introduce another playback lifecycle.
 
 Still absent by design: custom transport controls, stream/audio extraction, background/hidden playback, offline media, and a separate playback persistence system.
+
+## 8. Documentation contract
+
+This file remains the compact engineering authority for `SYS-MEDIA`. Keep the eight numbered chapters stable so documentation integrity checks and future-agent routing remain predictable. Human-facing YouTube behavior belongs in [`youtube/README.md`](./youtube/README.md); implementation details should be updated here rather than split into phase-specific memo files.

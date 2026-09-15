@@ -1,7 +1,7 @@
 ---
 id: SYS-MEDIA
 status: active
-verified_commit: 5b1d962ddf76970857977790517dcf7d80fc3035
+verified_commit: 808d9d78dd090a71b8349ba1947aa5ab8042b7af
 scope: media search, delivery, playback routing/authority/readiness/player, player appearance, persistence, cache, quota, retention and external handoff
 paths: [src/media, src/domain/media.ts, src/domain/playback.ts, src/app/components/media]
 keywords: [media, youtube, search, video, music, playback, routing, preference, readiness, iframe, player, appearance, preset, handoff, cache, quota, compliance, retention]
@@ -23,7 +23,7 @@ embedded -> PlaybackProvider.start(item)
 external -> validated external handoff
 ```
 
-Phase 7 adds presentation presets only around the existing global player. It does not add a route, player, reducer, playback preference, player state store, or iframe variant.
+Phase 8 hardens and adversarially verifies this existing architecture. It adds no route, player, reducer, playback preference, player state store, iframe variant, queue or event bus.
 
 Human/operator guide: [`youtube/README.md`](./youtube/README.md).
 
@@ -45,7 +45,7 @@ user request
 -> ask | embedded | external
 ```
 
-Search remains browser-only and unchanged by playback presentation work.
+Search remains browser-only and unchanged by playback work.
 
 Before either playback route is usable, `MediaCard` reconstructs and validates the canonical YouTube destination. Invalid/hostile persisted media is inert. `PlaybackProvider` remains the only route-preference and playback-lifecycle authority.
 
@@ -63,6 +63,14 @@ PlaybackProvider.start(item)
 ```
 
 The player remains singular, native-controlled and non-autoplaying. Close player calls existing `reset()`.
+
+Phase-8 hardening keeps failure and cancellation inside those same boundaries:
+
+- asynchronous Lockbox credential resolution is followed by an abort re-check before provider work begins;
+- cancellation remains authoritative while a provider request or response parse is pending;
+- synchronous adapter `load()` throws resolve to the existing failed phase;
+- provider `destroy()` is best-effort cleanup and cannot escape the global player boundary;
+- stale native callbacks keep their old request ID and cannot mutate a newer or reset request.
 
 ### 2.3 Appearance projection
 
@@ -88,7 +96,7 @@ Old, missing or invalid persisted values normalize to `glass`.
 
 `src/media/playback/surface-preset.ts` is a derived presentation bridge only. It observes the existing durable `chat-appearance` authority and projects one root attribute. It does not own a second preference store, React context, playback state, queue or event bus.
 
-### 2.4 Styling boundary
+### 2.4 Styling and minimum-player boundary
 
 Presets may change only Elara-owned presentation outside the iframe: shell width, border, radius, shadow and toolbar treatment.
 
@@ -98,9 +106,9 @@ They **must not**:
 - place overlays, pseudo-elements or frames over any part of the iframe;
 - alter iframe opacity, transforms, clipping, pointer behavior or stacking;
 - create a different iframe/player instance per preset;
-- reduce the player below the existing 200px minimum geometry.
+- reduce the actual provider viewport below 200×200 pixels.
 
-The player host remains 16:9 with `min-height: 200px`; the surface retains `min-width: 200px`. The toolbar remains outside the iframe.
+The player host remains 16:9 with a 200px minimum width/height contract. Because global border-box sizing makes the Elara shell border consume interior pixels, the ordinary bordered surface reserves 202px minimum width so the provider host still receives a true 200px interior. At viewport widths of 201px or less, Elara removes its decorative shell border and preserves the 200px player viewport instead. The toolbar remains outside the iframe.
 
 ### 2.5 External handoff
 
@@ -140,7 +148,7 @@ External routing reconstructs the exact canonical URL from provider/kind/id and 
 - No preset selector may target the iframe/host to add decoration or overlays.
 - YouTube native controls remain visible and unobscured.
 - Existing `autoplay=0`, origin/referrer behavior and official IFrame Player adapter remain unchanged.
-- Player viewport remains at least 200px with 16:9 host geometry.
+- The **actual provider viewport**, not merely the outer shell, remains at least 200×200 pixels.
 - `embedded` routes only through `PlaybackProvider.start()`.
 - `external` routes only through canonical handoff validation.
 - `ask` exposes only those two routes.
@@ -149,37 +157,56 @@ External routing reconstructs the exact canonical URL from provider/kind/id and 
 - Persisted `embedUrl` has no readiness/player authority.
 - Search/cache/quota/retention architecture is unchanged.
 - Active playback and chooser state are not persisted.
+- Transient readiness failures are not cached; a later user retry may recover.
+- Superseded/reset readiness attempts must not begin or continue provider work after cancellation is observed.
 
 ## 5. Security, compatibility and failure semantics
 
 Persisted media is untrusted. A malicious `webUrl` cannot become an internal or external target; a malicious `embedUrl` is ignored by readiness/player construction.
 
-Appearance persistence is normalized independently of playback. Old rows with no player preset and rows containing unknown values resolve to `glass`, so adding Phase 7 requires no schema fork or migration-only state path.
+Appearance persistence is normalized independently of playback. Old rows with no player preset and rows containing unknown values resolve to `glass`.
 
 If the appearance subscription cannot read the durable record, the document-root projection falls back to `glass`. This changes decoration only; it cannot start, stop, select or reroute media.
 
-Provider/readiness/player failures remain bounded application errors. A superseded player/readiness attempt receives abort/destroy; late callbacks retain their old request ID and cannot mutate the newer request.
+Provider/readiness/player failures remain bounded application errors. A superseded player/readiness attempt receives abort/destroy; late callbacks retain their old request ID and cannot mutate the newer request. Adapter teardown is deliberately best-effort so a provider cleanup exception cannot destabilize React or prevent the next request from becoming authoritative.
+
+Readiness uses an eight-second default provider timeout. Ready/blocked outcomes may be cached for the browser session; transient failures are not. An elected request cancelled while the Lockbox key is being resolved returns `aborted` before issuing `videos.list`.
 
 ## 6. Verification
 
-Phase-7 coverage extends the Phase-2–6 matrix with:
+Phase-8 coverage extends the Phase-2–7 matrix with:
 
-- normalization of missing/invalid player presets to `glass`;
-- persistence round-trip through the existing `chat-appearance` record;
-- live Dexie projection from the existing appearance authority to the document root;
-- guarded projection cleanup so an older binding cannot erase a newer value;
-- Appearance-settings radio behavior for Minimal / Glass / Cinema;
-- static CSS guards proving presets target the outer surface rather than iframe/host decoration;
-- guards for absence of player overlays/pseudo-elements and preservation of 200px/16:9 geometry;
-- browser acceptance proving Glass on a fresh state, live switch to Cinema, and Cinema persistence after reload.
+- synchronous player-adapter failure containment;
+- throwing provider teardown containment;
+- repeated start/reset cycles with one global host and no elected-session leakage;
+- stale native callback bursts after supersession and reset;
+- serialized rapid playback-preference writes with latest-write failure fallback to the last durable value;
+- hung readiness timeout;
+- cancellation during asynchronous credential lookup before any provider request starts;
+- cancellation propagated into an already-pending provider request;
+- transient network failure remaining retryable instead of cached;
+- rapid appearance-preset persistence/projection bursts and stale-binding disposal;
+- browser-level offline readiness failure, exact canonical external fallback and retry;
+- one visible fake-official iframe surviving live preset changes without recreation;
+- narrow 220px viewport verification of a true >=200px player host;
+- corrupted persisted `webUrl` becoming inert after reload;
+- ten repeated Ask/Escape cycles restoring focus without multiplying chooser surfaces.
 
-The first Phase-7 candidate `c7e08e450aea0386825808d5b1de0c1996f4dced` passed documentation integrity, lint and typecheck, and all 1,211 executed unit tests; CI #1701 stopped because the new static CSS test attempted to read its fixture through Vitest's transformed `import.meta.url`. The test path was corrected to the repository-root file path without changing runtime code.
+Candidate `b92fd4a4d2608834deae18c85c8226a64a297d28` passed documentation integrity, lint, TypeScript, all 1,225 unit tests, Worker/Durable Object tests and production build. Its full browser run passed 120/121 tests and deliberately exposed one real presentation defect: a 1px shell border on each side reduced the provider host to 198px at a 220px viewport.
 
-Behavioral Phase-7 head `5b1d962ddf76970857977790517dcf7d80fc3035` passed CI #1702 across documentation integrity, lint, TypeScript, unit tests, Worker/Durable Object tests, production build, full Playwright E2E and final reliability gate.
+The geometry was corrected at the existing CSS boundary rather than weakening the assertion. Behavioral Phase-8 head `808d9d78dd090a71b8349ba1947aa5ab8042b7af` then passed CI #1707 across documentation integrity, lint, TypeScript, 1,225 unit tests, Worker/Durable Object tests, production build, all 121 Playwright tests and the final reliability gate.
 
-## 7. Next boundary
+## 7. Final boundary
 
-Phase 8 is adversarial verification. It should attack the **existing** playback stack rather than add features: rapid route changes, preference/preset races, stale readiness/player callbacks, repeated open/close cycles, malformed persisted media, offline/provider failure, viewport extremes, keyboard/focus behavior and Android fallback should all continue to resolve through the same authorities.
+Phase 9 is the final **compliance, documentation and closeout** pass. It must not add another playback feature layer.
+
+Phase 9 must:
+
+- re-read current YouTube API Terms, Required Minimum Functionality, IFrame API/player guidance, branding, Made-for-Kids and quota guidance;
+- audit the implemented search, card, internal playback, external handoff, privacy/retention and preference behavior against those requirements;
+- reconcile the human YouTube guide and this canonical architecture authority to final runtime truth;
+- scan the complete media path for obsolete compatibility fields/dead code, especially persisted `embedUrl`, and remove it through the existing schema/migration path if it no longer carries a legitimate compatibility requirement;
+- finish only when the exact final head passes docs, lint, TypeScript, unit, Worker, build, Chromium/Android Playwright, the adversarial media suite and reliability gate.
 
 Still absent by design: custom transport controls, iframe overlays, stream/audio extraction, background/hidden playback, offline media, and a separate playback persistence system.
 

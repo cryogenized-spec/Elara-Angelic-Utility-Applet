@@ -70,6 +70,7 @@ describe('Phase 6 playback preference UX semantics', () => {
     expect(currentAuthority().preference).toBe('external');
     expect(currentAuthority().preferenceStatus).toBe('saving');
 
+    await act(async () => { await Promise.resolve(); });
     await act(async () => {
       resolveSave('embedded');
       await pending;

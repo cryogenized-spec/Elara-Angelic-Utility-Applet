@@ -6,6 +6,9 @@
   "engines": {
     "node": ">=24.0.0"
   },
+  "overrides": {
+    "sharp": "0.35.4"
+  },
   "allowScripts": {
     "@google/genai": false,
     "protobufjs": false,

@@ -1,8 +1,8 @@
 name: Phase 3 coverage baseline
 
 on:
-  push:
-    branches: [hardening/pass3-test-coverage]
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: read

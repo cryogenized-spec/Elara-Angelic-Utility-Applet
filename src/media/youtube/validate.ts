@@ -1,11 +1,15 @@
+import { hasAcceptedYouTubePolicy } from '../../persistence/preferences';
+
 /**
  * Lightweight YouTube API key validation.
  *
- * Uses a cheap `videos.list` call (1 quota unit from the shared 10k pool, not
- * from the 100-call search bucket) to confirm the key is accepted by Google.
- * This does not waste the user's daily search allowance.
+ * Uses a cheap `videos.list` call (1 quota unit from the shared pool, not from
+ * the dedicated search bucket) to confirm the key is accepted by Google. This
+ * does not waste the user's daily search allowance.
  *
- * The call is intentionally tiny: part=id, one known public video id.
+ * Runtime validation is policy-gated before any request. Tests may inject the
+ * consent resolver alongside their fake fetch, keeping the network boundary
+ * deterministic without weakening production behavior.
  */
 
 const VALIDATION_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos';
@@ -14,12 +18,13 @@ const DEFAULT_TIMEOUT_MS = 8_000;
 
 export type YouTubeKeyValidationResult =
   | { readonly valid: true; readonly quotaExhausted?: boolean }
-  | { readonly valid: false; readonly reason: 'invalid-key' | 'quota-exceeded' | 'network' | 'unknown'; readonly message: string };
+  | { readonly valid: false; readonly reason: 'consent-required' | 'invalid-key' | 'quota-exceeded' | 'network' | 'unknown'; readonly message: string };
 
 export interface ValidateYouTubeKeyOptions {
   readonly apiKey: string;
   readonly fetch?: typeof fetch;
   readonly timeoutMs?: number;
+  readonly consent?: () => Promise<boolean> | boolean;
 }
 
 function reasonOf(payload: unknown): string | undefined {
@@ -36,6 +41,20 @@ export async function validateYouTubeApiKey(options: ValidateYouTubeKeyOptions):
   const key = options.apiKey.trim();
   if (!key) {
     return { valid: false, reason: 'invalid-key', message: 'No API key provided.' };
+  }
+
+  let consented = false;
+  try {
+    consented = await (options.consent ?? hasAcceptedYouTubePolicy)();
+  } catch {
+    consented = false;
+  }
+  if (!consented) {
+    return {
+      valid: false,
+      reason: 'consent-required',
+      message: 'Accept Elara’s YouTube privacy and terms notice in Settings before testing or using this key.',
+    };
   }
 
   const runFetch = options.fetch ?? globalThis.fetch.bind(globalThis);

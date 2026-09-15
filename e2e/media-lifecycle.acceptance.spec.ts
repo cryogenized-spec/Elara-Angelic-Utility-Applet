@@ -106,7 +106,8 @@ async function persistedMediaSnapshot(page: Page): Promise<Array<{ id: string; t
         request.onsuccess = () => resolve(request.result as Array<{ media?: unknown }>);
         request.onerror = () => reject(request.error);
       });
-      return rows.flatMap((row) => Array.isArray(row.media) ? row.media : [])
+      const mediaValues = rows.flatMap((row): unknown[] => Array.isArray(row.media) ? [...row.media] as unknown[] : []);
+      return mediaValues
         .filter((entry): entry is { id: string; title: string } => (
           typeof entry === 'object'
           && entry !== null

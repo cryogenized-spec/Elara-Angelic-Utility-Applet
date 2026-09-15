@@ -22,8 +22,9 @@ export interface MediaDailySearchBudgetEntry {
 
 function stripLegacyEmbedUrls(value: unknown): { value: unknown; changed: boolean } {
   if (!Array.isArray(value)) return { value, changed: false };
+  const entries: readonly unknown[] = value;
   let changed = false;
-  const migrated = value.map((entry) => {
+  const migrated = entries.map((entry): unknown => {
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return entry;
     const record = entry as Record<string, unknown>;
     if (!Object.prototype.hasOwnProperty.call(record, 'embedUrl')) return entry;

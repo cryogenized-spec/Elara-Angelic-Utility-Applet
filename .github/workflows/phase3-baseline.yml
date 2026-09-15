@@ -38,5 +38,6 @@ jobs:
           path: |
             package-lock.json
             coverage/coverage-summary.json
+            src/app/components/media/MediaCard.test.tsx
           retention-days: 2
           if-no-files-found: error

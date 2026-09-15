@@ -25,7 +25,7 @@ import { PlaybackPlayerHost } from './PlaybackPlayerHost';
 import { playbackPlayerPort, type PlaybackPlayerPort } from './player';
 import { playbackReadinessPort, type PlaybackReadinessPort } from './readiness';
 
-export type PlaybackPreferenceStatus = 'loading' | 'ready' | 'failed';
+export type PlaybackPreferenceStatus = 'loading' | 'saving' | 'ready' | 'failed';
 
 export interface PlaybackPreferenceStore {
   load(): Promise<MediaPlaybackPreference>;
@@ -156,7 +156,7 @@ function PlaybackProviderRoot({
     const revision = preferenceRevisionRef.current + 1;
     preferenceRevisionRef.current = revision;
     if (mountedRef.current) {
-      setPreferenceStatus('loading');
+      setPreferenceStatus('saving');
       setPreferenceError(null);
     }
 

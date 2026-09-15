@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { ChatAppearancePreferences } from '../../domain/preferences';
+import { MEDIA_PLAYER_SURFACE_PRESETS, type ChatAppearancePreferences, type MediaPlayerSurfacePreset } from '../../domain/preferences';
 import { HexColourField } from './HexColourField';
 import './chat-appearance-settings.css';
 
@@ -8,6 +8,12 @@ const GRADIENTS = [
   ['violet', 'Violet'],
   ['rose', 'Rose'],
 ] as const;
+
+const MEDIA_PLAYER_PRESET_LABELS: Record<MediaPlayerSurfacePreset, string> = {
+  minimal: 'Minimal',
+  glass: 'Glass',
+  cinema: 'Cinema',
+};
 
 const ACCEPTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/avif']);
 const ACCEPTED_IMAGE_EXTENSIONS = /\.(?:jpe?g|png|webp|avif)$/i;
@@ -110,6 +116,12 @@ export function ChatAppearanceSettings({ value, onChange }: { value: ChatAppeara
     <div className="setting-card appearance-card">
       <strong>Generation activity</strong><span>Accent colour for Thinking, tools, timing and reasoning summaries.</span>
       <HexColourField label="Activity accent" colourAriaLabel="Generation activity accent colour" hexAriaLabel="Generation activity accent hex" value={value.generationActivityAccent} fallback="#6EA8FF" onCommit={(generationActivityAccent) => patch({ generationActivityAccent })} />
+    </div>
+    <div className="setting-card appearance-card">
+      <strong>Media player</strong><span>Styles only Elara's shell around the official YouTube player. Native YouTube controls and the iframe remain untouched.</span>
+      <div className="appearance-segment" role="radiogroup" aria-label="Media player surface preset">
+        {MEDIA_PLAYER_SURFACE_PRESETS.map((preset) => <button key={preset} type="button" className={value.mediaPlayerSurfacePreset === preset ? 'is-active' : ''} role="radio" aria-checked={value.mediaPlayerSurfacePreset === preset} onClick={() => patch({ mediaPlayerSurfacePreset: preset })}>{MEDIA_PLAYER_PRESET_LABELS[preset]}</button>)}
+      </div>
     </div>
     <div className="setting-card appearance-card">
       <strong>User messages</strong><span>Separate text and surface styling.</span>

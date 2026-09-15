@@ -9,9 +9,19 @@ interface ActivePlayerAttempt {
   session: PlaybackPlayerSession | null;
 }
 
+function destroySession(session: PlaybackPlayerSession | null): void {
+  if (!session) return;
+  try {
+    session.destroy();
+  } catch {
+    // Provider teardown is best-effort. A broken adapter must not escape the
+    // one global playback boundary and destabilize React or the next request.
+  }
+}
+
 function disposeAttempt(attempt: ActivePlayerAttempt): void {
   attempt.controller.abort();
-  attempt.session?.destroy();
+  destroySession(attempt.session);
 }
 
 export function PlaybackPlayerHost({
@@ -67,23 +77,35 @@ export function PlaybackPlayerHost({
     const attempt: ActivePlayerAttempt = { requestId, controller, session: null };
     activeRef.current = attempt;
 
-    void playerPort.load(state.item, host, controller.signal, {
-      onReady: () => markPaused(requestId),
-      onPlaying: () => markPlaying(requestId),
-      onPaused: () => markPaused(requestId),
-      onEnded: () => markEnded(requestId),
-      onError: (message) => markFailed(requestId, message),
-    }).then((session) => {
-      if (activeRef.current !== attempt || controller.signal.aborted) {
-        session.destroy();
-        return;
-      }
-      attempt.session = session;
-    }).catch(() => {
+    const failLoad = (): void => {
       if (activeRef.current !== attempt || controller.signal.aborted) return;
       activeRef.current = null;
       host.replaceChildren();
       markFailed(requestId, 'The embedded YouTube player could not be loaded.');
+    };
+
+    let loadPromise: Promise<PlaybackPlayerSession>;
+    try {
+      loadPromise = playerPort.load(state.item, host, controller.signal, {
+        onReady: () => markPaused(requestId),
+        onPlaying: () => markPlaying(requestId),
+        onPaused: () => markPaused(requestId),
+        onEnded: () => markEnded(requestId),
+        onError: (message) => markFailed(requestId, message),
+      });
+    } catch {
+      failLoad();
+      return;
+    }
+
+    void loadPromise.then((session) => {
+      if (activeRef.current !== attempt || controller.signal.aborted) {
+        destroySession(session);
+        return;
+      }
+      attempt.session = session;
+    }).catch(() => {
+      failLoad();
     });
   }, [markEnded, markFailed, markPaused, markPlaying, playerPort, state.item, state.phase, state.requestId]);
 

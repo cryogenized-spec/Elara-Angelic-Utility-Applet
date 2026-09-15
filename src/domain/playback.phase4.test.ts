@@ -10,7 +10,6 @@ const ITEM: MediaItem = {
   channel: 'Player Channel',
   thumbnail: { url: 'https://i.ytimg.com/vi/a1B2c3D4e5F/hqdefault.jpg', width: 480, height: 360 },
   webUrl: 'https://www.youtube.com/watch?v=a1B2c3D4e5F',
-  embedUrl: 'https://www.youtube.com/embed/a1B2c3D4e5F',
   apiDataFetchedAt: 1_800_000_000_000,
   intent: 'watch',
 };

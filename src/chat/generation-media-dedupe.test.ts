@@ -9,7 +9,6 @@ function video(id: string, intent?: MediaIntent, title = `Video ${id}`): MediaIt
     kind: 'video',
     title,
     webUrl: `https://www.youtube.com/watch?v=${id}`,
-    embedUrl: `https://www.youtube-nocookie.com/embed/${id}?autoplay=0`,
     ...(intent ? { intent } : {}),
   };
 }

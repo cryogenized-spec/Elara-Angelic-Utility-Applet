@@ -35,7 +35,6 @@ function item(overrides: Partial<MediaItem> = {}): MediaItem {
     publishedAt: '2024-05-01T00:00:00Z',
     thumbnail: { url: 'https://i.ytimg.com/vi/abc123/hqdefault.jpg', width: 480, height: 360 },
     webUrl: 'https://www.youtube.com/watch?v=abc123',
-    embedUrl: 'https://www.youtube-nocookie.com/embed/abc123?autoplay=0',
     apiDataFetchedAt: NOW - 1_000,
     ...overrides,
   };
@@ -127,7 +126,6 @@ describe('MediaCard routed playback', () => {
   const playable = () => item({
     id: 'a1B2c3D4e5F',
     webUrl: 'https://www.youtube.com/watch?v=a1B2c3D4e5F',
-    embedUrl: 'https://hostile.example/ignored',
   });
 
   it('routes embedded preference only through PlaybackProvider.start()', async () => {
@@ -138,14 +136,16 @@ describe('MediaCard routed playback', () => {
     await act(async () => { root.render(<MediaCard item={selected} platform={{ isAndroid: false }} />); });
     const button = container.querySelector<HTMLButtonElement>('.media-card__primary');
     expect(button).not.toBeNull();
-    expect(container.querySelector('a')).toBeNull();
+    const brandLink = container.querySelector<HTMLAnchorElement>('.media-card__brand-link');
+    expect(brandLink?.href).toBe('https://www.youtube.com/watch?v=a1B2c3D4e5F');
+    expect(container.querySelector('.media-card__choice--external')).toBeNull();
 
     await act(async () => { button!.click(); await Promise.resolve(); });
     expect(start).toHaveBeenCalledTimes(1);
     expect(start).toHaveBeenCalledWith(selected);
   });
 
-  it('uses ask as a disclosure choice between the same embedded and external routes', async () => {
+  it('uses ask as disclosure between the same embedded and external routes', async () => {
     const start = vi.fn<PlaybackAuthority['start']>(async () => null);
     playbackHolder.current = playbackAuthority({ preference: 'ask', start });
     const selected = playable();
@@ -161,20 +161,35 @@ describe('MediaCard routed playback', () => {
     expect(external?.href).toBe('https://www.youtube.com/watch?v=a1B2c3D4e5F');
 
     const playHere = [...container.querySelectorAll<HTMLButtonElement>('.media-card__choice')]
-      .find((button) => button.textContent === 'Play here');
+      .find((choice) => choice.textContent === 'Play here');
     await act(async () => { playHere!.click(); await Promise.resolve(); });
     expect(start).toHaveBeenCalledWith(selected);
     expect(container.querySelector('.media-card__chooser')).toBeNull();
   });
 
-  it('fails safe to ask while the durable preference is still loading', async () => {
-    playbackHolder.current = playbackAuthority({ preference: 'embedded', preferenceStatus: 'loading' });
+  it('uses the provider default ask route during initial preference loading', async () => {
+    playbackHolder.current = playbackAuthority({ preference: 'ask', preferenceStatus: 'loading' });
     await act(async () => { root.render(<MediaCard item={playable()} platform={{ isAndroid: false }} />); });
     expect(container.textContent).toContain('Choose playback');
     expect(container.querySelector('.media-card__primary')?.getAttribute('aria-expanded')).toBe('false');
   });
 
-  it('reflects current player state from the global authority and does not start a second request', async () => {
+  it('keeps the last durable route active while a new preference is saving', async () => {
+    playbackHolder.current = playbackAuthority({ preference: 'embedded', preferenceStatus: 'saving' });
+    await act(async () => { root.render(<MediaCard item={playable()} platform={{ isAndroid: false }} />); });
+    expect(container.textContent).toContain('Play here');
+    expect(container.querySelector('.media-card__primary')?.getAttribute('aria-expanded')).toBeNull();
+    expect(container.querySelector('.media-card__chooser')).toBeNull();
+  });
+
+  it('keeps the retained external route active after a failed preference save', () => {
+    playbackHolder.current = playbackAuthority({ preference: 'external', preferenceStatus: 'failed' });
+    const html = renderToStaticMarkup(<MediaCard item={playable()} platform={{ isAndroid: false }} />);
+    expect(html).toContain('href="https://www.youtube.com/watch?v=a1B2c3D4e5F"');
+    expect(html).not.toContain('Choose playback');
+  });
+
+  it('reflects current player state from the global authority and does not start a second embedded request', async () => {
     const selected = playable();
     const start = vi.fn<PlaybackAuthority['start']>(async () => null);
     playbackHolder.current = playbackAuthority({
@@ -189,6 +204,75 @@ describe('MediaCard routed playback', () => {
     expect(container.textContent).toContain('Playing here');
     act(() => button.click());
     expect(start).not.toHaveBeenCalled();
+  });
+
+  it('keeps Open YouTube available in ask mode while the same item is already playing', async () => {
+    const selected = playable();
+    const start = vi.fn<PlaybackAuthority['start']>(async () => null);
+    playbackHolder.current = playbackAuthority({
+      preference: 'ask',
+      start,
+      state: { phase: 'playing', requestId: 'request-a', item: selected, error: null },
+    });
+
+    await act(async () => { root.render(<MediaCard item={selected} platform={{ isAndroid: false }} />); });
+    const primary = container.querySelector<HTMLButtonElement>('.media-card__primary')!;
+    expect(primary.disabled).toBe(false);
+    expect(container.textContent).toContain('Playing here');
+    act(() => primary.click());
+
+    const playHere = [...container.querySelectorAll<HTMLButtonElement>('.media-card__choice')]
+      .find((choice) => choice.textContent === 'Play here')!;
+    expect(playHere.disabled).toBe(true);
+    expect(container.querySelector<HTMLAnchorElement>('.media-card__choice--external')?.href)
+      .toBe('https://www.youtube.com/watch?v=a1B2c3D4e5F');
+    act(() => playHere.click());
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('closes the ask chooser with Escape and restores focus to its primary control', async () => {
+    playbackHolder.current = playbackAuthority({ preference: 'ask' });
+    await act(async () => { root.render(<MediaCard item={playable()} platform={{ isAndroid: false }} />); });
+    const primary = container.querySelector<HTMLButtonElement>('.media-card__primary')!;
+    act(() => primary.click());
+    expect(container.querySelector('.media-card__chooser')).not.toBeNull();
+
+    act(() => {
+      container.querySelector<HTMLButtonElement>('.media-card__choice')!.focus();
+      container.querySelector<HTMLElement>('.media-card--routed')!
+        .dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    });
+
+    expect(container.querySelector('.media-card__chooser')).toBeNull();
+    expect(document.activeElement).toBe(primary);
+    expect(primary.getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('gives identical media cards distinct chooser ids', async () => {
+    playbackHolder.current = playbackAuthority({ preference: 'ask' });
+    const selected = playable();
+    await act(async () => {
+      root.render(<><MediaCard item={selected} /><MediaCard item={selected} /></>);
+    });
+    const controls = [...container.querySelectorAll<HTMLButtonElement>('.media-card__primary')]
+      .map((button) => button.getAttribute('aria-controls'));
+    expect(controls).toHaveLength(2);
+    expect(controls[0]).toBeTruthy();
+    expect(controls[1]).toBeTruthy();
+    expect(controls[0]).not.toBe(controls[1]);
+  });
+
+  it('preserves the unpinned Android VIEW intent in the ask external choice', async () => {
+    playbackHolder.current = playbackAuthority({ preference: 'ask' });
+    await act(async () => { root.render(<MediaCard item={playable()} platform={{ isAndroid: true }} />); });
+    act(() => container.querySelector<HTMLButtonElement>('.media-card__primary')!.click());
+    const external = container.querySelector<HTMLAnchorElement>('.media-card__choice--external')!;
+    expect(external.href).toBe('https://www.youtube.com/watch?v=a1B2c3D4e5F');
+    const intent = external.dataset.intentHref ?? '';
+    expect(intent).toContain('intent://www.youtube.com/watch?v=a1B2c3D4e5F#Intent;');
+    expect(intent).toContain('action=android.intent.action.VIEW');
+    expect(intent).toContain('browser_fallback_url');
+    expect(intent).not.toContain(';package=');
   });
 
   it('shows the authority failure with a separately validated external fallback', async () => {
@@ -217,14 +301,16 @@ describe('MediaCard trust and presentation', () => {
 
   it('renders a placeholder instead of a broken image when there is no thumbnail', () => {
     const html = renderToStaticMarkup(<MediaCard item={item({ thumbnail: undefined })} />);
-    expect(html).not.toContain('<img');
+    expect(html).not.toContain('<img class="media-card__thumb"');
     expect(html).toContain('media-card__thumb--empty');
   });
 
-  it('visibly attributes the API result to YouTube without imitating a logo', () => {
+  it('visibly attributes a trusted API result with the official YouTube brand asset', () => {
     const html = renderToStaticMarkup(<MediaCard item={item()} />);
-    expect(html).toContain('media-card__source">Source: YouTube');
-    expect(html).not.toContain('media-card__badge');
+    expect(html).toContain('media-card__brand-logo');
+    expect(html).toContain('https://www.gstatic.com/youtube/img/branding/youtubelogo/svg/youtubelogo.svg');
+    expect(html).toContain('alt="YouTube"');
+    expect(html).toContain('>Source<');
   });
 
   it.each(['external', 'embedded', 'ask'] as const)(
@@ -296,9 +382,18 @@ describe('MediaCard stylesheet contract', () => {
     expect(cssSheet).toMatch(/\.media-card__choice,[\s\S]*\.media-card__fallback\s*\{[^}]*min-height:\s*44px/s);
   });
 
-  it('styles attribution as ordinary source text rather than an imitation badge', () => {
-    expect(cssSheet).toMatch(/\.media-card__source\s*\{/);
-    expect(cssSheet).not.toMatch(/\.media-card__badge\s*\{/);
+  it('visibly distinguishes disabled embedded choice while preserving external access', () => {
+    expect(cssSheet).toMatch(/button\.media-card__choice:disabled\s*\{[^}]*cursor:\s*not-allowed[^}]*opacity:\s*\.55/s);
+  });
+
+  it('gives chooser and fallback actions a keyboard focus ring', () => {
+    expect(cssSheet).toMatch(/\.media-card__choice:focus-visible,[\s\S]*\.media-card__fallback:focus-visible\s*\{/);
+  });
+
+  it('keeps the official YouTube logo in a solid frame and gives routed attribution a 44px target', () => {
+    expect(cssSheet).toMatch(/\.media-card__brand-link\s*\{[^}]*min-height:\s*44px/s);
+    expect(cssSheet).toMatch(/\.media-card__brand-logo-frame\s*\{[^}]*background:\s*#fff/s);
+    expect(cssSheet).toMatch(/\.media-card__brand-logo\s*\{[^}]*width:\s*72px/s);
   });
 
   it('makes unavailable cards visibly non-interactive', () => {

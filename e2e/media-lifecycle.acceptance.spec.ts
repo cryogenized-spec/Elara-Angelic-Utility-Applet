@@ -139,7 +139,7 @@ async function installSingleSearch(page: Page, continuation: (route: import('@pl
 }
 
 test.describe('media lifecycle closeout acceptance', () => {
-  test('a media-only terminal answer is renderable, singular, durable, reloadable, and exposes the default ask routes', async ({ page }) => {
+  test('a media-only terminal answer is renderable, singular, durable, reloadable, and exposes accessible default ask routes', async ({ page }) => {
     await installSingleSearch(page, async (route) => {
       await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sseTurn('closeout-media-only', []) });
     });
@@ -156,7 +156,16 @@ test.describe('media lifecycle closeout acceptance', () => {
     const primary = card.locator('.media-card__primary');
     await expect(primary).toContainText('Choose playback');
     await primary.click();
+    await expect(card.getByRole('button', { name: 'Play here' })).toBeVisible();
     const external = card.locator('a.media-card__choice--external');
+    await expect(external).toHaveAttribute('href', CANONICAL_URL);
+
+    await page.keyboard.press('Escape');
+    await expect(card.locator('.media-card__chooser')).toHaveCount(0);
+    await expect(primary).toBeFocused();
+    await expect(primary).toHaveAttribute('aria-expanded', 'false');
+
+    await primary.click();
     await expect(card.getByRole('button', { name: 'Play here' })).toBeVisible();
     await expect(external).toHaveAttribute('href', CANONICAL_URL);
 

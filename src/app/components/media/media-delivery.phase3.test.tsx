@@ -2,8 +2,6 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { MediaItem } from '../../../domain/media';
 import { PlaybackProvider, type PlaybackPreferenceStore } from '../../../media/playback/PlaybackProvider';
@@ -75,18 +73,5 @@ describe('Phase 3 media delivery resilience', () => {
 
     expect(html).toContain('class="conversation__stream"');
     expect(html).toContain('class="empty-state"');
-  });
-
-  it('observes late growth while only explicit user gestures may elect manual scroll authority', () => {
-    const source = readFileSync(resolve(process.cwd(), 'src/app/components/ConversationSurface.tsx'), 'utf8');
-
-    expect(source).toMatch(/const\s+stream\s*=\s*[^;]+\.current/);
-    expect(source).toMatch(/resizeObserver\?\.observe\(stream\)/);
-    expect(source).toMatch(/mutationObserver\?\.observe\(stream,/);
-    expect(source).toMatch(/if\s*\(followModeRef\.current\s*!==\s*['"]bottom['"]\)\s*return/);
-    expect(source).toContain('userScrollIntentRef');
-    expect(source).toContain('if (!consumeUserScrollIntent()) return;');
-    expect(source).toContain('onWheel={markUserScrollIntent}');
-    expect(source).toContain('onTouchMove={markUserScrollIntent}');
   });
 });

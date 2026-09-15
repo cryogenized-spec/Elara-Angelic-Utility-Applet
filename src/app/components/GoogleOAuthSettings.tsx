@@ -56,7 +56,16 @@ export function GoogleOAuthSettings() {
   }
 
   useEffect(() => {
-    void refresh();
+    let active = true;
+    void googleOAuthAuthority.getStatus().then((nextStatus) => {
+      if (!active) return;
+      setStatus(nextStatus);
+    }).catch(() => {
+      if (active) setError('The Google authorization state could not be read.');
+    }).finally(() => {
+      if (active) setLoading(false);
+    });
+    return () => { active = false; };
   }, []);
 
   async function connect(capability: GoogleCapabilityKey) {

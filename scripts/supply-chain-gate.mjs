@@ -22,6 +22,7 @@ if (!baseline.npmrc.includes('strict-allow-scripts=true')) fail('reviewed baseli
 if (npmrc.some((line) => /^(?:ignore-scripts|dangerously-allow-all-scripts)\s*=\s*true$/i.test(line))) fail('.npmrc may not bypass install-script policy');
 
 const pkg = json('package.json');
+same(pkg.overrides, baseline.overrides, 'package.json security overrides');
 same(pkg.dependencies, reviewedDirectDependencies.dependencies, 'package.json dependencies');
 same(pkg.devDependencies, reviewedDirectDependencies.devDependencies, 'package.json devDependencies');
 same(pkg.allowScripts, reviewedInstallScripts, 'package.json allowScripts');
@@ -32,6 +33,8 @@ const lock = json('package-lock.json');
 if (lock.lockfileVersion !== 3) fail(`package-lock.json lockfileVersion must remain 3; found ${lock.lockfileVersion}`);
 same(lock.packages?.['']?.dependencies, reviewedDirectDependencies.dependencies, 'package-lock root dependencies');
 same(lock.packages?.['']?.devDependencies, reviewedDirectDependencies.devDependencies, 'package-lock root devDependencies');
+const sharp = lock.packages?.['node_modules/sharp'];
+if (sharp?.version !== baseline.overrides?.sharp) fail(`lockfile must resolve sharp to reviewed patched version ${baseline.overrides?.sharp}`);
 
 const installScriptIdentities = new Set();
 for (const [path, metadata] of Object.entries(lock.packages ?? {})) {
@@ -70,6 +73,7 @@ if (!ci.includes(`test "$(npm --version)" = "${baseline.npm}"`)) fail('CI must a
 if (/check-latest:\s*true/.test(ci)) fail('CI may not float Node via check-latest');
 if (/\bnpm\s+install\b/.test(ci)) fail('CI may not use npm install; use npm ci');
 if (/\b(?:ignore-scripts|dangerously-allow-all-scripts)\b/.test(ci)) fail('CI may not bypass install-script policy');
+if (ci.includes('actions/dependency-review-action@')) fail('dependency-review action requires repository Dependency Graph and is not part of the supported CI surface');
 
 const runsOn = (ci.match(/^\s+runs-on:/gm) ?? []).length;
 const timeouts = (ci.match(/^\s+timeout-minutes:/gm) ?? []).length;
@@ -95,7 +99,6 @@ if (!ci.includes("if: github.event_name == 'push' && github.ref == 'refs/heads/m
 if (!ci.includes('needs: runtime')) fail('Pages deploy must depend on Runtime verification');
 if (!ci.includes('pages: write') || !ci.includes('id-token: write')) fail('deploy-pages job lost explicit Pages/OIDC authority');
 if (!ci.includes('environment:\n      name: github-pages')) fail('deploy-pages job must use the github-pages environment');
-if (!ci.includes("if: github.event_name == 'pull_request'") || !ci.includes('fail-on-severity: high')) fail('dependency review must remain PR-only and reject high severity changes');
 
 if (!existsSync(join(root, '.github/dependabot.yml'))) fail('Dependabot configuration is required');
 else {
@@ -108,4 +111,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Supply-chain gate passed: Node ${baseline.node} / npm ${baseline.npm}; ${Object.keys(reviewedDirectDependencies.dependencies).length + Object.keys(reviewedDirectDependencies.devDependencies).length} direct specs; ${installScriptIdentities.size} reviewed install-script packages; ${actionUses.length} immutable Action invocations; lockfile registry/integrity, npm audit signatures, dependency review, Dependabot, exact-head certification and certified-before-deploy ordering verified.\n`);
+process.stdout.write(`Supply-chain gate passed: Node ${baseline.node} / npm ${baseline.npm}; sharp ${baseline.overrides.sharp} security override; ${Object.keys(reviewedDirectDependencies.dependencies).length + Object.keys(reviewedDirectDependencies.devDependencies).length} direct specs; ${installScriptIdentities.size} reviewed install-script packages; ${actionUses.length} immutable Action invocations; lockfile registry/integrity, registry signatures, high-severity audit, Dependabot, exact-head certification and certified-before-deploy ordering verified.\n`);

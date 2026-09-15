@@ -16,7 +16,7 @@
     "verify:artifact-assets": "node scripts/verify-artifact-assets.mjs",
     "docs:check": "node scripts/check-docs.mjs",
     "verify:gates": "node scripts/check-verification-integrity.mjs",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings 0",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p worker/tsconfig.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "typecheck:web": "tsc -p tsconfig.json --noEmit",
     "typecheck:worker": "tsc -p worker/tsconfig.json --noEmit",

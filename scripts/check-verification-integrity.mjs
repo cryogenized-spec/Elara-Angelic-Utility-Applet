@@ -201,6 +201,8 @@ for (const marker of [
   'reviewedWorkerAuthorities',
   'reviewedDexieAuthorities',
   'reviewedLockboxConsumers',
+  'reviewedAutonomyCredentialConsumers',
+  'reviewedPairingTokenConsumers',
   'reviewedRawFetchAuthorities',
   'reviewedGlobalFetchReferences',
   'reviewedGoogleServiceImporters',

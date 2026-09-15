@@ -2,7 +2,7 @@
 
 Elara has one YouTube media system: one search path, one validated `MediaItem`, one durable playback route preference, one global `PlaybackProvider`, one readiness path, one official YouTube IFrame Player host, one validated external handoff path, and one Elara-owned presentation shell around the player.
 
-Phase 7 adds **visual presets around that existing iframe**. It does not add another player, route authority, state machine or YouTube control layer.
+Phase 8 adversarially verifies and hardens those same authorities. It does not add another player, route authority, state machine or YouTube control layer.
 
 > Implementation/compliance guide only. Current Google/YouTube policies take priority.
 
@@ -20,7 +20,7 @@ Player appearance is independent of route selection. Choosing Minimal, Glass or 
 
 ## 2. Player appearance presets
 
-Appearance settings now expose:
+Appearance settings expose:
 
 - **Minimal** — a narrower, quieter Elara shell.
 - **Glass** — the existing/default shell and the compatibility fallback for old preference rows.
@@ -28,7 +28,7 @@ Appearance settings now expose:
 
 The durable value is stored as `mediaPlayerSurfacePreset` inside the **existing `chat-appearance` preference record**. No new database or preference store exists.
 
-Old rows that predate Phase 7 have no field; they normalize to `glass`. Unknown persisted values also normalize to `glass`.
+Old rows that predate the field normalize to `glass`. Unknown persisted values also normalize to `glass`.
 
 ## 3. What a preset is allowed to change
 
@@ -57,11 +57,13 @@ route preference
 external URL
 ```
 
-The player host remains 16:9, with at least 200px minimum geometry. Elara does not add overlays, pseudo-elements, filters, clipping or custom visual layers over the iframe.
+The actual provider viewport is kept at least 200×200 pixels. The ordinary bordered Elara shell reserves the border outside that minimum; at an extremely narrow viewport Elara drops its decorative border before it allows the provider viewport to shrink below 200px. The host retains 16:9 geometry where the available viewport permits it.
+
+Elara does not add overlays, pseudo-elements, filters, clipping or custom visual layers over the iframe.
 
 ## 4. How the appearance reaches the global player
 
-The globally mounted player lives outside the normal Appearance component tree, so Phase 7 reuses the existing durable appearance authority rather than creating another context.
+The globally mounted player lives outside the normal Appearance component tree, so Elara reuses the existing durable appearance authority rather than creating another context.
 
 ```text
 existing chat-appearance record
@@ -74,6 +76,8 @@ existing chat-appearance record
 This projection is decoration only. It carries no selected media, request ID, player phase or route decision.
 
 The document root starts safely on `glass`. If reading the appearance record fails, the projection also falls back to `glass`.
+
+Rapid appearance writes converge on the latest durable preset, and a disposed/stale binding cannot overwrite a later owner.
 
 ## 5. Play here remains the same official player
 
@@ -95,6 +99,15 @@ Made-for-Kids, unavailable and non-embeddable videos remain blocked before the p
 
 The official player keeps native YouTube controls, `autoplay=0`, inline playback and the existing origin/referrer identity. Close player remains an Elara control outside the iframe and calls existing `reset()`.
 
+Phase-8 hardening also guarantees:
+
+- cancellation during asynchronous Lockbox credential retrieval stops before a stale `videos.list` request can begin;
+- cancellation after provider work starts propagates into that request and resolves as `aborted`;
+- transient network/readiness failures are not cached, so an explicit later retry can recover;
+- a synchronous player-adapter failure becomes the existing failed playback state rather than escaping React;
+- a broken provider `destroy()` is contained as best-effort cleanup;
+- stale native callbacks after supersession/reset cannot mutate the current player request.
+
 ## 6. Ask / Open YouTube remain unchanged
 
 Ask mode remains a disclosure UI with **Play here** and **Open YouTube**. It does not own player state.
@@ -102,6 +115,8 @@ Ask mode remains a disclosure UI with **Play here** and **Open YouTube**. It doe
 External handoff still reconstructs the exact canonical YouTube URL. Ordinary browsers use canonical HTTPS. Supported Android Chromium-family browsers may attempt the existing **unpinned Android VIEW intent**, preserving the canonical HTTPS URL as fallback. No YouTube package is forced.
 
 If internal playback fails, **Open YouTube instead** still uses the independently validated external route.
+
+A corrupted/non-canonical persisted `webUrl` is inert after reload; it cannot become either an internal player target or an external link.
 
 ## 7. Preference boundaries
 
@@ -113,6 +128,8 @@ chat-appearance record -> mediaPlayerSurfacePreset + existing appearance fields
 ```
 
 They do not control one another. Playback state remains session-only; the selected video, request ID, readiness decision, player instance and playback position are never added to `chat-appearance`.
+
+Rapid playback-route writes are serialized. If a newer save fails, Elara returns to the most recent successfully durable choice rather than pretending the failed choice was saved.
 
 ## 8. Search, quota and storage remain unchanged
 
@@ -134,32 +151,41 @@ YouTube provider metadata must still be valid and younger than 30 days. Elara do
 
 ## 9. Compliance guardrails
 
-Current YouTube embedded-player guidance was rechecked for Phase 7. Elara continues to preserve:
+Elara preserves these embedded-player constraints:
 
-- an embedded viewport of at least 200×200 pixels;
+- an actual embedded viewport of at least 200×200 pixels;
 - native YouTube player controls;
 - normal origin/referrer client identity;
 - no overlays, frames or visual elements in front of any portion of the embedded player;
-- no custom stream/audio extraction.
+- no custom stream/audio extraction;
+- no background/hidden playback;
+- no autoplay introduced by the Elara shell.
 
-Because Phase 7 decorates only the outer Elara shell, preset styling must never migrate into iframe-targeting CSS.
+Preset styling remains strictly outside the iframe.
+
+Phase 9 is the final compliance pass and must re-check the current official sources before release closeout; this document is not a substitute for current YouTube policy.
 
 ## 10. Verification
 
-Phase-7 tests cover:
+Phase-8 tests cover:
 
-- missing/invalid preset normalization to Glass;
-- persistence through the existing chat-appearance record;
-- live preset projection through Dexie;
-- Appearance-setting selection for Minimal / Glass / Cinema;
-- CSS guards that prevent preset selectors from decorating the iframe/host;
-- absence of overlay pseudo-elements;
-- preservation of 200px/16:9 player geometry;
-- browser-level switch to Cinema and persistence across reload.
+- synchronous adapter-load failure containment;
+- throwing provider teardown containment;
+- repeated start/reset cycles with one global host;
+- stale native callback bursts after supersession and reset;
+- rapid route-preference writes and durable fallback when the newest write fails;
+- provider timeout and cancellation both before and after network start;
+- transient readiness failure retry;
+- rapid preset writes and stale-binding disposal;
+- browser-level offline readiness and exact external fallback;
+- one visible iframe surviving live preset changes without recreation;
+- a 220px browser viewport preserving a true >=200px provider host;
+- corrupted persisted media becoming inert after reload;
+- repeated chooser open/Escape cycles restoring focus without duplicate chooser surfaces.
 
-The first candidate `c7e08e450aea0386825808d5b1de0c1996f4dced` reached unit tests after green docs/lint/typecheck; CI #1701 stopped only because the new static CSS test used Vitest's transformed `import.meta.url` as a filesystem URL. The fixture path was corrected without changing runtime code.
+Candidate `b92fd4a4d2608834deae18c85c8226a64a297d28` passed every non-browser gate and 120/121 Playwright tests. Its one browser failure revealed that the bordered outer shell left only 198px of actual provider width at a 220px viewport.
 
-Behavioral Phase-7 head `5b1d962ddf76970857977790517dcf7d80fc3035` passed CI #1702 across the complete repository matrix.
+The CSS contract was corrected without weakening the test. Behavioral Phase-8 head `808d9d78dd090a71b8349ba1947aa5ab8042b7af` then passed CI #1707 across docs integrity, lint, TypeScript, all 1,225 unit tests, Worker/Durable Object tests, production build, all 121 Playwright tests and final reliability.
 
 ## 11. Developer map
 
@@ -183,9 +209,11 @@ Behavioral Phase-7 head `5b1d962ddf76970857977790517dcf7d80fc3035` passed CI #17
 
 Compact engineering authority: [`../media.md`](../media.md).
 
-## 12. Next pass
+## 12. Final pass
 
-Phase 8 should be adversarial testing of the existing stack rather than another feature layer: rapid preference/preset changes, repeated start/close cycles, stale callbacks, malformed stored media, provider/network failures, extreme mobile geometry and keyboard/focus races should all continue to resolve through the same authorities.
+Phase 9 is **compliance, documentation and final closeout** rather than another feature layer.
+
+It must re-read the current YouTube API Terms, Required Minimum Functionality, IFrame/player documentation, branding, Made-for-Kids and quota guidance; audit the implemented search/card/playback/handoff/privacy/retention/preferences stack against them; remove dead compatibility code through the existing migration path where justified (especially persisted `embedUrl`); reconcile this guide and the canonical architecture document to final runtime truth; and finish only on an exact head that passes the complete repository matrix.
 
 ## Official references
 

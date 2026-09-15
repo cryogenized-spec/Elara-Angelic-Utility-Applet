@@ -168,14 +168,13 @@ describe('YouTube search adapter', () => {
     expect(params.get('part')).toBe('snippet');
   });
 
-  it('never produces an embed URL that enables autoplay', async () => {
+  it('does not emit a persisted or card-level embed URL', async () => {
     const { provider } = providerWith(() => searchResponse([videoItem('abc', 'One')]));
 
     const { items } = await provider.search({ query: 'x' });
 
-    expect(items[0].embedUrl).toContain('autoplay=0');
-    expect(items[0].embedUrl).not.toContain('autoplay=1');
-    expect(items[0].embedUrl).toContain('youtube-nocookie.com');
+    expect(items[0]).not.toHaveProperty('embedUrl');
+    expect(JSON.stringify(items[0])).not.toContain('youtube-nocookie.com/embed');
   });
 
   it('does not call the API at all when no key is configured', async () => {

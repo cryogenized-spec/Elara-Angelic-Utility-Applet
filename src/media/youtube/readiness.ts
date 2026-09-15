@@ -1,5 +1,6 @@
 import type { PlaybackReadinessDecision } from '../../domain/playback';
 import { getYouTubeApiKey } from '../../persistence/gemini-api-key';
+import { hasAcceptedYouTubePolicy } from '../../persistence/preferences';
 
 const VIDEOS_ENDPOINT = 'https://www.googleapis.com/youtube/v3/videos';
 const YOUTUBE_VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{11}$/;
@@ -65,13 +66,13 @@ export function resetYouTubePlaybackReadinessCache(): void {
 }
 
 /**
- * Check whether one exact YouTube video may proceed to the future iframe phase.
+ * Check whether one exact YouTube video may proceed to the official iframe.
  *
  * This uses videos.list only after the application playback authority has elected
- * a media item. It does not consume the search-specific budget, does not create a
- * player, and does not trust a stored embed URL. Made-for-Kids videos are kept
- * external-only until the iframe phase explicitly implements and certifies that
- * policy surface.
+ * a media item. It does not consume the search-specific budget and does not
+ * create a player. Runtime/default calls also fail closed until the current
+ * YouTube policy/privacy consent version has been accepted. Made-for-Kids videos
+ * remain external-only.
  */
 export async function checkYouTubePlaybackReadiness(
   videoId: string,
@@ -83,6 +84,22 @@ export async function checkYouTubePlaybackReadiness(
     return blocked('invalid-target', 'This YouTube video identifier is not valid for internal playback.');
   }
 
+  // Runtime consent is checked before the session cache. A policy-version change
+  // or explicit consent clear must invalidate permission to use even a readiness
+  // decision that was derived earlier in the same browser session.
+  if (!options.apiKey) {
+    let accepted: boolean;
+    try {
+      accepted = await hasAcceptedYouTubePolicy();
+    } catch {
+      accepted = false;
+    }
+    if (signal.aborted) return { status: 'aborted' };
+    if (!accepted) {
+      return failed('no-api-key', 'Accept Elara’s YouTube privacy and terms notice in Settings before using internal playback.');
+    }
+  }
+
   const cached = readinessCache.get(videoId);
   if (cached) return cached;
 
@@ -92,6 +109,10 @@ export async function checkYouTubePlaybackReadiness(
   } catch {
     return failed('no-api-key', 'The YouTube API key is unavailable. Unlock the Lockbox to check internal playback.');
   }
+  // Credential retrieval may itself be asynchronous. If the elected playback
+  // request was superseded or reset during that await, do not start provider
+  // work for a request that no longer owns the readiness lane.
+  if (signal.aborted) return { status: 'aborted' };
   if (!key) {
     return failed('no-api-key', 'The YouTube API key is unavailable. Unlock the Lockbox to check internal playback.');
   }
@@ -135,6 +156,7 @@ export async function checkYouTubePlaybackReadiness(
   if (!response.ok) {
     let payload: unknown;
     try { payload = await response.json(); } catch { payload = undefined; }
+    if (signal.aborted) return { status: 'aborted' };
     return classifyHttpFailure(response.status, reasonOf(payload));
   }
 
@@ -142,8 +164,10 @@ export async function checkYouTubePlaybackReadiness(
   try {
     payload = await response.json();
   } catch {
+    if (signal.aborted) return { status: 'aborted' };
     return failed('invalid-response', 'YouTube returned an unreadable readiness response.');
   }
+  if (signal.aborted) return { status: 'aborted' };
 
   if (!isRecord(payload) || !Array.isArray(payload.items)) {
     return failed('invalid-response', 'YouTube returned an invalid readiness response.');

@@ -9,7 +9,6 @@ const MEDIA: MediaItem = {
   kind: 'video',
   title: 'Video',
   webUrl: 'https://www.youtube.com/watch?v=video-1',
-  embedUrl: 'https://www.youtube-nocookie.com/embed/video-1?autoplay=0',
 };
 
 function message(patch: Partial<ChatMessage> = {}): ChatMessage {

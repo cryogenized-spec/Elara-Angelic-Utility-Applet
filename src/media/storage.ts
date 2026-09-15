@@ -20,6 +20,21 @@ export interface MediaDailySearchBudgetEntry {
   updatedAt: number;
 }
 
+function stripLegacyEmbedUrls(value: unknown): { value: unknown; changed: boolean } {
+  if (!Array.isArray(value)) return { value, changed: false };
+  const entries: readonly unknown[] = value;
+  let changed = false;
+  const migrated = entries.map((entry): unknown => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return entry;
+    const record = entry as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(record, 'embedUrl')) return entry;
+    const { embedUrl: _retired, ...withoutEmbedUrl } = record;
+    changed = true;
+    return withoutEmbedUrl;
+  });
+  return { value: migrated, changed };
+}
+
 /**
  * One storage authority for YouTube-search state.
  *
@@ -27,17 +42,28 @@ export interface MediaDailySearchBudgetEntry {
  * the same database instead of creating a competing persistence store. Dexie
  * read/write transactions on `dailySearchBudget` serialize reservations across
  * tabs, so BroadcastChannel can remain an optimisation rather than an authority.
+ * v3 retires the old derived iframe URL without discarding otherwise-useful
+ * cached search metadata.
  */
-class MediaDatabase extends Dexie {
+export class MediaDatabase extends Dexie {
   entries!: Table<MediaCacheEntry, string>;
   dailySearchBudget!: Table<MediaDailySearchBudgetEntry, string>;
 
-  constructor() {
-    super(MEDIA_DATABASE_NAME);
+  constructor(name = MEDIA_DATABASE_NAME) {
+    super(name);
     this.version(1).stores({ entries: 'key, expiresAt' });
     this.version(2).stores({
       entries: 'key, expiresAt',
       dailySearchBudget: 'id, quotaDay, updatedAt',
+    });
+    this.version(3).stores({
+      entries: 'key, expiresAt',
+      dailySearchBudget: 'id, quotaDay, updatedAt',
+    }).upgrade(async (transaction) => {
+      await transaction.table('entries').toCollection().modify((entry: Record<string, unknown>) => {
+        const migrated = stripLegacyEmbedUrls(entry.items);
+        if (migrated.changed) entry.items = migrated.value;
+      });
     });
   }
 }

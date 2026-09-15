@@ -30,6 +30,7 @@
     "docs:check": "node scripts/check-docs.mjs",
     "verify:gates": "node scripts/check-verification-integrity.mjs",
     "security:check": "node scripts/security-architecture-gate.mjs",
+    "secrets:check": "node scripts/secret-scan.mjs",
     "supply-chain:check": "node scripts/supply-chain-gate.mjs",
     "test:quality": "node scripts/test-quality-gate.mjs && node scripts/verify-coverage-gate.mjs",
     "lint": "eslint . --max-warnings 0",
@@ -46,7 +47,7 @@
     "worker:dev": "wrangler dev --config worker/wrangler.toml",
     "worker:types": "wrangler types --config worker/wrangler.toml worker/worker-configuration.d.ts",
     "verify:worker": "node scripts/verify-gemini-worker.mjs",
-    "reliability:check": "npm run docs:check && npm run verify:gates && npm run security:check && npm run supply-chain:check && npm run test:quality && node scripts/reliability-gate.mjs",
+    "reliability:check": "npm run docs:check && npm run verify:gates && npm run security:check && npm run secrets:check && npm run supply-chain:check && npm run test:quality && node scripts/reliability-gate.mjs",
     "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {

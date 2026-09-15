@@ -55,10 +55,34 @@ describe('Phase 8 adversarial YouTube readiness', () => {
     expect(calls).toBe(2);
   });
 
-  it('propagates outer cancellation through a pending provider request without converting it into failure', async () => {
+  it('cancels during asynchronous credential lookup before any provider request can start', async () => {
+    const outer = new AbortController();
+    let releaseKey!: (value: string) => void;
+    let fetchCalls = 0;
+    const key = new Promise<string>((resolve) => { releaseKey = resolve; });
+
+    const check = checkYouTubePlaybackReadiness(VIDEO_ID, outer.signal, {
+      apiKey: () => key,
+      fetch: async () => {
+        fetchCalls += 1;
+        return readyResponse();
+      },
+    });
+
+    outer.abort();
+    releaseKey('phase8-key');
+
+    await expect(check).resolves.toEqual({ status: 'aborted' });
+    expect(fetchCalls).toBe(0);
+  });
+
+  it('propagates cancellation into a provider request that is already pending', async () => {
     const outer = new AbortController();
     let innerAborted = false;
+    let fetchStarted!: () => void;
+    const started = new Promise<void>((resolve) => { fetchStarted = resolve; });
     const pendingFetch: typeof fetch = (_input, init) => new Promise((_resolve, reject) => {
+      fetchStarted();
       init?.signal?.addEventListener('abort', () => {
         innerAborted = true;
         reject(new DOMException('aborted', 'AbortError'));
@@ -70,6 +94,7 @@ describe('Phase 8 adversarial YouTube readiness', () => {
       fetch: pendingFetch,
       timeoutMs: 5_000,
     });
+    await started;
     outer.abort();
 
     await expect(check).resolves.toEqual({ status: 'aborted' });

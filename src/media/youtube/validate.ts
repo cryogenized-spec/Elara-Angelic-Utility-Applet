@@ -43,7 +43,7 @@ export async function validateYouTubeApiKey(options: ValidateYouTubeKeyOptions):
     return { valid: false, reason: 'invalid-key', message: 'No API key provided.' };
   }
 
-  let consented = false;
+  let consented: boolean;
   try {
     consented = await (options.consent ?? hasAcceptedYouTubePolicy)();
   } catch {

@@ -84,7 +84,7 @@ describe('memory tools through the interactive Gemini tool loop', () => {
         source: 'elara',
         conversationId: 'thread_1',
         messageId: 'message_1',
-        note: 'idempotency:generation_1:call_1',
+        note: 'idempotency:thread_1:message_1:generation_1:call_1',
       },
     });
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({

@@ -1,7 +1,8 @@
 import type { DurableMemory } from './types';
 import { memory, type MemoryCapabilityContext } from './capability';
-import { getMemory, reinforceMemory, updateMemory } from './store';
+import { getMemory, updateMemory } from './store';
 import { authorizeMemoryMutation } from './permissions';
+import { applyMemoryLifecyclePolicy, reinforceMemoryFromEvidence } from './lifecycle';
 
 export type ObservationRelation = 'support' | 'conflict' | 'related';
 
@@ -50,10 +51,9 @@ export async function recordObservation(request: ObservationRequest, context: Ob
 
 /**
  * Explicitly attach an observation to an established memory.
- * Supporting evidence reinforces the target once; conflicting evidence is
- * retained as a visible relationship and never overwrites the target prose.
- * Replaying the same observation/relation is a no-op rather than a second
- * reinforcement, while attempting to reclassify that observation fails closed.
+ * Supporting evidence reinforces the target once using the application-owned
+ * lifecycle policy; conflicting evidence is retained without rewriting prose.
+ * Replaying the same relation is a no-op and reclassification fails closed.
  */
 export async function consolidateObservation(
   observationId: string,
@@ -77,28 +77,35 @@ export async function consolidateObservation(
   if (existingRelation) throw new Error('Observation is already consolidated with a different relation.');
 
   if (relation === 'support') {
-    const reinforced = await reinforceMemory(target.id);
-    return updateMemory(reinforced.id, {
+    const reinforced = await reinforceMemoryFromEvidence(target.id);
+    const linked = await updateMemory(reinforced.id, {
       supportingMemoryIds: appendUnique(reinforced.supportingMemoryIds, observation.id),
     });
+    // Supporting evidence is retained but recedes behind the consolidated target.
+    if (observation.lifecycle === 'active') await updateMemory(observation.id, { lifecycle: 'dormant' });
+    return applyMemoryLifecyclePolicy(linked.id);
   }
 
   if (relation === 'conflict') {
-    return updateMemory(target.id, {
+    const linked = await updateMemory(target.id, {
       conflictingMemoryIds: appendUnique(target.conflictingMemoryIds, observation.id),
     });
+    // Conflict evidence stays active so unresolved contradiction can still surface.
+    return applyMemoryLifecyclePolicy(linked.id);
   }
 
-  return updateMemory(target.id, {
+  const linked = await updateMemory(target.id, {
     relatedMemoryIds: appendUnique(target.relatedMemoryIds, observation.id),
   });
+  if (observation.lifecycle === 'active') await updateMemory(observation.id, { lifecycle: 'dormant' });
+  return linked;
 }
 
 /**
  * Create a conservative replacement and link both sides of the supersession.
- * The old memory remains active until the lifecycle pass decides otherwise.
  * CORE authority is never inherited automatically; episodic targets remain
- * episodic, everything else restarts as contextual evidence.
+ * episodic, everything else restarts as contextual evidence. Once both links
+ * exist, the replaced record becomes dormant rather than being deleted.
  */
 export async function supersedeMemory(
   targetMemoryId: string,
@@ -133,5 +140,6 @@ export async function supersedeMemory(
     });
   }
 
+  linkedTarget = await applyMemoryLifecyclePolicy(linkedTarget.id);
   return { target: linkedTarget, replacement };
 }

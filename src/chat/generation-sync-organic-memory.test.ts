@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ChatMessage, ConversationState, ProviderStatus } from '../domain/chat';
 import type { OrganicObservationResult } from '../memory/organic-observer';
 
@@ -63,6 +63,11 @@ function completedGeneration(withMemoryTool = false) {
 }
 
 describe('terminal persistence -> organic observation barrier', () => {
+  beforeEach(() => {
+    observePersistedTurn.mockReset();
+    geminiOrganicMemoryExtractor.mockReset();
+  });
+
   it('does not inspect memory until the response save has durably resolved', async () => {
     const gate = deferred<void>();
     const extractor = vi.fn();

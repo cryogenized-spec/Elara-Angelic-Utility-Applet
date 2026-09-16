@@ -42,6 +42,12 @@ type ExchangeFixture = {
   name?: string;
 };
 
+type RefreshFailureFixture = {
+  error: string;
+  errorDescription: string;
+  status: number;
+};
+
 const DEFAULT_EXCHANGE: ExchangeFixture = {
   accessToken: 'access-token-one',
   refreshToken: 'refresh-token-must-never-be-returned',
@@ -50,7 +56,10 @@ const DEFAULT_EXCHANGE: ExchangeFixture = {
   name: 'Owner',
 };
 
-function mockProvider(fixtures: readonly ExchangeFixture[] = [DEFAULT_EXCHANGE]): ProviderMockCounters {
+function mockProvider(
+  fixtures: readonly ExchangeFixture[] = [DEFAULT_EXCHANGE],
+  refreshFailure?: RefreshFailureFixture,
+): ProviderMockCounters {
   const counters: ProviderMockCounters = { exchange: 0, refresh: 0, userinfo: 0, revoke: 0 };
 
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -72,6 +81,12 @@ function mockProvider(fixtures: readonly ExchangeFixture[] = [DEFAULT_EXCHANGE])
       }
       if (grantType === 'refresh_token') {
         counters.refresh += 1;
+        if (refreshFailure) {
+          return new Response(JSON.stringify({
+            error: refreshFailure.error,
+            error_description: refreshFailure.errorDescription,
+          }), { status: refreshFailure.status, headers: { 'content-type': 'application/json' } });
+        }
         return new Response(JSON.stringify({
           access_token: 'access-token-refreshed',
           expires_in: 3600,
@@ -241,18 +256,18 @@ describe('GoogleOAuthVault', () => {
   });
 
   it('turns provider invalid_grant into explicit reauthorization and deletes the revoked durable grant', async () => {
-    mockProvider();
+    const provider = mockProvider([DEFAULT_EXCHANGE], {
+      error: 'invalid_grant',
+      errorDescription: 'Token has been expired or revoked.',
+      status: 400,
+    });
     expect((await exchange('revoked-grant-code')).status).toBe(200);
     expect(await credentialSnapshot()).not.toBeNull();
-
-    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
-      error: 'invalid_grant',
-      error_description: 'Token has been expired or revoked.',
-    }), { status: 400, headers: { 'content-type': 'application/json' } }));
 
     const refreshed = await doFetch(await signedWrite('/google/oauth/token', '{}'));
     expect(refreshed.status).toBe(409);
     expect(await refreshed.json()).toEqual(expect.objectContaining({ code: 'reauthorization_required' }));
+    expect(provider.refresh).toBe(1);
     expect(await credentialSnapshot()).toBeNull();
 
     const status = await doFetch(await bearerRead('/google/oauth/status'));

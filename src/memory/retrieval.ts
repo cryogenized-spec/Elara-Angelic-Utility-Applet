@@ -76,6 +76,9 @@ export function memoryScopeForConversation(conversationId: string, state: Folder
 
 export function isMemoryRetrievable(memory: DurableMemory, scope: MemoryRetrievalScope, now = scope.now ?? Date.now()): boolean {
   if (memory.lifecycle === 'archived') return false;
+  // Dormant micro-observations remain as evidence in Memory Bank but must not
+  // consume normal conversational recall budget after consolidation/staleness.
+  if (memory.kind === 'MICRO_OBSERVATION' && memory.lifecycle === 'dormant') return false;
   if (memory.supersededBy.length > 0) return false;
   if (memory.expiresAt !== null && memory.expiresAt <= now) return false;
   if (memory.folderId === null) return scope.includeGlobal !== false;

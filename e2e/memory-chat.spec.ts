@@ -3,6 +3,8 @@ import { expect, test, type Page } from '@playwright/test';
 type InteractionPayload = Record<string, unknown>;
 
 const USER_EVIDENCE = 'I prefer compact dark editor layouts for this project.';
+const ASSISTANT_RESPONSE = 'Memory closure answer.';
+const CONVERSATION_DB = 'elara-angelic-utility-applet';
 
 async function unlockTestGemini(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Open sidebar' }).click();
@@ -19,6 +21,29 @@ async function unlockTestGemini(page: Page): Promise<void> {
 async function ask(page: Page, text: string): Promise<void> {
   await page.getByRole('textbox', { name: 'Message Elara' }).fill(text);
   await page.getByRole('button', { name: 'Send message' }).click();
+}
+
+async function persistedAssistantResponseExists(page: Page, expectedText: string): Promise<boolean> {
+  return page.evaluate(async ({ databaseName, text }) => {
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open(databaseName);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error ?? new Error('Could not open the conversation database.'));
+    });
+
+    try {
+      if (!database.objectStoreNames.contains('messages')) return false;
+      const rows = await new Promise<Array<Record<string, unknown>>>((resolve, reject) => {
+        const transaction = database.transaction('messages', 'readonly');
+        const request = transaction.objectStore('messages').getAll();
+        request.onsuccess = () => resolve(request.result as Array<Record<string, unknown>>);
+        request.onerror = () => reject(request.error ?? new Error('Could not read persisted chat messages.'));
+      });
+      return rows.some((row) => row.role === 'assistant' && row.text === text);
+    } finally {
+      database.close();
+    }
+  }, { databaseName: CONVERSATION_DB, text: expectedText });
 }
 
 function thoughtStep(index: number, text: string): string {
@@ -71,12 +96,14 @@ test('chat exposes memory tools and persists organic capture with the paging-boo
   test.setTimeout(25_000);
   const chatRequests: InteractionPayload[] = [];
   const observerRequests: InteractionPayload[] = [];
+  let observerSawPersistedResponse: boolean | null = null;
 
   await page.route('**/v1/interactions*', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}') as InteractionPayload;
     const input = typeof payload.input === 'string' ? payload.input : '';
 
     if (input.startsWith('USER_MESSAGE:\n')) {
+      observerSawPersistedResponse = await persistedAssistantResponseExists(page, ASSISTANT_RESPONSE);
       observerRequests.push(payload);
       await route.fulfill({
         status: 200,
@@ -92,17 +119,18 @@ test('chat exposes memory tools and persists organic capture with the paging-boo
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
-      body: completedTurn('memory-chat', 'Memory closure answer.', ['Considering durable user context.']),
+      body: completedTurn('memory-chat', ASSISTANT_RESPONSE, ['Considering durable user context.']),
     });
   });
 
   await page.goto('');
   await unlockTestGemini(page);
   await ask(page, USER_EVIDENCE);
-  await expect(page.getByText('Memory closure answer.', { exact: true })).toBeVisible();
+  await expect(page.getByText(ASSISTANT_RESPONSE, { exact: true })).toBeVisible();
 
   await expect.poll(() => chatRequests.length).toBe(1);
   await expect.poll(() => observerRequests.length).toBe(1);
+  expect(observerSawPersistedResponse).toBe(true);
 
   const memoryTools = declaredToolNames(chatRequests[0])
     .filter((name) => name.startsWith('memory.'))
@@ -129,7 +157,7 @@ test('chat exposes memory tools and persists organic capture with the paging-boo
 
   await page.getByRole('button', { name: 'Back to chat' }).click();
   await page.reload();
-  await expect(page.getByText('Memory closure answer.', { exact: true })).toBeVisible();
+  await expect(page.getByText(ASSISTANT_RESPONSE, { exact: true })).toBeVisible();
 
   const rehydrated = page.getByRole('region', { name: 'Generation activity' });
   await expect(rehydrated).toHaveCount(1);

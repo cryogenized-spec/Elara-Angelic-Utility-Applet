@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
-import { archiveMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, saveMemory, saveMemoryOnce, updateMemory } from './store';
+import { archiveMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, runMemoryMutationTransaction, saveMemory, saveMemoryOnce, updateMemory } from './store';
 
 describe('canonical durable memory store', () => {
   beforeEach(async () => { await db.memories.clear(); });
@@ -62,6 +62,19 @@ describe('canonical durable memory store', () => {
       { title: 'Cancelled memory', body: 'This must not persist.', source },
       source.note,
       () => false,
+    )).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await db.memories.count()).toBe(0);
+  });
+
+  it('commits or rolls back a compound mutation as one authority boundary', async () => {
+    const committed = await runMemoryMutationTransaction(() => saveMemory({ title: 'Compound success', body: 'This transaction is allowed.' }));
+    expect(await getMemory(committed.id)).toBeDefined();
+    await deleteMemory(committed.id);
+
+    let checks = 0;
+    await expect(runMemoryMutationTransaction(
+      () => saveMemory({ title: 'Compound rollback', body: 'This write must be rolled back before commit.' }),
+      () => { checks += 1; return checks === 1; },
     )).rejects.toMatchObject({ name: 'AbortError' });
     expect(await db.memories.count()).toBe(0);
   });

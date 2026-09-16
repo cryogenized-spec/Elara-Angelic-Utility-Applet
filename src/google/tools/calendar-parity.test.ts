@@ -126,8 +126,14 @@ describe('Calendar parity tool boundary', () => {
     const update = confirmationRequestForCall({ tool: 'calendar.updateEvent', arguments: { eventId: 'event-1', etag: '"v1"', summary: 'Changed' } });
     const remove = confirmationRequestForCall({ tool: 'calendar.deleteEvent', arguments: { eventId: 'event-1', etag: '"v2"' } });
 
-    expect(create).toEqual(expect.objectContaining({ risk: 'write', resourceSummary: expect.stringContaining('send guest updates') }));
-    expect(update).toEqual(expect.objectContaining({ risk: 'write', resourceSummary: expect.stringContaining('using the version just read') }));
-    expect(remove).toEqual(expect.objectContaining({ risk: 'destructive', resourceSummary: expect.stringContaining('Delete Calendar event event-1') }));
+    expect(create).not.toBeNull();
+    expect(update).not.toBeNull();
+    expect(remove).not.toBeNull();
+    expect(create?.risk).toBe('write');
+    expect(create?.resourceSummary).toContain('send guest updates');
+    expect(update?.risk).toBe('write');
+    expect(update?.resourceSummary).toContain('using the version just read');
+    expect(remove?.risk).toBe('destructive');
+    expect(remove?.resourceSummary).toContain('Delete Calendar event event-1');
   });
 });

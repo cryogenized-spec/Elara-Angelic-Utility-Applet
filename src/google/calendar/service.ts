@@ -17,7 +17,8 @@ const MAX_FREEBUSY_CALENDARS = 50;
 const MAX_EVENT_BODY_BYTES = 1_000_000;
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 250;
-const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/i;
+const ALL_DAY_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))?$/i;
 const CONCRETE_ETAG_PATTERN = /^(?:W\/)?"[^"]+"$/;
 
 export type CalendarSendUpdates = 'all' | 'externalOnly';
@@ -211,6 +212,23 @@ function boundedText(value: string | undefined, field: string, maxLength: number
   return normalized || undefined;
 }
 
+function isValidIanaTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function boundedTimeZone(value: string | undefined): string | undefined {
+  const normalized = boundedText(value, 'time zone', MAX_TIME_ZONE_LENGTH);
+  if (normalized !== undefined && !isValidIanaTimeZone(normalized)) {
+    throw new Error('Google Calendar time zone must be a valid IANA time zone.');
+  }
+  return normalized;
+}
+
 function boundedPatchText(value: string, field: string, maxLength: number): string {
   const normalized = value.trim();
   if (normalized.length > maxLength) throw new Error(`Google Calendar ${field} is too long.`);
@@ -233,8 +251,23 @@ function boundedStringArray(values: readonly string[] | undefined, field: string
   });
 }
 
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function hasValidDateParts(year: number, month: number, day: number): boolean {
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month);
+}
+
 function isAllDayDate(value: string): boolean {
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+  const match = ALL_DAY_DATE_PATTERN.exec(value);
+  if (!match) return false;
+  const [, year, month, day] = match;
+  return hasValidDateParts(Number(year), Number(month), Number(day));
 }
 
 function hasExplicitOffset(value: string): boolean {
@@ -242,9 +275,13 @@ function hasExplicitOffset(value: string): boolean {
 }
 
 function isDateTime(value: string): boolean {
-  if (!DATE_TIME_PATTERN.test(value)) return false;
-  const deterministicValue = hasExplicitOffset(value) ? value : `${value}Z`;
-  return !Number.isNaN(Date.parse(deterministicValue));
+  const match = DATE_TIME_PATTERN.exec(value);
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] = match;
+  if (!hasValidDateParts(Number(year), Number(month), Number(day))) return false;
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return false;
+  if (offsetHour !== undefined && (Number(offsetHour) > 23 || Number(offsetMinute) > 59)) return false;
+  return true;
 }
 
 function isOffsetDateTime(value: string): boolean {
@@ -261,7 +298,10 @@ function validateTimePair(start: string, end: string, timeZone?: string): void {
   const startTimed = isDateTime(start);
   const endTimed = isDateTime(end);
   if ((!startAllDay && !startTimed) || (!endAllDay && !endTimed) || startAllDay !== endAllDay) {
-    throw new Error('Google Calendar start/end must both be RFC 3339 date-times or both be all-day YYYY-MM-DD dates.');
+    throw new Error('Google Calendar start/end must both be valid RFC 3339 date-times or both be real all-day YYYY-MM-DD dates.');
+  }
+  if (startTimed && endTimed && hasExplicitOffset(start) !== hasExplicitOffset(end)) {
+    throw new Error('Google Calendar timed start/end must both include UTC offsets or both rely on the explicit time zone.');
   }
   if ((startTimed && !hasExplicitOffset(start)) || (endTimed && !hasExplicitOffset(end))) {
     if (!timeZone) throw new Error('Google Calendar date-times without a UTC offset require an explicit time zone.');
@@ -388,10 +428,10 @@ export class GoogleCalendarService {
     const safeTimeMax = boundedText(input.timeMax, 'timeMax', MAX_TIME_PARAMETER_LENGTH);
     const safePageToken = boundedText(input.pageToken, 'page token', MAX_PAGE_TOKEN_LENGTH);
     const safeQuery = boundedText(input.query, 'query', MAX_QUERY_LENGTH);
-    const safeTimeZone = boundedText(input.timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
+    const safeTimeZone = boundedTimeZone(input.timeZone);
     const maxResults = boundedPageSize(input.maxResults);
-    if (safeTimeMin && !isOffsetDateTime(safeTimeMin)) throw new Error('Google Calendar timeMin must be an RFC 3339 timestamp with an explicit UTC offset.');
-    if (safeTimeMax && !isOffsetDateTime(safeTimeMax)) throw new Error('Google Calendar timeMax must be an RFC 3339 timestamp with an explicit UTC offset.');
+    if (safeTimeMin && !isOffsetDateTime(safeTimeMin)) throw new Error('Google Calendar timeMin must be a real RFC 3339 timestamp with an explicit UTC offset.');
+    if (safeTimeMax && !isOffsetDateTime(safeTimeMax)) throw new Error('Google Calendar timeMax must be a real RFC 3339 timestamp with an explicit UTC offset.');
     if (safeTimeMin && safeTimeMax && Date.parse(safeTimeMax) <= Date.parse(safeTimeMin)) throw new Error('Google Calendar timeMax must be after timeMin.');
     const access = await this.oauth.authorize('calendar.events.read');
     const request = this.buildEventsRequest(access, safeCalendarId, safeTimeMin, safeTimeMax, safePageToken, maxResults, safeQuery, safeTimeZone);
@@ -406,7 +446,7 @@ export class GoogleCalendarService {
   async getEvent(calendarId = 'primary', eventId: string, timeZone?: string): Promise<CalendarEventDetail> {
     const safeCalendarId = boundedText(calendarId, 'calendar ID', MAX_CALENDAR_ID_LENGTH) ?? 'primary';
     const safeEventId = boundedText(eventId, 'event ID', MAX_EVENT_ID_LENGTH);
-    const safeTimeZone = boundedText(timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
+    const safeTimeZone = boundedTimeZone(timeZone);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
     const access = await this.oauth.authorize('calendar.events.read');
     return this.getEventWithAccess(access, safeCalendarId, safeEventId, safeTimeZone);
@@ -452,9 +492,9 @@ export class GoogleCalendarService {
   async queryFreeBusy(timeMin: string, timeMax: string, calendarIds: readonly string[], timeZone?: string): Promise<CalendarFreeBusyResult> {
     const safeTimeMin = boundedText(timeMin, 'timeMin', MAX_TIME_PARAMETER_LENGTH);
     const safeTimeMax = boundedText(timeMax, 'timeMax', MAX_TIME_PARAMETER_LENGTH);
-    const safeTimeZone = boundedText(timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
+    const safeTimeZone = boundedTimeZone(timeZone);
     if (!safeTimeMin || !safeTimeMax || !isOffsetDateTime(safeTimeMin) || !isOffsetDateTime(safeTimeMax)) {
-      throw new Error('Google Calendar free/busy requires RFC 3339 timeMin and timeMax with explicit UTC offsets.');
+      throw new Error('Google Calendar free/busy requires real RFC 3339 timeMin and timeMax with explicit UTC offsets.');
     }
     if (Date.parse(safeTimeMax) <= Date.parse(safeTimeMin)) throw new Error('Google Calendar free/busy timeMax must be after timeMin.');
     const safeCalendarIds = boundedStringArray(calendarIds, 'calendar ID', MAX_FREEBUSY_CALENDARS, MAX_CALENDAR_ID_LENGTH) ?? [];
@@ -485,7 +525,7 @@ export class GoogleCalendarService {
     const safeStart = boundedText(input.start, 'event start', MAX_TIME_PARAMETER_LENGTH);
     const safeEnd = boundedText(input.end, 'event end', MAX_TIME_PARAMETER_LENGTH);
     if (!safeSummary || !safeStart || !safeEnd) throw new Error('Google Calendar event summary, start, and end are required.');
-    const safeTimeZone = boundedText(input.timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
+    const safeTimeZone = boundedTimeZone(input.timeZone);
     validateTimePair(safeStart, safeEnd, safeTimeZone);
     const safeLocation = boundedText(input.location, 'location', MAX_EVENT_LOCATION_LENGTH);
     const safeDescription = boundedText(input.description, 'description', MAX_EVENT_DESCRIPTION_LENGTH);
@@ -520,7 +560,7 @@ export class GoogleCalendarService {
   async updateSemanticEvent(input: CalendarEventSemanticUpdateInput): Promise<CalendarEventDetail> {
     const safeEventId = boundedText(input.eventId, 'event ID', MAX_EVENT_ID_LENGTH);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
-    const safeTimeZone = boundedText(input.timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
+    const safeTimeZone = boundedTimeZone(input.timeZone);
     const safeRecurrence = input.recurrence !== undefined ? validateRecurrence(input.recurrence) ?? [] : undefined;
     if (safeRecurrence?.length && (input.start === undefined || input.end === undefined)) {
       throw new Error('Google Calendar recurrence updates require explicit start and end boundaries.');

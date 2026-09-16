@@ -42,7 +42,10 @@ describe('memory lifecycle policy', () => {
   it('raises epistemic weight in bounded steps without reviving superseded memories', async () => {
     const target = await memory.save({ title: 'Preference', body: 'The user prefers compact layouts.', confidence: 0.6, importance: 0.35 });
     const reinforced = await reinforceMemoryFromEvidence(target.id);
-    expect(reinforced).toMatchObject({ reinforcementCount: 1, confidence: 0.68, importance: 0.39, lifecycle: 'active' });
+    expect(reinforced.reinforcementCount).toBe(1);
+    expect(reinforced.confidence).toBeCloseTo(0.68, 8);
+    expect(reinforced.importance).toBeCloseTo(0.39, 8);
+    expect(reinforced.lifecycle).toBe('active');
 
     await updateMemory(target.id, { supersededBy: ['replacement'], lifecycle: 'dormant' });
     const historical = await reinforceMemoryFromEvidence(target.id);
@@ -95,7 +98,8 @@ describe('memory lifecycle policy', () => {
     expect(dormantSuperseded.lifecycle).toBe('dormant');
     expect(await getMemory(superseded.id)).toBeDefined();
 
-    const expired = await memory.save({ title: 'Temporary fact', body: 'Temporary state.', expiresAt: 1_000 });
+    const expiring = await memory.save({ title: 'Temporary fact', body: 'Temporary state.' });
+    const expired = await updateMemory(expiring.id, { expiresAt: 1_000 });
     const dormantExpired = await applyMemoryLifecyclePolicy(expired.id, 2_000);
     expect(dormantExpired.lifecycle).toBe('dormant');
   });

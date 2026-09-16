@@ -39,11 +39,14 @@ export type MemoryToolName = keyof typeof memoryToolArgumentSchemas;
 export type MemoryLookupToolArguments = z.infer<typeof memoryLookupToolArgumentsSchema>;
 export type MemorySaveToolArguments = z.infer<typeof memorySaveToolArgumentsSchema>;
 export type MemoryReconcileToolArguments = z.infer<typeof memoryReconcileToolArgumentsSchema>;
-export type MemoryToolArguments = MemoryLookupToolArguments | MemorySaveToolArguments | MemoryReconcileToolArguments;
+export interface MemoryToolArgumentsByName {
+  'memory.lookup': MemoryLookupToolArguments;
+  'memory.save': MemorySaveToolArguments;
+  'memory.reconcile': MemoryReconcileToolArguments;
+}
+export type MemoryToolArguments = MemoryToolArgumentsByName[MemoryToolName];
 
-export function validateMemoryToolArguments(tool: 'memory.lookup', value: unknown): MemoryLookupToolArguments;
-export function validateMemoryToolArguments(tool: 'memory.save', value: unknown): MemorySaveToolArguments;
-export function validateMemoryToolArguments(tool: 'memory.reconcile', value: unknown): MemoryReconcileToolArguments;
-export function validateMemoryToolArguments(tool: MemoryToolName, value: unknown): MemoryToolArguments {
-  return memoryToolArgumentSchemas[tool].parse(value) as MemoryToolArguments;
+/** Preserve the exact argument type for literal callers while allowing union dispatch in the central executor. */
+export function validateMemoryToolArguments<T extends MemoryToolName>(tool: T, value: unknown): MemoryToolArgumentsByName[T] {
+  return memoryToolArgumentSchemas[tool].parse(value) as MemoryToolArgumentsByName[T];
 }

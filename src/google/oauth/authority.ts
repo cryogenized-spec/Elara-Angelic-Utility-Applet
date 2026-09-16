@@ -46,6 +46,8 @@ type StoredAuthorization = {
 type AccessSession = {
   accessToken: string;
   expiresAt: number;
+  /** Present only for paired durable OAuth sessions. */
+  vaultUpdatedAt?: number;
 };
 
 type DurableOAuthStatus = {
@@ -56,9 +58,10 @@ type DurableOAuthStatus = {
   refreshTokenExpiresAt?: number;
 };
 
-type DurableOAuthToken = DurableOAuthStatus & {
+type DurableOAuthToken = Omit<DurableOAuthStatus, 'updatedAt'> & {
   accessToken: string;
   expiresIn: number;
+  updatedAt: number;
 };
 
 class DurableGoogleOAuthError extends Error {
@@ -267,6 +270,13 @@ async function durablePost<T>(pairing: AutonomyPairing, path: string, payload: u
   return await response.json() as T;
 }
 
+function durableRevision(value: number | undefined): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
+    throw new DurableGoogleOAuthError('protocol', 'The paired Worker did not provide a valid Google OAuth grant revision.', 0);
+  }
+  return value;
+}
+
 function applyDurableStatus(remote: DurableOAuthStatus): void {
   const current = loadStored();
   legacyGrantedCapabilities = [];
@@ -277,6 +287,15 @@ function applyDurableStatus(remote: DurableOAuthStatus): void {
     delete (stored as { account?: unknown }).account;
     saveStored();
     return;
+  }
+  if (session) {
+    const remoteRevision = remote.updatedAt;
+    if (session.vaultUpdatedAt === undefined
+      || typeof remoteRevision !== 'number'
+      || !Number.isFinite(remoteRevision)
+      || session.vaultUpdatedAt !== remoteRevision) {
+      session = null;
+    }
   }
   stored.grantedProviderScopes = parseProviderScopes(remote.scopes.join(' '));
   stored.needsReauthorization = false;
@@ -374,6 +393,7 @@ async function acquireDurableToken(capability: GoogleCapabilityKey, pairing: Aut
   session = {
     accessToken: response.accessToken,
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
+    vaultUpdatedAt: durableRevision(response.updatedAt),
   };
   legacyGrantedCapabilities = [];
   stored.enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
@@ -389,6 +409,7 @@ async function refreshDurableToken(pairing: AutonomyPairing): Promise<void> {
   session = {
     accessToken: response.accessToken,
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
+    vaultUpdatedAt: durableRevision(response.updatedAt),
   };
   const scopes = parseProviderScopes(response.scopes.join(' '));
   if (scopes.length) stored.grantedProviderScopes = scopes;

@@ -68,12 +68,22 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'roleplay_setting.update': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.'), name: stringProperty('Optional replacement name.'), description: stringProperty('Optional replacement description.'), parentId: stringProperty('Optional destination parent id.'), type: { type: 'string', enum: ['building','room','outdoor','place','area','object','world'] } },
   'roleplay_setting.move': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.'), parentId: stringProperty('Optional destination parent id.') },
   'roleplay_setting.delete': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.') },
+  'memory.lookup': {
+    query: { type: 'string', minLength: 1, maxLength: 500, description: 'Concise query for finding an existing established durable memory to manage. Normal conversational recall is already automatic.' },
+  },
   'memory.save': {
     title: { type: 'string', minLength: 1, maxLength: 160, description: 'Short durable-memory title.' },
     body: { type: 'string', minLength: 1, maxLength: 4_000, description: 'Concise durable fact, preference, decision, commitment, or other information the user explicitly asked Elara to retain.' },
     kind: { type: 'string', enum: ['CONTEXTUAL', 'EPISODIC'], description: 'CONTEXTUAL for durable facts/preferences/working context; EPISODIC for a specific durable event or experience. Defaults to CONTEXTUAL.' },
     confidence: { type: 'number', minimum: 0, maximum: 1, description: 'Optional confidence from 0 to 1. Omit when the default is appropriate.' },
     importance: { type: 'number', minimum: 0, maximum: 1, description: 'Optional importance from 0 to 1. Omit when the default is appropriate.' },
+    tags: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 64 }, maxItems: 12, description: 'Optional concise search tags.' },
+  },
+  'memory.reconcile': {
+    targetRef: { type: 'string', minLength: 1, maxLength: 96, description: 'Opaque reference returned by memory.lookup in this same turn. Never supply a raw memory id.' },
+    relation: { type: 'string', enum: ['support', 'conflict', 'related', 'supersede'], description: 'How the new user-authored evidence relates to the selected memory.' },
+    title: { type: 'string', minLength: 1, maxLength: 160, description: 'Short title for the new evidence or replacement memory.' },
+    body: { type: 'string', minLength: 1, maxLength: 4_000, description: 'Concise user-authored evidence or replacement statement.' },
     tags: { type: 'array', items: { type: 'string', minLength: 1, maxLength: 64 }, maxItems: 12, description: 'Optional concise search tags.' },
   },
   'youtube.search': {
@@ -106,7 +116,9 @@ const requiredByTool: Record<string, readonly string[]> = {
   'drive.getFile': ['fileId'], 'drive.downloadFile': ['fileId'], 'drive.createFile': ['name'], 'drive.updateFile': ['fileId', 'patch'], 'drive.moveFile': ['fileId', 'parentId'],
   'sheets.getSpreadsheet': ['spreadsheetId'], 'sheets.readRange': ['spreadsheetId', 'range'], 'sheets.writeRange': ['spreadsheetId', 'range', 'values'], 'sheets.appendRows': ['spreadsheetId', 'range', 'values'], 'sheets.updateCell': ['spreadsheetId', 'range'], 'sheets.insertRows': ['spreadsheetId', 'sheetId', 'startIndex', 'count'], 'sheets.batchUpdate': ['spreadsheetId', 'requests'],
   'roleplay_setting.create': ['type', 'name'],
+  'memory.lookup': ['query'],
   'memory.save': ['title', 'body'],
+  'memory.reconcile': ['targetRef', 'relation', 'title', 'body'],
   'youtube.search': ['queries'],
 };
 

@@ -104,7 +104,7 @@ export class GoogleOAuthVault extends DurableObject {
   private readonly oauthEnv: GoogleOAuthVaultEnv;
 
   constructor(ctx: DurableObjectState, env: GoogleOAuthVaultEnv) {
-    super(ctx, env);
+    super(ctx, env as unknown as Record<string, unknown>);
     this.oauthEnv = env;
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS google_oauth_credential (

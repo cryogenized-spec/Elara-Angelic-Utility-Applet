@@ -74,6 +74,11 @@ function looksLikeCredential(evidence: string): boolean {
     || /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(evidence);
 }
 
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 export function boundedOrganicUserMessage(userMessage: string): string {
   return userMessage.trim().slice(0, MAX_ORGANIC_INPUT_CHARS);
 }
@@ -140,10 +145,14 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
   try {
     const folderState = await loadFolderState();
     const folderId = folderState.assignments[request.conversationId] ?? null;
+    const preparedCandidates = await Promise.all(candidates.map(async (candidate) => ({
+      candidate,
+      evidenceFingerprint: await sha256Hex(candidate.evidence),
+    })));
     if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
 
     await runMemoryMutationTransaction(async () => {
-      for (const candidate of candidates) {
+      for (const { candidate, evidenceFingerprint } of preparedCandidates) {
         await recordObservation(
           {
             title: DOMAIN_TITLES[candidate.domain],
@@ -157,7 +166,7 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
             conversationId: request.conversationId,
             messageId: request.messageId,
             folderId,
-            idempotencyKey: `organic:${request.conversationId}:${request.messageId}:${candidate.domain}:${candidate.evidence}`,
+            idempotencyKey: `organic:${request.conversationId}:${request.messageId}:${candidate.domain}:sha256:${evidenceFingerprint}`,
             isMutationAllowed,
           },
         );

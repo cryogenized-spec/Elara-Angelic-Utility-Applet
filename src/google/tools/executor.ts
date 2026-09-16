@@ -10,17 +10,19 @@ import { validateSemanticToolArguments, semanticToolArgumentSchemas, type Semant
 import { validateGoogleReadToolArguments, googleReadToolArgumentSchemas, type GoogleReadToolName } from './read-schemas';
 import { validateRoleplayWorldToolArguments, roleplayWorldToolArgumentSchemas, type RoleplayWorldToolName } from './roleplay-world-schemas';
 import { validateYouTubeToolArguments, youtubeToolArgumentSchemas, type YouTubeToolName } from '../../media/youtube-schema';
+import { validateMemoryToolArguments, memoryToolArgumentSchemas, type MemoryToolName } from '../../memory/tool-schema';
 import { loadRoleplayPreferences } from '../../persistence/preferences';
 
-export type LocalToolCapability = 'documents.local' | 'media.youtube.read';
+export type LocalToolCapability = 'documents.local' | 'media.youtube.read' | 'memory.durable.local';
 export type ToolCapability = GoogleCapabilityKey | LocalToolCapability;
+export type GoogleToolInvocation = GoogleToolCall & { readonly callId?: string };
 
 /**
  * Capabilities satisfied inside the application rather than by a Google OAuth
  * scope. They are not members of `googleCapabilityKeySchema`, so `safeCapability`
  * must recognize them before it parses.
  */
-const LOCAL_TOOL_CAPABILITIES: ReadonlySet<string> = new Set<string>(['documents.local', 'media.youtube.read']);
+const LOCAL_TOOL_CAPABILITIES: ReadonlySet<string> = new Set<string>(['documents.local', 'media.youtube.read', 'memory.durable.local']);
 
 /**
  * Capabilities that need no OAuth authorization check. This is the local set plus
@@ -29,10 +31,32 @@ const LOCAL_TOOL_CAPABILITIES: ReadonlySet<string> = new Set<string>(['documents
  */
 const NON_OAUTH_CAPABILITIES: ReadonlySet<string> = new Set<string>([...LOCAL_TOOL_CAPABILITIES, 'roleplay.world.local']);
 
-export interface GoogleToolExecutionContext { readonly tool: GoogleToolName; readonly descriptor: GoogleToolDescriptor; readonly capability: ToolCapability; readonly risk: GoogleToolRisk; readonly arguments: Readonly<Record<string, unknown>>; readonly signal?: AbortSignal; readonly generationId?: string; readonly isGenerationActive?: () => boolean; }
+export interface GoogleToolExecutionContext {
+  readonly tool: GoogleToolName;
+  readonly descriptor: GoogleToolDescriptor;
+  readonly capability: ToolCapability;
+  readonly risk: GoogleToolRisk;
+  readonly arguments: Readonly<Record<string, unknown>>;
+  readonly callId?: string;
+  readonly conversationId?: string;
+  readonly messageId?: string;
+  readonly signal?: AbortSignal;
+  readonly generationId?: string;
+  readonly isGenerationActive?: () => boolean;
+}
 export type GoogleToolHandler = (context: GoogleToolExecutionContext) => Promise<unknown>;
 export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandler>>;
-export interface GoogleToolExecutorOptions { readonly oauth: GoogleOAuthAuthority; readonly handlers: GoogleToolHandlers; readonly confirm?: (request: WriteConfirmationRequest) => Promise<boolean>; readonly now?: () => Date; readonly signal?: AbortSignal; readonly generationId?: string; readonly isGenerationActive?: () => boolean; }
+export interface GoogleToolExecutorOptions {
+  readonly oauth: GoogleOAuthAuthority;
+  readonly handlers: GoogleToolHandlers;
+  readonly confirm?: (request: WriteConfirmationRequest) => Promise<boolean>;
+  readonly now?: () => Date;
+  readonly signal?: AbortSignal;
+  readonly conversationId?: string;
+  readonly messageId?: string;
+  readonly generationId?: string;
+  readonly isGenerationActive?: () => boolean;
+}
 export type GoogleToolExecutionResult =
   | { readonly ok: true; readonly correlationId: string; readonly tool: GoogleToolName; readonly result: unknown }
   | { readonly ok: false; readonly correlationId: string; readonly tool?: GoogleToolName; readonly code: 'INVALID_TOOL_CALL' | 'AUTHORIZATION_REQUIRED' | 'CONFIRMATION_REQUIRED' | 'USER_DECLINED' | 'HANDLER_UNAVAILABLE' | 'EXECUTION_FAILED'; readonly failure: GoogleToolFailure; readonly confirmation?: WriteConfirmationRequest; readonly requiredCapability?: GoogleCapabilityKey };
@@ -44,8 +68,8 @@ function safeCapability(value: string): ToolCapability {
   return googleCapabilityKeySchema.parse(value);
 }
 function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Record<string, unknown>> {
-  // The schema module is Zod plus two constants only; the media provider, cache,
-  // and budget stay behind the handler's dynamic import.
+  // Schema modules remain validation-only; provider/cache/runtime work stays in handlers.
+  if (Object.prototype.hasOwnProperty.call(memoryToolArgumentSchemas, tool)) return validateMemoryToolArguments(tool as MemoryToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(youtubeToolArgumentSchemas, tool)) return validateYouTubeToolArguments(tool as YouTubeToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(roleplayWorldToolArgumentSchemas, tool)) return validateRoleplayWorldToolArguments(tool as RoleplayWorldToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(semanticToolArgumentSchemas, tool)) return validateSemanticToolArguments(tool as SemanticToolName, value) as Readonly<Record<string, unknown>>;
@@ -117,6 +141,7 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'roleplay_setting.update': return `Update ${id ?? 'selected entity'}: ${Object.entries(args).filter(([key]) => !['id', 'ref'].includes(key)).map(([key, entry]) => `${key}=${JSON.stringify(entry)}`).join(', ')}.`;
     case 'roleplay_setting.move': return `Move ${id ?? 'selected entity'} under ${typeof args.parentId === 'string' ? args.parentId : 'the world root'}.`;
     case 'roleplay_setting.delete': return `Delete ${id ?? 'selected entity'} and any child entities beneath it.`;
+    case 'memory.save': return `Save durable memory “${value(args, 'title') ?? 'Untitled'}”.`;
     default: return fallback;
   }
 }
@@ -131,8 +156,9 @@ export function confirmationRequestForCall(call: GoogleToolCall, now = new Date(
   return { tool: descriptor.name, risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>, resourceSummary: confirmationSummary(parsed.data.tool, args, descriptor.description), requestedAt: now.toISOString() };
 }
 
-export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToolExecutorOptions): Promise<GoogleToolExecutionResult> {
+export async function executeGoogleTool(call: GoogleToolInvocation, options: GoogleToolExecutorOptions): Promise<GoogleToolExecutionResult> {
   const id = correlationId();
+  const providerCallId = typeof call.callId === 'string' && call.callId.trim() ? call.callId.trim() : undefined;
   const parsed = googleToolCallSchema.safeParse(call);
   if (!parsed.success) return { ok: false, correlationId: id, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) };
   const validCall = parsed.data;
@@ -161,6 +187,21 @@ export async function executeGoogleTool(call: GoogleToolCall, options: GoogleToo
   }
   const handler = options.handlers[descriptor.name];
   if (!handler) return { ok: false, correlationId: id, tool: validCall.tool, code: 'HANDLER_UNAVAILABLE', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
-  try { const result = await handler({ tool: descriptor.name, descriptor, capability, risk: descriptor.risk, arguments: args, signal: options.signal, generationId: options.generationId, isGenerationActive: options.isGenerationActive }); return { ok: true, correlationId: id, tool: descriptor.name, result }; }
+  try {
+    const result = await handler({
+      tool: descriptor.name,
+      descriptor,
+      capability,
+      risk: descriptor.risk,
+      arguments: args,
+      callId: providerCallId,
+      conversationId: options.conversationId,
+      messageId: options.messageId,
+      signal: options.signal,
+      generationId: options.generationId,
+      isGenerationActive: options.isGenerationActive,
+    });
+    return { ok: true, correlationId: id, tool: descriptor.name, result };
+  }
   catch { return { ok: false, correlationId: id, tool: descriptor.name, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'provider' }) }; }
 }

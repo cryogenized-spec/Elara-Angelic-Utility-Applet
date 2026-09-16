@@ -1,9 +1,10 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
-import { getMemory } from './store';
+import { getMemory, updateMemory } from './store';
 import { consolidateObservation, recordObservation, supersedeMemory } from './observation';
 import { memory } from './capability';
+import { MEMORY_MAX_RELATIONSHIPS } from './normalize';
 
 describe('memory observation and consolidation', () => {
   beforeEach(async () => { await db.memories.clear(); });
@@ -33,6 +34,39 @@ describe('memory observation and consolidation', () => {
     expect(replay.reinforcementCount).toBe(1);
     expect(replay.body).toBe(target.body);
     expect((await getMemory(observation.id))?.lifecycle).toBe('dormant');
+  });
+
+  it('fails closed before changing weight when a relationship array is saturated', async () => {
+    const full = Array.from({ length: MEMORY_MAX_RELATIONSHIPS }, (_, index) => `existing-${index}`);
+
+    for (const relation of ['support', 'conflict', 'related'] as const) {
+      const target = await memory.save({ title: `${relation} target`, body: `Target for ${relation}.`, confidence: 0.7 });
+      const observation = await recordObservation({ title: `${relation} evidence`, body: `Fresh ${relation} evidence.` });
+      const patch = relation === 'support'
+        ? { supportingMemoryIds: full }
+        : relation === 'conflict'
+          ? { conflictingMemoryIds: full }
+          : { relatedMemoryIds: full };
+      await updateMemory(target.id, patch);
+
+      await expect(consolidateObservation(observation.id, target.id, relation)).rejects.toThrow('relationship capacity reached');
+      const unchanged = await getMemory(target.id);
+      expect(unchanged?.reinforcementCount).toBe(0);
+      expect(unchanged?.confidence).toBe(0.7);
+      expect((await getMemory(observation.id))?.lifecycle).toBe('active');
+    }
+  });
+
+  it('keeps an already-linked saturated support replay idempotent', async () => {
+    const target = await memory.save({ title: 'Saturated target', body: 'Stable target.', confidence: 0.7 });
+    const observation = await recordObservation({ title: 'Existing evidence', body: 'Already consolidated evidence.' });
+    const full = [observation.id, ...Array.from({ length: MEMORY_MAX_RELATIONSHIPS - 1 }, (_, index) => `existing-${index}`)];
+    await updateMemory(target.id, { supportingMemoryIds: full, reinforcementCount: 9, confidence: 0.9 });
+
+    const replay = await consolidateObservation(observation.id, target.id, 'support');
+    expect(replay.reinforcementCount).toBe(9);
+    expect(replay.confidence).toBe(0.9);
+    expect(replay.supportingMemoryIds).toHaveLength(MEMORY_MAX_RELATIONSHIPS);
   });
 
   it('rejects reclassifying already-consolidated evidence', async () => {
@@ -75,6 +109,18 @@ describe('memory observation and consolidation', () => {
     expect(result.target.supersededBy).toContain(result.replacement.id);
     expect(result.target.lifecycle).toBe('dormant');
     expect(await getMemory(target.id)).toMatchObject({ lifecycle: 'dormant', body: target.body });
+  });
+
+  it('fails closed before creating a replacement when supersession capacity is saturated', async () => {
+    const target = await memory.save({ title: 'Old preference', body: 'Historical preference.', kind: 'CORE' });
+    const full = Array.from({ length: MEMORY_MAX_RELATIONSHIPS }, (_, index) => `replacement-${index}`);
+    await updateMemory(target.id, { supersededBy: full, lifecycle: 'dormant' });
+    const countBefore = await db.memories.count();
+
+    await expect(supersedeMemory(target.id, { title: 'Overflow replacement', body: 'Must not be created.' }))
+      .rejects.toThrow('supersession relationship capacity reached');
+    expect(await db.memories.count()).toBe(countBefore);
+    expect((await getMemory(target.id))?.supersededBy).toEqual(full);
   });
 
   it('retains episodic kind when superseding an episodic memory', async () => {

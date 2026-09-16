@@ -5,6 +5,16 @@ declare module 'cloudflare:test' {
   export const SELF: {
     fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
   };
+  export const fetchMock: {
+    activate(): void;
+    disableNetConnect(): void;
+    assertNoPendingInterceptors(): void;
+    get(origin: string): {
+      intercept(options: { path: string; method?: string }): {
+        reply(statusCode: number, data: string, responseOptions?: { headers?: Record<string, string> }): unknown;
+      };
+    };
+  };
   /** Deletes all Durable Object instances and their storage (test isolation). */
   export function reset(): Promise<void>;
   /** Creates the ScheduledController for invoking a worker's scheduled() handler. */

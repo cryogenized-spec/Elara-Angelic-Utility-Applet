@@ -283,13 +283,12 @@ A green test that passes for the wrong reason is a defect. Pass 5's media-suite 
 | 4 | deterministic evidence lifecycle / contradiction / supersession | `14ae86d8b0a4713b3671183c0073db1bc53ac1dc` |
 | 5 | Memory Bank parity / landmarks / provenance / audit / portable archive | `bdc10d79e1da8964de90debfef73c5ca0bc512cc` |
 | 6 | hostile cross-boundary certification + final hardening | `766e94b9870ff5d9037950727534daa2e2587e6b` |
-| closure | browser chat acceptance + exact-head final reliability | `7ab3a8aee8574f2ce32614621ac93c60f7eb67af` |
 
-Every completed runtime pass cleared documentation/verification integrity, architecture/security, secret and supply-chain gates, registry signatures, dependency audit, zero-warning lint, TS6, TS7, unit + coverage ratchets, Worker/Durable Object tests, production build, Playwright E2E and final reliability before merge. PR #66 added the missing browser-boundary proof without changing production behavior and passed the same complete pipeline on exact head `f509e5aa5fc3588641a619508ef4c9ffe7bccbfe` before squash merge.
+Every completed runtime pass cleared documentation/verification integrity, architecture/security, secret and supply-chain gates, registry signatures, dependency audit, zero-warning lint, TS6, TS7, unit + coverage ratchets, Worker/Durable Object tests, production build, Playwright E2E and final reliability before merge.
 
 ## 11. Agent handoff
 
-**Program status: CLOSED / CERTIFIED.** The seven-pass durable-memory completion program and its final browser closure audit are merged. Treat `7ab3a8aee8574f2ce32614621ac93c60f7eb67af` as the certified handover baseline for memory work.
+**Program status: CLOSED / CERTIFIED.** The seven-pass durable-memory completion program and its final browser closure audit are merged. Treat frontmatter `verified_commit` as the certified handover baseline for memory work.
 
 For future work, read `AGENTS.md`, route through `documents/manifest.json`, then load this document before modifying any memory path. Inspect only the exact source/tests needed for the requested change.
 

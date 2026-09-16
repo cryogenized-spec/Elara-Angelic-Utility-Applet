@@ -38,8 +38,12 @@ function assertTurnActive(signal: AbortSignal | undefined, isGenerationActive: (
   }
 }
 
-function pruneExpiringMap<T extends { expiresAt: number }>(map: Map<string, T>, maxEntries: number, now: number): void {
+function pruneExpired<T extends { expiresAt: number }>(map: Map<string, T>, now: number): void {
   for (const [key, entry] of map) if (entry.expiresAt <= now) map.delete(key);
+}
+
+function reserveEntry<T extends { expiresAt: number }>(map: Map<string, T>, maxEntries: number, now: number): void {
+  pruneExpired(map, now);
   while (map.size >= maxEntries) {
     const oldest = map.keys().next().value as string | undefined;
     if (!oldest) break;
@@ -49,7 +53,7 @@ function pruneExpiringMap<T extends { expiresAt: number }>(map: Map<string, T>, 
 
 function issueLookupRef(memoryId: string, conversationId: string, generationId: string): string {
   const now = Date.now();
-  pruneExpiringMap(lookupGrants, MAX_MEMORY_REFS, now);
+  reserveEntry(lookupGrants, MAX_MEMORY_REFS, now);
   const ref = `memref_${crypto.randomUUID().replace(/-/g, '')}`;
   lookupGrants.set(ref, { memoryId, conversationId, generationId, expiresAt: now + MEMORY_REF_TTL_MS });
   return ref;
@@ -57,7 +61,7 @@ function issueLookupRef(memoryId: string, conversationId: string, generationId: 
 
 function resolveLookupRef(ref: string, conversationId: string, generationId: string): string {
   const now = Date.now();
-  pruneExpiringMap(lookupGrants, MAX_MEMORY_REFS, now);
+  pruneExpired(lookupGrants, now);
   const grant = lookupGrants.get(ref);
   if (!grant || grant.conversationId !== conversationId || grant.generationId !== generationId || grant.expiresAt <= now) {
     throw new Error('Memory reference is unavailable for this turn.');
@@ -155,7 +159,7 @@ export const memoryToolHandlers: GoogleToolHandlers = {
     const operationKey = `${boundGenerationId}:${boundCallId}`;
     const signature = reconcileSignature(targetMemoryId, args.relation, args.title, args.body, args.tags);
     const now = Date.now();
-    pruneExpiringMap(reconcileReplays, MAX_RECONCILE_REPLAYS, now);
+    pruneExpired(reconcileReplays, now);
     const replay = reconcileReplays.get(operationKey);
     if (replay) {
       if (replay.signature !== signature) throw new Error('Memory reconciliation replay arguments do not match the original call.');
@@ -189,7 +193,7 @@ export const memoryToolHandlers: GoogleToolHandlers = {
       return { reconciled: true, relation: args.relation, evidenceKind: 'MICRO_OBSERVATION' } as const;
     }, isMutationAllowed);
 
-    pruneExpiringMap(reconcileReplays, MAX_RECONCILE_REPLAYS, Date.now());
+    reserveEntry(reconcileReplays, MAX_RECONCILE_REPLAYS, Date.now());
     reconcileReplays.set(operationKey, { signature, result, expiresAt: Date.now() + MEMORY_REF_TTL_MS });
     return result;
   },

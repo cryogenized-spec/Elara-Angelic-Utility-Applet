@@ -96,6 +96,32 @@ describe('terminal persistence -> organic observation barrier', () => {
     }));
   });
 
+  it('persists a dedicated memory activity row after durable organic capture', async () => {
+    const saved: ConversationState[] = [];
+    geminiOrganicMemoryExtractor.mockReturnValue(vi.fn());
+    observePersistedTurn.mockResolvedValue({ status: 'recorded', count: 2 } satisfies OrganicObservationResult);
+    const harness = makeContext(async (next) => { saved.push(next); });
+    const { state, completed } = completedGeneration();
+
+    syncGenerationEvent(completed, state, harness.context);
+    const handedOff = harness.read().handedOff;
+    if (!handedOff) throw new Error('expected terminal persistence handoff');
+    await handedOff;
+
+    expect(saved).toHaveLength(2);
+    const tracedAssistant = saved[1].messages.find((message) => message.id === 'assistant-1');
+    expect(tracedAssistant?.generationActivity?.steps.at(-1)).toMatchObject({
+      id: 'memory-observer-gen-1',
+      kind: 'context',
+      state: 'done',
+      label: 'Saved to memory',
+      detail: 'Recorded 2 durable observations.',
+      contextCategory: 'memory',
+    });
+    const visibleAssistant = harness.read().conversation.messages.find((message) => message.id === 'assistant-1');
+    expect(visibleAssistant?.generationActivity?.steps.at(-1)).toMatchObject({ label: 'Saved to memory', contextCategory: 'memory' });
+  });
+
   it('never runs the observer when the response save fails', async () => {
     const saveError = new Error('IndexedDB write failed');
     geminiOrganicMemoryExtractor.mockReturnValue(vi.fn());
@@ -139,6 +165,25 @@ describe('terminal persistence -> organic observation barrier', () => {
     if (!handedOff) throw new Error('expected terminal persistence handoff');
 
     await expect(handedOff).resolves.toBeUndefined();
+    expect(harness.read().conversation.messages.some((message) => message.role === 'assistant')).toBe(true);
+  });
+
+  it('keeps response and memory success when optional activity persistence fails', async () => {
+    let saves = 0;
+    geminiOrganicMemoryExtractor.mockReturnValue(vi.fn());
+    observePersistedTurn.mockResolvedValue({ status: 'recorded', count: 1 } satisfies OrganicObservationResult);
+    const harness = makeContext(async () => {
+      saves += 1;
+      if (saves === 2) throw new Error('trace metadata write failed');
+    });
+    const { state, completed } = completedGeneration();
+
+    syncGenerationEvent(completed, state, harness.context);
+    const handedOff = harness.read().handedOff;
+    if (!handedOff) throw new Error('expected terminal persistence handoff');
+
+    await expect(handedOff).resolves.toBeUndefined();
+    expect(saves).toBe(2);
     expect(harness.read().conversation.messages.some((message) => message.role === 'assistant')).toBe(true);
   });
 });

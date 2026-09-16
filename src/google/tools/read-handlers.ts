@@ -18,9 +18,25 @@ function readArgs<T extends keyof typeof googleReadToolArgumentSchemas>(tool: T,
 }
 
 export const googleReadToolHandlers: GoogleToolHandlers = {
+  'calendar.listCalendars': async ({ arguments: args }) => {
+    const parsed = readArgs('calendar.listCalendars', args);
+    return calendar.listCalendars(parsed);
+  },
   'calendar.listEvents': async ({ arguments: args }) => {
     const parsed = readArgs('calendar.listEvents', args);
-    return calendar.listEvents(parsed.calendarId, parsed.timeMin, parsed.timeMax);
+    return calendar.listEventPage(parsed);
+  },
+  'calendar.getEvent': async ({ arguments: args }) => {
+    const parsed = readArgs('calendar.getEvent', args);
+    return calendar.getEvent(parsed.calendarId, parsed.eventId, parsed.timeZone);
+  },
+  'calendar.getSettings': async ({ arguments: args }) => {
+    readArgs('calendar.getSettings', args);
+    return calendar.getSettings();
+  },
+  'calendar.queryFreeBusy': async ({ arguments: args }) => {
+    const parsed = readArgs('calendar.queryFreeBusy', args);
+    return calendar.queryFreeBusy(parsed.timeMin, parsed.timeMax, parsed.calendarIds, parsed.timeZone);
   },
   'tasks.listTaskLists': async ({ arguments: args }) => {
     const parsed = readArgs('tasks.listTaskLists', args);

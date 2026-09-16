@@ -39,6 +39,22 @@ describe('memory lifecycle policy', () => {
     expect(await findExactEvidenceSupportTarget(otherDomain)).toBeUndefined();
   });
 
+  it('does not select or reinforce an expired memory as an automatic support target', async () => {
+    const expired = await recordObservation(
+      { title: 'Observed preference', body: 'I prefer compact layouts', tags: ['organic', 'domain:preference'] },
+      { folderId: 'folder-a' },
+    );
+    await updateMemory(expired.id, { expiresAt: Date.now() - 1 });
+    const repeated = await recordObservation(
+      { title: 'Observed preference', body: 'I prefer compact layouts', tags: ['organic', 'domain:preference'] },
+      { folderId: 'folder-a' },
+    );
+
+    expect(await findExactEvidenceSupportTarget(repeated)).toBeUndefined();
+    await expect(reinforceMemoryFromEvidence(expired.id)).rejects.toThrow('Expired memory cannot be automatically reinforced');
+    expect((await getMemory(expired.id))?.reinforcementCount).toBe(0);
+  });
+
   it('raises epistemic weight in bounded steps without reviving superseded memories', async () => {
     const target = await memory.save({ title: 'Preference', body: 'The user prefers compact layouts.', confidence: 0.6, importance: 0.35 });
     const reinforced = await reinforceMemoryFromEvidence(target.id);

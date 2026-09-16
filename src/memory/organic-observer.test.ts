@@ -70,6 +70,8 @@ describe('bounded organic memory observer', () => {
         messageId: 'user_message_1',
       },
     });
+    expect(memories[0].source.note).toMatch(/^idempotency:organic:thread_organic:user_message_1:preference:sha256:[a-f0-9]{64}$/);
+    expect(memories[0].source.note).not.toContain(evidence);
   });
 
   it('rejects model paraphrases instead of allowing the classifier to author facts', async () => {

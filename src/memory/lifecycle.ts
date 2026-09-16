@@ -41,8 +41,9 @@ export function normalizedEvidenceKey(value: string): string {
 
 /**
  * Find a same-scope, same-domain, text-equivalent memory that can safely receive
- * automatic supporting evidence. Superseded/archived records are never revived
- * by the organic path. Established memories win over micro-observations.
+ * automatic supporting evidence. Superseded, archived, and expired records are
+ * never revived or reinforced by the organic path. Established memories win
+ * over micro-observations.
  */
 export async function findExactEvidenceSupportTarget(observation: DurableMemory): Promise<DurableMemory | undefined> {
   if (observation.kind !== 'MICRO_OBSERVATION') return undefined;
@@ -50,11 +51,13 @@ export async function findExactEvidenceSupportTarget(observation: DurableMemory)
   if (!domain) return undefined;
   const evidenceKey = normalizedEvidenceKey(observation.body);
   if (!evidenceKey) return undefined;
+  const now = Date.now();
 
   const candidates = (await listMemories())
     .filter((memory) => memory.id !== observation.id)
     .filter((memory) => memory.lifecycle !== 'archived')
     .filter((memory) => memory.supersededBy.length === 0)
+    .filter((memory) => memory.expiresAt === null || memory.expiresAt > now)
     .filter((memory) => memory.folderId === observation.folderId)
     .filter((memory) => domainTag(memory) === domain)
     .filter((memory) => normalizedEvidenceKey(memory.body) === evidenceKey)
@@ -71,12 +74,13 @@ export async function findExactEvidenceSupportTarget(observation: DurableMemory)
 /**
  * Evidence reinforcement changes epistemic weight in small application-owned
  * steps. A superseded target may accumulate historical evidence but can never
- * be automatically reactivated.
+ * be automatically reactivated. Expired targets reject new automatic evidence.
  */
 export async function reinforceMemoryFromEvidence(id: string): Promise<DurableMemory> {
   const memory = await getMemory(id);
   if (!memory) throw new Error('Memory not found.');
   if (memory.lifecycle === 'archived') throw new Error('Archived memory cannot be automatically reinforced.');
+  if (memory.expiresAt !== null && memory.expiresAt <= Date.now()) throw new Error('Expired memory cannot be automatically reinforced.');
 
   return updateMemory(memory.id, {
     reinforcementCount: memory.reinforcementCount + 1,

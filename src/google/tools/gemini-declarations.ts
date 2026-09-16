@@ -7,10 +7,17 @@ export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly
 const stringProperty = (description: string) => ({ type: 'string', description });
 const objectProperty = (description: string) => ({ type: 'object', description });
 const arrayProperty = (description: string, items: Record<string, unknown> = { type: 'string' }) => ({ type: 'array', items, description });
+const calendarSendUpdatesProperty = { type: 'string', enum: ['all', 'externalOnly'], description: 'Optional guest-notification policy. Omit when notifications are not requested.' };
 
 const toolProperties: Record<string, Record<string, unknown>> = {
-  'calendar.listEvents': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), timeMin: stringProperty('Optional RFC 3339 lower time bound.'), timeMax: stringProperty('Optional RFC 3339 upper time bound.') },
-  'calendar.createEvent': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), summary: stringProperty('Event title.'), start: stringProperty('Start as RFC 3339 date-time or all-day date.'), end: stringProperty('End as RFC 3339 date-time or all-day date.'), location: stringProperty('Optional location.'), description: stringProperty('Optional description.'), attendees: arrayProperty('Optional attendee email addresses.') },
+  'calendar.listCalendars': { pageToken: stringProperty('Optional pagination token.'), maxResults: { type: 'integer', minimum: 1, maximum: 250 }, showHidden: { type: 'boolean', description: 'Whether hidden calendars should be included.' }, minAccessRole: { type: 'string', enum: ['freeBusyReader', 'reader', 'writerWithoutPrivateAccess', 'writer', 'owner'], description: 'Optional minimum access role.' }, showOwnOrganizationOnly: { type: 'boolean', description: 'When supported by the account, restrict results to calendars owned by the user organization.' } },
+  'calendar.listEvents': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), timeMin: stringProperty('Optional RFC 3339 lower time bound.'), timeMax: stringProperty('Optional RFC 3339 upper time bound.'), pageToken: stringProperty('Optional pagination token.'), maxResults: { type: 'integer', minimum: 1, maximum: 250 }, query: stringProperty('Optional free-text event query.'), timeZone: stringProperty('Optional IANA timezone for returned event times.') },
+  'calendar.getEvent': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), eventId: stringProperty('Event id from a prior Calendar read.'), timeZone: stringProperty('Optional IANA timezone for returned event times.') },
+  'calendar.getSettings': {},
+  'calendar.queryFreeBusy': { timeMin: stringProperty('RFC 3339 start of the availability window.'), timeMax: stringProperty('RFC 3339 end of the availability window.'), calendarIds: arrayProperty('One to 50 calendar ids to check.'), timeZone: stringProperty('Optional IANA timezone for the response.') },
+  'calendar.createEvent': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), summary: stringProperty('Event title.'), start: stringProperty('Start as RFC 3339 date-time or all-day YYYY-MM-DD date.'), end: stringProperty('End as RFC 3339 date-time or all-day YYYY-MM-DD date.'), timeZone: stringProperty('IANA timezone. Required for recurring date-time events.'), location: stringProperty('Optional location.'), description: stringProperty('Optional description.'), attendees: arrayProperty('Optional attendee email addresses.'), recurrence: arrayProperty('Optional RFC 5545 recurrence lines beginning with RRULE:, EXRULE:, RDATE:, or EXDATE:.'), sendUpdates: calendarSendUpdatesProperty },
+  'calendar.updateEvent': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), eventId: stringProperty('Event id from calendar.getEvent.'), etag: stringProperty('Current ETag from calendar.getEvent. Re-read after a conflict.'), summary: stringProperty('Optional replacement event title; empty string clears it.'), start: stringProperty('Optional replacement RFC 3339 date-time or all-day date.'), end: stringProperty('Optional replacement RFC 3339 date-time or all-day date.'), timeZone: stringProperty('Optional IANA timezone used with replacement date-times.'), location: stringProperty('Optional replacement location; empty string clears it.'), description: stringProperty('Optional replacement description; empty string clears it.'), attendees: arrayProperty('Optional complete replacement attendee email list; an empty array clears attendees.'), recurrence: arrayProperty('Optional complete replacement recurrence list; an empty array clears recurrence.'), sendUpdates: calendarSendUpdatesProperty },
+  'calendar.deleteEvent': { calendarId: stringProperty('Optional calendar id; defaults to primary.'), eventId: stringProperty('Event id from calendar.getEvent.'), etag: stringProperty('Current ETag from calendar.getEvent. Re-read after a conflict.'), sendUpdates: calendarSendUpdatesProperty },
   'tasks.listTaskLists': { pageToken: stringProperty('Optional pagination token.') },
   'tasks.listTasks': { taskListId: stringProperty('Task list id.'), pageToken: stringProperty('Optional pagination token.'), showCompleted: { type: 'boolean' }, showDeleted: { type: 'boolean' }, showHidden: { type: 'boolean' }, dueMin: stringProperty('Optional RFC 3339 lower due-time bound.'), dueMax: stringProperty('Optional RFC 3339 upper due-time bound.'), updatedMin: stringProperty('Optional RFC 3339 lower updated-time bound.'), completedMin: stringProperty('Optional RFC 3339 lower completed-time bound.'), completedMax: stringProperty('Optional RFC 3339 upper completed-time bound.'), maxResults: { type: 'integer', minimum: 1, maximum: 100 } },
   'tasks.getTask': { taskListId: stringProperty('Task list id.'), taskId: stringProperty('Task id.') },
@@ -107,7 +114,11 @@ const toolProperties: Record<string, Record<string, unknown>> = {
 };
 
 const requiredByTool: Record<string, readonly string[]> = {
+  'calendar.getEvent': ['eventId'],
+  'calendar.queryFreeBusy': ['timeMin', 'timeMax', 'calendarIds'],
   'calendar.createEvent': ['summary', 'start', 'end'],
+  'calendar.updateEvent': ['eventId', 'etag'],
+  'calendar.deleteEvent': ['eventId', 'etag'],
   'tasks.listTasks': ['taskListId'], 'tasks.getTask': ['taskListId', 'taskId'], 'tasks.createTask': ['taskListId', 'task'], 'tasks.updateTask': ['taskListId', 'taskId', 'task'], 'tasks.moveTask': ['taskListId', 'taskId'], 'tasks.deleteTask': ['taskListId', 'taskId'], 'tasks.clearCompleted': ['taskListId'],
   'docs.getDocument': ['documentId'], 'docs.inspectDocument': ['documentId'], 'docs.createDocument': ['title'], 'docs.insertText': ['documentId', 'index', 'text'], 'docs.appendParagraph': ['documentId', 'text'], 'docs.replaceText': ['documentId', 'findText', 'replaceText'], 'docs.batchUpdate': ['documentId', 'requests'],
   'document.create_pdf': ['source'],
@@ -150,12 +161,7 @@ function toFunctionDeclaration(descriptor: GoogleToolDescriptor): GeminiFunction
  */
 export const googleGeminiFunctionDeclarations: readonly GeminiFunctionDeclaration[] = geminiVisibleTools.map(toFunctionDeclaration);
 
-/**
- * Gemini-visible declarations that `plane` can actually execute.
- *
- * Tools with no `executionPlane` are available everywhere; browser-only tools are
- * excluded from the Worker list so the model never calls into a dead end.
- */
+/** Gemini-visible declarations that `plane` can actually execute. */
 export function googleGeminiFunctionDeclarationsForPlane(plane: GoogleToolExecutionPlane): readonly GeminiFunctionDeclaration[] {
   return googleToolsForPlane(plane)
     .filter((descriptor) => descriptor.exposure === 'gemini')

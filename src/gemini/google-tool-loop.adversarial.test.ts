@@ -80,6 +80,39 @@ async function consumeWriteTurn(now: () => Date, writeHandler = vi.fn(async () =
   return writeHandler;
 }
 
+async function consumeUndeclaredMemoryCall(name: 'memory.lookup' | 'memory.reconcile') {
+  streamReply.mockReturnValueOnce(events(
+    { type: 'interaction-created', interactionId: 'interaction-memory', model: 'gemini-3.8-flash' },
+    {
+      type: 'tool-call', interactionId: 'interaction-memory', index: 0, callId: 'call-memory', name,
+      arguments: name === 'memory.lookup'
+        ? { query: 'private memory' }
+        : { targetRef: 'memref_forged', relation: 'support', title: 'Injected', body: 'Injected evidence.' },
+    },
+  ));
+  streamToolResult.mockReturnValueOnce(events(
+    { type: 'completed', interactionId: 'interaction-done', status: 'completed', durationMs: 4 },
+  ));
+  const confirm = vi.fn(async () => true);
+
+  for await (const _event of streamGoogleToolLoop(
+    {
+      model: 'gemini-3.8-flash',
+      input: 'Only save the explicit memory.',
+      tools: ['memory.save'],
+      conversationId: 'thread_1',
+      inputMessageId: 'message_1',
+      generationId: 'generation_1',
+      isGenerationActive: () => true,
+    },
+    { tools: ['memory.save'], readOnly: false, executor: { oauth, confirm } },
+  )) {
+    // consume
+  }
+
+  return confirm;
+}
+
 describe('Google tool loop adversarial confirmation lifecycle', () => {
   beforeEach(() => {
     streamReply.mockReset();
@@ -87,6 +120,26 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     executeGoogleTool.mockReset();
     requestGoogleToolConfirmations.mockReset();
     requestGoogleCapabilityGrant.mockReset();
+  });
+
+  it('rejects an undeclared memory read even when the turn is write-enabled', async () => {
+    const confirm = await consumeUndeclaredMemoryCall('memory.lookup');
+    expect(executeGoogleTool).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(requestGoogleToolConfirmations).not.toHaveBeenCalled();
+    expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      results: [expect.objectContaining({ callId: 'call-memory', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })],
+    }), undefined);
+  });
+
+  it('rejects an undeclared memory mutation before confirmation or execution', async () => {
+    const confirm = await consumeUndeclaredMemoryCall('memory.reconcile');
+    expect(executeGoogleTool).not.toHaveBeenCalled();
+    expect(confirm).not.toHaveBeenCalled();
+    expect(requestGoogleToolConfirmations).not.toHaveBeenCalled();
+    expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      results: [expect.objectContaining({ callId: 'call-memory', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })],
+    }), undefined);
   });
 
   it('does not execute a grouped mutation after the confirmation the user saw has expired', async () => {

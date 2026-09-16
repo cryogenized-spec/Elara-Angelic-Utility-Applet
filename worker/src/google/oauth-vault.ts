@@ -110,6 +110,10 @@ function sameScopeSet(left: readonly string[], right: readonly string[]): boolea
   return left.every((scope) => rightSet.has(scope));
 }
 
+function nextGrantRevision(previous: number | null | undefined, now = Date.now()): number {
+  return Math.max(now, (previous ?? 0) + 1);
+}
+
 function normalizeOrigin(value: string | null): string {
   try { return value ? new URL(value).origin : ''; } catch { return ''; }
 }
@@ -265,6 +269,7 @@ export class GoogleOAuthVault extends DurableObject {
       : { cipher: existing!.refresh_cipher, iv: existing!.refresh_iv };
     const scopes = result.scopes.length ? result.scopes : reusedExistingRefresh && existing ? parseScopes(existing.scopes) : [];
     const now = Date.now();
+    const revision = nextGrantRevision(existing?.updated_at, now);
     const refreshExpiresAt = result.refreshTokenExpiresIn
       ? now + result.refreshTokenExpiresIn * 1000
       : reusedExistingRefresh ? existing?.refresh_expires_at ?? null : null;
@@ -289,7 +294,7 @@ export class GoogleOAuthVault extends DurableObject {
     account?.subject ?? (reusedExistingRefresh ? existing?.subject ?? null : null),
     account?.email ?? (reusedExistingRefresh ? existing?.email ?? null : null),
     account?.displayName ?? (reusedExistingRefresh ? existing?.display_name ?? null : null),
-    now,
+    revision,
     refreshExpiresAt);
 
     return json({
@@ -302,7 +307,7 @@ export class GoogleOAuthVault extends DurableObject {
         : reusedExistingRefresh && existing?.email
           ? { email: existing.email, ...(existing.display_name ? { displayName: existing.display_name } : {}) }
           : undefined,
-      updatedAt: now,
+      updatedAt: revision,
       ...(refreshExpiresAt ? { refreshTokenExpiresAt: refreshExpiresAt } : {}),
     });
   }
@@ -331,7 +336,7 @@ export class GoogleOAuthVault extends DurableObject {
     const existingScopes = parseScopes(existing.scopes);
     const scopes = result.scopes.length ? result.scopes : existingScopes;
     const now = Date.now();
-    const revision = sameScopeSet(scopes, existingScopes) ? existing.updated_at : now;
+    const revision = sameScopeSet(scopes, existingScopes) ? existing.updated_at : nextGrantRevision(existing.updated_at, now);
     const refreshExpiresAt = result.refreshTokenExpiresIn
       ? now + result.refreshTokenExpiresIn * 1000
       : existing.refresh_expires_at;

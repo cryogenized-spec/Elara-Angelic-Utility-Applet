@@ -12,6 +12,7 @@ type MemoryTable = {
   get(key: string): Promise<DurableMemory | undefined>;
   delete(key: string): Promise<unknown>;
   count(): Promise<number>;
+  toArray(): Promise<DurableMemory[]>;
   orderBy(index: string): { reverse(): { toArray(): Promise<DurableMemory[]> } };
 };
 
@@ -35,6 +36,25 @@ export async function saveMemory(input: MemoryInput): Promise<DurableMemory> {
   });
   await table().put(record);
   return record;
+}
+
+/**
+ * Save exactly once for an application-owned provenance marker. The scan and
+ * put share one Dexie transaction so a replay of the same logical tool call
+ * converges on the already-created record rather than duplicating it.
+ *
+ * Only a matching provenance note is inspected; unrelated malformed legacy
+ * records cannot block a new deliberate memory write.
+ */
+export async function saveMemoryOnce(input: MemoryInput, provenanceNote: string): Promise<DurableMemory> {
+  const note = provenanceNote.trim();
+  if (!note) throw new Error('Memory idempotency provenance is required.');
+  if (input.source?.note !== note) throw new Error('Memory idempotency provenance mismatch.');
+  return db.transaction('rw', db.memories, async () => {
+    const existing = (await table().toArray()).find((record) => record?.source?.note === note);
+    if (existing) return validate(existing);
+    return saveMemory(input);
+  });
 }
 
 export async function getMemory(id: string): Promise<DurableMemory | undefined> { const record = await table().get(id); return record ? validate(record) : undefined; }

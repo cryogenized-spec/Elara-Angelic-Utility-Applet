@@ -100,6 +100,10 @@ function parseScopes(value: string): string[] {
   }
 }
 
+function normalizeOrigin(value: string | null): string {
+  try { return value ? new URL(value).origin : ''; } catch { return ''; }
+}
+
 export class GoogleOAuthVault extends DurableObject {
   private readonly oauthEnv: GoogleOAuthVaultEnv;
 
@@ -217,9 +221,7 @@ export class GoogleOAuthVault extends DurableObject {
     const parsed = exchangeSchema.safeParse(parseJson(body));
     if (!parsed.success) return json({ code: 'validation', message: 'Google OAuth exchange payload was invalid.' }, 400);
 
-    const origin = request.headers.get('Origin');
-    let normalizedOrigin = '';
-    try { normalizedOrigin = origin ? new URL(origin).origin : ''; } catch { normalizedOrigin = ''; }
+    const normalizedOrigin = normalizeOrigin(request.headers.get('Origin'));
     if (!normalizedOrigin || parsed.data.redirectUri !== normalizedOrigin) {
       return json({ code: 'redirect_uri', message: 'Google OAuth redirect URI must match the calling origin.' }, 400);
     }

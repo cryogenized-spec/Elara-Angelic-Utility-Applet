@@ -123,6 +123,39 @@ describe('memory observation and consolidation', () => {
     expect((await getMemory(target.id))?.supersededBy).toEqual(full);
   });
 
+  it('keeps an idempotent supersession replay valid after the first call fills the final relationship slot', async () => {
+    const target = await memory.save({ title: 'Nearly saturated preference', body: 'Historical preference.', kind: 'CORE' });
+    const existing = Array.from({ length: MEMORY_MAX_RELATIONSHIPS - 1 }, (_, index) => `replacement-${index}`);
+    await updateMemory(target.id, { supersededBy: existing });
+    const request = { title: 'Final replacement', body: 'The durable replacement that consumes the last slot.' };
+    const context = {
+      actor: 'model' as const,
+      conversationId: 'thread-replay',
+      messageId: 'message-replay',
+      idempotencyKey: 'thread-replay:message-replay:generation-1:call-1',
+      isMutationAllowed: () => true,
+    };
+
+    const first = await supersedeMemory(target.id, request, context);
+    expect(first.target.supersededBy).toHaveLength(MEMORY_MAX_RELATIONSHIPS);
+    expect(first.target.supersededBy).toContain(first.replacement.id);
+    expect(first.replacement.supersedes).toContain(target.id);
+    expect(await db.memories.count()).toBe(2);
+
+    const replay = await supersedeMemory(target.id, request, context);
+    expect(replay.replacement.id).toBe(first.replacement.id);
+    expect(replay.target.supersededBy).toHaveLength(MEMORY_MAX_RELATIONSHIPS);
+    expect(await db.memories.count()).toBe(2);
+
+    await expect(supersedeMemory(target.id, { ...request, body: 'Changed replay payload.' }, context))
+      .rejects.toThrow('replay does not match the original mutation');
+    expect(await db.memories.count()).toBe(2);
+
+    await expect(supersedeMemory(target.id, request, { ...context, idempotencyKey: 'thread-replay:message-replay:generation-1:call-2' }))
+      .rejects.toThrow('supersession relationship capacity reached');
+    expect(await db.memories.count()).toBe(2);
+  });
+
   it('retains episodic kind when superseding an episodic memory', async () => {
     const target = await memory.save({ title: 'Old event', body: 'The event happened at noon.', kind: 'EPISODIC' });
     const result = await supersedeMemory(target.id, { title: 'Corrected event', body: 'The user corrected the event time to 13:00.' });

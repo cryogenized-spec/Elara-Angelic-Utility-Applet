@@ -1,6 +1,6 @@
 import type { DurableMemory } from './types';
 import { memory, type MemoryCapabilityContext } from './capability';
-import { getMemory, updateMemory } from './store';
+import { getMemory, runMemoryMutationTransaction, updateMemory } from './store';
 import { authorizeMemoryMutation } from './permissions';
 import { applyMemoryLifecyclePolicy, reinforceMemoryFromEvidence } from './lifecycle';
 import { MEMORY_MAX_RELATIONSHIPS } from './normalize';
@@ -119,6 +119,12 @@ export async function consolidateObservation(
  * CORE authority is never inherited automatically; episodic targets remain
  * episodic, everything else restarts as contextual evidence. Once both links
  * exist, the replaced record becomes dormant rather than being deleted.
+ *
+ * A successful idempotent supersession remains replayable even if it consumed
+ * the target's final relationship slot. At full capacity only an operation with
+ * an application-owned idempotency key may probe for that replay, and the probe
+ * runs transactionally: a genuinely new/changed operation rolls back instead
+ * of leaving an unlinked replacement behind.
  */
 export async function supersedeMemory(
   targetMemoryId: string,
@@ -129,19 +135,32 @@ export async function supersedeMemory(
   const target = await getMemory(targetMemoryId);
   if (!target) throw new Error('Target memory not found.');
   if (target.kind === 'MICRO_OBSERVATION') throw new Error('Micro-observations cannot be superseded through reconciliation.');
+
+  const replacementRequest = {
+    title: request.title,
+    body: request.body,
+    kind: target.kind === 'EPISODIC' ? 'EPISODIC' as const : 'CONTEXTUAL' as const,
+    tags: request.tags,
+  };
+
   if (target.supersededBy.length >= MEMORY_MAX_RELATIONSHIPS) {
-    throw new Error('Memory supersession relationship capacity reached.');
+    if (!context.idempotencyKey?.trim()) {
+      throw new Error('Memory supersession relationship capacity reached.');
+    }
+    return runMemoryMutationTransaction(async () => {
+      const replacement = await memory.save(replacementRequest, context);
+      const linkedTarget = (await getMemory(target.id)) ?? target;
+      if (!linkedTarget.supersededBy.includes(replacement.id) || !replacement.supersedes.includes(linkedTarget.id)) {
+        throw new Error('Memory supersession relationship capacity reached.');
+      }
+      return {
+        target: await applyMemoryLifecyclePolicy(linkedTarget.id),
+        replacement,
+      };
+    }, context.isMutationAllowed);
   }
 
-  let replacement = await memory.save(
-    {
-      title: request.title,
-      body: request.body,
-      kind: target.kind === 'EPISODIC' ? 'EPISODIC' : 'CONTEXTUAL',
-      tags: request.tags,
-    },
-    context,
-  );
+  let replacement = await memory.save(replacementRequest, context);
 
   if (!replacement.supersedes.includes(target.id)) {
     assertRelationshipCapacity(replacement.supersedes, target.id, 'supersedes');

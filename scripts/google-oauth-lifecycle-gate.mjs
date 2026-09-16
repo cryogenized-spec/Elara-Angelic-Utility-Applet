@@ -4,12 +4,13 @@ import { join } from 'node:path';
 const root = process.cwd();
 const read = (path) => readFileSync(join(root, path), 'utf8');
 
+const providerSource = read('worker/src/google/oauth-provider.ts');
 const vaultSource = read('worker/src/google/oauth-vault.ts');
 const authoritySource = read('src/google/oauth/authority.ts');
 const browserTests = read('src/google/oauth/authority.test.ts');
 const vaultTests = read('worker/test/google-oauth-vault.test.ts');
 
-function validateLifecycleContracts(vault, authority, browserTestSource, vaultTestSource) {
+function validateLifecycleContracts(provider, vault, authority, browserTestSource, vaultTestSource) {
   const errors = [];
   const requireMatch = (source, pattern, message) => {
     if (!pattern.test(source)) errors.push(message);
@@ -28,6 +29,21 @@ function validateLifecycleContracts(vault, authority, browserTestSource, vaultTe
     'Google OAuth refresh-token reuse no longer requires stable provider subject continuity',
   );
   requireText(vault, 'account identity could not be safely matched', 'Google OAuth account-switch mismatch no longer fails closed');
+
+  // Provider refresh rejection is lifecycle information, not a generic 502.
+  // Preserve Google's error code and fail a revoked/expired durable grant closed.
+  requireText(provider, 'export class GoogleOAuthProviderError', 'Google OAuth provider lost its typed provider-error contract');
+  requireMatch(provider, /payload\?\.error\s*===?/, 'Google OAuth provider no longer reads the provider error code');
+  requireMatch(
+    vault,
+    /error instanceof GoogleOAuthProviderError\s*&&\s*error\.code\s*===\s*['"]invalid_grant['"]/,
+    'Google OAuth vault no longer recognizes provider invalid_grant as reauthorization state',
+  );
+  requireMatch(
+    vault,
+    /error\.code\s*===\s*['"]invalid_grant['"][\s\S]{0,260}?DELETE FROM google_oauth_credential WHERE slot = 1[\s\S]{0,260}?reauthorization_required/,
+    'Google OAuth revoked refresh grant no longer deletes the unusable durable credential and requests reauthorization',
+  );
 
   // updated_at is a grant revision, not an access-token-refresh timestamp.
   // Browser sessions bind to it and must be invalidated before Google API use
@@ -55,6 +71,11 @@ function validateLifecycleContracts(vault, authority, browserTestSource, vaultTe
     'Google OAuth lifecycle suite lost the cross-account refresh-token rejection proof',
   );
   requireText(
+    vaultTestSource,
+    "turns provider invalid_grant into explicit reauthorization and deletes the revoked durable grant",
+    'Google OAuth lifecycle suite lost the revoked-refresh-grant recovery proof',
+  );
+  requireText(
     browserTestSource,
     "invalidates an unexpired paired browser token when the authoritative vault revision changes",
     'Google OAuth lifecycle suite lost the browser grant-revision invalidation proof',
@@ -64,31 +85,41 @@ function validateLifecycleContracts(vault, authority, browserTestSource, vaultTe
   return errors;
 }
 
-const failures = validateLifecycleContracts(vaultSource, authoritySource, browserTests, vaultTests);
+const failures = validateLifecycleContracts(providerSource, vaultSource, authoritySource, browserTests, vaultTests);
 
-function mutationMustFail(label, mutateVault, mutateAuthority) {
+function mutationMustFail(label, mutateProvider, mutateVault, mutateAuthority) {
+  const mutatedProvider = mutateProvider ? mutateProvider(providerSource) : providerSource;
   const mutatedVault = mutateVault ? mutateVault(vaultSource) : vaultSource;
   const mutatedAuthority = mutateAuthority ? mutateAuthority(authoritySource) : authoritySource;
-  if (mutatedVault === vaultSource && mutatedAuthority === authoritySource) {
+  if (mutatedProvider === providerSource && mutatedVault === vaultSource && mutatedAuthority === authoritySource) {
     failures.push(`${label}: mutation fixture did not change the reviewed source`);
     return;
   }
-  const rejected = validateLifecycleContracts(mutatedVault, mutatedAuthority, browserTests, vaultTests);
+  const rejected = validateLifecycleContracts(mutatedProvider, mutatedVault, mutatedAuthority, browserTests, vaultTests);
   if (!rejected.length) failures.push(`${label}: deliberate OAuth lifecycle mutation escaped certification`);
 }
 
 mutationMustFail(
   'stable-subject continuity removal',
+  null,
   (source) => source.replace('account.subject !== existing.subject', 'account.subject === existing.subject'),
+  null,
+);
+mutationMustFail(
+  'revoked-grant recovery removal',
+  null,
+  (source) => source.replace("error.code === 'invalid_grant'", "error.code === 'never_invalid_grant'"),
   null,
 );
 mutationMustFail(
   'grant-revision invalidation removal',
   null,
+  null,
   (source) => source.replace('session.vaultUpdatedAt !== remoteRevision', 'session.vaultUpdatedAt === remoteRevision'),
 );
 mutationMustFail(
   'grant-revision churn on token refresh',
+  null,
   (source) => source.replace('const revision = sameScopeSet(scopes, existingScopes) ? existing.updated_at : now;', 'const revision = now;'),
   null,
 );
@@ -98,4 +129,4 @@ if (failures.length) {
   process.exit(1);
 }
 
-process.stdout.write('Google OAuth lifecycle certification passed: stable-subject refresh-token continuity, durable grant-revision binding, focused behavioral proofs, and 3 hostile lifecycle mutations verified.\n');
+process.stdout.write('Google OAuth lifecycle certification passed: stable-subject refresh-token continuity, revoked-grant recovery, durable grant-revision binding, focused behavioral proofs, and 4 hostile lifecycle mutations verified.\n');

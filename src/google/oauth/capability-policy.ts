@@ -24,7 +24,7 @@ export const LEGACY_CAPABILITY_ALIASES: Readonly<Record<string, GoogleCapability
   'drive.files.write': 'drive.files.app.write',
 };
 
-/** Core v1 capabilities. Optional extras (Gmail send/labels, Drive library) do not block `connected`. */
+/** Core v1 capabilities. Optional service extras do not block `connected`. */
 export const GOOGLE_V1_CORE_CAPABILITIES = [
   'calendar.events.read',
   'calendar.events.write',
@@ -41,6 +41,9 @@ export const GOOGLE_V1_CORE_CAPABILITIES = [
 ] as const satisfies readonly GoogleCapabilityKey[];
 
 export const GOOGLE_V1_OPTIONAL_CAPABILITIES = [
+  'calendar.list.read',
+  'calendar.settings.read',
+  'calendar.freebusy.read',
   'gmail.labels',
   'gmail.send',
   'drive.library.read',
@@ -170,6 +173,7 @@ export const CAPABILITY_CONSENT_COPY: Readonly<Record<GoogleCapabilityKey, strin
   'calendar.events.write': 'To continue, Elara needs permission to create or edit Google Calendar events.',
   'calendar.list.read': 'To continue, Elara needs permission to see which calendars you subscribe to.',
   'calendar.settings.read': 'To continue, Elara needs permission to read your Calendar settings.',
+  'calendar.freebusy.read': 'To continue, Elara needs permission to check free/busy availability without reading event details.',
   'tasks.read': 'To continue, Elara needs permission to read your Google Tasks.',
   'tasks.write': 'To continue, Elara needs permission to create or change Google Tasks.',
   'docs.read': 'To continue, Elara needs permission to read Google Docs in her app-file boundary — or Drive library access to read a discovered document.',

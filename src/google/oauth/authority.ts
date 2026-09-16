@@ -10,7 +10,6 @@ import {
   computeEffectiveCapabilities,
   normalizeCapabilityKey,
   parseProviderScopes,
-  providerSatisfiesCapability,
   resolveAuthorizingCapability,
 } from './capability-policy';
 
@@ -433,13 +432,7 @@ async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = f
   const pairing = activePairing();
   if (pairing) {
     await synchronizeDurableStatus(pairing);
-    let status = currentStatus();
-    if (!status.enabledCapabilities.includes(capability) && providerSatisfiesCapability(capability, status.grantedProviderScopes)) {
-      stored.enabledCapabilities = uniqueCapabilities([...stored.enabledCapabilities, capability]);
-      stored.needsReauthorization = false;
-      saveStored();
-      status = currentStatus();
-    }
+    const status = currentStatus();
     const authorizing = resolveAuthorizingCapability(capability, status.grantedCapabilities);
     if (!authorizing) {
       if (!allowInteraction) throw new Error('Google authorization requires explicit consent in Settings.');

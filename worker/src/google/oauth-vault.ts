@@ -25,6 +25,7 @@ type CredentialRow = {
   refresh_cipher: string;
   refresh_iv: string;
   scopes: string;
+  subject: string | null;
   email: string | null;
   display_name: string | null;
   updated_at: number;
@@ -118,12 +119,17 @@ export class GoogleOAuthVault extends DurableObject {
         refresh_cipher TEXT NOT NULL,
         refresh_iv TEXT NOT NULL,
         scopes TEXT NOT NULL,
+        subject TEXT,
         email TEXT,
         display_name TEXT,
         updated_at INTEGER NOT NULL,
         refresh_expires_at INTEGER
       )
     `);
+    const credentialColumns = this.ctx.storage.sql.exec<{ name: string }>('PRAGMA table_info(google_oauth_credential)').toArray();
+    if (!credentialColumns.some((column) => column.name === 'subject')) {
+      this.ctx.storage.sql.exec('ALTER TABLE google_oauth_credential ADD COLUMN subject TEXT');
+    }
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS google_oauth_nonces (
         nonce TEXT PRIMARY KEY,
@@ -160,7 +166,7 @@ export class GoogleOAuthVault extends DurableObject {
 
   protected credentialRow(): CredentialRow | null {
     return this.ctx.storage.sql.exec<CredentialRow>(
-      'SELECT refresh_cipher, refresh_iv, scopes, email, display_name, updated_at, refresh_expires_at FROM google_oauth_credential WHERE slot = 1',
+      'SELECT refresh_cipher, refresh_iv, scopes, subject, email, display_name, updated_at, refresh_expires_at FROM google_oauth_credential WHERE slot = 1',
     ).toArray()[0] ?? null;
   }
 
@@ -230,30 +236,41 @@ export class GoogleOAuthVault extends DurableObject {
 
     const result = await exchangeGoogleAuthorizationCode(this.oauthEnv, parsed.data);
     const existing = this.credentialRow();
+    const account: GoogleOAuthAccount | null = await fetchGoogleOAuthAccount(result.accessToken).catch(() => null);
+
+    if (!result.refreshToken && existing && (!account || !existing.subject || account.subject !== existing.subject)) {
+      this.ctx.storage.sql.exec('DELETE FROM google_oauth_credential WHERE slot = 1');
+      return json({
+        code: 'reauthorization_required',
+        message: 'Google did not issue a refresh token and the account identity could not be safely matched. Authorize the selected account again.',
+      }, 409);
+    }
+
     const refreshToken = result.refreshToken
       ?? (existing ? await decryptRefreshToken(this.vaultSecret(), existing.refresh_cipher, existing.refresh_iv) : undefined);
     if (!refreshToken) {
       return json({ code: 'reauthorization_required', message: 'Google did not issue a refresh token. Revoke the existing grant and authorize again.' }, 409);
     }
 
+    const reusedExistingRefresh = !result.refreshToken && Boolean(existing);
     const encrypted = result.refreshToken
       ? await encryptRefreshToken(this.vaultSecret(), result.refreshToken)
       : { cipher: existing!.refresh_cipher, iv: existing!.refresh_iv };
-    const account: GoogleOAuthAccount | null = await fetchGoogleOAuthAccount(result.accessToken).catch(() => null);
-    const scopes = result.scopes.length ? result.scopes : existing ? parseScopes(existing.scopes) : [];
+    const scopes = result.scopes.length ? result.scopes : reusedExistingRefresh && existing ? parseScopes(existing.scopes) : [];
     const now = Date.now();
     const refreshExpiresAt = result.refreshTokenExpiresIn
       ? now + result.refreshTokenExpiresIn * 1000
-      : existing?.refresh_expires_at ?? null;
+      : reusedExistingRefresh ? existing?.refresh_expires_at ?? null : null;
 
     this.ctx.storage.sql.exec(`
       INSERT INTO google_oauth_credential (
-        slot, refresh_cipher, refresh_iv, scopes, email, display_name, updated_at, refresh_expires_at
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+        slot, refresh_cipher, refresh_iv, scopes, subject, email, display_name, updated_at, refresh_expires_at
+      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(slot) DO UPDATE SET
         refresh_cipher = excluded.refresh_cipher,
         refresh_iv = excluded.refresh_iv,
         scopes = excluded.scopes,
+        subject = excluded.subject,
         email = excluded.email,
         display_name = excluded.display_name,
         updated_at = excluded.updated_at,
@@ -262,8 +279,9 @@ export class GoogleOAuthVault extends DurableObject {
     encrypted.cipher,
     encrypted.iv,
     JSON.stringify(scopes),
-    account?.email ?? existing?.email ?? null,
-    account?.displayName ?? existing?.display_name ?? null,
+    account?.subject ?? (reusedExistingRefresh ? existing?.subject ?? null : null),
+    account?.email ?? (reusedExistingRefresh ? existing?.email ?? null : null),
+    account?.displayName ?? (reusedExistingRefresh ? existing?.display_name ?? null : null),
     now,
     refreshExpiresAt);
 
@@ -272,7 +290,11 @@ export class GoogleOAuthVault extends DurableObject {
       accessToken: result.accessToken,
       expiresIn: result.expiresIn,
       scopes,
-      account: account ?? (existing?.email ? { email: existing.email, ...(existing.display_name ? { displayName: existing.display_name } : {}) } : undefined),
+      account: account
+        ? { email: account.email, ...(account.displayName ? { displayName: account.displayName } : {}) }
+        : reusedExistingRefresh && existing?.email
+          ? { email: existing.email, ...(existing.display_name ? { displayName: existing.display_name } : {}) }
+          : undefined,
       ...(refreshExpiresAt ? { refreshTokenExpiresAt: refreshExpiresAt } : {}),
     });
   }

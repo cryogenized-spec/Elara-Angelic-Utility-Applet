@@ -5,12 +5,16 @@ workers_dev = true
 preview_urls = false
 
 [vars]
+# This repository's Pages origin. Self-hosted forks must replace this with the
+# exact origin of their own PWA (scheme + host + optional port, no path).
 ALLOWED_ORIGINS = "https://cryogenized-spec.github.io"
 
-# Server-side Google OAuth secrets are provisioned with `wrangler secret put`:
+# Google OAuth belongs to the person deploying the fork, not to a shared Elara
+# service. Provision these with `wrangler secret put` on that user's Worker:
 # GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_VAULT_KEY.
-# The vault key must be high-entropy and at least 32 characters. Refresh tokens
-# are AES-GCM encrypted before Durable Object persistence.
+# GOOGLE_OAUTH_CLIENT_ID must match the browser VITE_GOOGLE_CLIENT_ID from that
+# same Google Web OAuth client. The vault key must be high-entropy and at least
+# 32 characters. Refresh tokens are AES-GCM encrypted before DO persistence.
 
 # Phase B autonomy scheduler: one hourly cron heartbeat (the repair clock —
 # the Durable Object's single alarm is the exact per-routine appointment

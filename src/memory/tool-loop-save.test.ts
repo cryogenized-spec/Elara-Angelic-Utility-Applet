@@ -1,6 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { GeminiToolContinuationRequest } from '../gemini/contracts';
+import type { GeminiToolContinuationRequest, GeminiTurnRequest } from '../gemini/contracts';
 
 const { streamReply, streamToolResult } = vi.hoisted(() => ({
   streamReply: vi.fn(),
@@ -95,7 +95,7 @@ describe('memory tools through the interactive Gemini tool loop', () => {
     }), undefined);
   });
 
-  it('performs lookup then confirmed reconciliation with a same-turn opaque reference', async () => {
+  it('performs lookup then confirmed reconciliation while freezing one memory snapshot across continuations', async () => {
     const target = await saveMemory({ title: 'Compact editor', body: 'The user prefers compact editor layout.' });
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction_lookup', model: 'gemini-3.8-flash' },
@@ -137,5 +137,14 @@ describe('memory tools through the interactive Gemini tool loop', () => {
     expect(updated?.reinforcementCount).toBe(1);
     expect(records.filter((record) => record.kind === 'MICRO_OBSERVATION')).toHaveLength(1);
     expect(streamToolResult).toHaveBeenCalledTimes(2);
+
+    const initial = streamReply.mock.calls[0]?.[0] as GeminiTurnRequest | undefined;
+    const firstContinuation = streamToolResult.mock.calls[0]?.[0] as GeminiToolContinuationRequest | undefined;
+    const secondContinuation = streamToolResult.mock.calls[1]?.[0] as GeminiToolContinuationRequest | undefined;
+    expect(initial?.memoryContext).toBe('none');
+    expect(initial?.systemInstruction).toContain('The user prefers compact editor layout.');
+    expect(initial?.systemInstruction).toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
+    expect(firstContinuation?.systemInstruction).toBe(initial?.systemInstruction);
+    expect(secondContinuation?.systemInstruction).toBe(initial?.systemInstruction);
   });
 });

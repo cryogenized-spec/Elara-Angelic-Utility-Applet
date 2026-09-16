@@ -1,4 +1,4 @@
-import type { DurableMemory, MemoryKind } from './types';
+import type { DurableMemory, MemoryKind, MemoryLifecycle } from './types';
 import { getMemory, listMemories, updateMemory } from './store';
 
 export const SUPPORT_CONFIDENCE_STEP = 0.08;
@@ -107,27 +107,33 @@ function shouldDormantForAge(memory: DurableMemory, now: number): boolean {
   return false;
 }
 
+export type MemoryLifecycleReason = 'superseded' | 'expired' | 'stale-organic' | 'promote-episodic' | 'promote-contextual';
+
+export interface MemoryLifecycleTransition {
+  kind: MemoryKind;
+  lifecycle: MemoryLifecycle;
+  reason: MemoryLifecycleReason;
+}
+
 /**
- * Apply one conservative lifecycle transition. Conflict blocks automatic
- * promotion; supersession/expiry take precedence; organic evidence can promote
- * only as far as CONTEXTUAL. CORE remains a deliberate/user-owned authority.
+ * Pure preview of the canonical lifecycle policy. Memory Bank maintenance uses
+ * this to explain what a sweep would do, and the mutating policy below consumes
+ * the same result so preview and execution cannot drift apart.
  */
-export async function applyMemoryLifecyclePolicy(id: string, now = Date.now()): Promise<DurableMemory> {
-  let memory = await getMemory(id);
-  if (!memory) throw new Error('Memory not found.');
-  if (memory.lifecycle === 'archived') return memory;
+export function previewMemoryLifecycleTransition(memory: DurableMemory, now = Date.now()): MemoryLifecycleTransition | null {
+  if (memory.lifecycle === 'archived') return null;
 
-  if (memory.supersededBy.length > 0 || (memory.expiresAt !== null && memory.expiresAt <= now)) {
-    if (memory.lifecycle !== 'dormant') memory = await updateMemory(memory.id, { lifecycle: 'dormant' });
-    return memory;
+  if (memory.supersededBy.length > 0) {
+    return memory.lifecycle === 'dormant' ? null : { kind: memory.kind, lifecycle: 'dormant', reason: 'superseded' };
   }
-
+  if (memory.expiresAt !== null && memory.expiresAt <= now) {
+    return memory.lifecycle === 'dormant' ? null : { kind: memory.kind, lifecycle: 'dormant', reason: 'expired' };
+  }
   if (shouldDormantForAge(memory, now)) {
-    if (memory.lifecycle !== 'dormant') memory = await updateMemory(memory.id, { lifecycle: 'dormant' });
-    return memory;
+    return memory.lifecycle === 'dormant' ? null : { kind: memory.kind, lifecycle: 'dormant', reason: 'stale-organic' };
   }
 
-  if (memory.conflictingMemoryIds.length > 0) return memory;
+  if (memory.conflictingMemoryIds.length > 0) return null;
 
   if (
     memory.kind === 'MICRO_OBSERVATION'
@@ -135,7 +141,7 @@ export async function applyMemoryLifecyclePolicy(id: string, now = Date.now()): 
     && memory.supportingMemoryIds.length >= MICRO_TO_EPISODIC_REINFORCEMENTS
     && memory.confidence >= 0.68
   ) {
-    return updateMemory(memory.id, { kind: 'EPISODIC', lifecycle: 'active' });
+    return { kind: 'EPISODIC', lifecycle: 'active', reason: 'promote-episodic' };
   }
 
   if (
@@ -144,10 +150,23 @@ export async function applyMemoryLifecyclePolicy(id: string, now = Date.now()): 
     && memory.supportingMemoryIds.length >= EPISODIC_TO_CONTEXTUAL_REINFORCEMENTS
     && memory.confidence >= 0.8
   ) {
-    return updateMemory(memory.id, { kind: 'CONTEXTUAL', lifecycle: 'active' });
+    return { kind: 'CONTEXTUAL', lifecycle: 'active', reason: 'promote-contextual' };
   }
 
-  return memory;
+  return null;
+}
+
+/**
+ * Apply one conservative lifecycle transition. Conflict blocks automatic
+ * promotion; supersession/expiry take precedence; organic evidence can promote
+ * only as far as CONTEXTUAL. CORE remains a deliberate/user-owned authority.
+ */
+export async function applyMemoryLifecyclePolicy(id: string, now = Date.now()): Promise<DurableMemory> {
+  const memory = await getMemory(id);
+  if (!memory) throw new Error('Memory not found.');
+  const transition = previewMemoryLifecycleTransition(memory, now);
+  if (!transition) return memory;
+  return updateMemory(memory.id, { kind: transition.kind, lifecycle: transition.lifecycle });
 }
 
 export interface MemoryLifecycleSweepResult {

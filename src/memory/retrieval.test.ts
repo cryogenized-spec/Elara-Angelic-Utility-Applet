@@ -8,7 +8,7 @@ const makeMemory = (overrides: Partial<DurableMemory>): DurableMemory => ({
   createdAt: 1_000, updatedAt: 1_000, observedAt: 1_000, confidence: 0.5, importance: 0.5,
   lifecycle: 'active', source: { source: 'user', createdAt: 1_000 }, tags: [],
   relatedMemoryIds: [], supportingMemoryIds: [], conflictingMemoryIds: [], supersedes: [], supersededBy: [],
-  reinforcementCount: 0, folderId: null, expiresAt: null, lastRecalledAt: null, recallCount: 0, autonomyContext: false,
+  reinforcementCount: 0, folderId: null, expiresAt: null, lastRecalledAt: null, recallCount: 0, pinned: false, autonomyContext: false,
   ...overrides,
 });
 
@@ -46,6 +46,16 @@ describe('canonical memory retrieval engine', () => {
       makeMemory({ id: 'weak', title: 'Project note', body: 'Project context.', reinforcementCount: 0, importance: 0.1 }),
     ], { query: 'project' });
     expect(result[0]?.id).toBe('reinforced');
+  });
+
+  it('treats a pinned landmark as bounded salience without bypassing eligibility', () => {
+    const result = rankAndBudgetMemories([
+      makeMemory({ id: 'ordinary', title: 'Project note', body: 'Project context.' }),
+      makeMemory({ id: 'landmark', title: 'Project note', body: 'Project context.', pinned: true }),
+      makeMemory({ id: 'archived-landmark', title: 'Project note', body: 'Project context.', pinned: true, lifecycle: 'archived' }),
+    ], { query: 'project', includeGlobal: true, now: 10_000 });
+    expect(result[0]?.id).toBe('landmark');
+    expect(result.map((memory) => memory.id)).not.toContain('archived-landmark');
   });
 
   it('hard-limits selected records and payload characters', () => {

@@ -33,8 +33,8 @@ function equalStrings(left: readonly string[], right: readonly string[]): boolea
 
 /**
  * A provider retry may reuse an application-owned idempotency marker only for
- * the same logical save. Mutable lifecycle/relationship/recall fields are not
- * compared because later legitimate memory work may change them after creation.
+ * the same logical save. Mutable lifecycle/relationship/recall/pin fields are
+ * not compared because later legitimate memory work may change them after creation.
  */
 function replayMatchesOriginalSave(existing: DurableMemory, input: MemoryInput): boolean {
   const normalized = normalizeMemoryInput({
@@ -65,7 +65,7 @@ export async function saveMemory(input: MemoryInput): Promise<DurableMemory> {
     lifecycle: normalized.lifecycle!, source: normalized.source!, tags: normalized.tags!, relatedMemoryIds: normalized.relatedMemoryIds!,
     supportingMemoryIds: normalized.supportingMemoryIds!, conflictingMemoryIds: normalized.conflictingMemoryIds!, supersedes: normalized.supersedes!,
     supersededBy: normalized.supersededBy!, reinforcementCount: 0, folderId: normalized.folderId ?? null, expiresAt: normalized.expiresAt ?? null,
-    lastRecalledAt: null, recallCount: 0, autonomyContext: normalized.autonomyContext ?? false,
+    lastRecalledAt: null, recallCount: 0, pinned: normalized.pinned === true, autonomyContext: normalized.autonomyContext ?? false,
   });
   await table().put(record);
   return record;
@@ -127,7 +127,7 @@ export async function updateMemory(id: string, patch: Partial<Omit<DurableMemory
     source: normalizeProvenance(candidate.source, candidate.createdAt), tags: candidate.tags,
     relatedMemoryIds: candidate.relatedMemoryIds, supportingMemoryIds: candidate.supportingMemoryIds,
     conflictingMemoryIds: candidate.conflictingMemoryIds, supersedes: candidate.supersedes, supersededBy: candidate.supersededBy,
-    folderId: candidate.folderId, expiresAt: candidate.expiresAt, autonomyContext: candidate.autonomyContext,
+    folderId: candidate.folderId, expiresAt: candidate.expiresAt, pinned: candidate.pinned === true, autonomyContext: candidate.autonomyContext,
   }, Date.now());
   return saveExisting(validate({
     ...candidate,
@@ -135,7 +135,7 @@ export async function updateMemory(id: string, patch: Partial<Omit<DurableMemory
     confidence: normalized.confidence!, importance: normalized.importance!, lifecycle: normalized.lifecycle!, source: normalized.source!,
     tags: normalized.tags!, relatedMemoryIds: normalized.relatedMemoryIds!, supportingMemoryIds: normalized.supportingMemoryIds!,
     conflictingMemoryIds: normalized.conflictingMemoryIds!, supersedes: normalized.supersedes!, supersededBy: normalized.supersededBy!,
-    folderId: normalized.folderId ?? null, expiresAt: normalized.expiresAt ?? null, updatedAt: Date.now(),
+    folderId: normalized.folderId ?? null, expiresAt: normalized.expiresAt ?? null, pinned: normalized.pinned === true, updatedAt: Date.now(),
   }));
 }
 async function saveExisting(record: DurableMemory): Promise<DurableMemory> { const valid = validate(record); await table().put(valid); return valid; }

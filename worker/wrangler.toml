@@ -7,6 +7,11 @@ preview_urls = false
 [vars]
 ALLOWED_ORIGINS = "https://cryogenized-spec.github.io"
 
+# Server-side Google OAuth secrets are provisioned with `wrangler secret put`:
+# GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET, GOOGLE_OAUTH_VAULT_KEY.
+# The vault key must be high-entropy and at least 32 characters. Refresh tokens
+# are AES-GCM encrypted before Durable Object persistence.
+
 # Phase B autonomy scheduler: one hourly cron heartbeat (the repair clock —
 # the Durable Object's single alarm is the exact per-routine appointment
 # mechanism; cron never schedules individual routines), plus the
@@ -15,11 +20,18 @@ ALLOWED_ORIGINS = "https://cryogenized-spec.github.io"
 crons = ["0 * * * *"]
 
 [durable_objects]
-bindings = [{ name = "AUTONOMY", class_name = "AutonomyEngine" }]
+bindings = [
+  { name = "AUTONOMY", class_name = "AutonomyEngine" },
+  { name = "GOOGLE_OAUTH", class_name = "GoogleOAuthVault" },
+]
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["AutonomyEngine"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["GoogleOAuthVault"]
 
 # Phase C0: Workflow is the execution plane. Instance id is a hash of runKey;
 # the scheduler (DO) remains the only due-time authority.

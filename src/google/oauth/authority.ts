@@ -1,12 +1,16 @@
+import { newNonce, signWrite } from '../../autonomy/protocol';
+import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../../autonomy/cloud/pairing';
 import { googleCapabilityKeySchema, type AuthorizedGoogleRequest, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus as GoogleOAuthStatusContract } from './contracts';
 import { classifyGoogleOAuthFailure } from './diagnostics';
 import { getGoogleScope } from './scope-registry';
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
+import { requestGoogleAuthorizationCode } from './code-flow';
 import {
   authorizationStateFor,
   computeEffectiveCapabilities,
   normalizeCapabilityKey,
   parseProviderScopes,
+  providerSatisfiesCapability,
   resolveAuthorizingCapability,
 } from './capability-policy';
 
@@ -21,6 +25,7 @@ const GOOGLE_API_HOSTS = new Set([
 ]);
 const STORAGE_KEY = 'elara.google.authorization.v2';
 const ACCESS_TOKEN_REFRESH_SKEW_MS = 60_000;
+const WORKER_TIMEOUT_MS = 20_000;
 const GOOGLE_USERINFO_EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email';
 const GOOGLE_OPENID_SCOPE = 'openid';
 const GOOGLE_USERINFO_ENDPOINTS = [
@@ -43,6 +48,25 @@ type AccessSession = {
   expiresAt: number;
 };
 
+type DurableOAuthStatus = {
+  connected: boolean;
+  scopes: string[];
+  account?: { email: string; displayName?: string };
+  updatedAt?: number;
+  refreshTokenExpiresAt?: number;
+};
+
+type DurableOAuthToken = DurableOAuthStatus & {
+  accessToken: string;
+  expiresIn: number;
+};
+
+class DurableGoogleOAuthError extends Error {
+  constructor(readonly code: string, message: string, readonly status: number) {
+    super(message);
+  }
+}
+
 let stored: StoredAuthorization = emptyStored();
 let session: AccessSession | null = null;
 
@@ -50,12 +74,6 @@ let session: AccessSession | null = null;
  * Capability evidence carried over from v2-era records that did not persist a
  * provider-scope manifest. The v2 format recorded the capabilities a user
  * consented to; scope strings were not always stored alongside them.
- *
- * Such records are honored as granted for exactly what was recorded — no
- * sibling inference — until the next token acquisition replaces them with
- * fresh scope truth. This trust lives at the storage boundary only:
- * computeEffectiveCapabilities() stays strict, and current scope-bearing
- * (v3) records never receive it.
  */
 let legacyGrantedCapabilities: GoogleCapabilityKey[] = [];
 
@@ -102,10 +120,6 @@ function loadStored(): StoredAuthorization {
     const scopes = Array.isArray(parsed.grantedProviderScopes)
       ? parseProviderScopes(parsed.grantedProviderScopes.filter((value): value is string => typeof value === 'string').join(' '))
       : [];
-    // A v2-era record (grantedCapabilities field) without a scope manifest is
-    // migrated consent evidence: honor exactly the recorded capabilities until
-    // a fresh token acquisition supersedes them. Records that carry scopes go
-    // through the strict scope-based policy instead.
     legacyGrantedCapabilities = Array.isArray(parsed.grantedCapabilities) && scopes.length === 0
       ? [...enabled]
       : [];
@@ -135,6 +149,13 @@ function saveStored(): void {
   stored.version = 3;
   if (typeof localStorage === 'undefined') return;
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+}
+
+function clearStored(): void {
+  session = null;
+  stored = emptyStored();
+  legacyGrantedCapabilities = [];
+  if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
 }
 
 function ensureClientId(): string {
@@ -172,6 +193,104 @@ function currentAccessToken(): string | undefined {
   return session?.accessToken;
 }
 
+function activePairing(): AutonomyPairing | null {
+  if (typeof window === 'undefined') return null;
+  return loadPairing();
+}
+
+function normalizeWorkerBaseUrl(value: string): string {
+  let url: URL;
+  try {
+    url = new URL(value.trim());
+  } catch {
+    throw new DurableGoogleOAuthError('worker-url', 'The paired Worker URL is invalid.', 0);
+  }
+  if (url.protocol !== 'https:') throw new DurableGoogleOAuthError('worker-url', 'The paired Worker must use HTTPS.', 0);
+  if (url.username || url.password || url.search || url.hash) throw new DurableGoogleOAuthError('worker-url', 'The paired Worker URL contains unsupported components.', 0);
+  return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+async function workerToken(pairing: AutonomyPairing): Promise<string> {
+  const token = (await resolvePairingToken(pairing)).trim();
+  if (!token) throw new DurableGoogleOAuthError('credential', 'The self-hosted Worker installation credential is unavailable. Pair this device again.', 0);
+  return token;
+}
+
+async function workerRequest(pairing: AutonomyPairing, path: string, init: RequestInit): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
+  try {
+    return await fetch(`${normalizeWorkerBaseUrl(pairing.workerUrl)}${path}`, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DurableGoogleOAuthError) throw error;
+    throw new DurableGoogleOAuthError('network', error instanceof Error ? error.message : 'The self-hosted Worker could not be reached.', 0);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function workerError(response: Response): Promise<DurableGoogleOAuthError> {
+  const body = await response.json().catch(() => null) as { code?: string; message?: string } | null;
+  return new DurableGoogleOAuthError(
+    body?.code ?? `http-${response.status}`,
+    body?.message ?? `The self-hosted Worker responded with HTTP ${response.status}.`,
+    response.status,
+  );
+}
+
+async function durableStatus(pairing: AutonomyPairing): Promise<DurableOAuthStatus> {
+  const token = await workerToken(pairing);
+  const response = await workerRequest(pairing, '/google/oauth/status', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (response.status !== 200) throw await workerError(response);
+  return await response.json() as DurableOAuthStatus;
+}
+
+async function durablePost<T>(pairing: AutonomyPairing, path: string, payload: unknown, popupExchange = false): Promise<T> {
+  const token = await workerToken(pairing);
+  const body = JSON.stringify(payload);
+  const timestamp = Date.now();
+  const nonce = newNonce();
+  const signature = await signWrite(token, 'POST', path, timestamp, nonce, body);
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+    'X-Elara-Timestamp': String(timestamp),
+    'X-Elara-Nonce': nonce,
+    'X-Elara-Signature': signature,
+  };
+  if (popupExchange) headers['X-Requested-With'] = 'XmlHttpRequest';
+  const response = await workerRequest(pairing, path, { method: 'POST', headers, body });
+  if (response.status !== 200) throw await workerError(response);
+  return await response.json() as T;
+}
+
+function applyDurableStatus(remote: DurableOAuthStatus): void {
+  const current = loadStored();
+  legacyGrantedCapabilities = [];
+  session = null;
+  if (!remote.connected) {
+    stored.grantedProviderScopes = [];
+    stored.needsReauthorization = current.enabledCapabilities.length > 0;
+    delete (stored as { account?: unknown }).account;
+    saveStored();
+    return;
+  }
+  stored.grantedProviderScopes = parseProviderScopes(remote.scopes.join(' '));
+  stored.needsReauthorization = false;
+  if (remote.account?.email) stored.account = remote.account;
+  else delete (stored as { account?: unknown }).account;
+  saveStored();
+}
+
+async function synchronizeDurableStatus(pairing: AutonomyPairing): Promise<DurableOAuthStatus> {
+  const remote = await durableStatus(pairing);
+  applyDurableStatus(remote);
+  return remote;
+}
+
 async function fetchGoogleAccount(accessToken: string): Promise<{ email: string; displayName?: string } | null> {
   for (const endpoint of GOOGLE_USERINFO_ENDPOINTS) {
     try {
@@ -192,25 +311,14 @@ async function fetchGoogleAccount(accessToken: string): Promise<{ email: string;
   return null;
 }
 
-async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'): Promise<void> {
+async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' | 'none'): Promise<void> {
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   try {
-    // Always request the email scope alongside the capability scope so we can
-    // populate `account.email` without a second consent round. The email scope
-    // is filtered out of `grantedProviderScopes` by `parseProviderScopes`
-    // (https://-only), but the token still carries it for userinfo.
     const requestedScope = [descriptor.scope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].join(' ');
     const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: requestedScope, prompt });
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
     const current = loadStored();
-    // Stored provider scopes describe the CURRENT Google token, never a
-    // historical union. A returned scope set therefore replaces the stored
-    // grant — otherwise a revocation, partial grant change, or account switch
-    // leaves stale scopes locally and getStatus() overstates authority.
-    // When Google omits the scope header there is no evidence of change, so
-    // retain existing grants and only add the requested scope: a successful
-    // acquisition for `descriptor.scope` proves at least that much.
     const returnedScopes = parseProviderScopes(response.scope);
     const grantedProviderScopes = returnedScopes.length
       ? returnedScopes
@@ -220,10 +328,6 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
     };
-    // Best-effort account identity: a successful interactive acquisition that
-    // can resolve userinfo populates `account`; a silent refresh keeps the
-    // previous account on failure, while an interactive failure clears a stale
-    // account so the UI never shows the wrong email.
     let nextAccount = current.account;
     try {
       const fetched = await fetchGoogleAccount(response.access_token);
@@ -232,8 +336,6 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
     } catch {
       if (prompt === '') nextAccount = undefined;
     }
-    // A fresh provider response is the current truth: it supersedes any
-    // scope-less legacy capability evidence.
     legacyGrantedCapabilities = [];
     stored.enabledCapabilities = enabledCapabilities;
     stored.grantedProviderScopes = grantedProviderScopes;
@@ -252,11 +354,91 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
   }
 }
 
+async function acquireDurableToken(capability: GoogleCapabilityKey, pairing: AutonomyPairing): Promise<void> {
+  const descriptor = getGoogleScope(capability);
+  if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
+  const current = loadStored();
+  const requestedScope = [descriptor.scope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].join(' ');
+  const code = await requestGoogleAuthorizationCode({
+    clientId: ensureClientId(),
+    scope: requestedScope,
+    ...(current.account?.email ? { loginHint: current.account.email } : {}),
+  });
+  const redirectUri = window.location.origin;
+  const response = await durablePost<DurableOAuthToken>(pairing, '/google/oauth/exchange', {
+    code: code.code,
+    redirectUri,
+  }, true);
+  const providerScopes = parseProviderScopes(response.scopes.join(' '));
+  const codeScopes = parseProviderScopes(code.scope);
+  session = {
+    accessToken: response.accessToken,
+    expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
+  };
+  legacyGrantedCapabilities = [];
+  stored.enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
+  stored.grantedProviderScopes = providerScopes.length ? providerScopes : codeScopes;
+  stored.needsReauthorization = false;
+  if (response.account?.email) stored.account = response.account;
+  else delete (stored as { account?: unknown }).account;
+  saveStored();
+}
+
+async function refreshDurableToken(pairing: AutonomyPairing): Promise<void> {
+  const response = await durablePost<DurableOAuthToken>(pairing, '/google/oauth/token', {});
+  session = {
+    accessToken: response.accessToken,
+    expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
+  };
+  const scopes = parseProviderScopes(response.scopes.join(' '));
+  if (scopes.length) stored.grantedProviderScopes = scopes;
+  stored.needsReauthorization = false;
+  if (response.account?.email) stored.account = response.account;
+  saveStored();
+}
+
+function markReauthorizationRequired(): void {
+  stored.needsReauthorization = true;
+  session = null;
+  saveStored();
+}
+
+function workerFailureRequiresReauthorization(error: unknown): boolean {
+  return error instanceof DurableGoogleOAuthError
+    && (error.code === 'not_connected' || error.code === 'reauthorization_required' || error.code === 'auth');
+}
+
 async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = false): Promise<string> {
+  const pairing = activePairing();
+  if (pairing) {
+    await synchronizeDurableStatus(pairing);
+    let status = currentStatus();
+    if (!status.enabledCapabilities.includes(capability) && providerSatisfiesCapability(capability, status.grantedProviderScopes)) {
+      stored.enabledCapabilities = uniqueCapabilities([...stored.enabledCapabilities, capability]);
+      stored.needsReauthorization = false;
+      saveStored();
+      status = currentStatus();
+    }
+    const authorizing = resolveAuthorizingCapability(capability, status.grantedCapabilities);
+    if (!authorizing) {
+      if (!allowInteraction) throw new Error('Google authorization requires explicit consent in Settings.');
+      await acquireDurableToken(capability, pairing);
+    } else if (!tokenStillValid()) {
+      try {
+        await refreshDurableToken(pairing);
+      } catch (error) {
+        if (workerFailureRequiresReauthorization(error)) markReauthorizationRequired();
+        throw error;
+      }
+    }
+    if (!tokenStillValid() || !session) throw new Error('Google durable authorization did not return a usable access token.');
+    return session.accessToken;
+  }
+
   const status = currentStatus();
   const authorizing = resolveAuthorizingCapability(capability, status.grantedCapabilities);
   const target = authorizing ?? capability;
-  if (!authorizing || !tokenStillValid()) await acquireToken(target, allowInteraction ? '' : 'none');
+  if (!authorizing || !tokenStillValid()) await acquireBrowserToken(target, allowInteraction ? '' : 'none');
   if (!tokenStillValid() || !session) throw new Error('Google authorization did not return a usable access token.');
   return session.accessToken;
 }
@@ -278,22 +460,17 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
 
   session = null;
   try {
-    const status = currentStatus();
-    const authorizing = resolveAuthorizingCapability(capability, status.grantedCapabilities) ?? capability;
-    await acquireToken(authorizing, 'none');
-  } catch {
-    stored.needsReauthorization = true;
-    saveStored();
-    throw new Error('Google authorization has expired or was revoked. Reauthorize this Google capability in Settings.');
+    await ensureToken(capability, false);
+  } catch (error) {
+    if (!activePairing() || workerFailureRequiresReauthorization(error)) markReauthorizationRequired();
+    throw new Error('Google authorization has expired or was revoked. Reauthorize this Google capability in Settings.', { cause: error });
   }
 
   const refreshedToken = currentAccessToken();
   if (!refreshedToken) throw new Error('Google authorization did not return a refreshed access token.');
   response = await fetch(new Request(target, requestOptions(refreshedToken)));
   if (response.status === 401) {
-    stored.needsReauthorization = true;
-    session = null;
-    saveStored();
+    markReauthorizationRequired();
     throw new Error('Google rejected the refreshed authorization. Reauthorize this capability in Settings.');
   }
   return response;
@@ -304,31 +481,40 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
     const parsed = googleCapabilityKeySchema.parse(capability);
     const descriptor = getGoogleScope(parsed);
     if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
-    const status = currentStatus();
-    const authorizing = resolveAuthorizingCapability(parsed, status.grantedCapabilities);
-    if (!authorizing || !tokenStillValid() || status.state === 'reauthorization-required') {
-      await acquireToken(parsed, authorizing && status.state !== 'reauthorization-required' ? 'none' : '');
-    }
+    await ensureToken(parsed, true);
     return { capability: parsed, fetch: (input, init) => authorizedFetch(parsed, input, init) } satisfies AuthorizedGoogleRequest;
   },
 
   async getStatus() {
+    const pairing = activePairing();
+    if (pairing) {
+      try {
+        await synchronizeDurableStatus(pairing);
+      } catch {
+        const local = currentStatus();
+        if (local.enabledCapabilities.length || local.grantedProviderScopes.length) return { ...local, state: 'token-recovery' };
+      }
+    }
     return currentStatus();
   },
 
   async disconnect() {
+    const pairing = activePairing();
+    if (pairing) {
+      await durablePost<{ disconnected: boolean; providerRevoked: boolean }>(pairing, '/google/oauth/disconnect', {});
+      clearStored();
+      return;
+    }
+
     const token = session?.accessToken;
     if (token) {
       try {
         await revokeGoogleAccessToken(token);
       } catch {
-        // Provider revocation is best-effort; local disconnect must still complete.
+        // Provider revocation is best-effort for the browser-only fallback.
       }
     }
-    session = null;
-    stored = emptyStored();
-    legacyGrantedCapabilities = [];
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+    clearStored();
   },
 };
 

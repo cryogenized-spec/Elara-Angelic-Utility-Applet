@@ -3,6 +3,7 @@ import type { DurableMemory, MemoryRetrievalScope, RetrievedMemory } from './typ
 
 export const DEFAULT_MAX_ITEMS = 8;
 export const DEFAULT_MAX_CHARACTERS = 6_000;
+export const PINNED_MEMORY_WEIGHT = 0.08;
 
 const KIND_WEIGHT: Record<DurableMemory['kind'], number> = {
   CORE: 0.08,
@@ -16,7 +17,7 @@ function tokenize(value: string): string[] {
 }
 
 /** Structural minimum the scorer reads — satisfied by DurableMemory and by the Autonomy Context source snapshot. */
-export type ScorableMemory = Pick<DurableMemory, 'kind' | 'title' | 'body' | 'tags' | 'importance' | 'confidence' | 'updatedAt' | 'lifecycle' | 'relatedMemoryIds' | 'supportingMemoryIds' | 'conflictingMemoryIds' | 'reinforcementCount'>;
+export type ScorableMemory = Pick<DurableMemory, 'kind' | 'title' | 'body' | 'tags' | 'importance' | 'confidence' | 'updatedAt' | 'lifecycle' | 'relatedMemoryIds' | 'supportingMemoryIds' | 'conflictingMemoryIds' | 'reinforcementCount'> & { pinned?: boolean };
 
 function lexicalRelevance(memory: ScorableMemory, query: string): number {
   const queryTokens = tokenize(query);
@@ -31,7 +32,8 @@ function score(memory: ScorableMemory, query: string, now: number): number {
   const reinforcement = Math.min(memory.reinforcementCount / 8, 1);
   const relationshipDensity = Math.min((memory.relatedMemoryIds.length + memory.supportingMemoryIds.length + memory.conflictingMemoryIds.length) / 12, 1);
   const lifecycle = memory.lifecycle === 'active' ? 0.12 : memory.lifecycle === 'dormant' ? 0.03 : -0.4;
-  return lexicalRelevance(memory, query) * 0.5 + memory.importance * 0.18 + memory.confidence * 0.12 + reinforcement * 0.07 + recency * 0.06 + relationshipDensity * 0.03 + KIND_WEIGHT[memory.kind] + lifecycle;
+  const landmark = memory.pinned === true ? PINNED_MEMORY_WEIGHT : 0;
+  return lexicalRelevance(memory, query) * 0.5 + memory.importance * 0.18 + memory.confidence * 0.12 + reinforcement * 0.07 + recency * 0.06 + relationshipDensity * 0.03 + KIND_WEIGHT[memory.kind] + lifecycle + landmark;
 }
 
 /**

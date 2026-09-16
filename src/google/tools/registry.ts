@@ -1,8 +1,14 @@
 import type { GoogleToolDescriptor, GoogleToolExecutionPlane } from './contracts';
 
 export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
-  { name: 'calendar.listEvents', risk: 'read', capability: 'calendar.events.read', exposure: 'gemini', description: 'List calendar events with explicit filters and pagination.' },
-  { name: 'calendar.createEvent', risk: 'write', capability: 'calendar.events.write', exposure: 'gemini', description: 'Create a Calendar event with a title, start time, and end time.' },
+  { name: 'calendar.listCalendars', risk: 'read', capability: 'calendar.list.read', exposure: 'gemini', description: 'List available calendars with bounded filters and pagination.' },
+  { name: 'calendar.listEvents', risk: 'read', capability: 'calendar.events.read', exposure: 'gemini', description: 'List calendar events with explicit time, query, timezone, and pagination filters.' },
+  { name: 'calendar.getEvent', risk: 'read', capability: 'calendar.events.read', exposure: 'gemini', description: 'Inspect one Calendar event, including its ETag, recurrence, and attendee state.' },
+  { name: 'calendar.getSettings', risk: 'read', capability: 'calendar.settings.read', exposure: 'gemini', description: 'Read Calendar account settings such as timezone and week-start preferences.' },
+  { name: 'calendar.queryFreeBusy', risk: 'read', capability: 'calendar.freebusy.read', exposure: 'gemini', description: 'Check availability for explicit calendars and a bounded time window without reading event details.' },
+  { name: 'calendar.createEvent', risk: 'write', capability: 'calendar.events.write', exposure: 'gemini', description: 'Create a Calendar event with explicit timing, recurrence, attendees, and optional guest notifications.' },
+  { name: 'calendar.updateEvent', risk: 'write', capability: 'calendar.events.write', exposure: 'gemini', description: 'Partially update an explicit Calendar event using its current ETag.' },
+  { name: 'calendar.deleteEvent', risk: 'destructive', capability: 'calendar.events.write', exposure: 'gemini', description: 'Delete an explicit Calendar event using its current ETag.' },
   { name: 'tasks.listTaskLists', risk: 'read', capability: 'tasks.read', exposure: 'gemini', description: 'List task lists with pagination.' },
   { name: 'tasks.listTasks', risk: 'read', capability: 'tasks.read', exposure: 'gemini', description: 'List tasks with filtering and pagination.' },
   { name: 'tasks.getTask', risk: 'read', capability: 'tasks.read', exposure: 'gemini', description: 'Retrieve one task.' },

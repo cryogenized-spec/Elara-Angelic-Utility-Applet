@@ -58,6 +58,7 @@ Authorization remains capability-driven and incremental. A Google provider grant
 | Durable provider exchange/refresh/revoke | `worker/src/google/oauth-provider.ts` |
 | Durable encrypted credential owner | `worker/src/google/oauth-vault.ts` |
 | Public Worker OAuth route boundary | `worker/src/google/oauth-routes.ts`, `worker/src/entry.ts` |
+| OAuth lifecycle certification | `scripts/google-oauth-lifecycle-gate.mjs` |
 | Settings UI | `src/app/components/GoogleOAuthSettings.tsx` |
 
 `SYS-WORKER / worker.md` owns the Worker execution/runtime boundary; this document owns the Google authorization semantics that cross it.
@@ -69,6 +70,10 @@ The application scope registry maps named Elara capabilities to provider scopes.
 The browser authorization record remains version 3 under the historical `elara.google.authorization.v2` key. It stores only enabled capabilities, current provider scopes, optional account display metadata, recovery state and timestamps. Browser access tokens remain module-memory-only and are never persisted.
 
 In durable mode, the refresh token exists only inside the user's Worker Durable Object. It is encrypted with AES-GCM using dedicated `GOOGLE_OAUTH_VAULT_KEY` material before persistence. Refresh tokens are never returned by the Worker, never written to browser localStorage/IndexedDB, never placed in the autonomy database and never exposed to Gemini. The browser receives only a short-lived access token.
+
+Durable refresh credentials are bound to Google's stable OIDC subject (`sub`) internally. Email remains display/profile metadata and is not sufficient proof that an existing refresh token belongs to a newly selected account. When Google omits a replacement refresh token, the existing encrypted refresh credential may be reused only if the newly resolved stable subject matches the subject already stored with that credential; otherwise the unsafe local grant is deleted and reauthorization is required.
+
+The durable vault's `updated_at` field is also the browser-visible grant revision. Token-only refreshes keep that revision stable when the effective provider scope set is unchanged. A new authorization/grant change advances the revision. Paired browser access-token sessions bind themselves to that revision, and any authoritative revision change invalidates the in-memory token before another Google API request can use it.
 
 The durable vault reuses the self-hosted installation credential for admission. Browser writes are HMAC-signed with timestamp and nonce; the public Worker route verifies them and the Durable Object independently verifies them again while maintaining its own durable nonce replay ledger. Status reads use the installation bearer credential.
 
@@ -82,6 +87,9 @@ Effective authorization remains the intersection of user-enabled capabilities an
 - Every durable deployment uses credentials and infrastructure controlled by that deployment owner.
 - Refresh tokens never cross from the Worker vault into the browser or model/tool surface.
 - Browser access tokens are short-lived and memory-only.
+- Existing durable refresh credentials are reused only when stable Google subject identity proves account continuity.
+- A durable grant revision change invalidates any browser access-token session bound to the previous revision before Google API egress.
+- Ordinary access-token refresh does not manufacture a new grant revision when provider scopes are unchanged.
 - Provider grants never auto-promote Elara write/send authority.
 - A paired installation never silently falls back to browser-only authorization when its Worker is unavailable.
 - OAuth permission and Workspace mutation confirmation remain separate boundaries.
@@ -95,13 +103,19 @@ Worker OAuth writes use the existing installation signing protocol plus a dedica
 
 A missing/revoked refresh grant becomes an explicit reauthorization state. Temporary Worker/network loss may surface `token-recovery`; it does not erase a known local capability record or broaden authority. Disconnect attempts provider revocation and removes the durable local grant; browser-only mode retains its existing best-effort token revocation behavior.
 
+Account-switch ambiguity fails closed. If Google omits a replacement refresh token and stable subject continuity cannot be proven, Elara deletes the local durable credential rather than associating an old refresh token with new account metadata. Cross-device grant replacement also fails closed at the browser-token boundary: a changed Worker grant revision clears the still-unexpired local access token and forces retrieval from the current vault authority before API use.
+
 Consequential Google mutations still require the separate `SYS-GWS / google-workspace.md` confirmation boundary after OAuth authorization succeeds.
 
 ## 7. Verification and tests
 
 Browser tests cover both authorities: the legacy interactive-only token path and paired durable code exchange/refresh. `code-flow.test.ts` pins popup behavior so an arbitrary `redirect_uri` cannot be reintroduced. Worker tests cover encrypted persistence, refresh without browser interaction, replay rejection, origin mismatch, popup CSRF admission, CORS/authentication and disconnect/revocation.
 
-Repository security/reliability gates pin the reviewed credential consumers and require durable browser brokerage, signed Worker requests, AES-GCM vaulting, nonce replay protection, the dedicated Durable Object and the isolated Worker composition root.
+`worker/test/google-oauth-vault.test.ts` additionally pins safe same-subject refresh-token reuse and rejects cross-account reuse when Google omits a replacement refresh token. `src/google/oauth/authority.test.ts` pins grant-revision invalidation and proves that the stale account's still-unexpired token never reaches Google API egress after the Worker grant changes.
+
+CI has a named `Google OAuth lifecycle regression` step before the broad coverage/Worker suites. It runs `scripts/google-oauth-lifecycle-gate.mjs` plus the focused browser and workerd OAuth suites. The lifecycle gate freezes the stable-subject and grant-revision architecture and executes controlled hostile mutations that deliberately remove subject continuity, revision invalidation and revision stability; all three weakened variants must fail certification. `scripts/check-verification-integrity.mjs` pins both the exact npm command and its ordered CI step so this focused protection cannot be silently removed by a later cleanup.
+
+Repository security/reliability gates continue to pin the reviewed credential consumers and require durable browser brokerage, signed Worker requests, AES-GCM vaulting, nonce replay protection, the dedicated Durable Object and the isolated Worker composition root.
 
 `e2e/google-oauth-settings.spec.ts` continues to exercise the real browser-only Settings writer by stubbing only Google's external GIS/userinfo boundary. Durable Worker behavior is covered by unit + workerd tests because production credentials must never be required by CI.
 

@@ -29,7 +29,7 @@ function renderExpanded(record: GenerationActivityRecord): void {
 }
 
 describe('Generation Activity memory presentation', () => {
-  it('uses the dedicated Lucide memory icon for deliberate memory tools and organic capture', () => {
+  it('uses the dedicated Lucide open-book icon for deliberate memory tools and organic capture', () => {
     renderExpanded({
       id: 'memory-activity-turn',
       durationMs: 1250,
@@ -57,10 +57,10 @@ describe('Generation Activity memory presentation', () => {
     expect(container.textContent).toContain('Memory · Save');
     expect(container.textContent).toContain('Saved to memory');
     expect(container.textContent).toContain('Recorded 1 durable observation.');
-    expect(container.querySelectorAll('svg.lucide-brain')).toHaveLength(2);
+    expect(container.querySelectorAll('svg.lucide-book-open')).toHaveLength(2);
   });
 
-  it('uses the same dedicated icon for recalled durable context without relabeling it as a tool', () => {
+  it('uses the same open-book icon for recalled durable context without relabeling it as a tool', () => {
     renderExpanded({
       id: 'memory-recall-turn',
       durationMs: 700,
@@ -80,6 +80,6 @@ describe('Generation Activity memory presentation', () => {
     expect(container.textContent).toContain('Memory');
     expect(container.textContent).toContain('Recalled relevant durable memory.');
     expect(container.textContent).not.toContain('Tool invocations');
-    expect(container.querySelectorAll('svg.lucide-brain')).toHaveLength(1);
+    expect(container.querySelectorAll('svg.lucide-book-open')).toHaveLength(1);
   });
 });

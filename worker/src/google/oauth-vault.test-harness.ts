@@ -24,4 +24,9 @@ export class TestGoogleOAuthVault extends GoogleOAuthVault {
       refreshExpiresAt: row.refresh_expires_at,
     };
   }
+
+  /** Test-only adversarial hook for proving grant revisions stay monotonic. */
+  forceCredentialUpdatedAt(updatedAt: number): void {
+    this.ctx.storage.sql.exec('UPDATE google_oauth_credential SET updated_at = ? WHERE slot = 1', updatedAt);
+  }
 }

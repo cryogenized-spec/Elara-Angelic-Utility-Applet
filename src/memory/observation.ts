@@ -9,6 +9,9 @@ export interface ObservationRequest {
   title: string;
   body: string;
   tags?: string[];
+  /** Application-owned epistemic weight; model-facing reconcile omits these. */
+  confidence?: number;
+  importance?: number;
 }
 
 export type ObservationContext = MemoryCapabilityContext;
@@ -33,7 +36,14 @@ function existingObservationRelation(target: DurableMemory, observationId: strin
 export async function recordObservation(request: ObservationRequest, context: ObservationContext = {}): Promise<DurableMemory> {
   authorizeMemoryMutation('observe', context);
   return memory.save(
-    { title: request.title, body: request.body, kind: 'MICRO_OBSERVATION', tags: request.tags },
+    {
+      title: request.title,
+      body: request.body,
+      kind: 'MICRO_OBSERVATION',
+      tags: request.tags,
+      confidence: request.confidence,
+      importance: request.importance,
+    },
     context,
   );
 }

@@ -17,12 +17,20 @@ export interface GoogleOAuthAccount {
   readonly displayName?: string;
 }
 
+export class GoogleOAuthProviderError extends Error {
+  constructor(readonly code: string, message: string, readonly status: number) {
+    super(message);
+    this.name = 'GoogleOAuthProviderError';
+  }
+}
+
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
 const USERINFO_ENDPOINT = 'https://openidconnect.googleapis.com/v1/userinfo';
 const MAX_TOKEN_CHARS = 32_768;
 const MAX_SCOPE_CHARS = 16_384;
 const MAX_SUBJECT_CHARS = 255;
+const MAX_PROVIDER_ERROR_CHARS = 500;
 
 function required(value: string | undefined, name: string): string {
   const normalized = value?.trim() ?? '';
@@ -43,9 +51,18 @@ function parseScopes(value: unknown): string[] {
   return [...new Set(value.split(/\s+/).map((scope) => scope.trim()).filter(Boolean))];
 }
 
+function providerError(payload: Record<string, unknown> | null, status: number): GoogleOAuthProviderError {
+  const rawCode = typeof payload?.error === 'string' ? payload.error.trim() : '';
+  const code = rawCode && rawCode.length <= 100 ? rawCode : `http-${status}`;
+  const rawDescription = typeof payload?.error_description === 'string' ? payload.error_description.trim() : '';
+  const description = rawDescription ? rawDescription.slice(0, MAX_PROVIDER_ERROR_CHARS) : `HTTP ${status}`;
+  return new GoogleOAuthProviderError(code, `Google OAuth token request failed: ${description}.`, status);
+}
+
 async function readTokenResponse(response: Response): Promise<GoogleOAuthTokenResult> {
   const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-  if (!response.ok || !payload) throw new Error(`Google OAuth token exchange failed (${response.status}).`);
+  if (!response.ok) throw providerError(payload, response.status);
+  if (!payload) throw new GoogleOAuthProviderError('invalid_response', 'Google OAuth token response was not valid JSON.', response.status);
   const expiresIn = typeof payload.expires_in === 'number' && Number.isFinite(payload.expires_in)
     ? Math.max(60, Math.trunc(payload.expires_in))
     : 3600;

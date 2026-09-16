@@ -270,8 +270,8 @@ async function durablePost<T>(pairing: AutonomyPairing, path: string, payload: u
 function applyDurableStatus(remote: DurableOAuthStatus): void {
   const current = loadStored();
   legacyGrantedCapabilities = [];
-  session = null;
   if (!remote.connected) {
+    session = null;
     stored.grantedProviderScopes = [];
     stored.needsReauthorization = current.enabledCapabilities.length > 0;
     delete (stored as { account?: unknown }).account;

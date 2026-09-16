@@ -44,6 +44,13 @@ export interface GeminiTurnRequest {
   systemInstruction?: string;
   tools?: readonly string[];
   /**
+   * Application-owned turn provenance. These identifiers are never provider
+   * arguments; local mutation handlers use them to bind durable effects to the
+   * exact conversation and originating user message that elected this turn.
+   */
+  conversationId?: string;
+  inputMessageId?: string;
+  /**
    * Memory context composition mode. `'thread'` (default, interactive chat)
    * appends the active thread's durable-memory projection inside the provider
    * boundary. `'none'` passes the caller's system instruction through

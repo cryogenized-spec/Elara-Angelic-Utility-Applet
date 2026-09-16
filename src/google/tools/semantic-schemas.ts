@@ -26,6 +26,11 @@ const calendarUpdateSchema = z.object({
   const hasEventChange = ['summary', 'start', 'end', 'location', 'description', 'attendees', 'recurrence']
     .some((field) => value[field as keyof typeof value] !== undefined);
   if (!hasEventChange) context.addIssue({ code: 'custom', message: 'Calendar update requires at least one event field change.' });
+
+  const updatesTimedBoundary = (value.start?.includes('T') ?? false) || (value.end?.includes('T') ?? false);
+  if (value.recurrence?.length && updatesTimedBoundary && !value.timeZone) {
+    context.addIssue({ code: 'custom', path: ['timeZone'], message: 'Recurring Calendar date-time updates require an explicit time zone.' });
+  }
 });
 
 export const semanticToolArgumentSchemas = {

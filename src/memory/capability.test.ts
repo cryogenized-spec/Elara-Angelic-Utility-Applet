@@ -57,7 +57,7 @@ describe('deliberate memory capability', () => {
     const replay = await memory.save(request, context);
 
     expect(replay.id).toBe(first.id);
-    expect(replay.source.note).toMatch(/^idempotency:sha256:[a-f0-9]{64}$/);
+    expect(replay.source.note).toBe('idempotency:thread_123:message_456:generation_1:call_1');
     expect(await countMemories()).toBe(1);
   });
 

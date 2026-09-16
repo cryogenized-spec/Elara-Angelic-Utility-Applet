@@ -5,7 +5,18 @@ vi.mock('./gis', () => ({
   revokeGoogleAccessToken: vi.fn(),
 }));
 
+vi.mock('./code-flow', () => ({
+  requestGoogleAuthorizationCode: vi.fn(),
+}));
+
+vi.mock('../../autonomy/cloud/pairing', () => ({
+  loadPairing: vi.fn(() => null),
+  resolvePairingToken: vi.fn(async () => ''),
+}));
+
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
+import { requestGoogleAuthorizationCode } from './code-flow';
+import { loadPairing, resolvePairingToken } from '../../autonomy/cloud/pairing';
 import { googleOAuthAuthority } from './authority';
 import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE } from './capability-policy';
 
@@ -16,6 +27,24 @@ const EXPECTED_SCOPE = (scope: string) => `${scope} ${EMAIL_SCOPE} ${OPENID_SCOP
 
 const tokenMock = vi.mocked(requestGoogleAccessToken);
 const revokeMock = vi.mocked(revokeGoogleAccessToken);
+const codeMock = vi.mocked(requestGoogleAuthorizationCode);
+const pairingMock = vi.mocked(loadPairing);
+const pairingTokenMock = vi.mocked(resolvePairingToken);
+
+const TEST_PAIRING = {
+  workerUrl: 'https://worker.example',
+  token: '',
+  installationId: 'test-installation',
+  workerVersion: 'test',
+  schemaVersion: 1,
+  pairedAt: 1,
+  lastSyncedAt: null,
+  lastSyncedContextHash: null,
+  lastPulledRunsAt: 0,
+  lastPulledRunsId: '',
+  lastPulledEventsAt: 0,
+  lastPulledEventsId: '',
+};
 
 function token(accessToken: string, scope: string, expiresIn = 3600) {
   return { access_token: accessToken, expires_in: expiresIn, scope };
@@ -38,13 +67,26 @@ function installUserinfoFetch(email = 'test@example.com') {
   }) as unknown as typeof fetch;
 }
 
+function requestUrl(input: RequestInfo | URL): string {
+  return input instanceof Request ? input.url : String(input);
+}
+
+function requestMethod(input: RequestInfo | URL, init?: RequestInit): string {
+  return input instanceof Request ? input.method : init?.method ?? 'GET';
+}
+
 describe('direct Google OAuth authority', () => {
   beforeEach(async () => {
     vi.stubEnv('VITE_GOOGLE_CLIENT_ID', 'test-client.apps.googleusercontent.com');
+    pairingMock.mockReturnValue(null);
+    pairingTokenMock.mockResolvedValue('');
     localStorage.clear();
     tokenMock.mockReset();
     revokeMock.mockReset();
+    codeMock.mockReset();
     vi.restoreAllMocks();
+    pairingMock.mockReturnValue(null);
+    pairingTokenMock.mockResolvedValue('');
     await googleOAuthAuthority.disconnect();
     installUserinfoFetch();
   });
@@ -59,12 +101,12 @@ describe('direct Google OAuth authority', () => {
   });
 
   it('records GIS scopes and persists metadata without persisting the access token', async () => {
-    tokenMock.mockResolvedValueOnce(token('secret-access-token', 'https://www.googleapis.com/auth/calendar.events.readonly'));
+    tokenMock.mockResolvedValueOnce(token('secret-access-token', CALENDAR_READ_SCOPE));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
 
     expect(tokenMock).toHaveBeenCalledWith({
       clientId: 'test-client.apps.googleusercontent.com',
-      scope: EXPECTED_SCOPE('https://www.googleapis.com/auth/calendar.events.readonly'),
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
       prompt: '',
     });
     const stored = localStorage.getItem('elara.google.authorization.v2') ?? '';
@@ -74,7 +116,7 @@ describe('direct Google OAuth authority', () => {
     const status = await googleOAuthAuthority.getStatus();
     expect(status.enabledCapabilities).toContain('calendar.events.read');
     expect(status.grantedCapabilities).toContain('calendar.events.read');
-    expect(status.grantedProviderScopes).toContain('https://www.googleapis.com/auth/calendar.events.readonly');
+    expect(status.grantedProviderScopes).toContain(CALENDAR_READ_SCOPE);
     expect(status.account?.email).toBe('test@example.com');
     expect(authorized.capability).toBe('calendar.events.read');
   });
@@ -95,7 +137,7 @@ describe('direct Google OAuth authority', () => {
     localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
       version: 2,
       grantedCapabilities: ['drive.files.read', 'calendar.events.read'],
-      grantedProviderScopes: [DRIVE_APP_FILE_SCOPE, 'https://www.googleapis.com/auth/calendar.events.readonly'],
+      grantedProviderScopes: [DRIVE_APP_FILE_SCOPE, CALENDAR_READ_SCOPE],
       updatedAt: new Date().toISOString(),
     }));
     const status = await googleOAuthAuthority.getStatus();
@@ -104,7 +146,7 @@ describe('direct Google OAuth authority', () => {
   });
 
   it('attaches the short-lived access token directly to an approved Google API request', async () => {
-    tokenMock.mockResolvedValueOnce(token('access-123', 'https://www.googleapis.com/auth/calendar.events.readonly'));
+    tokenMock.mockResolvedValueOnce(token('access-123', CALENDAR_READ_SCOPE));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     const fetchMock = vi.fn().mockResolvedValue(new Response('{"items":[]}', { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -118,17 +160,15 @@ describe('direct Google OAuth authority', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('silently reacquires the token after a 401 and retries the same request body', async () => {
+  it('silently reacquires the browser token after a 401 and retries the same request body', async () => {
     tokenMock
-      .mockResolvedValueOnce(token('access-old', 'https://www.googleapis.com/auth/calendar.events.readonly'))
-      .mockResolvedValueOnce(token('access-new', 'https://www.googleapis.com/auth/calendar.events.readonly'));
+      .mockResolvedValueOnce(token('access-old', CALENDAR_READ_SCOPE))
+      .mockResolvedValueOnce(token('access-new', CALENDAR_READ_SCOPE));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     let callCount = 0;
     const fetchMock = vi.fn().mockImplementation(async (input) => {
       const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String((input as { url?: string })?.url ?? input);
-      if (String(url).includes('userinfo') || String(url).includes('openidconnect')) {
-        return userinfoResponse();
-      }
+      if (String(url).includes('userinfo') || String(url).includes('openidconnect')) return userinfoResponse();
       callCount += 1;
       if (callCount === 1) return new Response('expired', { status: 401 });
       return new Response('ok', { status: 200 });
@@ -144,13 +184,97 @@ describe('direct Google OAuth authority', () => {
     expect(response.status).toBe(200);
     expect(tokenMock).toHaveBeenLastCalledWith({
       clientId: 'test-client.apps.googleusercontent.com',
-      scope: EXPECTED_SCOPE('https://www.googleapis.com/auth/calendar.events.readonly'),
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
       prompt: 'none',
     });
   });
 
+  it('uses the paired self-hosted Worker code flow and never stores durable credentials in browser storage', async () => {
+    pairingMock.mockReturnValue(TEST_PAIRING);
+    pairingTokenMock.mockResolvedValue('test-installation-secret');
+    codeMock.mockResolvedValue({ code: 'one-time-code', scope: `${CALENDAR_READ_SCOPE} ${EMAIL_SCOPE}` });
+    let connected = false;
+
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = requestMethod(input, init);
+      if (url === 'https://worker.example/google/oauth/status' && method === 'GET') {
+        return new Response(JSON.stringify(connected
+          ? { connected: true, scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE], account: { email: 'durable@example.com', displayName: 'Durable User' } }
+          : { connected: false, scopes: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/exchange' && method === 'POST') {
+        connected = true;
+        const request = input instanceof Request ? input : new Request(url, init);
+        expect(request.headers.get('X-Requested-With')).toBe('XmlHttpRequest');
+        expect(request.headers.get('X-Elara-Signature')).toBeTruthy();
+        expect(await request.json()).toEqual({ code: 'one-time-code', redirectUri: window.location.origin });
+        return new Response(JSON.stringify({
+          connected: true,
+          accessToken: 'durable-access-token',
+          expiresIn: 3600,
+          scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+          account: { email: 'durable@example.com', displayName: 'Durable User' },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    expect(codeMock).toHaveBeenCalledWith(expect.objectContaining({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
+    }));
+    expect(tokenMock).not.toHaveBeenCalled();
+    const persisted = localStorage.getItem('elara.google.authorization.v2') ?? '';
+    expect(persisted).toContain('calendar.events.read');
+    expect(persisted).toContain('durable@example.com');
+    expect(persisted).not.toContain('durable-access-token');
+    expect(persisted).not.toContain('test-installation-secret');
+  });
+
+  it('refreshes a paired durable grant without opening GIS again after browser session loss', async () => {
+    pairingMock.mockReturnValue(TEST_PAIRING);
+    pairingTokenMock.mockResolvedValue('test-installation-secret');
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE],
+      account: { email: 'durable@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+
+    let refreshCalls = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = requestMethod(input, init);
+      if (url === 'https://worker.example/google/oauth/status' && method === 'GET') {
+        return new Response(JSON.stringify({ connected: true, scopes: [CALENDAR_READ_SCOPE], account: { email: 'durable@example.com' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/token' && method === 'POST') {
+        refreshCalls += 1;
+        return new Response(JSON.stringify({
+          connected: true,
+          accessToken: 'refreshed-durable-access-token',
+          expiresIn: 3600,
+          scopes: [CALENDAR_READ_SCOPE],
+          account: { email: 'durable@example.com' },
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    }) as unknown as typeof fetch;
+
+    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    expect(refreshCalls).toBe(1);
+    expect(codeMock).not.toHaveBeenCalled();
+    expect(tokenMock).not.toHaveBeenCalled();
+  });
+
   it('rejects non-Google API targets before network access', async () => {
-    tokenMock.mockResolvedValueOnce(token('access-123', 'https://www.googleapis.com/auth/calendar.events.readonly'));
+    tokenMock.mockResolvedValueOnce(token('access-123', CALENDAR_READ_SCOPE));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -159,7 +283,7 @@ describe('direct Google OAuth authority', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('disconnects the local authorization state and revokes the active token', async () => {
+  it('disconnects the local browser authorization state and revokes the active token', async () => {
     tokenMock.mockResolvedValueOnce(token('access-123', CALENDAR_READ_SCOPE));
     await googleOAuthAuthority.authorize('calendar.events.read');
     await googleOAuthAuthority.disconnect();
@@ -263,14 +387,14 @@ describe('direct Google OAuth authority', () => {
     expect(status.state).toBe('partially-authorized');
   });
 
-  it('writes account identity from userinfo after interactive authorization', async () => {
+  it('writes account identity from userinfo after interactive browser authorization', async () => {
     tokenMock.mockResolvedValueOnce(token('access-123', CALENDAR_READ_SCOPE));
     await googleOAuthAuthority.authorize('calendar.events.read');
     const status = await googleOAuthAuthority.getStatus();
     expect(status.account?.email).toBe('test@example.com');
   });
 
-  it('clears stale account when interactive userinfo fails', async () => {
+  it('clears stale account when interactive browser userinfo fails', async () => {
     localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
       version: 3,
       enabledCapabilities: ['calendar.events.read'],

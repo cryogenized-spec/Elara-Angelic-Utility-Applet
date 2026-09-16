@@ -23,7 +23,8 @@ normal chat
 -> canonical folder/global scope
 -> rank + budget
 -> untrusted contextual projection
--> Gemini
+-> freeze one composed system instruction for the elected turn
+-> Gemini initial interaction + every tool continuation
 
 explicit remember
 -> declared memory.save
@@ -44,6 +45,8 @@ memory-management request
 ```
 
 Normal recall and `memory.lookup` share the same folder/global scope resolver and ranking engine. Automatic recall is bound to the conversation captured when the turn was elected; current UI navigation is only a compatibility fallback for legacy callers without turn provenance. Lookup does not use `retrieveMemories`, so a management lookup does not alter recall telemetry.
+
+Gemini Interactions treats `system_instruction` as interaction-scoped rather than conversation-history state. Interactive tool turns therefore compose durable memory once at the elected top-level turn, pass the provider `memoryContext: none`, and reuse that exact composed instruction for every tool-result continuation. Memory is neither dropped after a tool call nor re-retrieved mid-turn after a mutation.
 
 ## 3. Source map
 
@@ -83,6 +86,7 @@ Ranking remains one scorer: lexical 0.50, importance 0.18, confidence 0.12, rein
 - `memory.save` and `memory.reconcile` are real `write` tools and use the existing confirmation broker. `memory.lookup` is a true read.
 - A mutation may commit only while its originating generation remains elected.
 - One logical model call must converge on at most one logical mutation; replaying that call with changed mutation arguments fails closed.
+- Tool continuations reuse one frozen bounded-memory instruction for the entire elected turn; a mutation cannot rewrite the model's context halfway through that turn.
 - Model-visible hard delete/forget/raw update/promote/reinforce/observe/consolidate are not declared.
 
 ## 6. Model-facing contract
@@ -93,7 +97,7 @@ Ranking remains one scorer: lexical 0.50, importance 0.18, confidence 0.12, rein
 | `memory.save` | write | browser | Pass 1 certified + merged | deliberate durable retention |
 | `memory.reconcile` | write | browser | Pass 2 implemented; certification pending | attach evidence or supersede a lookup-selected memory |
 
-All three use `memory.durable.local` through the central registry/executor/tool loop. No parallel dispatcher exists.
+All three use `memory.durable.local` through the central registry/executor/tool loop. Normal interactive chat derives its offered tool list from the Gemini-visible registry; Worker/autonomy derives a separate execution-plane surface. No parallel memory dispatcher exists.
 
 ### 6.1 `memory.lookup`
 
@@ -109,7 +113,7 @@ A lookup ref is an in-memory capability grant, not identity. It is bound to the 
 
 Input: title 1-160, body 1-4,000, optional kind (`CONTEXTUAL`/`EPISODIC`), confidence/importance `[0,1]`, and at most 12 tags of 64 chars.
 
-The app owns identity, provenance, scope and lifecycle. Logical mutation identity derives from `conversationId + inputMessageId + generationId + provider callId`; `saveMemoryOnce` performs replay convergence inside the canonical Dexie transaction and rechecks turn authority before commit.
+The app owns identity, provenance, scope and lifecycle. Logical mutation identity derives from `conversationId + inputMessageId + generationId + provider callId`; `saveMemoryOnce` performs replay convergence inside the canonical Dexie transaction and rechecks turn authority before commit. Normal bounded keys remain human-readable in provenance; an overlong full-lineage key is represented by a SHA-256 marker rather than truncated, so distinguishing suffixes still participate in replay identity.
 
 Replay convergence is semantic, not merely key-based: reusing the same logical call identity with a changed title/body/kind/confidence/importance/tags/scope/provenance fails closed. Later legitimate lifecycle, relationship and recall metadata changes do not invalidate a true replay.
 
@@ -143,9 +147,9 @@ Pass 0 was certified and squash-merged as `c95b41100a54fd1cad13d1f6c425ea0f992e0
 
 Pass 1 was certified across documentation/security/secret/supply-chain/test-quality gates, registry signatures, dependency audit, zero-warning lint, TS6, TS7, unit + per-file coverage ratchet, Worker/Durable Object tests, build, E2E and final reliability. It was squash-merged as `217a4d7e60157acbf1cba75321fb2019e2f4ddbe`.
 
-Pass 2 is implemented on `memory/pass-2-lookup-reconcile` and is not considered complete until the same full certification pipeline passes. The Pass 0-2 review additionally audits compile-time schema dispatch, exact declared-tool authority, replay equivalence, captured-conversation recall, prompt-injection-shaped stored prose, ref lineage, archived/scope-changed targets, transaction rollback and Worker-plane exclusion.
+Pass 2 is implemented on `memory/pass-2-lookup-reconcile` and is not considered complete until the same full certification pipeline passes. The Pass 0-2 review additionally audits compile-time schema dispatch, exact declared-tool authority, replay equivalence, long-lineage collision resistance, captured-conversation recall, frozen continuation context, prompt-injection-shaped stored prose, ref lineage, archived/scope-changed targets, transaction rollback and Worker-plane exclusion.
 
-Pass 2 tests pin: one shared scope authority; originating-conversation recall despite UI navigation; no lookup recall-telemetry mutation; opaque ref/no-ID leakage; conversation/message/generation reference binding; raw-ID/cross-turn rejection; current-scope revalidation; confirmed reconcile; replay-safe support; changed-replay rejection; conflict/related preservation; conservative supersession; compound rollback on generation loss; exact browser-only authority surface; undeclared-tool rejection even in write-enabled turns; and a real Gemini lookup -> reconcile continuation loop.
+Pass 2 tests pin: one shared scope authority; originating-conversation recall despite UI navigation; no lookup recall-telemetry mutation; opaque ref/no-ID leakage; conversation/message/generation reference binding; raw-ID/cross-turn rejection; current-scope revalidation; confirmed reconcile; replay-safe support; changed-replay rejection; long replay-key hashing; conflict/related preservation; conservative supersession; compound rollback on generation loss; exact browser-only authority surface; undeclared-tool rejection even in write-enabled turns; frozen memory context across Gemini tool continuations; and a real Gemini lookup -> reconcile continuation loop.
 
 ## 9. Organic observation boundary
 

@@ -1,6 +1,6 @@
 // Typed test bindings: the real worker Env surface under test.
 declare module 'cloudflare:test' {
-  import type { Env } from '../src/index';
+  import type { Env } from '../src/entry';
   export const env: Env;
   export const SELF: {
     fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;

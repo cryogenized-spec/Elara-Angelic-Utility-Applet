@@ -12,15 +12,17 @@ export interface GoogleOAuthTokenResult {
 }
 
 export interface GoogleOAuthAccount {
+  readonly subject: string;
   readonly email: string;
   readonly displayName?: string;
 }
 
 const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const REVOKE_ENDPOINT = 'https://oauth2.googleapis.com/revoke';
-const USERINFO_ENDPOINT = 'https://www.googleapis.com/oauth2/v2/userinfo';
+const USERINFO_ENDPOINT = 'https://openidconnect.googleapis.com/v1/userinfo';
 const MAX_TOKEN_CHARS = 32_768;
 const MAX_SCOPE_CHARS = 16_384;
+const MAX_SUBJECT_CHARS = 255;
 
 function required(value: string | undefined, name: string): string {
   const normalized = value?.trim() ?? '';
@@ -105,12 +107,13 @@ export async function fetchGoogleOAuthAccount(accessToken: string, fetcher: type
   });
   if (!response.ok) return null;
   const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const subject = typeof payload?.sub === 'string' ? payload.sub.trim() : '';
   const email = typeof payload?.email === 'string' ? payload.email.trim() : '';
-  if (!email || email.length > 320) return null;
+  if (!subject || subject.length > MAX_SUBJECT_CHARS || !email || email.length > 320) return null;
   const displayName = typeof payload?.name === 'string' && payload.name.trim()
     ? payload.name.trim().slice(0, 500)
     : undefined;
-  return { email, ...(displayName ? { displayName } : {}) };
+  return { subject, email, ...(displayName ? { displayName } : {}) };
 }
 
 export async function revokeGoogleOAuthToken(token: string, fetcher: typeof fetch = fetch): Promise<boolean> {

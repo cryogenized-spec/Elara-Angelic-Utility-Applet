@@ -43,17 +43,23 @@ export async function saveMemory(input: MemoryInput): Promise<DurableMemory> {
  * put share one Dexie transaction so a replay of the same logical tool call
  * converges on the already-created record rather than duplicating it.
  *
+ * `isMutationAllowed` is checked on both sides of the asynchronous write. If
+ * turn authority is lost while IndexedDB is settling, throwing here aborts the
+ * transaction so a late/cancelled generation cannot leave a durable mutation.
  * Only a matching provenance note is inspected; unrelated malformed legacy
  * records cannot block a new deliberate memory write.
  */
-export async function saveMemoryOnce(input: MemoryInput, provenanceNote: string): Promise<DurableMemory> {
+export async function saveMemoryOnce(input: MemoryInput, provenanceNote: string, isMutationAllowed: () => boolean = () => true): Promise<DurableMemory> {
   const note = provenanceNote.trim();
   if (!note) throw new Error('Memory idempotency provenance is required.');
   if (input.source?.note !== note) throw new Error('Memory idempotency provenance mismatch.');
   return db.transaction('rw', db.memories, async () => {
+    if (!isMutationAllowed()) throw new DOMException('The memory mutation lost turn authority.', 'AbortError');
     const existing = (await table().toArray()).find((record) => record?.source?.note === note);
     if (existing) return validate(existing);
-    return saveMemory(input);
+    const saved = await saveMemory(input);
+    if (!isMutationAllowed()) throw new DOMException('The memory mutation lost turn authority.', 'AbortError');
+    return saved;
   });
 }
 

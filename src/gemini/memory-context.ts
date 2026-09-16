@@ -4,10 +4,20 @@ import { loadFolderState } from '../persistence/folders';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 
-/** Build a bounded, folder-aware durable-memory context for the current thread. */
-export async function loadMemoryContext(query: string): Promise<string> {
-  if (typeof window === 'undefined') return '';
-  const threadId = window.localStorage.getItem(ACTIVE_THREAD_KEY);
+function resolveConversationId(conversationId?: string): string | null {
+  const captured = conversationId?.trim();
+  if (captured) return captured;
+  if (typeof window === 'undefined') return null;
+  return window.localStorage.getItem(ACTIVE_THREAD_KEY)?.trim() || null;
+}
+
+/**
+ * Build a bounded, folder-aware durable-memory context for the originating
+ * conversation. The active-thread localStorage value is only a compatibility
+ * fallback for callers that do not carry turn provenance.
+ */
+export async function loadMemoryContext(query: string, conversationId?: string): Promise<string> {
+  const threadId = resolveConversationId(conversationId);
   if (!threadId) return '';
 
   const folderState = await loadFolderState();
@@ -16,6 +26,7 @@ export async function loadMemoryContext(query: string): Promise<string> {
 
 export type MemoryContextStatus = 'used' | 'empty' | 'unavailable';
 export interface MemoryContextResult { context: string; status: MemoryContextStatus; }
+export type MemoryContextLoader = (query: string, conversationId?: string) => Promise<string>;
 
 /**
  * Retrieve memory without allowing a local persistence failure to block Gemini.
@@ -24,10 +35,11 @@ export interface MemoryContextResult { context: string; status: MemoryContextSta
  */
 export async function loadMemoryContextResult(
   query: string,
-  loader: (query: string) => Promise<string> = loadMemoryContext,
+  loader: MemoryContextLoader = loadMemoryContext,
+  conversationId?: string,
 ): Promise<MemoryContextResult> {
   try {
-    const context = await loader(query);
+    const context = await loader(query, conversationId);
     return { context, status: context.trim() ? 'used' : 'empty' };
   } catch {
     return { context: '', status: 'unavailable' };
@@ -35,8 +47,8 @@ export async function loadMemoryContextResult(
 }
 
 /** Backwards-compatible string-only helper for existing callers/tests. */
-export async function loadMemoryContextSafely(query: string, loader: (query: string) => Promise<string> = loadMemoryContext): Promise<string> {
-  return (await loadMemoryContextResult(query, loader)).context;
+export async function loadMemoryContextSafely(query: string, loader: MemoryContextLoader = loadMemoryContext, conversationId?: string): Promise<string> {
+  return (await loadMemoryContextResult(query, loader, conversationId)).context;
 }
 
 /** Keep durable memory explicitly contextual and separate from Elara's identity instructions. */
@@ -59,13 +71,14 @@ export interface ComposedSystemInstruction {
 export async function composeSystemInstructionWithStatus(
   systemInstruction: string | undefined,
   query: string,
+  conversationId?: string,
 ): Promise<ComposedSystemInstruction> {
-  const memory = await loadMemoryContextResult(query);
+  const memory = await loadMemoryContextResult(query, loadMemoryContext, conversationId);
   const contextual = appendMemoryContext(systemInstruction ?? '', memory.context);
   return { instruction: contextual.trim() ? contextual : undefined, memoryStatus: memory.status };
 }
 
 /** Existing string-only API retained for non-trace callers. */
-export async function composeSystemInstruction(systemInstruction: string | undefined, query: string): Promise<string | undefined> {
-  return (await composeSystemInstructionWithStatus(systemInstruction, query)).instruction;
+export async function composeSystemInstruction(systemInstruction: string | undefined, query: string, conversationId?: string): Promise<string | undefined> {
+  return (await composeSystemInstructionWithStatus(systemInstruction, query, conversationId)).instruction;
 }

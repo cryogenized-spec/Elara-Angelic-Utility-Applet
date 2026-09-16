@@ -48,6 +48,7 @@
     "worker:types": "wrangler types --config worker/wrangler.toml worker/worker-configuration.d.ts",
     "verify:worker": "node scripts/verify-gemini-worker.mjs",
     "reliability:check": "npm run docs:check && npm run verify:gates && npm run security:check && npm run secrets:check && npm run supply-chain:check && npm run test:quality && node scripts/reliability-gate.mjs",
+    "test:google-oauth-lifecycle": "node scripts/google-oauth-lifecycle-gate.mjs && vitest run src/google/oauth/authority.test.ts && vitest run --config vitest.workers.config.ts worker/test/google-oauth-vault.test.ts",
     "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {

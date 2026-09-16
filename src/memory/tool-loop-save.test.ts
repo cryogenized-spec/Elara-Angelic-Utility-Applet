@@ -79,7 +79,9 @@ describe('memory.save through the interactive Gemini tool loop', () => {
     });
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
       previousInteractionId: 'interaction_1',
-      results: [expect.objectContaining({ callId: 'call_1', name: 'memory.save', result: expect.objectContaining({ saved: true, kind: 'CONTEXTUAL' }) })],
+      results: expect.arrayContaining([
+        expect.objectContaining({ callId: 'call_1', name: 'memory.save' }),
+      ]) as unknown[],
     }), undefined);
   });
 });

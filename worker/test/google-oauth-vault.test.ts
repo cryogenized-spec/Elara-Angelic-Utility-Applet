@@ -208,6 +208,25 @@ describe('GoogleOAuthVault', () => {
     expect(await status.json()).toEqual({ connected: false, scopes: [] });
   });
 
+  it('turns provider invalid_grant into explicit reauthorization and deletes the revoked durable grant', async () => {
+    mockProvider();
+    expect((await exchange('revoked-grant-code')).status).toBe(200);
+    expect(await credentialSnapshot()).not.toBeNull();
+
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(new Response(JSON.stringify({
+      error: 'invalid_grant',
+      error_description: 'Token has been expired or revoked.',
+    }), { status: 400, headers: { 'content-type': 'application/json' } }));
+
+    const refreshed = await doFetch(await signedWrite('/google/oauth/token', '{}'));
+    expect(refreshed.status).toBe(409);
+    expect(await refreshed.json()).toEqual(expect.objectContaining({ code: 'reauthorization_required' }));
+    expect(await credentialSnapshot()).toBeNull();
+
+    const status = await doFetch(await bearerRead('/google/oauth/status'));
+    expect(await status.json()).toEqual({ connected: false, scopes: [] });
+  });
+
   it('rejects replay of the same signed exchange before a second provider call can occur', async () => {
     const provider = mockProvider();
     const body = JSON.stringify({ code: 'single-use-code', redirectUri: ORIGIN });

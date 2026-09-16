@@ -82,12 +82,12 @@ describe('bounded organic memory observer', () => {
   });
 
   it('deterministically rejects credential-shaped evidence even if the classifier emits it', async () => {
-    const userMessage = 'For tomorrow, my API key is sk-abcdefghijklmnop123456789 and do not lose it.';
+    const userMessage = 'For tomorrow, my API key is EXAMPLE_NOT_A_REAL_SECRET_12345 and do not lose it.';
     const result = await observePersistedTurn({
       conversationId: 'thread_organic',
       messageId: 'user_secret_1',
       userMessage,
-      extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence: 'my API key is sk-abcdefghijklmnop123456789' }] }),
+      extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence: 'my API key is EXAMPLE_NOT_A_REAL_SECRET_12345' }] }),
     });
 
     expect(result).toEqual({ status: 'empty', count: 0 });

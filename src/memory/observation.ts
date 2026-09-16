@@ -62,7 +62,8 @@ export async function recordObservation(request: ObservationRequest, context: Ob
  * lifecycle policy; conflicting evidence is retained without rewriting prose.
  * Replaying the same relation is a no-op and reclassification fails closed.
  * Relationship capacity is checked before any mutation so normalization can
- * never silently drop a link after epistemic weight has changed.
+ * never silently drop a link after epistemic weight has changed. A replay whose
+ * link is already present remains a no-op even when the array is full.
  */
 export async function consolidateObservation(
   observationId: string,

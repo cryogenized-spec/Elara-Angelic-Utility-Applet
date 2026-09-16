@@ -10,6 +10,7 @@ import {
 import {
   exchangeGoogleAuthorizationCode,
   fetchGoogleOAuthAccount,
+  GoogleOAuthProviderError,
   refreshGoogleAccessToken,
   revokeGoogleOAuthToken,
   type GoogleOAuthAccount,
@@ -314,7 +315,19 @@ export class GoogleOAuthVault extends DurableObject {
     if (!existing) return json({ code: 'not_connected', message: 'Google OAuth is not connected.' }, 409);
 
     const refreshToken = await decryptRefreshToken(this.vaultSecret(), existing.refresh_cipher, existing.refresh_iv);
-    const result = await refreshGoogleAccessToken(this.oauthEnv, refreshToken);
+    let result;
+    try {
+      result = await refreshGoogleAccessToken(this.oauthEnv, refreshToken);
+    } catch (error) {
+      if (error instanceof GoogleOAuthProviderError && error.code === 'invalid_grant') {
+        this.ctx.storage.sql.exec('DELETE FROM google_oauth_credential WHERE slot = 1');
+        return json({
+          code: 'reauthorization_required',
+          message: 'The Google refresh grant expired or was revoked. Authorize Google Workspace again.',
+        }, 409);
+      }
+      throw error;
+    }
     const existingScopes = parseScopes(existing.scopes);
     const scopes = result.scopes.length ? result.scopes : existingScopes;
     const now = Date.now();

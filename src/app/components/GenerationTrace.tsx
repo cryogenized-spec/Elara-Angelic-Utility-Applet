@@ -59,12 +59,14 @@ function toolIcon(name: string | undefined): IconName {
   if (name.startsWith('sheets.')) return 'sheets';
   if (name.startsWith('chat.')) return 'message-circle';
   if (name.startsWith('roleplay_setting.')) return 'wand-sparkles';
+  if (name.startsWith('memory.')) return 'memory';
   if (name.startsWith('youtube.')) return 'search';
   return 'tool';
 }
 
 function rowIcon(row: ActivityRow): IconName {
-  if (row.kind === 'thinking' || row.contextCategory === 'memory') return 'sparkles';
+  if (row.contextCategory === 'memory') return 'memory';
+  if (row.kind === 'thinking') return 'sparkles';
   if (row.kind === 'generation') return 'bot';
   if (row.kind === 'tool') return toolIcon(row.toolName);
   return 'dots';
@@ -91,7 +93,8 @@ function rowCopy(row: ActivityRow): { primary: string; secondary?: string } {
     return { primary: toolDescriptor(row.toolName ?? row.label) };
   }
   if (row.kind === 'context') {
-    const category = row.contextCategory === 'memory' ? 'Memory' : row.contextCategory === 'artifacts' ? 'Documents & Artifacts' : row.label;
+    if (row.contextCategory === 'memory') return { primary: row.label || 'Memory', secondary: row.detail };
+    const category = row.contextCategory === 'artifacts' ? 'Documents & Artifacts' : row.label;
     return { primary: category, secondary: row.detail };
   }
   return { primary: row.label, secondary: row.detail };

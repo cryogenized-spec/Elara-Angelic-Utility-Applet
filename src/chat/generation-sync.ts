@@ -1,10 +1,13 @@
 import type { Dispatch, SetStateAction } from 'react';
-import type { ChatMessage, ConversationState, ProviderStatus, ProviderUsage } from '../domain/chat';
+import type { ChatMessage, ConversationState, GenerationActivityStep, ProviderStatus, ProviderUsage } from '../domain/chat';
 import type { GeminiStreamEvent, GeminiUsage } from '../gemini/contracts';
 import type { NormalizedProviderError } from '../gemini/errors';
+import { geminiOrganicMemoryExtractor } from '../gemini/memory-observer';
+import { observePersistedTurn } from '../memory/organic-observer';
 import {
   applyGenerationEvent,
   buildGenerationActivity,
+  MAX_PERSISTED_ACTIVITY_STEPS,
   persistedThoughtSummaryOf,
   type GenerationEventEnvelope,
   type GenerationState,
@@ -90,6 +93,90 @@ function buildUsage(usage: GeminiUsage | undefined, thoughtSummary: string | und
   };
 }
 
+function generationUsedMemoryTool(generation: GenerationState): boolean {
+  return generation.steps.some((step) => step.toolName?.startsWith('memory.') === true);
+}
+
+function withOrganicMemoryActivity(
+  completed: ConversationState,
+  assistantMessageId: string,
+  generationId: string,
+  count: number,
+  durationMs: number,
+  totalDurationMs: number,
+): ConversationState {
+  const step: GenerationActivityStep = {
+    id: `memory-observer-${generationId}`,
+    kind: 'context',
+    state: 'done',
+    durationMs: Math.max(0, Math.floor(durationMs)),
+    label: 'Saved to memory',
+    detail: count === 1 ? 'Recorded 1 durable observation.' : `Recorded ${count} durable observations.`,
+    contextCategory: 'memory',
+  };
+
+  const messages = completed.messages.map((message) => {
+    if (message.id !== assistantMessageId || !message.generationActivity) return message;
+    const previousSteps = message.generationActivity.steps.slice(-(MAX_PERSISTED_ACTIVITY_STEPS - 1));
+    return {
+      ...message,
+      generationActivity: {
+        ...message.generationActivity,
+        durationMs: Math.max(message.generationActivity.durationMs, Math.max(0, Math.floor(totalDurationMs))),
+        steps: [...previousSteps, step],
+      },
+    };
+  });
+
+  return { ...completed, updatedAt: Date.now(), messages };
+}
+
+/**
+ * Terminal durability is one ordered barrier:
+ *   response save -> bounded organic observation -> optional trace save -> caller unlocks the turn.
+ *
+ * Once the response save succeeds, the durable user turn is the observer's
+ * authority. Navigation therefore does not cancel the observer. Observer or
+ * trace-persistence failure is intentionally non-fatal and can never roll the
+ * saved response back; a failed response save, conversely, prevents observation
+ * entirely.
+ */
+async function persistCompletedTurn(completed: ConversationState, generation: GenerationState, context: GenerationSyncContext): Promise<void> {
+  await context.save(completed);
+  const observerStartedAt = performance.now();
+  try {
+    const result = await observePersistedTurn({
+      conversationId: context.base.id,
+      messageId: context.inputMessageId ?? '',
+      userMessage: context.input,
+      extractor: geminiOrganicMemoryExtractor(context.model),
+      usedMemoryTool: generationUsedMemoryTool(generation),
+      responseVariant: context.assistantMessage.responseVariant,
+    });
+    if (result.status !== 'recorded' || result.count <= 0) return;
+
+    const traced = withOrganicMemoryActivity(
+      completed,
+      context.assistantMessage.id,
+      generation.generationId,
+      result.count,
+      performance.now() - observerStartedAt,
+      Date.now() - context.wallStartedAt,
+    );
+
+    try {
+      await context.save(traced);
+      context.setConversation((current) => current.id === traced.id ? traced : current);
+    } catch {
+      // The response and memory are already durable. Failure to persist optional
+      // activity metadata must not misreport the completed chat as failed.
+    }
+  } catch {
+    // Memory formation is best-effort after the conversation has crossed its
+    // durability boundary. Never convert a saved reply into a failed turn.
+  }
+}
+
 /**
  * One projection from reducer-owned live state into the single optimistic
  * assistant message. Text, artifacts and media therefore cannot overwrite one
@@ -150,7 +237,7 @@ export function syncGenerationEvent(event: GeminiStreamEvent, generation: Genera
     const completed: ConversationState = { ...base, updatedAt: completedAt, messages: [...base.messages, completedMessage] };
     context.setConversation(completed);
     context.setStatus('saving');
-    const persistence = context.save(completed);
+    const persistence = persistCompletedTurn(completed, generation, context);
     // The turn owner awaits this exact promise. Mark the rejection handled now
     // so a fast storage failure cannot surface as an unhandled rejection before
     // control reaches the owner's finally block.

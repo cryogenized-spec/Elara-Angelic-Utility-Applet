@@ -1,19 +1,19 @@
 ---
 id: SYS-MEM
 status: active
-verified_commit: 217a4d7e60157acbf1cba75321fb2019e2f4ddbe
-scope: durable memory lifecycle, retrieval, and model capability boundary
-paths: [src/memory, src/gemini/memory-context.ts, src/gemini/google-tool-loop.ts, src/google/tools]
-keywords: [memory, recall, observation, retrieval, consolidation, reconciliation, memory-bank, capability]
+verified_commit: 6d4c90677d00fdc4c4df9b717859e08e42dbfb24
+scope: durable memory lifecycle, retrieval, model capabilities, and organic observation
+paths: [src/memory, src/gemini/memory-context.ts, src/gemini/memory-observer.ts, src/gemini/google-tool-loop.ts, src/chat/generation-sync.ts, src/google/tools]
+keywords: [memory, recall, observation, retrieval, consolidation, reconciliation, organic-observer, memory-bank, capability]
 ---
 
 # Durable memory
 
 ## 1. Purpose and boundary
 
-`SYS-MEM` owns durable facts and observations that can outlive a conversation window. Conversation history is not automatically permanent memory. `db.memories` is the single durable authority; Memory Bank, retrieval, Gemini tools and future observers are projections over that store.
+`SYS-MEM` owns durable facts and observations that can outlive a conversation window. Conversation history is not automatically permanent memory. `db.memories` is the single durable authority; Memory Bank, recall, Gemini tools and the organic observer are projections over that store.
 
-The completion target is Companion-style initiative on Angelic architecture: Elara may deliberately remember and reconcile evidence, then later form bounded observations, without restoring the old free-form notebook `UPDATE`/`DELETE` model.
+The target is Companion-style initiative on Angelic architecture: Elara may deliberately remember, reconcile evidence, and form bounded observations without restoring the old free-form notebook `UPDATE`/`DELETE` model or allowing assistant prose to bootstrap itself into fact.
 
 ## 2. Runtime architecture
 
@@ -23,8 +23,16 @@ normal chat
 -> canonical folder/global scope
 -> rank + budget
 -> untrusted contextual projection
--> freeze one composed system instruction for the elected turn
+-> freeze one composed instruction for the elected turn
 -> Gemini initial interaction + every tool continuation
+-> terminal assistant response
+-> durable conversation save
+-> bounded organic classifier [user message only]
+-> exact-span validation + app-owned metadata
+-> replay-safe MICRO_OBSERVATION transaction
+-> db.memories
+-> optional Generation Activity trace update
+-> unlock next turn
 
 explicit remember
 -> declared memory.save
@@ -44,9 +52,11 @@ memory-management request
 -> db.memories
 ```
 
-Normal recall and `memory.lookup` share the same folder/global scope resolver and ranking engine. Automatic recall is bound to the conversation captured when the turn was elected; current UI navigation is only a compatibility fallback for legacy callers without turn provenance. Lookup does not use `retrieveMemories`, so a management lookup does not alter recall telemetry.
+Normal recall and `memory.lookup` share the same folder/global scope resolver and ranking engine. Automatic recall is bound to the conversation captured when the turn was elected; current UI navigation is only a compatibility fallback for legacy callers without turn provenance. Lookup does not use `retrieveMemories`, so management lookup does not alter recall telemetry.
 
 Gemini Interactions treats `system_instruction` as interaction-scoped rather than conversation-history state. Interactive tool turns therefore compose durable memory once at the elected top-level turn, pass the provider `memoryContext: none`, and reuse that exact composed instruction for every tool-result continuation. Memory is neither dropped after a tool call nor re-retrieved mid-turn after a mutation.
+
+Organic formation is downstream of conversation durability. `generation-sync.ts` extends the existing terminal persistence promise rather than creating another queue or lifecycle owner: the assistant response must save first; observer failure cannot roll that response back; the composer remains in `saving` until the bounded observer stage completes or safely degrades.
 
 ## 3. Source map
 
@@ -57,11 +67,14 @@ Gemini Interactions treats `system_instruction` as interaction-scoped rather tha
 | Store/transactions/lifecycle | `src/memory/store.ts` |
 | Scope/ranking/budget | `src/memory/retrieval.ts` |
 | Observation/consolidation/supersession | `src/memory/observation.ts` |
+| Organic observation policy/write path | `src/memory/organic-observer.ts` |
+| Organic Gemini classifier | `src/gemini/memory-observer.ts` |
 | Permission/capability | `src/memory/permissions.ts`, `capability.ts` |
 | Gemini memory schemas/handlers | `src/memory/tool-schema.ts`, `tool-handler.ts` |
 | Integrity/health | `src/memory/inspection.ts`, `health.ts` |
-| Gemini projection | `src/gemini/memory-context.ts`, `provider.ts` |
+| Gemini recall projection | `src/gemini/memory-context.ts`, `provider.ts` |
 | Tool loop | `src/gemini/google-tool-loop.ts` |
+| Terminal persistence barrier | `src/chat/generation-sync.ts` |
 | Central tool authority | `src/google/tools/registry.ts`, `contracts.ts`, `gemini-declarations.ts`, `executor.ts` |
 | User UI | `src/app/components/DurableMemorySettings.tsx` |
 
@@ -75,29 +88,33 @@ Promotion order remains `MICRO_OBSERVATION -> EPISODIC -> CONTEXTUAL -> CORE`. R
 
 Ranking remains one scorer: lexical 0.50, importance 0.18, confidence 0.12, reinforcement 0.07, recency 0.06, relationship density 0.03, plus kind/lifecycle weights. No second lookup scorer exists.
 
+Organic observations deliberately start below explicit durable saves: `kind=MICRO_OBSERVATION`, confidence `0.60`, importance `0.35`, tags `organic` + `domain:<domain>`. The classifier cannot override those values.
+
 ## 5. Authority invariants
 
 - `db.memories` is the only durable-memory authority.
 - Retrieved/stored prose is untrusted application data, never instruction and never permission.
 - Every provider tool call must be in the exact tool set declared for that turn. Registry membership or an installed handler cannot widen authority, including in write-enabled turns.
-- Model arguments never control durable IDs, provenance, conversation/message identity, timestamps, folder scope, lifecycle, relationship arrays, expiry or autonomy consent.
+- Model tool arguments never control durable IDs, provenance, conversation/message identity, timestamps, folder scope, lifecycle, relationship arrays, expiry or autonomy consent.
 - Model defaults remain `save=true`, `observe=true`, `consolidate=true`, `forget=false`, `delete=false`; Gemini declarations are narrower than that internal policy.
 - All Gemini memory tools are browser-only because the canonical store is local IndexedDB/Dexie. Worker/autonomy never advertises them.
 - `memory.save` and `memory.reconcile` are real `write` tools and use the existing confirmation broker. `memory.lookup` is a true read.
-- A mutation may commit only while its originating generation remains elected.
+- A live model-tool mutation may commit only while its originating generation remains elected.
 - One logical model call must converge on at most one logical mutation; replaying that call with changed mutation arguments fails closed.
-- Tool continuations reuse one frozen bounded-memory instruction for the entire elected turn; a mutation cannot rewrite the model's context halfway through that turn.
+- Tool continuations reuse one frozen bounded-memory instruction for the entire elected turn; a mutation cannot rewrite model context halfway through that turn.
 - Model-visible hard delete/forget/raw update/promote/reinforce/observe/consolidate are not declared.
+- Organic observation starts only after the user turn and assistant response are durable. It receives no assistant-response evidence and cannot create established memory directly.
+- Organic classifier output has no write authority. Only exact verbatim spans that occur in the persisted user message can pass application validation.
 
 ## 6. Model-facing contract
 
 | Tool | Risk | Plane | State | Purpose |
 | --- | --- | --- | --- | --- |
-| `memory.lookup` | read | browser | Pass 2 implemented; certification pending | bounded lookup for memory-management work |
+| `memory.lookup` | read | browser | Pass 2 certified + merged | bounded lookup for memory-management work |
 | `memory.save` | write | browser | Pass 1 certified + merged | deliberate durable retention |
-| `memory.reconcile` | write | browser | Pass 2 implemented; certification pending | attach evidence or supersede a lookup-selected memory |
+| `memory.reconcile` | write | browser | Pass 2 certified + merged | attach evidence or supersede a lookup-selected memory |
 
-All three use `memory.durable.local` through the central registry/executor/tool loop. Normal interactive chat derives its offered tool list from the Gemini-visible registry; Worker/autonomy derives a separate execution-plane surface. No parallel memory dispatcher exists.
+All three use `memory.durable.local` through the central registry/executor/tool loop. Normal interactive chat derives its offered tool list from the Gemini-visible registry; Worker/autonomy derives a separate execution-plane surface. No parallel memory dispatcher exists. Phase 3 adds no model-visible memory tool.
 
 ### 6.1 `memory.lookup`
 
@@ -107,13 +124,13 @@ Lookup resolves the originating conversation through the same canonical scope fu
 
 Each result exposes title/body/kind/confidence/importance/lifecycle/tags plus an opaque `memref_*`. It never exposes the underlying durable ID. Lookup uses `listMemories + rankAndBudgetMemories`, not `retrieveMemories`, so `recallCount`/`lastRecalledAt` are unchanged.
 
-A lookup ref is an in-memory capability grant, not identity. It is bound to the exact originating conversation + user message + generation, expires after ten minutes, and lives in a bounded 128-entry map. Resolve prunes expired entries; eviction is performed only when reserving room for a new grant.
+A lookup ref is an in-memory capability grant, not identity. It is bound to the exact originating conversation + user message + generation, expires after ten minutes, and lives in a bounded 128-entry map.
 
 ### 6.2 `memory.save`
 
 Input: title 1-160, body 1-4,000, optional kind (`CONTEXTUAL`/`EPISODIC`), confidence/importance `[0,1]`, and at most 12 tags of 64 chars.
 
-The app owns identity, provenance, scope and lifecycle. Logical mutation identity derives from `conversationId + inputMessageId + generationId + provider callId`; `saveMemoryOnce` performs replay convergence inside the canonical Dexie transaction and rechecks turn authority before commit. Normal bounded keys remain human-readable in provenance; an overlong full-lineage key is represented by a SHA-256 marker rather than truncated, so distinguishing suffixes still participate in replay identity.
+The app owns identity, provenance, scope and lifecycle. Logical mutation identity derives from `conversationId + inputMessageId + generationId + provider callId`; `saveMemoryOnce` performs replay convergence inside the canonical Dexie transaction and rechecks turn authority before commit. Normal bounded keys remain human-readable in provenance; an overlong full-lineage key is represented by a SHA-256 marker rather than truncated.
 
 Replay convergence is semantic, not merely key-based: reusing the same logical call identity with a changed title/body/kind/confidence/importance/tags/scope/provenance fails closed. Later legitimate lifecycle, relationship and recall metadata changes do not invalidate a true replay.
 
@@ -123,15 +140,53 @@ The tool returns only `{ saved, kind }`; raw durable identity is not exposed.
 
 Input: `targetRef`, relation (`support`, `conflict`, `related`, `supersede`), title 1-160, body 1-4,000, optional bounded tags. A raw memory ID is not accepted as authority.
 
-Before mutation, the handler verifies that the ref belongs to the same conversation/message/generation and then re-resolves current folder/global scope. If navigation/folder assignment changed, the target became archived/expired, or it is otherwise no longer retrievable, reconciliation fails closed.
+Before mutation, the handler verifies that the ref belongs to the same conversation/message/generation and then re-resolves current folder/global scope. If the target became archived/expired or otherwise left scope, reconciliation fails closed.
 
-`support` / `conflict` / `related` create one replay-safe `MICRO_OBSERVATION` carrying current-turn provenance and then use canonical consolidation. Support reinforces once; replaying the same evidence/relation is a no-op rather than a second reinforcement. Trying to reclassify the same observation under another relation fails closed. Conflict and related evidence never overwrite target prose.
+`support` / `conflict` / `related` create one replay-safe `MICRO_OBSERVATION` and use canonical consolidation. Support reinforces once; same-relation replay is a no-op; relation reclassification fails closed. Conflict/related evidence never overwrite target prose.
 
-`supersede` creates a conservative replacement and links both sides through `supersedes` / `supersededBy`. An EPISODIC target yields an EPISODIC replacement; other established kinds restart as CONTEXTUAL, so CORE authority is never inherited automatically. The old memory remains active: dormancy/promotion policy belongs to Pass 4.
+`supersede` creates a conservative replacement and links both sides through `supersedes` / `supersededBy`. An EPISODIC target yields an EPISODIC replacement; other established kinds restart as CONTEXTUAL, so CORE authority is never inherited automatically. The old memory remains active; dormancy/promotion belongs to Pass 4.
 
-The full reconciliation runs inside `runMemoryMutationTransaction`. Losing generation authority before commit rolls back observation creation, reinforcement and relationship changes together. A bounded replay cache verifies the original call signature; same-call altered arguments fail closed.
+The full reconciliation runs inside `runMemoryMutationTransaction`. Losing generation authority before commit rolls back the compound operation.
 
-## 7. Security and failure semantics
+## 7. Organic observer contract
+
+### 7.1 Evidence boundary and capture criteria
+
+The classifier receives at most 6,000 characters from the current persisted user message. It receives no assistant response, no retrieved durable memory, no Character Master and no tools. Its only useful output is strict JSON containing at most three `{domain,evidence}` candidates.
+
+Automatic capture is not an unconstrained "the model feels like remembering this" decision. A candidate must fit one of six durable domains: `preference`, `persistent_fact`, `project_decision`, `commitment`, `recurring_context`, or `shared_event`, and it must be likely to remain useful beyond the immediate exchange. Ordinary questions, temporary task wording, acknowledgements, jokes, speculative hypotheticals, quoted third-party claims and incidental chatter are explicitly excluded.
+
+`evidence` is capped at 500 characters and must be an exact substring of the full user message. Paraphrases/inferences are discarded. Malformed or extra-property output fails closed. Obvious credential-shaped evidence is deterministically rejected in application code; the classifier is additionally instructed not to select highly sensitive personal facts for automatic persistence.
+
+The Gemini classifier uses the one canonical browser provider with `memoryContext: none` and an empty tool list. It has an eight-second internal timeout and a 4,000-character output ceiling. Provider failure, invalid JSON, timeout or cancellation becomes a non-fatal unavailable observer result.
+
+### 7.2 Write boundary
+
+Accepted candidates are converted by application code into app-titled, app-tagged low-weight `MICRO_OBSERVATION` records. The classifier never chooses the memory title, kind, confidence, importance, provenance, folder scope or durable identity.
+
+Each write uses the existing `recordObservation -> memory.save -> saveMemoryOnce -> db.memories` path and the existing permission policy. A stable idempotency identity derives from conversation + user message + domain + exact evidence, so a retry of the same persisted user evidence converges on one record even if the assistant generation changes. Provenance metadata stores a SHA-256 fingerprint of the evidence for replay identity rather than duplicating the user-authored prose outside the memory body.
+
+At most three accepted candidates are written inside one canonical memory transaction. A deliberate `memory.*` tool turn skips organic formation. Regeneration variants (`responseVariant > 1`) skip organic formation; a failed first response cannot form memory because its conversation save never crossed the durability boundary.
+
+### 7.3 Turn lifecycle and Generation Activity visibility
+
+`generation-sync.ts` hands the App one terminal promise covering the full post-response barrier:
+
+```text
+save completed conversation
+-> if save fails: reject; no observer
+-> if save succeeds: run bounded observer
+-> observer records / returns empty / safely degrades
+-> if records were created: persist optional "Saved to memory" activity row
+-> resolve terminal barrier
+-> App refreshes thread list, unlocks composer, releases generation
+```
+
+After the conversation save succeeds, the durable turn—not the currently visible UI thread—is sufficient authority for this best-effort post-turn observation. Navigating during `saving` therefore does not create a second lifecycle or silently roll back the already-saved reply.
+
+Memory activity has a dedicated Lucide brain icon in Generation Activity. Recall remains an application context row, deliberate `memory.lookup` / `memory.save` / `memory.reconcile` remain truthful tool rows, and a successful organic capture adds a persisted `Saved to memory` context row with the number of durable observations recorded. Empty/skipped organic classification does not add noise to the trace. Failure of the optional trace-metadata save is non-fatal because the response and memory have already crossed their durability boundaries.
+
+## 8. Security and failure semantics
 
 Memory context remains bounded and separated from Character Master. Retrieval failure cannot corrupt the canonical store or fail an otherwise valid turn. Health/inspection is diagnostic only; destructive repair is never automatic.
 
@@ -139,23 +194,19 @@ Lookup results explicitly state that stored memory is untrusted contextual data.
 
 Interactive writes inherit existing confirmation freshness and cancellation handling. Memory handlers additionally enforce app-owned conversation/message/generation/call provenance and canonical transaction-level election checks.
 
-Organic observation is a different authority path and remains disabled until Pass 3. User-authored content or app-verified evidence may later support observations; assistant-generated prose alone may not bootstrap itself into durable fact.
+Organic classifier prose has zero direct authority. A malicious user message can influence classifier output only to the extent that the classifier points at a literal span; application validation still enforces schema, exact-span membership, candidate count, secret rejection, app-owned metadata and canonical transactional storage. Observer failure never converts a saved assistant turn into a failed chat turn.
 
-## 8. Certification history
+## 9. Certification history
 
 Pass 0 was certified and squash-merged as `c95b41100a54fd1cad13d1f6c425ea0f992e0bb5`.
 
-Pass 1 was certified across documentation/security/secret/supply-chain/test-quality gates, registry signatures, dependency audit, zero-warning lint, TS6, TS7, unit + per-file coverage ratchet, Worker/Durable Object tests, build, E2E and final reliability. It was squash-merged as `217a4d7e60157acbf1cba75321fb2019e2f4ddbe`.
+Pass 1 was fully certified and squash-merged as `217a4d7e60157acbf1cba75321fb2019e2f4ddbe`.
 
-Pass 2 is implemented on `memory/pass-2-lookup-reconcile` and is not considered complete until the same full certification pipeline passes. The Pass 0-2 review additionally audits compile-time schema dispatch, exact declared-tool authority, replay equivalence, long-lineage collision resistance, captured-conversation recall, frozen continuation context, prompt-injection-shaped stored prose, ref lineage, archived/scope-changed targets, transaction rollback and Worker-plane exclusion.
+Pass 2 plus the Pass 0-2 hardening review passed documentation, verification, security, secret, supply-chain, test-quality/adversarial, registry-signature, dependency-audit, zero-warning lint, TS6, TS7, unit + per-file coverage, Worker/Durable Object, build, E2E and final-reliability gates. It was squash-merged as `6d4c90677d00fdc4c4df9b717859e08e42dbfb24`.
 
-Pass 2 tests pin: one shared scope authority; originating-conversation recall despite UI navigation; no lookup recall-telemetry mutation; opaque ref/no-ID leakage; conversation/message/generation reference binding; raw-ID/cross-turn rejection; current-scope revalidation; confirmed reconcile; replay-safe support; changed-replay rejection; long replay-key hashing; conflict/related preservation; conservative supersession; compound rollback on generation loss; exact browser-only authority surface; undeclared-tool rejection even in write-enabled turns; frozen memory context across Gemini tool continuations; and a real Gemini lookup -> reconcile continuation loop.
+Pass 3 is implemented on `memory/pass-3-organic-observer` and remains uncertified until the same exact-head pipeline passes.
 
-## 9. Organic observation boundary
-
-Pass 3 restores bounded automatic noticing without restoring a destructive notebook editor. It must run only after terminal assistant persistence succeeds. Candidates begin as `MICRO_OBSERVATION`, not CORE, and assistant-generated claims alone are not evidence.
-
-Candidate domains include explicit preferences, persistent facts, project decisions, commitments, recurring context and meaningful shared events. Incidental chatter is ignored. Reinforcement/promotion/dormancy behavior remains Pass 4.
+Pass 3 tests pin: trivial-turn skip; exact-user-span evidence; app-owned kind/title/tags/confidence/importance/scope; paraphrase rejection; credential rejection; strict schema; duplicate-candidate collapse; retry idempotency and evidence-fingerprint privacy; deliberate-memory and regeneration exclusion; classifier failure isolation; tool-less/memory-less Gemini classifier calls; bounded output; explicit provider completion; response-save-before-observer ordering; no observer after failed persistence; observer degradation without chat failure; non-fatal activity-trace persistence; and dedicated memory icon/labels for recall, deliberate memory tools and organic capture.
 
 ## 10. Completion passes
 
@@ -163,8 +214,8 @@ Candidate domains include explicit preferences, persistent facts, project decisi
 | --- | --- | --- |
 | 0 | baseline + invariants + exact capability contract | complete / merged (`c95b411`) |
 | 1 | deliberate `memory.save` + authoritative provenance/idempotency | complete / merged (`217a4d7`) |
-| 2 | scoped `memory.lookup` + safe `memory.reconcile` | implemented + hardened / certification pending |
-| 3 | bounded post-turn organic observer | pending |
+| 2 | scoped `memory.lookup` + safe `memory.reconcile` | complete / merged (`6d4c906`) |
+| 3 | bounded post-turn organic observer | implemented / certification pending |
 | 4 | reinforcement, contradiction, supersession and promotion/dormancy policy | pending |
 | 5 | Memory Bank parity: maintenance, landmarks/pinning, import/export | pending |
 | 6 | adversarial certification + final documentation | pending |
@@ -173,4 +224,4 @@ Semantic/vector retrieval, cloud memory sync, autonomous forgetting and a separa
 
 ## 11. Current gap
 
-Once Pass 2 certifies, deliberate retention and deliberate evidence reconciliation are complete. The remaining major behavioral gap is **organic formation**: Elara still will not automatically extract durable observations from ordinary conversation. That capability belongs exclusively to Pass 3 and must not be inferred from the existence of `memory.reconcile`.
+After Pass 3 certifies, Elara can deliberately remember, deliberately reconcile established memory, and automatically notice bounded user-authored evidence after durable turns. The next gap is **evidence lifecycle policy**: relating repeated organic observations to established memories, contradiction handling, promotion, dormancy and supersession consequences. That work belongs to Pass 4; Phase 3 intentionally does not promote or rewrite established memory.

@@ -1,6 +1,7 @@
 import type { CSSProperties } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
+  BookOpen,
   Bot,
   CalendarDays,
   Camera,
@@ -61,6 +62,7 @@ export type IconName =
   | 'message-circle'
   | 'sparkles'
   | 'wand-sparkles'
+  | 'memory'
   | 'lock-keyhole'
   | 'close'
   | 'search'
@@ -99,6 +101,7 @@ const icons: Record<IconName, LucideIcon> = {
   'message-circle': MessageCircle,
   sparkles: Sparkles,
   'wand-sparkles': WandSparkles,
+  memory: BookOpen,
   'lock-keyhole': LockKeyhole,
   close: X,
   search: Search,

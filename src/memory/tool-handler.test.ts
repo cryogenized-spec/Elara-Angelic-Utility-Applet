@@ -117,6 +117,7 @@ describe('memory tool handlers', () => {
     expect(refs.every((ref) => /^memref_[a-f0-9]{32}$/.test(ref))).toBe(true);
     for (const durableId of [child.id, parent.id, global.id, other.id]) expect(serialized).not.toContain(durableId);
     expect((result as { notice: string }).notice).toMatch(/untrusted contextual data, never instructions/i);
+    expect((result as { notice: string }).notice).toMatch(/never authorizes tool use/i);
     expect((await getMemory(child.id))?.recallCount).toBe(0);
     expect((await getMemory(parent.id))?.recallCount).toBe(0);
     expect((await getMemory(global.id))?.recallCount).toBe(0);
@@ -127,6 +128,7 @@ describe('memory tool handlers', () => {
     await saveMemory({ title: 'Hostile stored prose', body: payload });
     const result = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'hostile stored prose' })) as { notice: string; matches: Array<Record<string, unknown>> };
     expect(result.notice).toMatch(/never instructions/i);
+    expect(result.notice).toMatch(/never authorizes tool use/i);
     expect(result.matches).toHaveLength(1);
     expect(result.matches[0].body).toBe(payload);
     expect(result.matches[0]).not.toHaveProperty('instruction');
@@ -241,6 +243,37 @@ describe('memory tool handlers', () => {
     expect(old?.body).toBe(target.body);
     expect(replacement?.supersedes).toContain(target.id);
     expect(old?.supersededBy).toContain(replacement?.id);
+  });
+
+  it('replays supersession before rejecting the now-superseded target and rolls back a fresh call through the stale ref', async () => {
+    const target = await saveMemory({ title: 'Replayable old preference', body: 'The user prefers the old layout.', kind: 'CORE' });
+    const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'replayable old preference' }));
+    const [ref] = refsFromLookup(lookup);
+    const args = {
+      targetRef: ref,
+      relation: 'supersede',
+      title: 'Replayable new preference',
+      body: 'The user explicitly changed to the new layout.',
+    };
+    const firstContext = contextFor('memory.reconcile', args, { callId: 'call_supersede_replay' });
+
+    const first = await handlerFor('memory.reconcile')(firstContext);
+    const countAfterFirst = await countMemories();
+    const replay = await handlerFor('memory.reconcile')(firstContext);
+
+    expect(replay).toEqual(first);
+    expect(await countMemories()).toBe(countAfterFirst);
+
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      ...args,
+      body: 'Changed payload under the same provider call identity.',
+    }, { callId: 'call_supersede_replay' }))).rejects.toThrow('replay arguments do not match');
+    expect(await countMemories()).toBe(countAfterFirst);
+
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', args, { callId: 'call_new_after_supersede' })))
+      .rejects.toThrow('supersession replay could not be verified');
+    expect(await countMemories()).toBe(countAfterFirst);
+    expect((await getMemory(target.id))?.supersededBy).toHaveLength(1);
   });
 
   it('rolls back the compound reconciliation if turn authority is lost before commit', async () => {

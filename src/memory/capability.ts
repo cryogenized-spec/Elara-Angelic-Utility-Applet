@@ -29,6 +29,8 @@ export interface MemoryCapability {
   delete(id: string, context?: MemoryCapabilityContext): Promise<void>;
 }
 
+const MAX_READABLE_IDEMPOTENCY_KEY_LENGTH = 470;
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -36,7 +38,10 @@ async function sha256Hex(value: string): Promise<string> {
 
 async function effectiveProvenanceNote(context: MemoryCapabilityContext): Promise<string | undefined> {
   const key = context.idempotencyKey?.trim();
-  if (key) return `idempotency:sha256:${await sha256Hex(key)}`;
+  if (key) {
+    if (key.length <= MAX_READABLE_IDEMPOTENCY_KEY_LENGTH) return `idempotency:${key}`;
+    return `idempotency:sha256:${await sha256Hex(key)}`;
+  }
   return context.provenanceNote?.trim() || undefined;
 }
 

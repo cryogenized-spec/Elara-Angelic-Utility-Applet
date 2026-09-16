@@ -7,6 +7,9 @@ import type { GoogleToolExecutionContext } from '../google/tools/executor';
 import { countMemories, getMemory, listMemories, saveMemory } from './store';
 import { memoryToolHandlers } from './tool-handler';
 
+let testTurn = 0;
+let currentGenerationId = 'generation_test_0';
+
 function requireMemoryDescriptor(name: GoogleToolName): GoogleToolDescriptor {
   const found = googleToolRegistry.find((tool) => tool.name === name);
   if (!found) throw new Error(`${name} descriptor missing from test registry.`);
@@ -30,7 +33,7 @@ function contextFor(tool: GoogleToolName, argumentsValue: Record<string, unknown
     callId: 'call_1',
     conversationId: 'thread_1',
     messageId: 'message_1',
-    generationId: 'generation_1',
+    generationId: currentGenerationId,
     isGenerationActive: () => true,
     ...overrides,
   };
@@ -57,6 +60,8 @@ async function assignThread(folderId: string | null): Promise<void> {
 
 describe('memory tool handlers', () => {
   beforeEach(async () => {
+    testTurn += 1;
+    currentGenerationId = `generation_test_${testTurn}`;
     await db.transaction('rw', db.memories, db.folders, db.folderAssignments, async () => {
       await db.memories.clear();
       await db.folders.clear();
@@ -80,7 +85,7 @@ describe('memory tool handlers', () => {
       folderId: 'folder_1',
       source: { source: 'elara', conversationId: 'thread_1', messageId: 'message_1' },
     });
-    expect(records[0].source.note).toBe('idempotency:thread_1:message_1:generation_1:call_1');
+    expect(records[0].source.note).toBe(`idempotency:thread_1:message_1:${currentGenerationId}:call_1`);
   });
 
   it('fails closed when one save call identity is replayed with changed arguments', async () => {
@@ -142,7 +147,7 @@ describe('memory tool handlers', () => {
     const [ref] = refsFromLookup(lookup);
     const reconcileArgs = { targetRef: ref, relation: 'support', title: 'Evidence', body: 'The user repeated the preference.' };
 
-    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', reconcileArgs, { generationId: 'generation_2' })))
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', reconcileArgs, { generationId: `${currentGenerationId}_other` })))
       .rejects.toThrow('reference is unavailable');
     await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', reconcileArgs, { messageId: 'message_2' })))
       .rejects.toThrow('reference is unavailable');

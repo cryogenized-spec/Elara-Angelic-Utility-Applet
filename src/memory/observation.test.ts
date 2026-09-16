@@ -29,8 +29,10 @@ describe('memory observation and consolidation', () => {
 
     expect(result.supportingMemoryIds).toContain(observation.id);
     expect(result.reinforcementCount).toBe(1);
+    expect(result.confidence).toBeGreaterThan(target.confidence);
     expect(replay.reinforcementCount).toBe(1);
     expect(replay.body).toBe(target.body);
+    expect((await getMemory(observation.id))?.lifecycle).toBe('dormant');
   });
 
   it('rejects reclassifying already-consolidated evidence', async () => {
@@ -40,7 +42,7 @@ describe('memory observation and consolidation', () => {
     await expect(consolidateObservation(observation.id, target.id, 'conflict')).rejects.toThrow('different relation');
   });
 
-  it('retains contradictory evidence without overwriting the target', async () => {
+  it('retains contradictory evidence without overwriting the target or promoting it', async () => {
     const target = await memory.save({ title: 'Preference', body: 'The user prefers dark mode.', kind: 'CORE' });
     const observation = await recordObservation({ title: 'Contradictory observation', body: 'The user explicitly requested light mode.' });
 
@@ -49,7 +51,7 @@ describe('memory observation and consolidation', () => {
     expect(result.conflictingMemoryIds).toContain(observation.id);
     expect(result.body).toBe(target.body);
     expect(result.reinforcementCount).toBe(0);
-    expect(await getMemory(observation.id)).toEqual(observation);
+    expect((await getMemory(observation.id))?.lifecycle).toBe('active');
   });
 
   it('links related evidence without changing target confidence or prose', async () => {
@@ -61,23 +63,25 @@ describe('memory observation and consolidation', () => {
     expect(result.relatedMemoryIds).toContain(observation.id);
     expect(result.confidence).toBe(0.8);
     expect(result.body).toBe('The project uses TypeScript.');
+    expect((await getMemory(observation.id))?.lifecycle).toBe('dormant');
   });
 
-  it('links supersession bidirectionally without deleting or archiving the old memory', async () => {
+  it('links supersession bidirectionally, dormants the old memory, and keeps it inspectable', async () => {
     const target = await memory.save({ title: 'Old preference', body: 'The user prefers the old layout.', kind: 'CORE' });
     const result = await supersedeMemory(target.id, { title: 'New preference', body: 'The user now explicitly prefers the new layout.' });
 
     expect(result.replacement.kind).toBe('CONTEXTUAL');
     expect(result.replacement.supersedes).toContain(target.id);
     expect(result.target.supersededBy).toContain(result.replacement.id);
-    expect(result.target.lifecycle).toBe('active');
-    expect(await getMemory(target.id)).toMatchObject({ lifecycle: 'active', body: target.body });
+    expect(result.target.lifecycle).toBe('dormant');
+    expect(await getMemory(target.id)).toMatchObject({ lifecycle: 'dormant', body: target.body });
   });
 
   it('retains episodic kind when superseding an episodic memory', async () => {
     const target = await memory.save({ title: 'Old event', body: 'The event happened at noon.', kind: 'EPISODIC' });
     const result = await supersedeMemory(target.id, { title: 'Corrected event', body: 'The user corrected the event time to 13:00.' });
     expect(result.replacement.kind).toBe('EPISODIC');
+    expect(result.target.lifecycle).toBe('dormant');
   });
 
   it('rejects invalid consolidation and supersession targets', async () => {

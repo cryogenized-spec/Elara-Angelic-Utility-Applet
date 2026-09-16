@@ -3,6 +3,7 @@ import { memory, type MemoryCapabilityContext } from './capability';
 import { getMemory, updateMemory } from './store';
 import { authorizeMemoryMutation } from './permissions';
 import { applyMemoryLifecyclePolicy, reinforceMemoryFromEvidence } from './lifecycle';
+import { MEMORY_MAX_RELATIONSHIPS } from './normalize';
 
 export type ObservationRelation = 'support' | 'conflict' | 'related';
 
@@ -24,6 +25,12 @@ export interface SupersessionResult {
 
 function appendUnique(ids: string[], id: string): string[] {
   return ids.includes(id) ? ids : [...ids, id];
+}
+
+function assertRelationshipCapacity(ids: readonly string[], id: string, relation: string): void {
+  if (!ids.includes(id) && ids.length >= MEMORY_MAX_RELATIONSHIPS) {
+    throw new Error(`Memory ${relation} relationship capacity reached.`);
+  }
 }
 
 function existingObservationRelation(target: DurableMemory, observationId: string): ObservationRelation | undefined {
@@ -54,6 +61,8 @@ export async function recordObservation(request: ObservationRequest, context: Ob
  * Supporting evidence reinforces the target once using the application-owned
  * lifecycle policy; conflicting evidence is retained without rewriting prose.
  * Replaying the same relation is a no-op and reclassification fails closed.
+ * Relationship capacity is checked before any mutation so normalization can
+ * never silently drop a link after epistemic weight has changed.
  */
 export async function consolidateObservation(
   observationId: string,
@@ -77,6 +86,7 @@ export async function consolidateObservation(
   if (existingRelation) throw new Error('Observation is already consolidated with a different relation.');
 
   if (relation === 'support') {
+    assertRelationshipCapacity(target.supportingMemoryIds, observation.id, 'supporting');
     const reinforced = await reinforceMemoryFromEvidence(target.id);
     const linked = await updateMemory(reinforced.id, {
       supportingMemoryIds: appendUnique(reinforced.supportingMemoryIds, observation.id),
@@ -87,6 +97,7 @@ export async function consolidateObservation(
   }
 
   if (relation === 'conflict') {
+    assertRelationshipCapacity(target.conflictingMemoryIds, observation.id, 'conflicting');
     const linked = await updateMemory(target.id, {
       conflictingMemoryIds: appendUnique(target.conflictingMemoryIds, observation.id),
     });
@@ -94,6 +105,7 @@ export async function consolidateObservation(
     return applyMemoryLifecyclePolicy(linked.id);
   }
 
+  assertRelationshipCapacity(target.relatedMemoryIds, observation.id, 'related');
   const linked = await updateMemory(target.id, {
     relatedMemoryIds: appendUnique(target.relatedMemoryIds, observation.id),
   });
@@ -116,6 +128,9 @@ export async function supersedeMemory(
   const target = await getMemory(targetMemoryId);
   if (!target) throw new Error('Target memory not found.');
   if (target.kind === 'MICRO_OBSERVATION') throw new Error('Micro-observations cannot be superseded through reconciliation.');
+  if (target.supersededBy.length >= MEMORY_MAX_RELATIONSHIPS) {
+    throw new Error('Memory supersession relationship capacity reached.');
+  }
 
   let replacement = await memory.save(
     {
@@ -128,6 +143,7 @@ export async function supersedeMemory(
   );
 
   if (!replacement.supersedes.includes(target.id)) {
+    assertRelationshipCapacity(replacement.supersedes, target.id, 'supersedes');
     replacement = await updateMemory(replacement.id, {
       supersedes: appendUnique(replacement.supersedes, target.id),
     });
@@ -135,6 +151,7 @@ export async function supersedeMemory(
 
   let linkedTarget = (await getMemory(target.id)) ?? target;
   if (!linkedTarget.supersededBy.includes(replacement.id)) {
+    assertRelationshipCapacity(linkedTarget.supersededBy, replacement.id, 'superseded-by');
     linkedTarget = await updateMemory(linkedTarget.id, {
       supersededBy: appendUnique(linkedTarget.supersededBy, replacement.id),
     });

@@ -64,7 +64,7 @@ describe('memory lifecycle policy', () => {
     });
 
     const episodic = await applyMemoryLifecyclePolicy(memoryRecord.id);
-    expect(eposodicKind(eposodic.kind)).toBe('EPISODIC');
+    expect(episodic.kind).toBe('EPISODIC');
     const contextual = await applyMemoryLifecyclePolicy(memoryRecord.id);
     expect(contextual.kind).toBe('CONTEXTUAL');
     const stillContextual = await applyMemoryLifecyclePolicy(memoryRecord.id);
@@ -122,7 +122,3 @@ describe('memory lifecycle policy', () => {
     expect(result).toEqual({ reviewed: 2, changed: 1, dormant: 1, promoted: 0 });
   });
 });
-
-function eposodicKind(kind: string): string {
-  return kind;
-}

@@ -18,7 +18,9 @@ Update the owning canonical system document whenever a durable contract changes.
 
 Use implementation and tests, not old design prose, to determine runtime truth. Keep one canonical interactive Gemini path. Keep credentials behind their owning authority. UI must not own raw provider requests, OAuth internals, secrets or database implementation. Validate trust-boundary data. Preserve one authoritative state owner per domain rather than creating parallel stores.
 
-Normal interactive Gemini is browser-direct through `src/gemini/provider.ts` and the local Lockbox. Google Workspace authorization is browser-side GIS through `src/google/oauth/`. Cloud Worker/autonomy execution is a separate runtime plane. VTT is an input modality and must not create a competing chat provider/persona. See `SYS-ARCH / documents/architecture.md` before changing those boundaries.
+Normal interactive Gemini is browser-direct through `src/gemini/provider.ts` and the local Lockbox. Google Workspace authorization is owned by `src/google/oauth/`: an unpaired installation uses interactive GIS token mode; a paired self-hosted Worker uses GIS popup code flow plus the dedicated encrypted Google OAuth vault. The Worker remains a separate execution plane; possession of a durable Google grant does not by itself authorize autonomy or create a competing chat provider. VTT is an input modality and must not create a competing chat provider/persona. See `SYS-ARCH / documents/architecture.md` before changing those boundaries.
+
+Elara is self-hosted shareware. Do not assume a shared Elara account, shared OAuth client, shared Worker or centrally held user credential. Deployment-specific Pages origins, Google clients and Worker secrets belong to the person hosting that installation.
 
 A green test that passes for the wrong reason is a defect. Strengthen the assertion or fixture until it proves the intended invariant; do not weaken product or test contracts merely to make a gate green.
 

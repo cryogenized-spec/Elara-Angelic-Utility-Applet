@@ -5,12 +5,46 @@ const pageTokenSchema = z.string().trim().min(1).max(2048);
 const querySchema = z.string().trim().max(2000);
 const timestampValueSchema = z.string().trim().min(1).max(128);
 const timestampSchema = timestampValueSchema.optional();
-const calendarQueryTimestampValueSchema = timestampValueSchema.regex(
-  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/,
-  'Calendar query bounds must be RFC 3339 timestamps with an explicit UTC offset.',
+const CALENDAR_QUERY_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))$/i;
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function isValidCalendarQueryTimestamp(value: string): boolean {
+  const match = CALENDAR_QUERY_TIMESTAMP_PATTERN.exec(value);
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] = match;
+  const numericYear = Number(year);
+  const numericMonth = Number(month);
+  const numericDay = Number(day);
+  if (numericMonth < 1 || numericMonth > 12 || numericDay < 1 || numericDay > daysInMonth(numericYear, numericMonth)) return false;
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return false;
+  if (offsetHour !== undefined && (Number(offsetHour) > 23 || Number(offsetMinute) > 59)) return false;
+  return true;
+}
+
+function isValidIanaTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const calendarQueryTimestampValueSchema = timestampValueSchema.refine(
+  isValidCalendarQueryTimestamp,
+  'Calendar query bounds must be real RFC 3339 timestamps with an explicit UTC offset.',
 );
 const calendarQueryTimestampSchema = calendarQueryTimestampValueSchema.optional();
-const timeZoneSchema = z.string().trim().min(1).max(200).optional();
+const timeZoneSchema = z.string().trim().min(1).max(200)
+  .refine(isValidIanaTimeZone, 'Calendar time zone must be a valid IANA time zone.')
+  .optional();
 const metadataHeadersSchema = z.array(z.string().trim().min(1).max(200)).max(50).optional();
 
 export const googleReadToolArgumentSchemas = {

@@ -200,7 +200,7 @@ describe('direct Google OAuth authority', () => {
       const method = requestMethod(input, init);
       if (url === 'https://worker.example/google/oauth/status' && method === 'GET') {
         return new Response(JSON.stringify(connected
-          ? { connected: true, scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE], account: { email: 'durable@example.com', displayName: 'Durable User' } }
+          ? { connected: true, scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE], account: { email: 'durable@example.com', displayName: 'Durable User' }, updatedAt: 100 }
           : { connected: false, scopes: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (url === 'https://worker.example/google/oauth/exchange' && method === 'POST') {
@@ -215,6 +215,7 @@ describe('direct Google OAuth authority', () => {
           expiresIn: 3600,
           scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
           account: { email: 'durable@example.com', displayName: 'Durable User' },
+          updatedAt: 100,
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
@@ -251,7 +252,7 @@ describe('direct Google OAuth authority', () => {
       const url = requestUrl(input);
       const method = requestMethod(input, init);
       if (url === 'https://worker.example/google/oauth/status' && method === 'GET') {
-        return new Response(JSON.stringify({ connected: true, scopes: [CALENDAR_READ_SCOPE], account: { email: 'durable@example.com' } }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ connected: true, scopes: [CALENDAR_READ_SCOPE], account: { email: 'durable@example.com' }, updatedAt: 200 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       if (url === 'https://worker.example/google/oauth/token' && method === 'POST') {
         refreshCalls += 1;
@@ -261,6 +262,7 @@ describe('direct Google OAuth authority', () => {
           expiresIn: 3600,
           scopes: [CALENDAR_READ_SCOPE],
           account: { email: 'durable@example.com' },
+          updatedAt: 200,
         }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       }
       throw new Error(`Unexpected request: ${method} ${url}`);
@@ -271,6 +273,63 @@ describe('direct Google OAuth authority', () => {
     expect(refreshCalls).toBe(1);
     expect(codeMock).not.toHaveBeenCalled();
     expect(tokenMock).not.toHaveBeenCalled();
+  });
+
+  it('invalidates an unexpired paired browser token when the authoritative vault revision changes', async () => {
+    pairingMock.mockReturnValue(TEST_PAIRING);
+    pairingTokenMock.mockResolvedValue('test-installation-secret');
+    codeMock.mockResolvedValue({ code: 'initial-code', scope: `${CALENDAR_READ_SCOPE} ${EMAIL_SCOPE}` });
+    let revision = 300;
+    let account = 'account-a@example.com';
+    let refreshCalls = 0;
+    const apiTokens: string[] = [];
+
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = requestMethod(input, init);
+      if (url === 'https://worker.example/google/oauth/status' && method === 'GET') {
+        return new Response(JSON.stringify({ connected: true, scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE], account: { email: account }, updatedAt: revision }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/exchange' && method === 'POST') {
+        return new Response(JSON.stringify({
+          connected: true,
+          accessToken: 'access-account-a',
+          expiresIn: 3600,
+          scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+          account: { email: account },
+          updatedAt: revision,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/token' && method === 'POST') {
+        refreshCalls += 1;
+        return new Response(JSON.stringify({
+          connected: true,
+          accessToken: 'access-account-b',
+          expiresIn: 3600,
+          scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+          account: { email: account },
+          updatedAt: revision,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.startsWith('https://www.googleapis.com/calendar/v3/') && method === 'GET') {
+        const request = input instanceof Request ? input : new Request(url, init);
+        apiTokens.push(request.headers.get('Authorization') ?? '');
+        return new Response('{"items":[]}', { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    }) as unknown as typeof fetch;
+
+    const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
+    revision = 301;
+    account = 'account-b@example.com';
+
+    const response = await authorized.fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events');
+
+    expect(response.status).toBe(200);
+    expect(refreshCalls).toBe(1);
+    expect(apiTokens).toEqual(['Bearer access-account-b']);
+    expect(apiTokens).not.toContain('Bearer access-account-a');
+    expect((await googleOAuthAuthority.getStatus()).account?.email).toBe('account-b@example.com');
   });
 
   it('rejects non-Google API targets before network access', async () => {

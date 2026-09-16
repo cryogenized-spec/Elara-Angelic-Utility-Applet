@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { loadFolderState } from '../persistence/folders';
-import { recordObservation } from './observation';
+import { consolidateObservation, recordObservation } from './observation';
+import { findExactEvidenceSupportTarget } from './lifecycle';
 import { runMemoryMutationTransaction } from './store';
 
 export const ORGANIC_MEMORY_DOMAINS = [
@@ -117,6 +118,11 @@ function mutationGuard(request: ObservePersistedTurnRequest): () => boolean {
  * MICRO_OBSERVATION evidence. The extractor is a classifier/span selector;
  * application code owns wording, type, scope, provenance and write authority.
  *
+ * Phase 4 may consolidate only deterministic support: another memory must have
+ * the same canonical folder scope, the same domain tag, and text-equivalent
+ * user evidence after Unicode/case/whitespace normalization. No semantic model
+ * judges support/conflict/supersession in the automatic path.
+ *
  * Failure is deliberately non-fatal to chat durability. The caller can keep
  * the composer locked while awaiting this result, then continue regardless of
  * `unavailable`.
@@ -153,7 +159,15 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
 
     await runMemoryMutationTransaction(async () => {
       for (const { candidate, evidenceFingerprint } of preparedCandidates) {
-        await recordObservation(
+        const context = {
+          actor: 'model' as const,
+          conversationId: request.conversationId,
+          messageId: request.messageId,
+          folderId,
+          idempotencyKey: `organic:${request.conversationId}:${request.messageId}:${candidate.domain}:sha256:${evidenceFingerprint}`,
+          isMutationAllowed,
+        };
+        const observation = await recordObservation(
           {
             title: DOMAIN_TITLES[candidate.domain],
             body: candidate.evidence,
@@ -161,15 +175,11 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
             confidence: ORGANIC_OBSERVATION_CONFIDENCE,
             importance: ORGANIC_OBSERVATION_IMPORTANCE,
           },
-          {
-            actor: 'model',
-            conversationId: request.conversationId,
-            messageId: request.messageId,
-            folderId,
-            idempotencyKey: `organic:${request.conversationId}:${request.messageId}:${candidate.domain}:sha256:${evidenceFingerprint}`,
-            isMutationAllowed,
-          },
+          context,
         );
+
+        const target = await findExactEvidenceSupportTarget(observation);
+        if (target) await consolidateObservation(observation.id, target.id, 'support', context);
       }
     }, isMutationAllowed);
     return { status: 'recorded', count: candidates.length };

@@ -495,6 +495,10 @@ export class GoogleCalendarService {
     const safeEventId = boundedText(input.eventId, 'event ID', MAX_EVENT_ID_LENGTH);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
     const safeTimeZone = boundedText(input.timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
+    const safeRecurrence = input.recurrence !== undefined ? validateRecurrence(input.recurrence) ?? [] : undefined;
+    const updatesTimedBoundary = (input.start !== undefined && isDateTime(input.start.trim())) || (input.end !== undefined && isDateTime(input.end.trim()));
+    if (safeRecurrence?.length && updatesTimedBoundary && !safeTimeZone) throw new Error('Google Calendar recurring date-time updates require an explicit time zone.');
+
     const patch: Record<string, unknown> = {};
     if (input.summary !== undefined) patch.summary = boundedPatchText(input.summary, 'event summary', MAX_EVENT_SUMMARY_LENGTH);
     if (input.start !== undefined) {
@@ -511,7 +515,7 @@ export class GoogleCalendarService {
     if (input.location !== undefined) patch.location = boundedPatchText(input.location, 'location', MAX_EVENT_LOCATION_LENGTH);
     if (input.description !== undefined) patch.description = boundedPatchText(input.description, 'description', MAX_EVENT_DESCRIPTION_LENGTH);
     if (input.attendees !== undefined) patch.attendees = (boundedStringArray(input.attendees, 'attendee', MAX_ATTENDEES, 320) ?? []).map((email) => ({ email }));
-    if (input.recurrence !== undefined) patch.recurrence = [...(validateRecurrence(input.recurrence) ?? [])];
+    if (input.recurrence !== undefined) patch.recurrence = [...(safeRecurrence ?? [])];
     if (Object.keys(patch).length === 0) throw new Error('Google Calendar update requires at least one event change.');
     return this.updateEvent(input.calendarId, safeEventId, input.etag, patch, input.sendUpdates);
   }

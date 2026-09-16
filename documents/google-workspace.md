@@ -59,9 +59,11 @@ Calendar is treated as Google's time-commitment authority; Elara does not mirror
 
 Calendar-list access is discovery/target selection only. Elara does not subscribe/unsubscribe calendars, modify CalendarList metadata, create calendars, or edit ACLs in this pass. List discovery uses the dedicated read-only CalendarList capability. Settings and free/busy are separate optional read grants; free/busy can therefore answer availability questions without granting event-detail access.
 
-Event reads preserve provider identity required for later safe actions: event id plus ETag, recurrence, attendees, organizer/creator metadata, timing/timezone and relevant status fields. Update and delete require the current ETag returned by a prior read and send it as `If-Match`. A `412` conflict is surfaced as a read-again requirement instead of overwriting a newer Calendar version.
+Event reads preserve provider identity required for later safe actions: event id plus ETag, recurrence, attendees, organizer/creator metadata, timing/timezone and relevant status fields. Update and delete require one concrete provider ETag returned by a prior read and send it as `If-Match`. Wildcard (`*`), multi-value or malformed validators are rejected before write authorization, so stale-read protection cannot be bypassed. A `412` conflict is surfaced as a read-again requirement instead of overwriting a newer Calendar version.
 
-Creates and updates support timed or all-day events, location, description, attendees and recurrence. Recurrence lines are bounded RFC-style `RRULE`/`EXRULE`/`RDATE`/`EXDATE` entries; `DTSTART`/`DTEND` belong in the event start/end fields. Recurring date-time creates require an explicit IANA timezone. Attendee/recurrence arrays are complete replacement arrays when supplied to an update.
+Creates and updates support timed or all-day events, location, description, attendees and recurrence. Recurrence lines are bounded RFC-style `RRULE`/`EXRULE`/`RDATE`/`EXDATE` entries; `DTSTART`/`DTEND` belong in the event start/end fields. Recurring date-time creates require an explicit IANA timezone. A non-empty recurrence update must also carry explicit start and end boundaries; timed recurrence updates require an explicit timezone, while all-day recurrence may use date boundaries without one. Attendee/recurrence arrays are complete replacement arrays when supplied to an update.
+
+Event date-times may omit a numeric/UTC offset only when an explicit event timezone accompanies them. Calendar list-event bounds and free/busy bounds are stricter: they must be offset-bearing RFC 3339 timestamps so validation and ordering never depend on the browser's local timezone.
 
 Guest notification control exposes only `sendUpdates=all|externalOnly`. `sendUpdates=none` is intentionally not model-visible because Calendar documents it primarily for migration-style use and warns that suppressing updates can cause synchronization problems. Omitting `sendUpdates` leaves provider default behavior untouched.
 
@@ -79,7 +81,9 @@ Calendar event writes use the scoped event-write capability and still pass throu
 - Browser/worker execution-plane filtering is explicit; browser-only tools are not silently advertised by the Worker.
 - Workspace shortcuts never create hidden synthetic user turns.
 - Calendar provider scopes do not manufacture local Elara capabilities.
-- Calendar update/delete require a provider ETag and use conditional mutation.
+- Calendar update/delete require one concrete provider ETag; wildcard/multi-value validators are forbidden and mutation uses conditional `If-Match`.
+- Non-empty Calendar recurrence updates carry explicit start/end context; timed recurrence carries an explicit timezone.
+- Offset-free event date-times require an explicit event timezone; list/free-busy bounds always carry explicit UTC offsets.
 - Calendar create retry identity derives from the existing provider call id; ambiguous retries do not intentionally create a second event.
 - Calendar list/settings/free-busy remain optional capabilities and do not broaden the core Calendar event grant.
 
@@ -87,11 +91,11 @@ Calendar event writes use the scoped event-write capability and still pass throu
 
 Arguments are validated before execution, OAuth capabilities are checked centrally, and mutation confirmations summarize the target without leaking secrets. Handler/provider failures are normalized before returning to Gemini. If confirmation UI is unavailable, already busy or aborted, mutations resolve as denied rather than auto-approved.
 
-Calendar mutation conflicts fail closed. Oversized inputs, invalid recurrence/time pairs, more than 50 free/busy targets and undeclared arguments are rejected before provider execution. Calendar API targets still flow through the Google OAuth request broker's HTTPS/host allow-list.
+Calendar mutation conflicts fail closed. Invalid/non-concrete ETags, offset-ambiguous timestamps, incomplete recurrence conversion, oversized inputs, invalid recurrence/time pairs, more than 50 free/busy targets and undeclared arguments are rejected before provider execution. Calendar API targets still flow through the Google OAuth request broker's HTTPS/host allow-list.
 
 ## 8. Verification and tests
 
-Use service contract tests, `src/google/tools/*test*`, Gemini declaration tests, confirmation broker/policy tests and integration/E2E flows. Calendar service tests cover discovery, filters/pagination, detailed ETag reads, settings, free/busy, recurrence/timezone, guest updates, deterministic create retry recovery and conditional PATCH/DELETE. `calendar-parity.test.ts` pins registry risk/capabilities, schemas, handler call-id propagation and confirmation summaries.
+Use service contract tests, `src/google/tools/*test*`, Gemini declaration tests, confirmation broker/policy tests and integration/E2E flows. Calendar service tests cover discovery, filters/pagination, detailed ETag reads, settings, free/busy, recurrence/timezone, guest updates, deterministic create retry recovery and conditional PATCH/DELETE. `calendar-parity.test.ts` pins registry risk/capabilities, schemas, handler call-id propagation and confirmation summaries. `recurring-update-timezone.test.ts` and `provider-boundary-hardening.test.ts` pin recurrence conversion, concrete ETags, offset/timezone requirements and direct-service fail-closed behavior before authorization.
 
 `e2e/workspace-shortcuts.spec.ts` verifies visible shortcut drafting and explicit submission. The reliability gate continues to lock key invariants including Calendar write capability, grouped confirmations, registry-derived declarations and explicit accessibility controls.
 

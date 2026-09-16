@@ -320,6 +320,7 @@ describe('direct Google OAuth authority', () => {
     }) as unknown as typeof fetch;
 
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
+    refreshCalls = 0;
     revision = 301;
     account = 'account-b@example.com';
 

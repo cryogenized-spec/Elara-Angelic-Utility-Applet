@@ -2,6 +2,8 @@ import type { Dispatch, SetStateAction } from 'react';
 import type { ChatMessage, ConversationState, ProviderStatus, ProviderUsage } from '../domain/chat';
 import type { GeminiStreamEvent, GeminiUsage } from '../gemini/contracts';
 import type { NormalizedProviderError } from '../gemini/errors';
+import { geminiOrganicMemoryExtractor } from '../gemini/memory-observer';
+import { observePersistedTurn } from '../memory/organic-observer';
 import {
   applyGenerationEvent,
   buildGenerationActivity,
@@ -90,6 +92,36 @@ function buildUsage(usage: GeminiUsage | undefined, thoughtSummary: string | und
   };
 }
 
+function generationUsedMemoryTool(generation: GenerationState): boolean {
+  return generation.steps.some((step) => step.toolName?.startsWith('memory.') === true);
+}
+
+/**
+ * Terminal durability is one ordered barrier:
+ *   response save -> bounded organic observation -> caller unlocks the turn.
+ *
+ * Once the response save succeeds, the durable user turn is the observer's
+ * authority. Navigation therefore does not cancel the observer. Observer
+ * failure is intentionally non-fatal and can never roll the saved response
+ * back; a failed response save, conversely, prevents observation entirely.
+ */
+async function persistCompletedTurn(completed: ConversationState, generation: GenerationState, context: GenerationSyncContext): Promise<void> {
+  await context.save(completed);
+  try {
+    await observePersistedTurn({
+      conversationId: context.base.id,
+      messageId: context.inputMessageId ?? '',
+      userMessage: context.input,
+      extractor: geminiOrganicMemoryExtractor(context.model),
+      usedMemoryTool: generationUsedMemoryTool(generation),
+      responseVariant: context.assistantMessage.responseVariant,
+    });
+  } catch {
+    // Memory formation is best-effort after the conversation has crossed its
+    // durability boundary. Never convert a saved reply into a failed turn.
+  }
+}
+
 /**
  * One projection from reducer-owned live state into the single optimistic
  * assistant message. Text, artifacts and media therefore cannot overwrite one
@@ -150,7 +182,7 @@ export function syncGenerationEvent(event: GeminiStreamEvent, generation: Genera
     const completed: ConversationState = { ...base, updatedAt: completedAt, messages: [...base.messages, completedMessage] };
     context.setConversation(completed);
     context.setStatus('saving');
-    const persistence = context.save(completed);
+    const persistence = persistCompletedTurn(completed, generation, context);
     // The turn owner awaits this exact promise. Mark the rejection handled now
     // so a fast storage failure cannot surface as an unhandled rejection before
     // control reaches the owner's finally block.

@@ -3,14 +3,43 @@ import { z } from 'zod';
 const idSchema = z.string().trim().min(1).max(500);
 const pageTokenSchema = z.string().trim().min(1).max(2048);
 const querySchema = z.string().trim().max(2000);
-const timestampSchema = z.string().trim().min(1).max(128).optional();
+const timestampValueSchema = z.string().trim().min(1).max(128);
+const timestampSchema = timestampValueSchema.optional();
+const timeZoneSchema = z.string().trim().min(1).max(200).optional();
 const metadataHeadersSchema = z.array(z.string().trim().min(1).max(200)).max(50).optional();
 
 export const googleReadToolArgumentSchemas = {
+  'calendar.listCalendars': z.object({
+    pageToken: pageTokenSchema.optional(),
+    maxResults: z.number().int().min(1).max(250).optional(),
+    showHidden: z.boolean().optional(),
+    minAccessRole: z.enum(['freeBusyReader', 'reader', 'writerWithoutPrivateAccess', 'writer', 'owner']).optional(),
+    showOwnOrganizationOnly: z.boolean().optional(),
+  }).strict(),
+
   'calendar.listEvents': z.object({
     calendarId: idSchema.optional(),
     timeMin: timestampSchema,
     timeMax: timestampSchema,
+    pageToken: pageTokenSchema.optional(),
+    maxResults: z.number().int().min(1).max(250).optional(),
+    query: querySchema.optional(),
+    timeZone: timeZoneSchema,
+  }).strict(),
+
+  'calendar.getEvent': z.object({
+    calendarId: idSchema.optional(),
+    eventId: idSchema,
+    timeZone: timeZoneSchema,
+  }).strict(),
+
+  'calendar.getSettings': z.object({}).strict(),
+
+  'calendar.queryFreeBusy': z.object({
+    timeMin: timestampValueSchema,
+    timeMax: timestampValueSchema,
+    calendarIds: z.array(idSchema).min(1).max(50),
+    timeZone: timeZoneSchema,
   }).strict(),
 
   'tasks.listTaskLists': z.object({

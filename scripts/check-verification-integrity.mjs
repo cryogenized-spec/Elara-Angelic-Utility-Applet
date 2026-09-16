@@ -120,7 +120,7 @@ try {
     test: 'vitest run',
     'coverage:check': 'node scripts/check-coverage.mjs',
     'test:coverage': 'vitest run --coverage && npm run coverage:check',
-    'test:google-oauth-lifecycle': 'node scripts/google-oauth-lifecycle-gate.mjs && vitest run src/google/oauth/authority.test.ts && vitest run --config vitest.workers.config.ts worker/test/google-oauth-vault.test.ts',
+    'test:google-oauth-lifecycle': 'node scripts/google-oauth-lifecycle-gate.mjs && vitest run src/google/oauth/authority.test.ts && vitest run --config vitest.workers.config.ts worker/test/google-oauth-vault.test.ts && node scripts/verify-google-oauth-lifecycle-mutations.mjs',
     'test:workers': 'vitest run --config vitest.workers.config.ts',
     build: 'tsc -p tsconfig.json --noEmit && vite build',
     e2e: 'playwright test',
@@ -164,8 +164,12 @@ for (const marker of ['forbiddenCapabilities', 'forbiddenNodeAuthority', 'dynami
 }
 
 const oauthLifecycleGate = read('scripts/google-oauth-lifecycle-gate.mjs');
-for (const marker of ['validateLifecycleContracts', 'stable provider subject continuity', 'authoritative vault revision change', 'stable-subject continuity removal', 'grant-revision invalidation removal', 'grant-revision churn on token refresh', 'deliberate OAuth lifecycle mutation escaped certification']) {
-  if (!oauthLifecycleGate.includes(marker)) fail(`Google OAuth lifecycle gate lost required certification proof: ${marker}`);
+for (const marker of ['stable provider subject continuity', 'provider invalid_grant', 'nextGrantRevision', 'stored.enabledCapabilities', 'focused behavioral proof inventory']) {
+  if (!oauthLifecycleGate.includes(marker)) fail(`Google OAuth lifecycle structural gate lost required certification proof: ${marker}`);
+}
+const oauthMutationGate = read('scripts/verify-google-oauth-lifecycle-mutations.mjs');
+for (const marker of ['stable-subject continuity removal', 'revoked-grant recovery removal', 'grant-revision invalidation removal', 'grant-revision stability removal', 'monotonic grant revision removal', 'provider-scope local capability escalation', 'hostile mutation survived the behavioral suite', '6 hostile source mutations were executed']) {
+  if (!oauthMutationGate.includes(marker)) fail(`Google OAuth behavioral mutation gate lost required proof: ${marker}`);
 }
 
 const secretScan = read('scripts/secret-scan.mjs');
@@ -275,4 +279,4 @@ if (errors.length) {
   process.stderr.write(`Verification integrity failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
   process.exit(1);
 }
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; Google OAuth lifecycle certification, security, secret scanning, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node/npm controls, signed-registry and high-severity audits, exact-head checkout, and certified-before-deploy ordering pinned; no repository write authority, persisted checkout credentials, skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; Google OAuth lifecycle structural + behavioral mutation certification, security, secret scanning, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node/npm controls, signed-registry and high-severity audits, exact-head checkout, and certified-before-deploy ordering pinned; no repository write authority, persisted checkout credentials, skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

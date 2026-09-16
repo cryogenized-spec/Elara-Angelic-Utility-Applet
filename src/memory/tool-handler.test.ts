@@ -2,12 +2,18 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
 import { googleToolRegistry } from '../google/tools/registry';
+import type { GoogleToolDescriptor } from '../google/tools/contracts';
 import type { GoogleToolExecutionContext } from '../google/tools/executor';
 import { countMemories, listMemories } from './store';
 import { memoryToolHandlers } from './tool-handler';
 
-const descriptor = googleToolRegistry.find((tool) => tool.name === 'memory.save');
-if (!descriptor) throw new Error('memory.save descriptor missing from test registry.');
+function requireMemoryDescriptor(): GoogleToolDescriptor {
+  const found = googleToolRegistry.find((tool) => tool.name === 'memory.save');
+  if (!found) throw new Error('memory.save descriptor missing from test registry.');
+  return found;
+}
+
+const descriptor = requireMemoryDescriptor();
 const handler = memoryToolHandlers['memory.save'];
 if (!handler) throw new Error('memory.save handler missing.');
 

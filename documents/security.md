@@ -1,19 +1,19 @@
 ---
 id: SYS-SEC
 status: active
-verified_commit: 482da748f482a005d8d89c91649de0ac73dd52fe
+verified_commit: 85f2c3bca5193775b31ac3347e4938ebb40f262e
 scope: browser credential boundaries and security architecture enforcement
 paths: [src/persistence/gemini-api-key.ts, src/persistence/gemini-passkey.ts, src/persistence/gemini-lockbox-settings.ts, src/autonomy/cloud/credential.ts, src/autonomy/cloud/pairing.ts, src/gemini/google-tool-loop.ts, scripts/security-architecture-gate.mjs]
-keywords: [lockbox, credential, secret, pin, passkey, encryption, capability, egress, confirmation, expiry, adversarial, fail-closed]
+keywords: [lockbox, credential, secret, pin, passkey, encryption, capability, egress, confirmation, oauth, fail-closed]
 ---
 
 # Security and credential boundaries
 
 ## 1. Purpose and boundary
 
-`SYS-SEC` defines credential handling and the repository-level capability boundary. The primary browser API Lockbox stores the Gemini API key and named secondary credentials such as the YouTube API key behind one security authority and one unlock session. Consumers receive narrow named accessors; there is no general model/UI `getSecret()` capability.
+`SYS-SEC` defines credential handling and repository-level capability change control. The browser Lockbox stores Gemini and named secondary API credentials behind one security authority. The self-hosted Worker installation token is a separate device credential. Google refresh credentials are a third boundary owned by the user's Worker OAuth vault and never enter browser persistence.
 
-Autonomy's installation token is a separate device credential because cloud sync must resume without requiring the interactive Lockbox to be unlocked. It is nevertheless never ordinary application state or plaintext durable pairing metadata: it is sealed in a dedicated device-local credential store and resolved only at the cloud request boundary.
+Elara is self-hosted shareware: deployment owners supply and control their own provider credentials and Worker. There is no shared Elara credential service.
 
 ## 2. Runtime architecture
 
@@ -24,16 +24,27 @@ Gemini / YouTube credential
 -> explicit unlock session
 -> named accessor
 -> owning provider
-
-Autonomy installation token
--> pairing input
--> AES-GCM device-local credential store
--> pairing-only credential resolver
--> cloud-client runtime token handoff
--> autonomy cloud request
 ```
 
-The Gemini record is the Lockbox security authority. Secondary Lockbox records inherit the primary security mode and are unlocked with the same credential/session; stale or weaker secondary mode stamps are not treated as authority.
+```text
+self-hosted Worker installation token
+-> pairing input
+-> AES-GCM device-local credential store
+-> pairing resolver
+-> reviewed runtime consumers only:
+   - autonomy cloud transport
+   - Google OAuth browser authority
+```
+
+```text
+Google refresh credential
+-> GIS popup authorization code
+-> signed browser -> self-hosted Worker exchange
+-> GoogleOAuthVault
+-> AES-GCM encrypted Worker persistence
+-> refresh happens inside Worker
+-> only short-lived access token returns to browser memory
+```
 
 ## 3. Source map
 
@@ -43,78 +54,79 @@ The Gemini record is the Lockbox security authority. Secondary Lockbox records i
 | Passkey integration | `src/persistence/gemini-passkey.ts` |
 | PIN/security settings | `src/persistence/gemini-lockbox-settings.ts` |
 | Lockbox UI | `src/app/components/GeminiApiLockbox.tsx` |
-| Gemini consumer | `src/gemini/provider.ts` |
-| YouTube consumers | `src/media/youtube/`, `src/media/search.ts` |
-| Autonomy credential store | `src/autonomy/cloud/credential.ts` |
-| Autonomy pairing metadata/runtime resolver | `src/autonomy/cloud/pairing.ts` |
-| Autonomy plaintext request consumer | `src/autonomy/cloud/client.ts` |
-| Model tool authority and confirmation lifecycle | `src/gemini/google-tool-loop.ts` |
+| Autonomy/Worker credential store | `src/autonomy/cloud/credential.ts` |
+| Pairing metadata/runtime resolver | `src/autonomy/cloud/pairing.ts` |
+| Reviewed installation-token consumers | `src/autonomy/cloud/client.ts`, `src/google/oauth/authority.ts` |
+| Durable Google refresh vault | `worker/src/google/oauth-vault.ts` |
+| Worker OAuth admission | `worker/src/google/oauth-routes.ts` |
+| Model tool authority/confirmation | `src/gemini/google-tool-loop.ts` |
 | Capability expansion gate | `scripts/security-architecture-gate.mjs` |
 | Gate/CI integrity | `scripts/check-verification-integrity.mjs` |
 
 ## 4. Data and cryptography
 
-The Lockbox database is `elara-gemini-lockbox`, with `secrets` keyed by secret ID. Current IDs include `gemini-api-key` and `youtube-api-key`. Security modes are `password`, `pin`, `passkey`, `off`; PIN length is 6–8 digits. Protected passphrase/PIN records use PBKDF2-SHA-256 (310,000 iterations) to derive a 256-bit AES-GCM key with random 16-byte salt and 12-byte IV. Unlocked plaintext lives only in the in-memory session map.
+The Lockbox database is `elara-gemini-lockbox`, with secrets keyed by secret ID. Protected passphrase/PIN records use PBKDF2-SHA-256 to derive an AES-GCM key with random salt/IV. Unlocked plaintext lives only in the in-memory session map. `off` mode still uses a device-local non-extractable Web Crypto key rather than plaintext persistence.
 
-When security is enabled, the Lockbox session has a 15-minute idle timeout. `off` mode uses a device-local non-extractable Web Crypto key rather than plaintext persistence. A legacy plaintext localStorage Gemini key is migrated into encrypted/device-local Lockbox storage when possible and removed only after successful migration.
+The Worker installation token uses a dedicated Dexie store, AES-GCM-256 and a non-extractable device-local CryptoKey. `elara.autonomy.pairing.v1` stores pairing metadata only. Legacy pairing records containing plaintext token material migrate loss-safely: plaintext is removed only after the protected write succeeds.
 
-The autonomy installation token uses a dedicated Dexie store, AES-GCM-256 and a non-extractable device-local CryptoKey. `elara.autonomy.pairing.v1` stores pairing metadata only. Legacy pairing records containing `token` are migrated loss-safely: the plaintext field is removed only after the protected credential write succeeds.
+The Google refresh token is not a browser secret at all. `GoogleOAuthVault` derives an AES-GCM key from the deployment-owned `GOOGLE_OAUTH_VAULT_KEY` using a domain-separation context, encrypts with a random 12-byte IV and stores ciphertext/IV in the SQLite-backed Durable Object. The refresh token is decrypted only inside the Worker when exchanging for a new short-lived access token or revoking the grant.
+
+Browser Google access tokens remain memory-only. Browser localStorage contains only non-secret capability/scope/account metadata.
 
 ## 5. Credential invariants
 
 - Gemini credentials are never `VITE_*` build variables.
-- Secrets never appear in model-visible schemas, ordinary app state, conversation records, cache keys, URLs, analytics or diagnostic exports.
+- `VITE_GOOGLE_CLIENT_ID` is public OAuth client identification, not a secret.
+- Google client secret and vault key remain Worker-only deployment secrets.
+- Secrets never appear in model-visible schemas, conversation records, cache keys, URLs, analytics or diagnostic exports.
 - Lockbox consumers use named minimum-capability accessors.
-- YouTube keys are resolved just in time and sent only in `x-goog-api-key` headers.
-- The autonomy installation token is never serialized into new pairing JSON and is never placed in a network target.
-- Only `src/autonomy/cloud/pairing.ts` may directly import the autonomy credential store; only `src/autonomy/cloud/client.ts` may consume `resolvePairingToken` outside the pairing authority.
-- Credential-bearing autonomy modules do not gain `console.*` logging authority without explicit architecture review.
-- Secondary Lockbox credentials cannot silently remain under weaker protection after primary security changes.
-- Lock/idle enforcement clears the in-memory Lockbox unlock session.
-- Corrupt or undecryptable sealed material fails closed: it must not recreate plaintext, weaken protection or silently become usable under another credential path.
-- Cryptographic/storage migration failures must preserve recoverable legacy state rather than deleting the only usable credential.
+- The installation token is never serialized into new pairing JSON or placed in a network target.
+- Only `src/autonomy/cloud/pairing.ts` directly imports the installation credential store.
+- Only `src/autonomy/cloud/client.ts` and `src/google/oauth/authority.ts` may consume `resolvePairingToken` at runtime.
+- Credential-bearing modules do not gain `console.*` logging authority without explicit security review.
+- Google refresh tokens never return to the browser, Gemini, Workspace tool schemas or autonomy storage.
+- Lock/idle enforcement clears in-memory Lockbox plaintext.
+- Corrupt/undecryptable sealed material fails closed.
+- Cryptographic/storage migration failures preserve recoverable legacy state instead of deleting the only credential.
 
 ## 6. Capability change-control boundary
 
-`npm run security:check` is a dependency-free pre-install CI gate. It treats acquisition of new powers as an explicit architecture event. The reviewed surface currently freezes:
+`npm run security:check` is a dependency-free pre-install CI gate. New runtime power is an architecture event. The reviewed surface freezes:
 
-- dynamic execution and raw HTML injection primitives, which are forbidden;
-- alternate raw browser transports (`XMLHttpRequest`, WebSocket, EventSource and `sendBeacon`) and remote dynamic module imports, which are forbidden;
+- dynamic evaluation/raw HTML injection and alternate browser transports, which are forbidden;
 - Node filesystem/process/network/VM host authorities in runtime code, which are forbidden;
-- the two approved dynamic executable script loaders: Google Identity Services and the official YouTube IFrame API, including their exact provider URLs;
-- the two approved browser Worker constructors, both restricted to local module targets for OCR and document compilation;
-- Dexie database owners, so a new durable authority cannot appear silently;
-- Lockbox plaintext consumers, so secret propagation cannot expand silently;
-- autonomy credential-store and runtime-token consumers, so that separate secret boundary cannot expand silently;
+- the reviewed Google GIS and official YouTube script loaders and exact provider URLs;
+- approved local browser Worker constructors;
+- Dexie database owners;
+- Lockbox plaintext consumers;
+- installation-token store and runtime consumers;
 - global outbound fetch owners/references and reviewed provider destinations;
+- the durable Google OAuth browser brokerage markers (`requestGoogleAuthorizationCode`, signed Worker write, paired credential resolution and refresh route);
 - Google service import boundaries;
-- shared Google mutation confirmation-broker consumers;
-- the autonomy token's encrypted-storage and HTTPS egress contract.
+- shared Google mutation confirmation-broker consumers.
 
-The verification-integrity gate pins `security:check`, its CI order and the individual capability classes above. CI runs documentation integrity, verification integrity and the security/architecture boundary before `npm ci`, then repeats the security gate through the final reliability command.
+The verification-integrity gate pins `security:check`, CI ordering and the guarded capability classes. Adversarial mutation sentinels must continue to prove that forbidden authority fails closed.
 
-Pass-5 mutation sentinels deliberately introduce forbidden execution, storage, network, persistence and workflow authority in disposable repository copies and require the owning guard to reject each mutation for the expected reason. This is proof that the boundary is executable policy, not merely a source-code convention.
+## 7. Network, OAuth and confirmation boundaries
 
-## 7. Network and confirmation boundaries
+Global `fetch` is the reviewed ordinary request transport. Google Workspace API calls receive an authorized fetch from `src/google/oauth/authority.ts`, which enforces HTTPS and an explicit Google API hostname set.
 
-Global `fetch` is the reviewed ordinary request transport. Raw alternate transports are forbidden, while executable script loading is separately frozen to the Google GIS and official YouTube IFrame API authorities. New transport ownership is therefore a security architecture change rather than an ordinary implementation detail.
+For a paired installation, the same authority may contact only the paired self-hosted Worker URL after validating HTTPS and URL shape. Protected OAuth writes are HMAC-signed with method/path/timestamp/nonce/body. The public Worker verifies admission and the `GoogleOAuthVault` independently verifies the write and records the nonce durably. Authorization-code exchange additionally requires `X-Requested-With: XmlHttpRequest` and exact request-origin/redirect-origin equality.
 
-Google Workspace API calls receive an authorized fetch from `src/google/oauth/authority.ts`, which enforces HTTPS and an explicit Google API hostname set. Raw service classes remain behind the reviewed tool-handler boundary. Mutation execution must continue through the shared confirmation policy/broker path.
+A mutation confirmation is time-bounded application authority, not an OAuth grant. Google scopes do not bypass the shared confirmation policy. Confirmation freshness is rechecked around delayed OAuth or grouped-approval flows.
 
-A mutation confirmation is time-bounded authority, not a durable capability. `src/gemini/google-tool-loop.ts` rechecks confirmation freshness after the user's grouped approval and again after any delayed OAuth capability grant before a mutation retry. A confirmation that expires while the user is approving or granting OAuth is converted to a non-executing `USER_DECLINED` result; it cannot be replayed into a later mutation.
-
-YouTube search, playback readiness and key validation use reviewed Google API endpoints with injectable fetch seams for tests. The runtime key stays in a request header, never in a URL. Autonomy cloud pairing accepts only HTTPS worker targets without embedded credentials, query strings or fragments.
-
-Google permission and mutation confirmation dialogs build DOM nodes directly and assign untrusted/display text through `textContent`; runtime code does not retain arbitrary HTML parsing/injection authority.
+The Worker CORS allowlist is deployment-owned configuration. A fork must configure its own exact PWA origin; it must not rely on another deployment's allowlist.
 
 ## 8. Verification
 
-Primary checks are `npm run security:check`, `npm run verify:gates`, the complete unit/Worker/E2E matrix and `npm run reliability:check`. Credential changes require behavioral tests proving sensitive material does not reach ordinary persistence.
+Primary checks are `npm run security:check`, `npm run verify:gates`, unit/Worker/E2E tests and `npm run reliability:check`.
 
-`src/autonomy/cloud/credential.test.ts` corrupts the sealed autonomy credential and requires a fail-closed empty read. `src/persistence/lockbox-corruption.adversarial.test.ts` corrupts the primary Lockbox ciphertext and requires unlock failure with no plaintext restored to browser storage. Secondary Lockbox tests cover stale protection stamps, mismatched ciphertext, rotation, orphan prevention and locked-session write refusal. `src/gemini/google-tool-loop.adversarial.test.ts` exercises confirmation-expiry races including delayed OAuth replay.
+Google durable-auth verification covers encrypted-at-rest persistence, refresh without browser interaction, signed admission, durable replay rejection, popup CSRF, origin mismatch, CORS, disconnect/revocation and proof that browser persistence contains no access/refresh/installation credential material.
+
+Existing Lockbox/adversarial tests continue to cover corrupt ciphertext, stale protection stamps, rotation/orphan prevention and locked-session write refusal. Autonomy credential tests continue to require a fail-closed empty read from corrupt sealed material.
 
 ## 9. Known boundary
 
-Repository gates materially reduce accidental or unauthorized capability expansion, but a repository cannot externally protect its own workflow/ruleset configuration from an actor who is authorized to rewrite every guard simultaneously. CI/supply-chain/ruleset hardening remains a separate change-control layer.
+A repository cannot externally protect its own workflow/ruleset configuration from an actor authorized to rewrite every guard simultaneously; CI/supply-chain/ruleset hardening remains a separate layer.
 
-Model-level indirect prompt injection and hostile retrieved content are also a distinct trust boundary. The current application/credential/authority controls constrain consequences, but provenance/taint propagation and dedicated hostile-content prompt-injection defenses are not claimed by this document and should be treated as a separate future security programme.
+The existence of durable Google credentials is not permission for autonomous Google execution. Future orchestration must add explicit tool/execution authority rather than treating credential availability as consent.

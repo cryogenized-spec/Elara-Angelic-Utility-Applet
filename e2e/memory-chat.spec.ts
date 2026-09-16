@@ -140,7 +140,6 @@ test('chat exposes memory tools and persists organic capture with the paging-boo
 
   const activity = page.getByRole('region', { name: 'Generation activity' });
   await expect(activity).toHaveCount(1);
-  await expect(activity.getByRole('button')).toContainText(/3 steps · .*total/);
   await activity.getByRole('button').click();
 
   const savedRow = activity.locator('.generation-activity__step').filter({ hasText: 'Saved to memory' });

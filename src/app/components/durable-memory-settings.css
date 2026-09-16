@@ -3,8 +3,8 @@
 .memory-settings__header > div { display: grid; gap: 4px; }
 .memory-settings__header strong { font-size: 0.98rem; }
 .memory-settings__header span { color: var(--muted-text, #a7adbd); font-size: 0.78rem; line-height: 1.45; }
-.memory-settings__header button, .memory-card__actions button, .memory-editor__actions button { border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(255,255,255,.045); color: inherit; min-height: 38px; padding: 8px 11px; }
-.memory-settings__header button, .memory-editor__actions .primary { background: rgba(160,130,255,.16); border-color: rgba(190,170,255,.3); }
+.memory-settings__header button, .memory-card__actions button, .memory-editor__actions button, .memory-panel__header button, .memory-panel__actions button, .memory-maintenance__group button { border: 1px solid rgba(255,255,255,.12); border-radius: 10px; background: rgba(255,255,255,.045); color: inherit; min-height: 38px; padding: 8px 11px; }
+.memory-settings__header button, .memory-editor__actions .primary, .memory-panel__actions .primary { background: rgba(160,130,255,.16); border-color: rgba(190,170,255,.3); }
 .memory-settings__guide { display: flex; gap: 12px; align-items: center; justify-content: space-between; padding: 11px 12px; border: 1px solid rgba(190,170,255,.16); border-radius: 13px; background: rgba(155,130,255,.035); }
 .memory-settings__guide > div { display: grid; gap: 3px; min-width: 0; }
 .memory-settings__guide strong { font-size: .78rem; }
@@ -13,7 +13,7 @@
 .memory-settings__guide a:hover, .memory-settings__guide a:focus-visible { text-decoration: underline; }
 .memory-settings__search { display: flex; gap: 8px; align-items: end; }
 .memory-settings__search label { display: grid; gap: 6px; flex: 1; }
-.memory-settings__search label span, .memory-settings__filters label span, .memory-editor label span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted-text, #a7adbd); }
+.memory-settings__search label span, .memory-settings__filters label span, .memory-editor label span, .memory-archive__preview label span { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .08em; color: var(--muted-text, #a7adbd); }
 .memory-settings__search button { min-height: 40px; border: 1px solid rgba(255,255,255,.1); border-radius: 10px; background: rgba(255,255,255,.045); color: inherit; padding: 8px 11px; }
 .memory-settings__filters { display: grid; gap: 8px; padding: 2px 0; }
 .memory-settings__filters label { display: grid; gap: 6px; }
@@ -36,6 +36,7 @@
 .memory-card__chevron { flex: 0 0 auto; color: var(--muted-text, #a7adbd); font-size: 1rem; line-height: 1; padding-top: 2px; }
 .memory-card__meta, .memory-card__tags, .memory-card__actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .memory-card__meta span, .memory-card__tags span { border-radius: 999px; padding: 4px 7px; background: rgba(255,255,255,.05); color: #c7ccda; font-size: .62rem; }
+.memory-card__meta span:last-child:not(:first-child) { border-color: rgba(190,170,255,.18); }
 .memory-card__tags span { color: #b6a9ff; background: rgba(155,130,255,.09); }
 .memory-card__detail { display: grid; gap: 10px; padding-top: 2px; }
 .memory-card__markdown { line-height: 1.55; font-size: .84rem; overflow-wrap: anywhere; }
@@ -51,6 +52,27 @@
 .memory-card__actions .danger { color: #ff9da8; border-color: rgba(255,75,96,.25); }
 .memory-settings__empty { display: grid; gap: 4px; margin: 0; padding: 16px 4px; color: var(--muted-text, #a7adbd); font-size: .78rem; }
 .memory-settings__empty strong { color: inherit; }
+.memory-maintenance, .memory-archive { display: grid; gap: 10px; padding: 12px; border: 1px solid rgba(255,255,255,.09); border-radius: 14px; background: rgba(255,255,255,.02); }
+.memory-panel__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.memory-panel__header > div:first-child { display: grid; gap: 3px; min-width: 0; }
+.memory-panel__header strong { font-size: .82rem; }
+.memory-panel__header span, .memory-archive__preview > div span { color: var(--muted-text, #a7adbd); font-size: .71rem; line-height: 1.4; }
+.memory-panel__header button, .memory-panel__actions button, .memory-maintenance__group button { min-height: 34px; padding: 7px 9px; font-size: .71rem; }
+.memory-panel__actions { display: flex; flex-wrap: wrap; gap: 7px; justify-content: flex-end; }
+.memory-panel__status { margin: 0; color: var(--muted-text, #a7adbd); font-size: .71rem; line-height: 1.4; }
+.memory-maintenance__summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; }
+.memory-maintenance__summary span { display: grid; gap: 2px; padding: 8px; border-radius: 10px; background: rgba(0,0,0,.14); color: var(--muted-text, #a7adbd); font-size: .66rem; line-height: 1.3; }
+.memory-maintenance__summary strong { color: inherit; font-size: .84rem; }
+.memory-maintenance__group { display: grid; gap: 5px; padding-top: 3px; }
+.memory-maintenance__group > strong { font-size: .72rem; }
+.memory-maintenance__group p { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 10px; margin: 0; padding: 7px 8px; border-radius: 9px; background: rgba(255,255,255,.025); font-size: .69rem; line-height: 1.35; overflow-wrap: anywhere; }
+.memory-maintenance__group p span { color: var(--muted-text, #a7adbd); }
+.memory-maintenance__group button { justify-self: start; }
+.memory-archive__file { display: none; }
+.memory-archive__preview { display: grid; gap: 9px; padding: 10px; border-radius: 11px; background: rgba(155,130,255,.045); border: 1px solid rgba(190,170,255,.14); }
+.memory-archive__preview > div:first-child { display: grid; gap: 3px; }
+.memory-archive__preview > div:first-child strong { font-size: .76rem; overflow-wrap: anywhere; }
+.memory-archive__preview label { display: grid; gap: 5px; }
 @media (max-width: 520px) {
   .memory-settings__header { align-items: stretch; flex-direction: column; }
   .memory-settings__header button { width: 100%; }
@@ -60,4 +82,9 @@
   .memory-editor__grid { grid-template-columns: 1fr; }
   .memory-editor__actions { justify-content: stretch; }
   .memory-editor__actions button { flex: 1; }
+  .memory-panel__header { align-items: stretch; flex-direction: column; }
+  .memory-panel__header > button { width: 100%; }
+  .memory-panel__actions { justify-content: stretch; }
+  .memory-panel__actions button { flex: 1; }
+  .memory-maintenance__summary { grid-template-columns: 1fr; }
 }

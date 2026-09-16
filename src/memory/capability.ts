@@ -29,14 +29,19 @@ export interface MemoryCapability {
   delete(id: string, context?: MemoryCapabilityContext): Promise<void>;
 }
 
-function effectiveProvenanceNote(context: MemoryCapabilityContext): string | undefined {
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function effectiveProvenanceNote(context: MemoryCapabilityContext): Promise<string | undefined> {
   const key = context.idempotencyKey?.trim();
-  if (key) return `idempotency:${key.slice(0, 470)}`;
+  if (key) return `idempotency:sha256:${await sha256Hex(key)}`;
   return context.provenanceNote?.trim() || undefined;
 }
 
-function elaraProvenance(context: MemoryCapabilityContext = {}): MemoryProvenance {
-  const note = effectiveProvenanceNote(context);
+async function elaraProvenance(context: MemoryCapabilityContext = {}): Promise<MemoryProvenance> {
+  const note = await effectiveProvenanceNote(context);
   return {
     source: 'elara',
     createdAt: Date.now(),
@@ -49,7 +54,7 @@ function elaraProvenance(context: MemoryCapabilityContext = {}): MemoryProvenanc
 export const memory: MemoryCapability = {
   async save(request, context = {}) {
     authorizeMemoryMutation('save', context);
-    const source = elaraProvenance(context);
+    const source = await elaraProvenance(context);
     const input: MemoryInput = {
       title: request.title,
       body: request.body,

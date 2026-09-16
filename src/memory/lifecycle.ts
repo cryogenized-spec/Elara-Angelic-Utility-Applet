@@ -20,8 +20,10 @@ const KIND_RANK: Readonly<Record<MemoryKind, number>> = {
   CORE: 3,
 };
 
-function clamp(value: number, ceiling: number): number {
-  return Math.min(ceiling, Math.max(0, value));
+/** Policy weights use hundredth precision; quantize here so IEEE-754 drift can never alter a lifecycle threshold. */
+function boundedPolicyWeight(value: number, ceiling: number): number {
+  const bounded = Math.min(ceiling, Math.max(0, value));
+  return Math.round(bounded * 100) / 100;
 }
 
 function domainTag(memory: DurableMemory): string | undefined {
@@ -78,8 +80,8 @@ export async function reinforceMemoryFromEvidence(id: string): Promise<DurableMe
 
   return updateMemory(memory.id, {
     reinforcementCount: memory.reinforcementCount + 1,
-    confidence: clamp(memory.confidence + SUPPORT_CONFIDENCE_STEP, SUPPORT_CONFIDENCE_CEILING),
-    importance: clamp(memory.importance + SUPPORT_IMPORTANCE_STEP, SUPPORT_IMPORTANCE_CEILING),
+    confidence: boundedPolicyWeight(memory.confidence + SUPPORT_CONFIDENCE_STEP, SUPPORT_CONFIDENCE_CEILING),
+    importance: boundedPolicyWeight(memory.importance + SUPPORT_IMPORTANCE_STEP, SUPPORT_IMPORTANCE_CEILING),
     lifecycle: memory.supersededBy.length ? 'dormant' : 'active',
   });
 }

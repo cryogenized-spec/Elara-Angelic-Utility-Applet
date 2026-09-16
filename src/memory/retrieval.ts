@@ -1,3 +1,4 @@
+import type { FolderState } from '../persistence/folders';
 import type { DurableMemory, MemoryRetrievalScope, RetrievedMemory } from './types';
 
 export const DEFAULT_MAX_ITEMS = 8;
@@ -43,7 +44,37 @@ export function scoreMemoryForRanking(memory: ScorableMemory, now: number): numb
   return score(memory, '', now);
 }
 
-function retrievable(memory: DurableMemory, scope: MemoryRetrievalScope, now: number): boolean {
+function folderAncestry(folderId: string | null, state: FolderState): string[] {
+  if (!folderId) return [];
+  const result: string[] = [];
+  const seen = new Set<string>();
+  let current: string | null = folderId;
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    result.push(current);
+    current = state.folders.find((folder) => folder.id === current)?.parentId ?? null;
+  }
+  return result;
+}
+
+/**
+ * One conversation-to-memory scope resolver for normal recall and model tools.
+ * Callers may choose their own query, but never their own folder/global rules.
+ */
+export function memoryScopeForConversation(conversationId: string, state: FolderState, query = ''): MemoryRetrievalScope {
+  const folderId = state.assignments[conversationId] ?? null;
+  const folder = folderId ? state.folders.find((item) => item.id === folderId) : undefined;
+  return {
+    folderId,
+    folderIds: folderAncestry(folderId, state),
+    includeGlobal: folderId === null || folder?.contextScope === 'global',
+    query,
+    maxItems: DEFAULT_MAX_ITEMS,
+    maxCharacters: DEFAULT_MAX_CHARACTERS,
+  };
+}
+
+export function isMemoryRetrievable(memory: DurableMemory, scope: MemoryRetrievalScope, now = scope.now ?? Date.now()): boolean {
   if (memory.lifecycle === 'archived') return false;
   if (memory.expiresAt !== null && memory.expiresAt <= now) return false;
   if (memory.folderId === null) return scope.includeGlobal !== false;
@@ -57,7 +88,7 @@ export function rankAndBudgetMemories(memories: DurableMemory[], scope: MemoryRe
   const maxCharacters = Math.max(200, Math.min(scope.maxCharacters ?? DEFAULT_MAX_CHARACTERS, 20_000));
   const query = scope.query?.trim() ?? '';
   const candidates = memories
-    .filter((memory) => retrievable(memory, scope, now))
+    .filter((memory) => isMemoryRetrievable(memory, scope, now))
     .map((memory) => ({ ...memory, score: score(memory, query, now) }))
     .sort((a, b) => b.score - a.score || b.updatedAt - a.updatedAt);
   const selected: RetrievedMemory[] = [];

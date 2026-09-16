@@ -163,10 +163,10 @@ if (/export\s+(?:async\s+)?function\s+(?:get|read|save|set|store)Secret\b/.test(
   fail('Lockbox exposes a forbidden generic secret accessor; credentials require named minimum-capability accessors');
 }
 
-// The autonomy credential is a separate device-local secret boundary because
-// cloud sync must survive reloads without requiring the interactive API-key
-// Lockbox to be unlocked. Freeze the only direct store consumer (pairing) and
-// the only runtime plaintext handoff consumer (the cloud client).
+// The installation credential is a separate device-local secret boundary used
+// only for the user's own self-hosted Worker. Freeze the direct store consumer
+// (pairing) and the two reviewed plaintext handoff consumers: autonomy cloud
+// transport and durable Google OAuth brokerage.
 const reviewedAutonomyCredentialConsumers = new Set(['src/autonomy/cloud/pairing.ts']);
 const actualAutonomyCredentialConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -176,7 +176,10 @@ for (const [path, source] of runtime) {
 for (const path of actualAutonomyCredentialConsumers) if (!reviewedAutonomyCredentialConsumers.has(path)) fail(`unreviewed autonomy credential-store consumer: ${path}`);
 for (const path of reviewedAutonomyCredentialConsumers) if (!actualAutonomyCredentialConsumers.has(path)) fail(`reviewed autonomy credential-store consumer disappeared or moved: ${path}`);
 
-const reviewedPairingTokenConsumers = new Set(['src/autonomy/cloud/client.ts']);
+const reviewedPairingTokenConsumers = new Set([
+  'src/autonomy/cloud/client.ts',
+  'src/google/oauth/authority.ts',
+]);
 const actualPairingTokenConsumers = new Set();
 for (const [path, source] of runtime) {
   if (path === 'src/autonomy/cloud/pairing.ts') continue;
@@ -188,6 +191,7 @@ for (const path of reviewedPairingTokenConsumers) if (!actualPairingTokenConsume
 const pairing = read('src/autonomy/cloud/pairing.ts');
 const autonomyCredential = read('src/autonomy/cloud/credential.ts');
 const autonomyClient = read('src/autonomy/cloud/client.ts');
+const oauthAuthority = read('src/google/oauth/authority.ts');
 if (!pairing.includes("type StoredAutonomyPairing = Omit<AutonomyPairing, 'token'>")) fail('autonomy pairing must exclude token from its durable metadata type');
 if (!pairing.includes('saveAutonomyInstallationToken')) fail('autonomy pairing must route the installation credential through its protected store');
 if (/writeJson\(PAIRING_KEY\s*,\s*\{\s*\.\.\.pairing\s*\}/.test(pairing)) fail('autonomy pairing serializes the complete pairing object, including its credential');
@@ -198,8 +202,9 @@ for (const [path, source] of [
   ['src/autonomy/cloud/credential.ts', autonomyCredential],
   ['src/autonomy/cloud/pairing.ts', pairing],
   ['src/autonomy/cloud/client.ts', autonomyClient],
+  ['src/google/oauth/authority.ts', oauthAuthority],
 ]) {
-  if (/\bconsole\.(?:log|info|warn|error|debug)\s*\(/.test(source)) fail(`${path} must not log from the autonomy credential-bearing boundary`);
+  if (/\bconsole\.(?:log|info|warn|error|debug)\s*\(/.test(source)) fail(`${path} must not log from the installation-credential-bearing boundary`);
 }
 
 for (const [path, source] of runtime) {
@@ -254,10 +259,12 @@ for (const path of reviewedGlobalFetchReferences) {
   if (!/(?:globalThis|window|self)\.fetch\b/.test(source)) fail(`reviewed global fetch reference disappeared or moved: ${path}`);
 }
 
-const oauthAuthority = read('src/google/oauth/authority.ts');
 if (!oauthAuthority.includes('GOOGLE_API_HOSTS')) fail('Google OAuth egress must retain its explicit API host allowlist');
 if (!oauthAuthority.includes("url.protocol !== 'https:'")) fail('Google OAuth egress must enforce HTTPS');
 if (!oauthAuthority.includes('assertGoogleApiTarget')) fail('Google authorized fetch must validate its destination');
+for (const marker of ['requestGoogleAuthorizationCode', "'/google/oauth/token'", 'resolvePairingToken', 'signWrite']) {
+  if (!oauthAuthority.includes(marker)) fail(`durable Google OAuth browser authority is missing: ${marker}`);
+}
 
 for (const marker of [
   "url.protocol !== 'https:'",
@@ -325,4 +332,4 @@ if (errors.length) {
   process.exit(1);
 }
 
-process.stdout.write(`Security & architecture gate passed: ${runtime.size} runtime files checked; forbidden execution/DOM/Node and alternate browser transport powers absent; reviewed dynamic script and browser Worker authorities frozen; ${reviewedDexieAuthorities.size} durable authorities, ${reviewedLockboxConsumers.size} Lockbox consumers, autonomy credential propagation, outbound egress authorities, Google service imports, and confirmation brokers match the reviewed capability surface.\n`);
+process.stdout.write(`Security & architecture gate passed: ${runtime.size} runtime files checked; forbidden execution/DOM/Node and alternate browser transport powers absent; reviewed dynamic script and browser Worker authorities frozen; ${reviewedDexieAuthorities.size} durable authorities, ${reviewedLockboxConsumers.size} Lockbox consumers, installation credential propagation, outbound egress authorities, Google service imports, and confirmation brokers match the reviewed capability surface.\n`);

@@ -58,29 +58,32 @@ describe('canonical memory retrieval engine', () => {
     expect(result.reduce((sum, memory) => sum + memory.title.length + memory.body.length, 0)).toBeLessThanOrEqual(12);
   });
 
-  it('excludes archived, expired, superseded, and out-of-scope records', () => {
+  it('excludes archived, expired, superseded, dormant micro-evidence, and out-of-scope records', () => {
     const scope = { folderId: 'folder-a', includeGlobal: false, now: 10_000 };
     const active = makeMemory({ id: 'active', folderId: 'folder-a' });
     const archived = makeMemory({ id: 'archived', lifecycle: 'archived', folderId: 'folder-a' });
     const expired = makeMemory({ id: 'expired', folderId: 'folder-a', expiresAt: 5_000 });
     const superseded = makeMemory({ id: 'superseded', folderId: 'folder-a', lifecycle: 'dormant', supersededBy: ['replacement'] });
+    const dormantMicro = makeMemory({ id: 'support-evidence', folderId: 'folder-a', kind: 'MICRO_OBSERVATION', lifecycle: 'dormant' });
     const other = makeMemory({ id: 'other', folderId: 'folder-b' });
     const global = makeMemory({ id: 'global', folderId: null, kind: 'CORE' });
-    const result = rankAndBudgetMemories([active, archived, expired, superseded, other, global], scope);
+    const result = rankAndBudgetMemories([active, archived, expired, superseded, dormantMicro, other, global], scope);
     expect(result.map((memory) => memory.id)).toEqual(['active']);
     expect(isMemoryRetrievable(active, scope)).toBe(true);
     expect(isMemoryRetrievable(archived, scope)).toBe(false);
     expect(isMemoryRetrievable(expired, scope)).toBe(false);
     expect(isMemoryRetrievable(superseded, scope)).toBe(false);
+    expect(isMemoryRetrievable(dormantMicro, scope)).toBe(false);
     expect(isMemoryRetrievable(other, scope)).toBe(false);
     expect(isMemoryRetrievable(global, scope)).toBe(false);
   });
 
-  it('marks dormant and conflicted context explicitly without exposing relationship ids', () => {
+  it('keeps dormant established memory recallable with an explicit context label', () => {
     const memory = {
       ...makeMemory({ id: 'conflicted', lifecycle: 'dormant', conflictingMemoryIds: ['secret-internal-id'] }),
       score: 1,
     };
+    expect(isMemoryRetrievable(memory, { includeGlobal: true })).toBe(true);
     const context = formatMemoryContext([memory]);
     expect(context).toContain('[CONTEXTUAL; dormant; unresolved-conflict]');
     expect(context).not.toContain('secret-internal-id');

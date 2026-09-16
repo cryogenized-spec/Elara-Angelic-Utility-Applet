@@ -17,6 +17,8 @@ const MAX_FREEBUSY_CALENDARS = 50;
 const MAX_EVENT_BODY_BYTES = 1_000_000;
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 250;
+const DATE_TIME_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})?$/i;
+const CONCRETE_ETAG_PATTERN = /^(?:W\/)?"[^"]+"$/;
 
 export type CalendarSendUpdates = 'all' | 'externalOnly';
 export type CalendarMinAccessRole = 'freeBusyReader' | 'reader' | 'writerWithoutPrivateAccess' | 'writer' | 'owner';
@@ -235,11 +237,25 @@ function isAllDayDate(value: string): boolean {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
 }
 
-function isDateTime(value: string): boolean {
-  return value.includes('T') && !Number.isNaN(Date.parse(value));
+function hasExplicitOffset(value: string): boolean {
+  return /(?:Z|[+-]\d{2}:\d{2})$/i.test(value);
 }
 
-function validateTimePair(start: string, end: string): void {
+function isDateTime(value: string): boolean {
+  if (!DATE_TIME_PATTERN.test(value)) return false;
+  const deterministicValue = hasExplicitOffset(value) ? value : `${value}Z`;
+  return !Number.isNaN(Date.parse(deterministicValue));
+}
+
+function isOffsetDateTime(value: string): boolean {
+  return isDateTime(value) && hasExplicitOffset(value);
+}
+
+function dateTimeMillis(value: string): number {
+  return Date.parse(hasExplicitOffset(value) ? value : `${value}Z`);
+}
+
+function validateTimePair(start: string, end: string, timeZone?: string): void {
   const startAllDay = isAllDayDate(start);
   const endAllDay = isAllDayDate(end);
   const startTimed = isDateTime(start);
@@ -247,14 +263,18 @@ function validateTimePair(start: string, end: string): void {
   if ((!startAllDay && !startTimed) || (!endAllDay && !endTimed) || startAllDay !== endAllDay) {
     throw new Error('Google Calendar start/end must both be RFC 3339 date-times or both be all-day YYYY-MM-DD dates.');
   }
-  const startMs = Date.parse(startAllDay ? `${start}T00:00:00Z` : start);
-  const endMs = Date.parse(endAllDay ? `${end}T00:00:00Z` : end);
+  if ((startTimed && !hasExplicitOffset(start)) || (endTimed && !hasExplicitOffset(end))) {
+    if (!timeZone) throw new Error('Google Calendar date-times without a UTC offset require an explicit time zone.');
+  }
+  const startMs = startAllDay ? Date.parse(`${start}T00:00:00Z`) : dateTimeMillis(start);
+  const endMs = endAllDay ? Date.parse(`${end}T00:00:00Z`) : dateTimeMillis(end);
   if (endMs <= startMs) throw new Error('Google Calendar event end must be after start.');
 }
 
 function eventDateTime(value: string, timeZone?: string): Record<string, string> {
   if (isAllDayDate(value)) return { date: value };
   if (!isDateTime(value)) throw new Error('Google Calendar date-time is invalid.');
+  if (!hasExplicitOffset(value) && !timeZone) throw new Error('Google Calendar date-times without a UTC offset require an explicit time zone.');
   return { dateTime: value, ...(timeZone ? { timeZone } : {}) };
 }
 
@@ -343,7 +363,9 @@ async function calendarEventIdForCallId(callId: string): Promise<string> {
 
 function conditionalHeaders(etag: string): Record<string, string> {
   const safeEtag = boundedText(etag, 'event ETag', MAX_ETAG_LENGTH);
-  if (!safeEtag) throw new Error('Google Calendar event ETag is required. Read the event again before changing it.');
+  if (!safeEtag || !CONCRETE_ETAG_PATTERN.test(safeEtag)) {
+    throw new Error('Google Calendar mutations require one concrete provider ETag. Read the event again before changing it.');
+  }
   return { 'If-Match': safeEtag };
 }
 
@@ -368,6 +390,8 @@ export class GoogleCalendarService {
     const safeQuery = boundedText(input.query, 'query', MAX_QUERY_LENGTH);
     const safeTimeZone = boundedText(input.timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
     const maxResults = boundedPageSize(input.maxResults);
+    if (safeTimeMin && !isOffsetDateTime(safeTimeMin)) throw new Error('Google Calendar timeMin must be an RFC 3339 timestamp with an explicit UTC offset.');
+    if (safeTimeMax && !isOffsetDateTime(safeTimeMax)) throw new Error('Google Calendar timeMax must be an RFC 3339 timestamp with an explicit UTC offset.');
     if (safeTimeMin && safeTimeMax && Date.parse(safeTimeMax) <= Date.parse(safeTimeMin)) throw new Error('Google Calendar timeMax must be after timeMin.');
     const access = await this.oauth.authorize('calendar.events.read');
     const request = this.buildEventsRequest(access, safeCalendarId, safeTimeMin, safeTimeMax, safePageToken, maxResults, safeQuery, safeTimeZone);
@@ -429,7 +453,9 @@ export class GoogleCalendarService {
     const safeTimeMin = boundedText(timeMin, 'timeMin', MAX_TIME_PARAMETER_LENGTH);
     const safeTimeMax = boundedText(timeMax, 'timeMax', MAX_TIME_PARAMETER_LENGTH);
     const safeTimeZone = boundedText(timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
-    if (!safeTimeMin || !safeTimeMax || !isDateTime(safeTimeMin) || !isDateTime(safeTimeMax)) throw new Error('Google Calendar free/busy requires RFC 3339 timeMin and timeMax.');
+    if (!safeTimeMin || !safeTimeMax || !isOffsetDateTime(safeTimeMin) || !isOffsetDateTime(safeTimeMax)) {
+      throw new Error('Google Calendar free/busy requires RFC 3339 timeMin and timeMax with explicit UTC offsets.');
+    }
     if (Date.parse(safeTimeMax) <= Date.parse(safeTimeMin)) throw new Error('Google Calendar free/busy timeMax must be after timeMin.');
     const safeCalendarIds = boundedStringArray(calendarIds, 'calendar ID', MAX_FREEBUSY_CALENDARS, MAX_CALENDAR_ID_LENGTH) ?? [];
     if (safeCalendarIds.length === 0) throw new Error('Google Calendar free/busy requires at least one calendar.');
@@ -459,8 +485,8 @@ export class GoogleCalendarService {
     const safeStart = boundedText(input.start, 'event start', MAX_TIME_PARAMETER_LENGTH);
     const safeEnd = boundedText(input.end, 'event end', MAX_TIME_PARAMETER_LENGTH);
     if (!safeSummary || !safeStart || !safeEnd) throw new Error('Google Calendar event summary, start, and end are required.');
-    validateTimePair(safeStart, safeEnd);
     const safeTimeZone = boundedText(input.timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
+    validateTimePair(safeStart, safeEnd, safeTimeZone);
     const safeLocation = boundedText(input.location, 'location', MAX_EVENT_LOCATION_LENGTH);
     const safeDescription = boundedText(input.description, 'description', MAX_EVENT_DESCRIPTION_LENGTH);
     const safeAttendees = boundedStringArray(input.attendees, 'attendee', MAX_ATTENDEES, 320);
@@ -496,8 +522,14 @@ export class GoogleCalendarService {
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
     const safeTimeZone = boundedText(input.timeZone, 'time zone', MAX_TIME_ZONE_LENGTH);
     const safeRecurrence = input.recurrence !== undefined ? validateRecurrence(input.recurrence) ?? [] : undefined;
-    const updatesTimedBoundary = (input.start !== undefined && isDateTime(input.start.trim())) || (input.end !== undefined && isDateTime(input.end.trim()));
-    if (safeRecurrence?.length && updatesTimedBoundary && !safeTimeZone) throw new Error('Google Calendar recurring date-time updates require an explicit time zone.');
+    if (safeRecurrence?.length && (input.start === undefined || input.end === undefined)) {
+      throw new Error('Google Calendar recurrence updates require explicit start and end boundaries.');
+    }
+    if (input.start !== undefined && input.end !== undefined) validateTimePair(input.start.trim(), input.end.trim(), safeTimeZone);
+    if (safeRecurrence?.length && input.start !== undefined && input.end !== undefined) {
+      const recurringTimedBoundary = isDateTime(input.start.trim()) || isDateTime(input.end.trim());
+      if (recurringTimedBoundary && !safeTimeZone) throw new Error('Google Calendar recurring date-time updates require an explicit time zone.');
+    }
 
     const patch: Record<string, unknown> = {};
     if (input.summary !== undefined) patch.summary = boundedPatchText(input.summary, 'event summary', MAX_EVENT_SUMMARY_LENGTH);
@@ -511,7 +543,6 @@ export class GoogleCalendarService {
       if (!end) throw new Error('Google Calendar event end cannot be empty.');
       patch.end = eventDateTime(end, safeTimeZone);
     }
-    if (input.start !== undefined && input.end !== undefined) validateTimePair(input.start.trim(), input.end.trim());
     if (input.location !== undefined) patch.location = boundedPatchText(input.location, 'location', MAX_EVENT_LOCATION_LENGTH);
     if (input.description !== undefined) patch.description = boundedPatchText(input.description, 'description', MAX_EVENT_DESCRIPTION_LENGTH);
     if (input.attendees !== undefined) patch.attendees = (boundedStringArray(input.attendees, 'attendee', MAX_ATTENDEES, 320) ?? []).map((email) => ({ email }));
@@ -525,8 +556,8 @@ export class GoogleCalendarService {
     const safeEventId = boundedText(eventId, 'event ID', MAX_EVENT_ID_LENGTH);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
     const safePatch = boundedEvent(patch);
-    const access = await this.oauth.authorize('calendar.events.write');
     const headers = { 'content-type': 'application/json', ...conditionalHeaders(etag) };
+    const access = await this.oauth.authorize('calendar.events.write');
     const url = withSendUpdates(new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(safeCalendarId)}/events/${encodeURIComponent(safeEventId)}`), sendUpdates);
     const response = await access.fetch(url, { method: 'PATCH', headers, body: JSON.stringify(safePatch) });
     if (!response.ok) throwMutationFailure(response, 'update');
@@ -537,9 +568,10 @@ export class GoogleCalendarService {
     const safeCalendarId = boundedText(calendarId, 'calendar ID', MAX_CALENDAR_ID_LENGTH) ?? 'primary';
     const safeEventId = boundedText(eventId, 'event ID', MAX_EVENT_ID_LENGTH);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
+    const headers = conditionalHeaders(etag);
     const access = await this.oauth.authorize('calendar.events.write');
     const url = withSendUpdates(new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(safeCalendarId)}/events/${encodeURIComponent(safeEventId)}`), sendUpdates);
-    const response = await access.fetch(url, { method: 'DELETE', headers: conditionalHeaders(etag) });
+    const response = await access.fetch(url, { method: 'DELETE', headers });
     if (!response.ok) throwMutationFailure(response, 'delete');
     return { deleted: true, calendarId: safeCalendarId, eventId: safeEventId };
   }

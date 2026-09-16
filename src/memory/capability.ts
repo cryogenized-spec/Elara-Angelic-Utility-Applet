@@ -1,5 +1,5 @@
 import type { DurableMemory, MemoryInput, MemoryKind, MemoryProvenance } from './types';
-import { archiveMemory, deleteMemory, saveMemory } from './store';
+import { archiveMemory, deleteMemory, saveMemory, saveMemoryOnce } from './store';
 import { authorizeMemoryMutation, type MemoryActor } from './permissions';
 
 export interface MemorySaveRequest {
@@ -17,6 +17,10 @@ export interface MemoryCapabilityContext {
   messageId?: string;
   folderId?: string | null;
   provenanceNote?: string;
+  /** Application-owned replay key. Never model supplied. */
+  idempotencyKey?: string;
+  /** Application-owned turn authority guard for async durable mutations. */
+  isMutationAllowed?: () => boolean;
 }
 
 export interface MemoryCapability {
@@ -25,19 +29,27 @@ export interface MemoryCapability {
   delete(id: string, context?: MemoryCapabilityContext): Promise<void>;
 }
 
+function effectiveProvenanceNote(context: MemoryCapabilityContext): string | undefined {
+  const key = context.idempotencyKey?.trim();
+  if (key) return `idempotency:${key.slice(0, 470)}`;
+  return context.provenanceNote?.trim() || undefined;
+}
+
 function elaraProvenance(context: MemoryCapabilityContext = {}): MemoryProvenance {
+  const note = effectiveProvenanceNote(context);
   return {
     source: 'elara',
     createdAt: Date.now(),
     ...(context.conversationId ? { conversationId: context.conversationId } : {}),
     ...(context.messageId ? { messageId: context.messageId } : {}),
-    ...(context.provenanceNote ? { note: context.provenanceNote } : {}),
+    ...(note ? { note } : {}),
   };
 }
 
 export const memory: MemoryCapability = {
   async save(request, context = {}) {
     authorizeMemoryMutation('save', context);
+    const source = elaraProvenance(context);
     const input: MemoryInput = {
       title: request.title,
       body: request.body,
@@ -46,9 +58,9 @@ export const memory: MemoryCapability = {
       importance: request.importance,
       tags: request.tags,
       folderId: context.folderId,
-      source: elaraProvenance(context),
+      source,
     };
-    return saveMemory(input);
+    return context.idempotencyKey ? saveMemoryOnce(input, source.note!, context.isMutationAllowed) : saveMemory(input);
   },
   async forget(id, context = {}) {
     authorizeMemoryMutation('forget', context);

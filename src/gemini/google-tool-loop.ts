@@ -7,6 +7,7 @@ import { googleServiceToolHandlers } from '../google/tools/service-handlers';
 import { googleReadToolHandlers } from '../google/tools/read-handlers';
 import { roleplayWorldToolHandlers } from '../google/tools/roleplay-world-handlers';
 import { mediaToolHandlers } from '../media/tool-handler';
+import { memoryToolHandlers } from '../memory/tool-handler';
 import { isMediaItem, isMediaProviderId } from '../domain/media';
 import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
 import { isConfirmationFresh } from '../google/confirmation/policy';
@@ -88,10 +89,12 @@ function normalizeTools(tools: readonly GoogleToolName[] | undefined, allowEmpty
 function executorOptions(options: GoogleToolLoopOptions, request: GeminiTurnRequest, signal?: AbortSignal): GoogleToolExecutorOptions {
   return {
     oauth: options.executor?.oauth ?? googleOAuthAuthority,
-    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...documentToolHandlers, ...mediaToolHandlers, ...options.executor?.handlers },
+    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...documentToolHandlers, ...mediaToolHandlers, ...memoryToolHandlers, ...options.executor?.handlers },
     confirm: options.executor?.confirm,
     now: options.executor?.now,
     signal,
+    conversationId: request.conversationId,
+    messageId: request.inputMessageId,
     generationId: request.generationId,
     isGenerationActive: request.isGenerationActive,
   };

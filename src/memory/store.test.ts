@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
-import { archiveMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, saveMemory, updateMemory } from './store';
+import { archiveMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, saveMemory, saveMemoryOnce, updateMemory } from './store';
 
 describe('canonical durable memory store', () => {
   beforeEach(async () => { await db.memories.clear(); });
@@ -41,6 +41,29 @@ describe('canonical durable memory store', () => {
     expect(memory.tags).toEqual(['preference']);
     await expect(saveMemory({ title: '', body: 'Missing title' })).rejects.toThrow('Memory title is required.');
     await expect(saveMemory({ title: 'Missing body', body: '   ' })).rejects.toThrow('Memory body is required.');
+  });
+
+  it('saves one logical mutation exactly once and validates its provenance marker', async () => {
+    const source = { source: 'elara' as const, createdAt: 1_000, note: 'idempotency:generation_1:call_1' };
+    const input = { title: 'Replay-safe memory', body: 'Create this logical memory once.', source };
+
+    const first = await saveMemoryOnce(input, source.note);
+    const replay = await saveMemoryOnce(input, source.note);
+
+    expect(replay.id).toBe(first.id);
+    expect(await db.memories.count()).toBe(1);
+    await expect(saveMemoryOnce(input, '   ')).rejects.toThrow('Memory idempotency provenance is required.');
+    await expect(saveMemoryOnce(input, 'idempotency:other-call')).rejects.toThrow('Memory idempotency provenance mismatch.');
+  });
+
+  it('aborts a replay-safe save when turn authority is absent before persistence', async () => {
+    const source = { source: 'elara' as const, createdAt: 1_000, note: 'idempotency:generation_2:call_1' };
+    await expect(saveMemoryOnce(
+      { title: 'Cancelled memory', body: 'This must not persist.', source },
+      source.note,
+      () => false,
+    )).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await db.memories.count()).toBe(0);
   });
 
   it('updates, reinforces, promotes, archives, and deletes', async () => {

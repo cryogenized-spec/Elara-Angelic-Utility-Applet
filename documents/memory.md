@@ -1,7 +1,7 @@
 ---
 id: SYS-MEM
 status: active
-verified_commit: b79b1c8996cd21e761f3cdf7f9b1fb3e7669dcec
+verified_commit: c95b41100a54fd1cad13d1f6c425ea0f992e0bb5
 scope: durable memory lifecycle, retrieval, and model capability boundary
 paths: [src/memory, src/gemini/memory-context.ts, src/gemini/google-tool-loop.ts, src/google/tools]
 keywords: [memory, recall, observation, retrieval, consolidation, memory-bank, capability]
@@ -21,15 +21,22 @@ The completion target is **Companion-style initiative on Angelic architecture**:
 ## 2. Runtime architecture
 
 ```text
-save / observe / consolidate / user edit
--> normalize + schema validate
--> db.memories
--> retrieval scope + scorer + budget
+normal recall
+-> scoped retrieval + scorer + budget
 -> contextual projection
 -> Gemini system-instruction composition
+
+explicit user-approved remember request
+-> Gemini memory.save proposal
+-> bounded tool schema
+-> existing write-confirmation broker
+-> application-owned turn provenance + folder scope
+-> memory capability permission boundary
+-> replay-safe canonical save transaction
+-> db.memories
 ```
 
-Retrieval is operational in normal chat. At the verified commit there is no model-visible `memory.*` mutation tool in the live Gemini tool registry; autonomous model mutation is not an active capability.
+Normal retrieval remains operational in chat and is independent of the write tool. Pass 1 introduces only deliberate `memory.save`; `memory.lookup`, `memory.reconcile`, organic observation and model-visible forget/delete remain unavailable until their later passes.
 
 ## 3. Source map
 
@@ -41,6 +48,8 @@ Retrieval is operational in normal chat. At the verified commit there is no mode
 | Ranking/budget | `src/memory/retrieval.ts` |
 | Observation/consolidation | `src/memory/observation.ts`, related modules |
 | Permission policy | `src/memory/permissions.ts`, `capability.ts` |
+| Gemini memory tool schema | `src/memory/tool-schema.ts` |
+| Gemini memory tool handler | `src/memory/tool-handler.ts` |
 | Integrity/health | `src/memory/inspection.ts`, `health.ts` |
 | Gemini projection | `src/gemini/memory-context.ts` |
 | Gemini tool loop | `src/gemini/google-tool-loop.ts` |
@@ -57,7 +66,7 @@ Promotion order is `MICRO_OBSERVATION -> EPISODIC -> CONTEXTUAL -> CORE`. Retrie
 
 Ranking uses one scorer: lexical relevance 0.50, importance 0.18, confidence 0.12, reinforcement 0.07, recency 0.06, relationship density 0.03, plus kind/lifecycle weights. The query-less form is reused for autonomy context so a second ranking authority is not created.
 
-Store limits remain the final validation boundary: title 160 chars, body 50,000 chars, tag 64 chars, 32 tags and 64 relationship ids. Model-facing tool limits below are intentionally narrower.
+Store limits remain the final validation boundary: title 160 chars, body 50,000 chars, tag 64 chars, 32 tags and 64 relationship ids. Model-facing `memory.save` is intentionally narrower: title 160, body 4,000, at most 12 tags and only `CONTEXTUAL`/`EPISODIC` kinds.
 
 ## 5. Invariants
 
@@ -78,35 +87,37 @@ Store limits remain the final validation boundary: title 160 chars, body 50,000 
 
 Memory context must stay bounded and separated from the Character Master. Retrieval failure must not corrupt the canonical store or fail an otherwise valid chat turn. Health/inspection paths are diagnostic; destructive repair is not automatic.
 
-Interactive model-visible memory mutations use the existing tool authority boundary. `risk: write` remains a real write classification and therefore uses the existing confirmation broker; memory must never be mislabeled `read` to avoid confirmation. Model-visible hard delete/forget is not declared.
+Interactive model-visible memory mutations use the existing tool authority boundary. `memory.save` is classified `risk: write`, so it uses the same existing confirmation broker and freshness/replay protections as other interactive writes; memory is never mislabeled `read` to avoid confirmation. Model-visible hard delete/forget is not declared.
+
+`memory.save` is browser-only (`executionPlane: browser`) and uses local capability `memory.durable.local`. The Worker plane therefore does not receive its Gemini declaration. Autonomous routines remain read-only/headless and cannot acquire this mutation path.
 
 Organic observation is a different authority path: an application-owned post-turn process introduced only after deliberate writes are certified. It is not a hidden Gemini write tool and must run only after the assistant turn has durably persisted. User-authored content or app-verified evidence may support observations; Elara's generated prose alone must never bootstrap itself into durable fact.
 
 ## 7. Verification baseline
 
-Pass 0 is pinned to certified `main` commit `b79b1c8996cd21e761f3cdf7f9b1fb3e7669dcec` (security Pass 5). No open PR existed when this completion branch was created.
+Pass 0 was certified on branch commit `97f37f071e2fc51e83f9bc4479c18d806c54297d` and squash-merged as `c95b41100a54fd1cad13d1f6c425ea0f992e0bb5`. Its CI passed architecture/security gates, lint, TypeScript 6 and 7 checks, unit/coverage, Worker/Durable Object tests, build, E2E and final reliability verification.
 
-At this baseline:
+Pass 1 is implemented on `memory/pass-1-deliberate-save` and remains **uncertified until that branch's CI completes**. Its verification suite pins the following behavior:
 
-- `src/memory/gemini-memory-capability.audit.test.ts` intentionally proves there is no `memory.*` registry/contract/declaration.
-- interactive chat derives its default tool set from all Gemini-visible registry entries and runs selected tools with `readOnly: false`;
-- autonomous routine runs use the same loop in `readOnly: true` headless mode;
-- every current `write`, `destructive` or `send` tool requires confirmation;
-- memory permissions already allow the model to save/observe/consolidate and deny model forget/delete;
-- `GeminiTurnRequest` does not yet carry conversation id or input-message id into tool execution;
-- tool handlers receive `generationId` but not the provider/model call id needed for mutation idempotency.
+- exactly one Gemini-visible `memory.*` operation exists: `memory.save`;
+- `memory.save` is a browser-only write and absent from Worker declarations;
+- model arguments are strict/bounded and cannot contain app-owned durable fields;
+- application-owned conversation id, input-message id, generation id and provider call id are carried into tool execution;
+- folder scope resolves from the captured conversation, not current UI navigation state;
+- save uses the canonical `memory.save(...)` capability rather than direct DB writes;
+- replay of one generation/call pair converges on one record;
+- loss of generation authority before transaction commit aborts/rolls back the mutation;
+- destructive/future memory tools remain undeclared.
 
-Those last two seams must be corrected before the first live memory write tool is enabled.
+## 8. Model-facing contract
 
-## 8. Reserved model-facing contract
+The completion surface remains deliberately small. Pass 1 implements only `memory.save`; Pass 2 adds lookup/reconciliation after this path is certified.
 
-The intended Gemini-visible surface is deliberately small. These names are reserved by this contract; Passes 1-2 implement them.
-
-| Tool | Risk | Plane | Purpose |
-| --- | --- | --- | --- |
-| `memory.lookup` | `read` | browser | bounded on-demand search for memory-management work |
-| `memory.save` | `write` | browser | deliberate creation of a durable user-approved memory |
-| `memory.reconcile` | `write` | browser | attach new evidence to an existing memory without arbitrary raw update/delete |
+| Tool | Risk | Plane | State | Purpose |
+| --- | --- | --- | --- | --- |
+| `memory.lookup` | `read` | browser | Pass 2 pending | bounded on-demand search for memory-management work |
+| `memory.save` | `write` | browser | Pass 1 implemented, certification pending | deliberate creation of a durable user-approved memory |
+| `memory.reconcile` | `write` | browser | Pass 2 pending | attach new evidence to an existing memory without arbitrary raw update/delete |
 
 All three use local capability `memory.durable.local` and the existing central registry/executor/tool loop. No parallel memory dispatcher is permitted.
 
@@ -124,7 +135,9 @@ Input: `title` (1-160), `body` (1-4,000), optional `kind` (`CONTEXTUAL` or `EPIS
 
 Application-owned fields: `id`, timestamps, `source=elara`, `conversationId`, originating user `messageId`, folder scope, lifecycle, relationships, expiry and `autonomyContext`. Default kind is `CONTEXTUAL`. Gemini cannot create `CORE` or `MICRO_OBSERVATION` through this tool.
 
-The handler calls `memory.save(...)`; direct `db.memories` access is forbidden. The returned result is minimal (`saved`, opaque `ref`, effective kind), not a raw store dump.
+The handler validates the bounded schema, resolves the originating conversation's folder, and calls `memory.save(...)`; direct `db.memories` access from the tool handler is forbidden. The returned result is minimal (`saved`, opaque `ref`, effective kind), not a raw store dump.
+
+The logical mutation identity is application-derived from `generationId + provider callId`. The canonical capability stores that key as bounded provenance metadata and `saveMemoryOnce` resolves replay inside one Dexie transaction. If generation authority is lost while persistence is settling, the transaction throws before commit and rolls back.
 
 ### 8.3 `memory.reconcile`
 
@@ -142,13 +155,15 @@ The model may only use a `targetRef` returned by scoped `memory.lookup`; arbitra
 
 ## 9. Runtime provenance and idempotency contract
 
-Before `memory.save` or `memory.reconcile` becomes live, the interactive turn/executor context must carry application-owned `conversationId`, originating user `messageId`, `generationId` and stable model `callId`.
+Interactive tool execution carries application-owned `conversationId`, originating user `messageId`, `generationId` and stable provider `callId`.
 
-- `conversationId` and `messageId` already exist at the App turn owner and must be forwarded; the model cannot supply them.
-- Folder scope is resolved from that specific conversation id, not from whatever thread happens to be active when confirmation finishes.
-- Mutation idempotency key is derived from the originating generation + tool call identity. Retry/replay returns the prior logical result instead of writing a duplicate.
-- Confirmation freshness, abort state and `isGenerationActive()` are checked before persistence.
-- Tool continuation preserves the same provenance context for the whole turn.
+- App owns `conversationId` and `messageId`; the model cannot supply them.
+- The tool loop forwards those identifiers into the central executor for the entire originating turn.
+- The executor preserves provider `callId` outside model arguments and supplies it to handlers.
+- Folder scope is resolved from the captured conversation id, not from whatever thread is active when confirmation finishes.
+- Mutation idempotency key is derived from generation + call identity. Retry/replay returns the prior logical result instead of writing a duplicate.
+- Confirmation freshness, abort state and `isGenerationActive()` are checked before execution; the memory transaction also rechecks turn authority immediately before commit.
+- Tool continuation cannot rewrite the application-owned provenance context.
 
 ## 10. Organic observation boundary
 
@@ -162,8 +177,8 @@ Assistant-generated claims alone are not evidence. Repeated independent support 
 
 | Pass | Deliverable | Status |
 | --- | --- | --- |
-| 0 | baseline + invariants + exact capability contract | active on `memory/pass-0-contract` |
-| 1 | live deliberate `memory.save` capability + authoritative turn provenance/idempotency | pending |
+| 0 | baseline + invariants + exact capability contract | complete / merged (`c95b411`) |
+| 1 | live deliberate `memory.save` capability + authoritative turn provenance/idempotency | implemented / certification pending |
 | 2 | scoped `memory.lookup` + safe `memory.reconcile` | pending |
 | 3 | bounded post-turn organic observer | pending |
 | 4 | reinforcement, contradiction, supersession and promotion/dormancy lifecycle | pending |
@@ -172,6 +187,6 @@ Assistant-generated claims alone are not evidence. Repeated independent support 
 
 Semantic/vector retrieval, cloud memory sync, autonomous forgetting and a separate WorldState database are explicitly outside this completion program.
 
-## 12. Current known gap
+## 12. Current known gaps
 
-The live Gemini registry still exposes retrieval context but no `memory.*` capability. That is intentional at Pass 0. Pass 1 may change the forensic audit only together with the registry/declaration/schema/handler/provenance/idempotency implementation and its tests; deleting or weakening the audit before the capability exists is forbidden.
+At Pass 1, deliberate user-approved saving is the only new model memory capability. Elara still cannot query internal memory references on demand, reconcile new evidence with existing records, autonomously form post-turn observations, or perform model-visible forgetting/deletion. Those omissions are intentional and define the boundaries of Passes 2-3 rather than incompleteness in Pass 1.

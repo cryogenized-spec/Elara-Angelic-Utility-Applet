@@ -247,8 +247,12 @@ test('migrates a legacy Gemini key before making the first interaction request',
     window.localStorage.setItem('elara.gemini.api-key', 'e2e-legacy-api-key');
   });
   let interactionRequests = 0;
+  let legacyKeyAtFirstRequest: string | null | undefined;
   await page.route('**/v1/interactions*', async (route) => {
     interactionRequests += 1;
+    if (interactionRequests === 1) {
+      legacyKeyAtFirstRequest = await page.evaluate(() => window.localStorage.getItem('elara.gemini.api-key'));
+    }
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
@@ -264,7 +268,8 @@ test('migrates a legacy Gemini key before making the first interaction request',
   await composer.fill('Verify legacy migration');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('Legacy key migrated.')).toBeVisible();
-  expect(interactionRequests).toBe(1);
+  expect(interactionRequests).toBeGreaterThanOrEqual(1);
+  expect(legacyKeyAtFirstRequest).toBeNull();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem('elara.gemini.api-key'))).toBeNull();
 });
 

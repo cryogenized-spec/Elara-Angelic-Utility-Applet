@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
-import { archiveMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, saveMemory, saveMemoryOnce, updateMemory } from './store';
+import { archiveMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, runMemoryMutationTransaction, saveMemory, saveMemoryOnce, updateMemory } from './store';
 
 describe('canonical durable memory store', () => {
   beforeEach(async () => { await db.memories.clear(); });
@@ -43,17 +43,32 @@ describe('canonical durable memory store', () => {
     await expect(saveMemory({ title: 'Missing body', body: '   ' })).rejects.toThrow('Memory body is required.');
   });
 
-  it('saves one logical mutation exactly once and validates its provenance marker', async () => {
-    const source = { source: 'elara' as const, createdAt: 1_000, note: 'idempotency:generation_1:call_1' };
-    const input = { title: 'Replay-safe memory', body: 'Create this logical memory once.', source };
+  it('saves one logical mutation exactly once and rejects changed replay payloads', async () => {
+    const source = { source: 'elara' as const, createdAt: 1_000, conversationId: 'thread_1', messageId: 'message_1', note: 'idempotency:thread_1:message_1:generation_1:call_1' };
+    const input = { title: 'Replay-safe memory', body: 'Create this logical memory once.', tags: ['replay'], folderId: 'folder_1', source };
 
     const first = await saveMemoryOnce(input, source.note);
-    const replay = await saveMemoryOnce(input, source.note);
+    const replay = await saveMemoryOnce({ ...input, source: { ...source, createdAt: 2_000 } }, source.note);
 
     expect(replay.id).toBe(first.id);
     expect(await db.memories.count()).toBe(1);
+    await expect(saveMemoryOnce({ ...input, body: 'A changed payload must not borrow the original call identity.' }, source.note))
+      .rejects.toThrow('replay does not match the original mutation');
+    await expect(saveMemoryOnce({ ...input, tags: ['different-tag'] }, source.note))
+      .rejects.toThrow('replay does not match the original mutation');
+    expect(await db.memories.count()).toBe(1);
     await expect(saveMemoryOnce(input, '   ')).rejects.toThrow('Memory idempotency provenance is required.');
     await expect(saveMemoryOnce(input, 'idempotency:other-call')).rejects.toThrow('Memory idempotency provenance mismatch.');
+  });
+
+  it('allows later relationship changes without invalidating the original save replay', async () => {
+    const source = { source: 'elara' as const, createdAt: 1_000, note: 'idempotency:generation_1:call_relationship' };
+    const input = { title: 'Relationship-safe replay', body: 'Relationship metadata may evolve later.', source };
+    const first = await saveMemoryOnce(input, source.note);
+    await updateMemory(first.id, { relatedMemoryIds: ['memory_related_later'] });
+    const replay = await saveMemoryOnce({ ...input, source: { ...source, createdAt: 5_000 } }, source.note);
+    expect(replay.id).toBe(first.id);
+    expect(replay.relatedMemoryIds).toEqual(['memory_related_later']);
   });
 
   it('aborts a replay-safe save when turn authority is absent before persistence', async () => {
@@ -62,6 +77,19 @@ describe('canonical durable memory store', () => {
       { title: 'Cancelled memory', body: 'This must not persist.', source },
       source.note,
       () => false,
+    )).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await db.memories.count()).toBe(0);
+  });
+
+  it('commits or rolls back a compound mutation as one authority boundary', async () => {
+    const committed = await runMemoryMutationTransaction(() => saveMemory({ title: 'Compound success', body: 'This transaction is allowed.' }));
+    expect(await getMemory(committed.id)).toBeDefined();
+    await deleteMemory(committed.id);
+
+    let checks = 0;
+    await expect(runMemoryMutationTransaction(
+      () => saveMemory({ title: 'Compound rollback', body: 'This write must be rolled back before commit.' }),
+      () => { checks += 1; return checks === 1; },
     )).rejects.toMatchObject({ name: 'AbortError' });
     expect(await db.memories.count()).toBe(0);
   });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { rankAndBudgetMemories } from './retrieval';
+import type { FolderState } from '../persistence/folders';
+import { isMemoryRetrievable, memoryScopeForConversation, rankAndBudgetMemories } from './retrieval';
 import type { DurableMemory } from './types';
 
 const makeMemory = (overrides: Partial<DurableMemory>): DurableMemory => ({
@@ -12,6 +13,25 @@ const makeMemory = (overrides: Partial<DurableMemory>): DurableMemory => ({
 });
 
 describe('canonical memory retrieval engine', () => {
+  it('derives folder ancestry and global scope from the conversation assignment', () => {
+    const state: FolderState = {
+      folders: [
+        { id: 'parent', name: 'Parent', parentId: null, contextScope: 'folder', createdAt: 1, updatedAt: 1 },
+        { id: 'child', name: 'Child', parentId: 'parent', contextScope: 'global', createdAt: 1, updatedAt: 1 },
+      ],
+      assignments: { thread: 'child' },
+    };
+    expect(memoryScopeForConversation('thread', state, 'preference')).toEqual({
+      folderId: 'child',
+      folderIds: ['child', 'parent'],
+      includeGlobal: true,
+      query: 'preference',
+      maxItems: 8,
+      maxCharacters: 6_000,
+    });
+    expect(memoryScopeForConversation('unassigned', state, '')).toMatchObject({ folderId: null, folderIds: [], includeGlobal: true });
+  });
+
   it('ranks lexical relevance ahead of generic recency', () => {
     const result = rankAndBudgetMemories([
       makeMemory({ id: 'relevant', title: 'Dark mode preference', body: 'The user prefers dark mode.', updatedAt: 1_000 }),
@@ -39,14 +59,19 @@ describe('canonical memory retrieval engine', () => {
   });
 
   it('excludes archived, expired, and out-of-scope records', () => {
-    const result = rankAndBudgetMemories([
-      makeMemory({ id: 'active', folderId: 'folder-a' }),
-      makeMemory({ id: 'archived', lifecycle: 'archived', folderId: 'folder-a' }),
-      makeMemory({ id: 'expired', folderId: 'folder-a', expiresAt: 5_000 }),
-      makeMemory({ id: 'other', folderId: 'folder-b' }),
-      makeMemory({ id: 'global', folderId: null, kind: 'CORE' }),
-    ], { folderId: 'folder-a', includeGlobal: false, now: 10_000 });
+    const scope = { folderId: 'folder-a', includeGlobal: false, now: 10_000 };
+    const active = makeMemory({ id: 'active', folderId: 'folder-a' });
+    const archived = makeMemory({ id: 'archived', lifecycle: 'archived', folderId: 'folder-a' });
+    const expired = makeMemory({ id: 'expired', folderId: 'folder-a', expiresAt: 5_000 });
+    const other = makeMemory({ id: 'other', folderId: 'folder-b' });
+    const global = makeMemory({ id: 'global', folderId: null, kind: 'CORE' });
+    const result = rankAndBudgetMemories([active, archived, expired, other, global], scope);
     expect(result.map((memory) => memory.id)).toEqual(['active']);
+    expect(isMemoryRetrievable(active, scope)).toBe(true);
+    expect(isMemoryRetrievable(archived, scope)).toBe(false);
+    expect(isMemoryRetrievable(expired, scope)).toBe(false);
+    expect(isMemoryRetrievable(other, scope)).toBe(false);
+    expect(isMemoryRetrievable(global, scope)).toBe(false);
   });
 
   it('keeps global memories opt-in when a folder is selected', () => {

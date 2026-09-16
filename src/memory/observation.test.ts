@@ -2,7 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
 import { getMemory } from './store';
-import { consolidateObservation, recordObservation } from './observation';
+import { consolidateObservation, recordObservation, supersedeMemory } from './observation';
 import { memory } from './capability';
 
 describe('memory observation and consolidation', () => {
@@ -20,15 +20,24 @@ describe('memory observation and consolidation', () => {
     expect(observation.reinforcementCount).toBe(0);
   });
 
-  it('consolidates supporting evidence by linking and reinforcing the target', async () => {
+  it('consolidates supporting evidence exactly once under replay', async () => {
     const target = await memory.save({ title: 'Dark mode preference', body: 'The user prefers dark mode.', kind: 'CONTEXTUAL' });
     const observation = await recordObservation({ title: 'Supporting observation', body: 'The user selected dark mode again.' });
 
     const result = await consolidateObservation(observation.id, target.id, 'support');
+    const replay = await consolidateObservation(observation.id, target.id, 'support');
 
     expect(result.supportingMemoryIds).toContain(observation.id);
     expect(result.reinforcementCount).toBe(1);
-    expect(result.body).toBe(target.body);
+    expect(replay.reinforcementCount).toBe(1);
+    expect(replay.body).toBe(target.body);
+  });
+
+  it('rejects reclassifying already-consolidated evidence', async () => {
+    const target = await memory.save({ title: 'Preference', body: 'The user prefers dark mode.' });
+    const observation = await recordObservation({ title: 'Evidence', body: 'The user selected dark mode again.' });
+    await consolidateObservation(observation.id, target.id, 'support');
+    await expect(consolidateObservation(observation.id, target.id, 'conflict')).rejects.toThrow('different relation');
   });
 
   it('retains contradictory evidence without overwriting the target', async () => {
@@ -54,9 +63,27 @@ describe('memory observation and consolidation', () => {
     expect(result.body).toBe('The project uses TypeScript.');
   });
 
-  it('rejects invalid consolidation targets and duplicate self-links', async () => {
+  it('links supersession bidirectionally without deleting or archiving the old memory', async () => {
+    const target = await memory.save({ title: 'Old preference', body: 'The user prefers the old layout.', kind: 'CORE' });
+    const result = await supersedeMemory(target.id, { title: 'New preference', body: 'The user now explicitly prefers the new layout.' });
+
+    expect(result.replacement.kind).toBe('CONTEXTUAL');
+    expect(result.replacement.supersedes).toContain(target.id);
+    expect(result.target.supersededBy).toContain(result.replacement.id);
+    expect(result.target.lifecycle).toBe('active');
+    expect(await getMemory(target.id)).toMatchObject({ lifecycle: 'active', body: target.body });
+  });
+
+  it('retains episodic kind when superseding an episodic memory', async () => {
+    const target = await memory.save({ title: 'Old event', body: 'The event happened at noon.', kind: 'EPISODIC' });
+    const result = await supersedeMemory(target.id, { title: 'Corrected event', body: 'The user corrected the event time to 13:00.' });
+    expect(result.replacement.kind).toBe('EPISODIC');
+  });
+
+  it('rejects invalid consolidation and supersession targets', async () => {
     const observation = await recordObservation({ title: 'Observation', body: 'Evidence.' });
     await expect(consolidateObservation(observation.id, observation.id, 'support')).rejects.toThrow('cannot consolidate against itself');
     await expect(consolidateObservation(observation.id, 'missing-memory', 'support')).rejects.toThrow('Target memory not found');
+    await expect(supersedeMemory(observation.id, { title: 'Replacement', body: 'Replacement.' })).rejects.toThrow('Micro-observations cannot be superseded');
   });
 });

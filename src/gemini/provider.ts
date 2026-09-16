@@ -37,7 +37,7 @@ function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
 }
 
 type PendingFunctionCall = { callId: string; name: string; arguments: string; initialArguments?: unknown };
-type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; memoryContext?: 'thread' | 'none'; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
+type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; memoryContext?: 'thread' | 'none'; conversationId?: string; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
 
 function pendingFunctionCall(callId: string, name: string, step: Record<string, unknown>): PendingFunctionCall {
   const initial = step.arguments;
@@ -187,7 +187,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     const shouldComposeThreadMemory = request.memoryContext !== 'none' && !request.previousInteractionId;
     if (shouldComposeThreadMemory) {
       const memoryStartedAt = performance.now();
-      const composed = await composeSystemInstructionWithStatus(request.systemInstruction, query);
+      const composed = await composeSystemInstructionWithStatus(request.systemInstruction, query, request.conversationId);
       contextualInstruction = composed.instruction;
       const memoryDurationMs = Math.max(0, performance.now() - memoryStartedAt);
       if (composed.memoryStatus !== 'empty') {
@@ -285,7 +285,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
 
 export const geminiTurnPort: GeminiTurnPort = {
   streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
-    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, attachments: request.attachments, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: request.memoryContext, generationId: request.generationId, isGenerationActive: request.isGenerationActive }, signal);
+    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, attachments: request.attachments, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: request.memoryContext, conversationId: request.conversationId, generationId: request.generationId, isGenerationActive: request.isGenerationActive }, signal);
   },
   streamToolResult(request: GeminiToolContinuationRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
     const results = request.results ?? (request.result ? [request.result] : []);

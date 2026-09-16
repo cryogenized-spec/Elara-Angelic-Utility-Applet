@@ -17,6 +17,7 @@ import type { GoogleCapabilityKey } from '../google/oauth/contracts';
 import { withRuntimeContext } from './runtime-context';
 import { consumeRuntimeContextRefresh } from './runtime-context-freshness';
 import { documentToolHandlers } from '../documents/tool-handler';
+import { composeSystemInstructionWithStatus } from './memory-context';
 
 export interface GoogleToolLoopOptions {
   readonly tools?: readonly GoogleToolName[];
@@ -61,8 +62,8 @@ const TOOL_CONFIRMATION_HEARTBEAT_MS = 20_000;
 // caller?" (availability); the registry answers "what is this tool allowed to
 // do?" (classification). They must never be conflated, and namespace prefixes
 // are never a security mechanism. Applied at BOTH declaration time and call
-// time; at call time the tool must also be in the declared set, so a model
-// that hallucinates an undeclared tool — read or not — is refused.
+// time. Separately, every call must be in the exact declared tool set for this
+// turn, regardless of whether the turn is read-only or write-enabled.
 // ---------------------------------------------------------------------------
 
 const registryRiskByName: ReadonlyMap<string, string> = new Map(googleToolRegistry.map((descriptor) => [descriptor.name, descriptor.risk]));
@@ -150,14 +151,32 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     }
   }
 
-  // One freshness decision per turn, after validation (a rejected turn is not a
-  // model invocation and records no refresh) and skipped entirely for
-  // headless callers that suppress interactive runtime context. Freshness is
-  // application-level, not per-thread. Tool continuations within the turn
-  // reuse this same instruction.
+  // One runtime-context and memory decision per elected top-level turn. Gemini
+  // Interactions treats system_instruction as interaction-scoped, so the exact
+  // composed instruction is frozen here and re-sent on every tool continuation.
+  // The provider is told memoryContext:'none' to prevent a second retrieval or
+  // mid-turn drift after a memory mutation.
   const refreshRuntimeContext = options.suppressRuntimeContext === true ? false : consumeRuntimeContextRefresh(Date.now());
-  const systemInstruction = options.suppressRuntimeContext === true ? request.systemInstruction?.trim() : withRuntimeContext(request.systemInstruction, { includeClock: refreshRuntimeContext });
-  let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
+  const runtimeInstruction = options.suppressRuntimeContext === true ? request.systemInstruction?.trim() : withRuntimeContext(request.systemInstruction, { includeClock: refreshRuntimeContext });
+  let systemInstruction = runtimeInstruction;
+  if (request.memoryContext !== 'none') {
+    const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
+    const memoryStartedAt = performance.now();
+    const composed = await composeSystemInstructionWithStatus(runtimeInstruction, query, request.conversationId);
+    systemInstruction = composed.instruction;
+    const durationMs = Math.max(0, performance.now() - memoryStartedAt);
+    if (composed.memoryStatus !== 'empty') {
+      yield {
+        type: 'context-activity',
+        category: 'memory',
+        label: 'Memory',
+        detail: composed.memoryStatus === 'used' ? 'Recalled relevant durable memory.' : 'Memory retrieval was unavailable; continued without it.',
+        durationMs,
+        outcome: composed.memoryStatus,
+      };
+    }
+  }
+  let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction, memoryContext: 'none' }, signal);
   let executedCalls = 0;
   let toolBudgetExhausted = false;
 
@@ -190,13 +209,16 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
     const immediateCalls: PendingToolCall[] = [];
     for (const call of allowedCalls) {
-      if (readOnly && (!isRegistryReadTool(call.name) || !(tools as readonly string[]).includes(call.name))) {
-        // Call-time read-only enforcement, same oracle as declaration time:
-        // the registry descriptor's risk must be exactly 'read' AND the tool
-        // must be in the declared set. A model that hallucinates an undeclared
-        // tool — write, destructive, send, or even a legitimate read it was
-        // never granted — gets a refusal result; the handler is never invoked
-        // and no confirmation UI is requested.
+      if (!(tools as readonly string[]).includes(call.name)) {
+        // The provider/model may only invoke tools that were declared on this
+        // exact turn. Registry membership or handler availability cannot widen
+        // that authority, even when the turn itself allows writes.
+        results.push(errorToolResult(call, 'TOOL_NOT_PERMITTED'));
+        continue;
+      }
+      if (readOnly && !isRegistryReadTool(call.name)) {
+        // Read-only callers use the registry risk classification as the single
+        // mutation oracle. Namespace prefixes and handler maps confer no power.
         results.push(errorToolResult(call, 'TOOL_NOT_PERMITTED'));
         continue;
       }

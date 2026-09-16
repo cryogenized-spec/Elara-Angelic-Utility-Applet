@@ -23,6 +23,39 @@ function validate(record: DurableMemory): DurableMemory {
   return result.data;
 }
 
+function assertMutationAllowed(isMutationAllowed: () => boolean): void {
+  if (!isMutationAllowed()) throw new DOMException('The memory mutation lost turn authority.', 'AbortError');
+}
+
+function equalStrings(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+/**
+ * A provider retry may reuse an application-owned idempotency marker only for
+ * the same logical save. Mutable lifecycle/relationship/recall fields are not
+ * compared because later legitimate memory work may change them after creation.
+ */
+function replayMatchesOriginalSave(existing: DurableMemory, input: MemoryInput): boolean {
+  const normalized = normalizeMemoryInput({
+    ...input,
+    observedAt: Number.isFinite(input.observedAt) ? input.observedAt : existing.observedAt,
+    source: input.source ? { ...input.source, createdAt: existing.source.createdAt } : input.source,
+  }, existing.createdAt);
+  const source = normalized.source!;
+  return existing.kind === normalized.kind
+    && existing.title === normalized.title
+    && existing.body === normalized.body
+    && existing.confidence === normalized.confidence
+    && existing.importance === normalized.importance
+    && equalStrings(existing.tags, normalized.tags!)
+    && existing.folderId === (normalized.folderId ?? null)
+    && existing.source.source === source.source
+    && existing.source.conversationId === source.conversationId
+    && existing.source.messageId === source.messageId
+    && existing.source.note === source.note;
+}
+
 export async function saveMemory(input: MemoryInput): Promise<DurableMemory> {
   const now = Date.now();
   const normalized = normalizeMemoryInput(input, now);
@@ -41,7 +74,9 @@ export async function saveMemory(input: MemoryInput): Promise<DurableMemory> {
 /**
  * Save exactly once for an application-owned provenance marker. The scan and
  * put share one Dexie transaction so a replay of the same logical tool call
- * converges on the already-created record rather than duplicating it.
+ * converges on the already-created record rather than duplicating it. Reusing
+ * that marker for a different payload fails closed instead of silently treating
+ * a changed mutation as the original call.
  *
  * `isMutationAllowed` is checked on both sides of the asynchronous write. If
  * turn authority is lost while IndexedDB is settling, throwing here aborts the
@@ -54,12 +89,30 @@ export async function saveMemoryOnce(input: MemoryInput, provenanceNote: string,
   if (!note) throw new Error('Memory idempotency provenance is required.');
   if (input.source?.note !== note) throw new Error('Memory idempotency provenance mismatch.');
   return db.transaction('rw', db.memories, async () => {
-    if (!isMutationAllowed()) throw new DOMException('The memory mutation lost turn authority.', 'AbortError');
+    assertMutationAllowed(isMutationAllowed);
     const existing = (await table().toArray()).find((record) => record?.source?.note === note);
-    if (existing) return validate(existing);
+    if (existing) {
+      const valid = validate(existing);
+      if (!replayMatchesOriginalSave(valid, input)) throw new Error('Memory idempotency replay does not match the original mutation.');
+      return valid;
+    }
     const saved = await saveMemory(input);
-    if (!isMutationAllowed()) throw new DOMException('The memory mutation lost turn authority.', 'AbortError');
+    assertMutationAllowed(isMutationAllowed);
     return saved;
+  });
+}
+
+/**
+ * Run a compound memory mutation as one canonical transaction. Nested store
+ * calls participate in this transaction; losing turn authority anywhere before
+ * commit throws and rolls the whole compound operation back.
+ */
+export async function runMemoryMutationTransaction<T>(operation: () => Promise<T>, isMutationAllowed: () => boolean = () => true): Promise<T> {
+  return db.transaction('rw', db.memories, async () => {
+    assertMutationAllowed(isMutationAllowed);
+    const result = await operation();
+    assertMutationAllowed(isMutationAllowed);
+    return result;
   });
 }
 

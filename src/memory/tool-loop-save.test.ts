@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { GeminiToolContinuationRequest, GeminiTurnRequest } from '../gemini/contracts';
 
 const { streamReply, streamToolResult } = vi.hoisted(() => ({
   streamReply: vi.fn(),
@@ -12,10 +13,19 @@ vi.mock('../gemini/provider', () => ({
 
 import { streamGoogleToolLoop } from '../gemini/google-tool-loop';
 import { db } from '../persistence/conversation';
-import { listMemories } from './store';
+import { getMemory, listMemories, saveMemory } from './store';
 
 async function* events(...items: unknown[]) {
   for (const item of items) yield item as never;
+}
+
+function firstLookupRef(request: GeminiToolContinuationRequest): string {
+  const result = request.results?.[0]?.result;
+  const matches = (result as { matches?: unknown }).matches;
+  if (!Array.isArray(matches)) throw new Error('Expected lookup matches.');
+  const ref = (matches[0] as { ref?: unknown } | undefined)?.ref;
+  if (typeof ref !== 'string') throw new Error('Expected lookup ref.');
+  return ref;
 }
 
 const oauth = {
@@ -24,7 +34,7 @@ const oauth = {
   disconnect: async () => undefined,
 };
 
-describe('memory.save through the interactive Gemini tool loop', () => {
+describe('memory tools through the interactive Gemini tool loop', () => {
   beforeEach(async () => {
     streamReply.mockReset();
     streamToolResult.mockReset();
@@ -74,7 +84,7 @@ describe('memory.save through the interactive Gemini tool loop', () => {
         source: 'elara',
         conversationId: 'thread_1',
         messageId: 'message_1',
-        note: 'idempotency:generation_1:call_1',
+        note: 'idempotency:thread_1:message_1:generation_1:call_1',
       },
     });
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
@@ -83,5 +93,58 @@ describe('memory.save through the interactive Gemini tool loop', () => {
         expect.objectContaining({ callId: 'call_1', name: 'memory.save' }),
       ]) as unknown[],
     }), undefined);
+  });
+
+  it('performs lookup then confirmed reconciliation while freezing one memory snapshot across continuations', async () => {
+    const target = await saveMemory({ title: 'Compact editor', body: 'The user prefers compact editor layout.' });
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction_lookup', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction_lookup', index: 0, callId: 'call_lookup', name: 'memory.lookup', arguments: { query: 'compact editor' } },
+    ));
+    streamToolResult.mockImplementationOnce((request: GeminiToolContinuationRequest) => {
+      const targetRef = firstLookupRef(request);
+      expect(targetRef).toMatch(/^memref_/);
+      return events(
+        { type: 'interaction-created', interactionId: 'interaction_reconcile', model: 'gemini-3.8-flash' },
+        { type: 'tool-call', interactionId: 'interaction_reconcile', index: 1, callId: 'call_reconcile', name: 'memory.reconcile', arguments: { targetRef, relation: 'support', title: 'Repeated choice', body: 'The user explicitly selected compact editor again.' } },
+      );
+    });
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction_done', status: 'completed', durationMs: 8 },
+    ));
+    const confirm = vi.fn(async () => true);
+
+    for await (const _event of streamGoogleToolLoop(
+      {
+        model: 'gemini-3.8-flash',
+        input: 'I still prefer the compact editor; reconcile that with what you remember.',
+        systemInstruction: 'You are Elara.',
+        tools: ['memory.lookup', 'memory.reconcile'],
+        conversationId: 'thread_1',
+        inputMessageId: 'message_2',
+        generationId: 'generation_2',
+        isGenerationActive: () => true,
+      },
+      { tools: ['memory.lookup', 'memory.reconcile'], readOnly: false, executor: { oauth, confirm } },
+    )) {
+      // Consume lookup, confirmed reconcile, and the closing answer.
+    }
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ tool: 'memory.reconcile', risk: 'write' }));
+    const updated = await getMemory(target.id);
+    const records = await listMemories();
+    expect(updated?.reinforcementCount).toBe(1);
+    expect(records.filter((record) => record.kind === 'MICRO_OBSERVATION')).toHaveLength(1);
+    expect(streamToolResult).toHaveBeenCalledTimes(2);
+
+    const initial = streamReply.mock.calls[0]?.[0] as GeminiTurnRequest | undefined;
+    const firstContinuation = streamToolResult.mock.calls[0]?.[0] as GeminiToolContinuationRequest | undefined;
+    const secondContinuation = streamToolResult.mock.calls[1]?.[0] as GeminiToolContinuationRequest | undefined;
+    expect(initial?.memoryContext).toBe('none');
+    expect(initial?.systemInstruction).toContain('The user prefers compact editor layout.');
+    expect(initial?.systemInstruction).toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
+    expect(firstContinuation?.systemInstruction).toBe(initial?.systemInstruction);
+    expect(secondContinuation?.systemInstruction).toBe(initial?.systemInstruction);
   });
 });

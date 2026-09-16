@@ -48,7 +48,7 @@ describe('deliberate memory capability', () => {
       actor: 'model' as const,
       conversationId: 'thread_123',
       messageId: 'message_456',
-      idempotencyKey: 'generation_1:call_1',
+      idempotencyKey: 'thread_123:message_456:generation_1:call_1',
       isMutationAllowed: () => true,
     };
     const request = { title: 'Remembered choice', body: 'Use the compact layout.', kind: 'CONTEXTUAL' as const };
@@ -57,8 +57,31 @@ describe('deliberate memory capability', () => {
     const replay = await memory.save(request, context);
 
     expect(replay.id).toBe(first.id);
-    expect(replay.source.note).toBe('idempotency:generation_1:call_1');
+    expect(replay.source.note).toBe('idempotency:thread_123:message_456:generation_1:call_1');
     expect(await countMemories()).toBe(1);
+  });
+
+  it('hashes the complete long replay key instead of truncating its distinguishing suffix', async () => {
+    const prefix = `${'conversation'.repeat(30)}:${'message'.repeat(30)}:${'generation'.repeat(30)}:`;
+    const base = {
+      actor: 'model' as const,
+      conversationId: 'thread_long',
+      messageId: 'message_long',
+      isMutationAllowed: () => true,
+    };
+    const first = await memory.save(
+      { title: 'Long key one', body: 'First long-lineage mutation.' },
+      { ...base, idempotencyKey: `${prefix}call_A` },
+    );
+    const second = await memory.save(
+      { title: 'Long key two', body: 'Second long-lineage mutation.' },
+      { ...base, idempotencyKey: `${prefix}call_B` },
+    );
+
+    expect(first.source.note).toMatch(/^idempotency:sha256:[a-f0-9]{64}$/);
+    expect(second.source.note).toMatch(/^idempotency:sha256:[a-f0-9]{64}$/);
+    expect(first.source.note).not.toBe(second.source.note);
+    expect(await countMemories()).toBe(2);
   });
 
   it('rolls the transaction back when turn authority is lost before commit', async () => {
@@ -74,7 +97,7 @@ describe('deliberate memory capability', () => {
         actor: 'model',
         conversationId: 'thread_123',
         messageId: 'message_456',
-        idempotencyKey: 'generation_2:call_1',
+        idempotencyKey: 'thread_123:message_456:generation_2:call_1',
         isMutationAllowed: guard,
       },
     )).rejects.toMatchObject({ name: 'AbortError' });

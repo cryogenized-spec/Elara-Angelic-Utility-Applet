@@ -46,7 +46,7 @@ describe('requestGoogleAuthorizationCode', () => {
       ux_mode: 'popup',
       state: 'state-1',
     }));
-    expect(initCodeClient).toHaveBeenCalledWith(expect.not.objectContaining({ redirect_uri: expect.anything() }));
+    expect(capturedConfig?.redirect_uri).toBeUndefined();
     expect(requestCode).toHaveBeenCalledOnce();
   });
 

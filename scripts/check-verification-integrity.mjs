@@ -41,7 +41,7 @@ for (const testFile of [...walk('src'), ...walk('worker/test'), ...walk('e2e')])
 }
 
 const e2eFiles = walk('e2e').filter((path) => /(?:\.spec\.ts|global-setup\.ts)$/.test(path));
-const forbiddenSourceImport = /(?:from\s+['"](?:\.\.\/)+src\/|import\s*\(\s*['"](?:\.\.\/)+src\/|['"]\/(?:Elara-Angelic-Utility-Applet\/)?src\/)/;
+const forbiddenSourceImport = /(?:from\s+['"](?:\.\.\/)+src\/|import\s+['"](?:\.\.\/)+src\/|import\s*\(\s*['"](?:\.\.\/)+src\/|['"]\/(?:Elara-Angelic-Utility-Applet\/)?src\/)/;
 const writableIndexedDb = /['"]readwrite['"]/g;
 const directDatabaseDeletion = /indexedDB\.deleteDatabase\s*\(/;
 const retiredBrowserProvider = /\*\*\/api\/gemini|\/api\/gemini/;
@@ -158,7 +158,7 @@ if (appDateNowCount !== 11) fail(`src/app/App.tsx Date.now() surface changed: ex
 if (appPerformanceNowCount !== 2) fail(`src/app/App.tsx performance.now() surface changed: expected 2, found ${appPerformanceNowCount}`);
 
 const securityGate = read('scripts/security-architecture-gate.mjs');
-for (const marker of ['forbiddenCapabilities', 'forbiddenNodeAuthority', 'XMLHttpRequest transport', 'sendBeacon transport', 'remote dynamic module import', 'reviewedScriptLoaders', 'reviewedWorkerAuthorities', 'reviewedDexieAuthorities', 'reviewedLockboxConsumers', 'reviewedAutonomyCredentialConsumers', 'reviewedPairingTokenConsumers', 'reviewedRawFetchAuthorities', 'reviewedGlobalFetchReferences', 'reviewedGoogleServiceImporters', 'reviewedConfirmationBrokerConsumers', 'StoredAutonomyPairing']) {
+for (const marker of ['forbiddenCapabilities', 'forbiddenNodeAuthority', 'dynamic Function constructor', 'direct HTML injection', 'DOM HTML parser injection', 'DOM fragment parser injection', 'XMLHttpRequest transport', 'sendBeacon transport', 'remote dynamic module import', 'reviewedScriptLoaders', 'reviewedWorkerAuthorities', 'reviewedDexieAuthorities', 'reviewedLockboxConsumers', 'reviewedAutonomyCredentialConsumers', 'reviewedPairingTokenConsumers', 'reviewedRawFetchAuthorities', 'reviewedGlobalFetchReferences', 'reviewedGoogleServiceImporters', 'reviewedConfirmationBrokerConsumers', 'StoredAutonomyPairing']) {
   if (!securityGate.includes(marker)) fail(`security architecture gate lost required capability check: ${marker}`);
 }
 
@@ -168,7 +168,7 @@ for (const marker of ['Google API key', 'GitHub token', 'AWS access key', 'Priva
 }
 
 const supplyChainGate = read('scripts/supply-chain-gate.mjs');
-for (const marker of ['reviewedActions', 'reviewedDirectDependencies', 'reviewedInstallScripts', 'baseline.overrides', 'sharp?.version', 'lockfileVersion', 'strict-allow-scripts=true', 'persist-credentials', 'upload-pages-artifact', 'deploy-pages', 'npm audit signatures', 'npm audit --audit-level=high']) {
+for (const marker of ['reviewedActions', 'reviewedDirectDependencies', 'reviewedInstallScripts', 'baseline.overrides', 'sharp?.version', 'lockfileVersion', 'strict-allow-scripts=true', 'persist-credentials', 'runtime verification job may not have repository write authority', 'deploy job permissions changed from the reviewed minimum', 'upload-pages-artifact', 'deploy-pages', 'npm audit signatures', 'npm audit --audit-level=high']) {
   if (!supplyChainGate.includes(marker)) fail(`supply-chain gate lost required control: ${marker}`);
 }
 try {
@@ -192,7 +192,7 @@ for (const marker of ['coverage/coverage-summary.json', 'coverage-baseline.json'
   if (!coverageGate.includes(marker)) fail(`coverage gate lost required ratchet check: ${marker}`);
 }
 const coverageSentinel = read('scripts/verify-coverage-gate.mjs');
-for (const marker of ['spawnSync', 'check-coverage.mjs', 'deliberately regressed branch metric', 'source-inventory disappearance']) {
+for (const marker of ['spawnSync', 'check-coverage.mjs', 'deliberately regressed branch metric', 'source-inventory disappearance', 'Pass 5 adversarial certification failed', 'bracket-notation raw HTML assignment', 'runtime job gains repository write authority']) {
   if (!coverageSentinel.includes(marker)) fail(`coverage adversarial sentinel lost required proof: ${marker}`);
 }
 try {

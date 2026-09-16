@@ -2,9 +2,9 @@
 id: SYS-REL
 status: active
 verified_commit: 0b5fd5623962c1d737ec6f5a793428bc42cc8649
-scope: CI, verification integrity, test quality, coverage, secret scanning, supply-chain controls and certified deployment
-paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/secret-scan.mjs, scripts/supply-chain-gate.mjs, scripts/supply-chain-baseline.json, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, .github/workflows/ci.yml, .github/dependabot.yml, package.json, package-lock.json, .npmrc, .nvmrc, e2e]
-keywords: [reliability, ci, exact-head, supply-chain, secret-scan, audit, signature, dependency, coverage, deployment]
+scope: CI, verification integrity, test quality, adversarial certification, coverage, secret scanning, supply-chain controls and certified deployment
+paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/secret-scan.mjs, scripts/supply-chain-gate.mjs, scripts/supply-chain-baseline.json, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/verify-coverage-gate.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, .github/workflows/ci.yml, .github/dependabot.yml, package.json, package-lock.json, .npmrc, .nvmrc, e2e]
+keywords: [reliability, ci, exact-head, adversarial, mutation, fail-closed, supply-chain, secret-scan, audit, signature, dependency, coverage, deployment]
 ---
 
 # Reliability and certification
@@ -25,6 +25,7 @@ exact PR head / main push SHA
 -> secret scan
 -> supply-chain gate
 -> test-quality / structural-contract gate
+-> adversarial mutation sentinel
 -> locked npm ci
 -> npm registry-signature verification
 -> high-severity dependency audit
@@ -53,6 +54,7 @@ CI pins Node `24.21.0` and npm `11.19.0`. Pull-request checkout explicitly uses 
 | Dependency/release capability boundary | `scripts/supply-chain-gate.mjs`, `scripts/supply-chain-baseline.json` |
 | Structural test-quality rules | `scripts/test-quality-gate.mjs` |
 | Coverage measurement/ratchet | `vitest.config.ts`, `scripts/check-coverage.mjs`, `scripts/coverage-baseline.json` |
+| Adversarial gate mutation proof | `scripts/verify-coverage-gate.mjs` |
 | Runtime invariant gate | `scripts/reliability-gate.mjs` |
 | CI and Pages release | `.github/workflows/ci.yml` |
 | Automated dependency proposals | `.github/dependabot.yml` |
@@ -104,7 +106,17 @@ Repository rules protect the default branch against deletion and non-fast-forwar
 
 The preferred final configuration also requires the `Runtime verification` status check before merge. If the ruleset's required-check list is empty, the PR requirement exists but CI is not yet server-enforced as a merge prerequisite; treat that as an external configuration gap rather than pretending an in-repo gate can solve it.
 
-## 9. Completion rule
+## 9. Adversarial certification
+
+The adversarial sentinel does not merely rerun green gates. It copies the checked-out repository into disposable sandboxes, injects controlled hostile changes, runs the owning guard and requires rejection for the expected reason. A guard that accepts its attack fixture, or rejects only because an unrelated fixture is broken, fails certification.
+
+The protected mutation classes include executable DOM sinks and syntax evasions, dynamic code execution, unreviewed network and Dexie authority, credential-shaped browser persistence, committed secret/private-key material, disabled or narrowed tests, E2E source-boundary cheating, removal of guard controls, mutable or unpinned GitHub Actions, checkout credential persistence, workflow permission escalation, deployment decoupling, mutable dependency installation and runtime-pin drift. The coverage adversary remains part of the same sentinel and requires both metric regression and eligible-source disappearance to fail closed.
+
+Runtime adversarial tests complement those static mutations. In particular, mutation tool calls must not execute after the confirmation shown to the user expires, and a delayed OAuth grant must not revive an expired mutation confirmation. Encrypted credential tests intentionally corrupt sealed material and require fail-closed reads/unlock behavior rather than plaintext recovery or silent weakening.
+
+These tests certify application, credential, authority, test, CI and deployment boundaries. They do not claim to solve indirect prompt injection or hostile model context; provenance, taint propagation and untrusted-content tool authorization remain a separate future security programme.
+
+## 10. Completion rule
 
 Never inherit green status across SHAs. Temporary bootstrap/write-capable workflows or jobs are not certification evidence and must be removed before the candidate run. Focused tests are useful for iteration but do not replace the ordered full matrix.
 

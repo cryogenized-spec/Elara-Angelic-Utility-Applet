@@ -44,11 +44,13 @@ const runtime = new Map(runtimeFiles.map((file) => [rel(file), readFileSync(file
 // ---------------------------------------------------------------------------
 const forbiddenCapabilities = [
   [/\beval\s*\(/, 'dynamic eval'],
-  [/\bnew\s+Function\s*\(/, 'dynamic Function constructor'],
+  [/\b(?:new\s+)?Function\s*\(/, 'dynamic Function constructor'],
   [/\bdangerouslySetInnerHTML\b/, 'React raw HTML injection'],
-  [/(?:\.innerHTML|\.outerHTML)\s*=/, 'direct HTML injection'],
-  [/\bdocument\.write\s*\(/, 'document.write'],
-  [/\bsrcDoc\s*=/, 'iframe srcDoc injection'],
+  [/(?:\.innerHTML|\.outerHTML|\[['"](?:innerHTML|outerHTML)['"]\])\s*=/, 'direct HTML injection'],
+  [/\b(?:document\.write|document\[['"]write['"]\])\s*\(/, 'document.write'],
+  [/(?:\.srcDoc|\[['"]srcDoc['"]\])\s*=/, 'iframe srcDoc injection'],
+  [/\binsertAdjacentHTML\s*\(/, 'DOM HTML parser injection'],
+  [/\bcreateContextualFragment\s*\(/, 'DOM fragment parser injection'],
   [/\bXMLHttpRequest\b/, 'XMLHttpRequest transport'],
   [/\bnew\s+WebSocket\b/, 'WebSocket transport'],
   [/\bnew\s+EventSource\b/, 'EventSource transport'],

@@ -9,6 +9,7 @@ import { roleplayWorldToolHandlers } from '../google/tools/roleplay-world-handle
 import { mediaToolHandlers } from '../media/tool-handler';
 import { isMediaItem, isMediaProviderId } from '../domain/media';
 import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
+import { isConfirmationFresh } from '../google/confirmation/policy';
 import { requestGoogleCapabilityGrant } from '../google/oauth/request-broker';
 import { googleOAuthAuthority } from '../google/oauth/authority';
 import type { GoogleCapabilityKey } from '../google/oauth/contracts';
@@ -130,8 +131,6 @@ function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandl
   return Object.prototype.hasOwnProperty.call(handlers, tool);
 }
 
-
-
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
   const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools, options.allowEmptyTools === true);
@@ -205,7 +204,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
         continue;
       }
-      const confirmation = confirmationRequestForCall(call);
+      const confirmation = confirmationRequestForCall(call, executeOptions.now?.() ?? new Date());
       if (confirmation) mutationEntries.push({ call, confirmation });
       else immediateCalls.push(call);
     }
@@ -290,6 +289,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
         return;
       }
+      if (!isConfirmationFresh(entry.confirmation.requestedAt, executeOptions.now?.() ?? new Date())) {
+        results.push(errorToolResult(entry.call, 'USER_DECLINED'));
+        continue;
+      }
       let result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
@@ -308,7 +311,13 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           if (outcome.settled) { granted = outcome.value; break; }
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
         }
-        if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+        if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) {
+          if (!isConfirmationFresh(entry.confirmation.requestedAt, executeOptions.now?.() ?? new Date())) {
+            results.push(errorToolResult(entry.call, 'USER_DECLINED'));
+            continue;
+          }
+          result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+        }
       }
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };

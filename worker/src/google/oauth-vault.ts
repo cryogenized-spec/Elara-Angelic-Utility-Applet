@@ -103,6 +103,12 @@ function parseScopes(value: string): string[] {
   }
 }
 
+function sameScopeSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const rightSet = new Set(right);
+  return left.every((scope) => rightSet.has(scope));
+}
+
 function normalizeOrigin(value: string | null): string {
   try { return value ? new URL(value).origin : ''; } catch { return ''; }
 }
@@ -295,6 +301,7 @@ export class GoogleOAuthVault extends DurableObject {
         : reusedExistingRefresh && existing?.email
           ? { email: existing.email, ...(existing.display_name ? { displayName: existing.display_name } : {}) }
           : undefined,
+      updatedAt: now,
       ...(refreshExpiresAt ? { refreshTokenExpiresAt: refreshExpiresAt } : {}),
     });
   }
@@ -308,15 +315,17 @@ export class GoogleOAuthVault extends DurableObject {
 
     const refreshToken = await decryptRefreshToken(this.vaultSecret(), existing.refresh_cipher, existing.refresh_iv);
     const result = await refreshGoogleAccessToken(this.oauthEnv, refreshToken);
-    const scopes = result.scopes.length ? result.scopes : parseScopes(existing.scopes);
+    const existingScopes = parseScopes(existing.scopes);
+    const scopes = result.scopes.length ? result.scopes : existingScopes;
     const now = Date.now();
+    const revision = sameScopeSet(scopes, existingScopes) ? existing.updated_at : now;
     const refreshExpiresAt = result.refreshTokenExpiresIn
       ? now + result.refreshTokenExpiresIn * 1000
       : existing.refresh_expires_at;
     this.ctx.storage.sql.exec(
       'UPDATE google_oauth_credential SET scopes = ?, updated_at = ?, refresh_expires_at = ? WHERE slot = 1',
       JSON.stringify(scopes),
-      now,
+      revision,
       refreshExpiresAt,
     );
     return json({
@@ -325,6 +334,7 @@ export class GoogleOAuthVault extends DurableObject {
       expiresIn: result.expiresIn,
       scopes,
       account: existing.email ? { email: existing.email, ...(existing.display_name ? { displayName: existing.display_name } : {}) } : undefined,
+      updatedAt: revision,
       ...(refreshExpiresAt ? { refreshTokenExpiresAt: refreshExpiresAt } : {}),
     });
   }

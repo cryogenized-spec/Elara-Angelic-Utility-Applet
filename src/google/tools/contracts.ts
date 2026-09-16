@@ -10,6 +10,7 @@ export const googleToolNameSchema = z.enum([
   'drive.searchFiles', 'drive.searchLibrary', 'drive.getFile', 'drive.downloadFile', 'drive.createFile', 'drive.updateFile', 'drive.moveFile',
   'sheets.getSpreadsheet', 'sheets.readRange', 'sheets.writeRange', 'sheets.appendRows', 'sheets.updateCell', 'sheets.insertRows', 'sheets.batchUpdate',
   'roleplay_setting.list', 'roleplay_setting.inspect', 'roleplay_setting.create', 'roleplay_setting.update', 'roleplay_setting.move', 'roleplay_setting.delete',
+  'memory.save',
   'youtube.search',
 ]);
 
@@ -26,7 +27,7 @@ export type GoogleToolRisk = 'read' | 'write' | 'destructive' | 'send';
 export type GoogleToolExposure = 'gemini' | 'internal';
 export type GoogleToolExecutionPlane = 'browser' | 'worker';
 
-export type ToolActivityCategory = 'google-workspace' | 'youtube' | 'roleplay' | 'documents' | 'other';
+export type ToolActivityCategory = 'google-workspace' | 'youtube' | 'roleplay' | 'documents' | 'memory' | 'other';
 export interface ToolActivityPresentation {
   readonly category: ToolActivityCategory;
   readonly categoryLabel: string;
@@ -70,6 +71,13 @@ export function toolActivityPresentation(name: string): ToolActivityPresentation
       category: 'roleplay',
       categoryLabel: 'Roleplay World',
       actionLabel: humanizeToolAction(name.slice('roleplay_setting.'.length)),
+    };
+  }
+  if (name.startsWith('memory.')) {
+    return {
+      category: 'memory',
+      categoryLabel: 'Memory',
+      actionLabel: humanizeToolAction(name.slice('memory.'.length)),
     };
   }
   if (name === 'document.create_pdf') {

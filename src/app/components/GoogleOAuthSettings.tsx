@@ -13,7 +13,18 @@ type ServiceDefinition = {
 };
 
 const SERVICES: readonly ServiceDefinition[] = [
-  { id: 'calendar', name: 'Google Calendar', description: 'Events, scheduling, and calendar context.', readCapability: 'calendar.events.read', writeCapability: 'calendar.events.write' },
+  {
+    id: 'calendar',
+    name: 'Google Calendar',
+    description: 'Events, scheduling, calendar discovery, timezone context, and availability.',
+    readCapability: 'calendar.events.read',
+    writeCapability: 'calendar.events.write',
+    extraCapabilities: [
+      { capability: 'calendar.list.read', label: 'Enable calendar list', readyLabel: 'Calendar list ready' },
+      { capability: 'calendar.settings.read', label: 'Enable settings', readyLabel: 'Settings ready' },
+      { capability: 'calendar.freebusy.read', label: 'Enable availability', readyLabel: 'Availability ready' },
+    ],
+  },
   { id: 'tasks', name: 'Google Tasks', description: 'Task lists, tasks, ordering, and completion.', readCapability: 'tasks.read', writeCapability: 'tasks.write' },
   { id: 'gmail', name: 'Gmail', description: 'Mailbox reading, organization, labels, and sending.', readCapability: 'gmail.read', writeCapability: 'gmail.modify', extraCapabilities: [{ capability: 'gmail.labels', label: 'Enable labels', readyLabel: 'Labels ready' }, { capability: 'gmail.send', label: 'Enable sending', readyLabel: 'Sending ready' }] },
   { id: 'drive', name: 'Google Drive', description: 'App-created or admitted files, plus optional library search across your Drive.', readCapability: 'drive.files.app.read', writeCapability: 'drive.files.app.write', extraCapabilities: [{ capability: 'drive.library.read', label: 'Enable library search', readyLabel: 'Library search ready' }] },
@@ -158,7 +169,7 @@ export function GoogleOAuthSettings() {
 
       <div className="setting-card google-oauth-settings__note">
         <strong>Stay connected</strong>
-        <span>Elara is self-hosted. If this installation is paired to your own Worker, Google refresh credentials are encrypted in that Worker vault and the browser receives only short-lived access tokens. Without a paired Worker, Google remains interactive-only in the browser. Elara stores only non-secret authorization metadata locally. Docs, Drive, and Sheets share app-file read access; writes still require an explicit Enable writes action. Library search is a separate, more sensitive consent.</span>
+        <span>Elara is self-hosted. If this installation is paired to your own Worker, Google refresh credentials are encrypted in that Worker vault and the browser receives only short-lived access tokens. Without a paired Worker, Google remains interactive-only in the browser. Elara stores only non-secret authorization metadata locally. Calendar discovery, account settings, and free/busy availability are separate optional read grants. Docs, Drive, and Sheets share app-file read access; writes still require an explicit Enable writes action. Library search is a separate, more sensitive consent.</span>
       </div>
     </div>
   );

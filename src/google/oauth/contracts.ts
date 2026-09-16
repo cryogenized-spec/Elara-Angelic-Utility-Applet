@@ -31,13 +31,11 @@ export interface AuthorizedGoogleRequest {
 }
 
 /**
- * GIS token-client-era reducers can only produce `disconnected`, `connected`,
- * `partially-authorized`, and `reauthorization-required`.
- *
- * `needs-consent`, `token-recovery`, and `revoked` are RESERVED for the
- * durable authorization-code + PKCE authority (a later, separate subsystem).
- * The v1 reducer must never emit them; callers may still treat them as
- * recovery states defensively.
+ * The interactive browser-only authority uses disconnected/connected,
+ * partially-authorized and reauthorization-required. A paired self-hosted
+ * Worker may additionally surface token-recovery while its durable vault is
+ * temporarily unreachable. needs-consent/revoked remain available as explicit
+ * recovery states for future provider-state refinement.
  */
 export type GoogleOAuthState =
   | 'disconnected'
@@ -54,7 +52,7 @@ export interface GoogleOAuthStatus {
   readonly grantedCapabilities: readonly GoogleCapabilityKey[];
   /** Capabilities the user explicitly enabled in Elara. Writes are never inferred into this set. */
   readonly enabledCapabilities: readonly GoogleCapabilityKey[];
-  /** Provider scopes actually returned by Google (GIS `scope` or equivalent). */
+  /** Provider scopes actually returned by Google (GIS `scope` or durable code exchange equivalent). */
   readonly grantedProviderScopes: readonly string[];
   readonly account?: {
     readonly email: string;

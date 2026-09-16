@@ -1,4 +1,11 @@
 # Copy this file to worker/.dev.vars for local Wrangler development.
-# Never commit worker/.dev.vars.
+# Never commit worker/.dev.vars. Every self-hosted Elara deployment owns its
+# own Worker, installation token, Google OAuth client, and vault material.
 GEMINI_API_KEY=
 ALLOWED_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
+ELARA_INSTALLATION_TOKEN=
+# Must match the browser VITE_GOOGLE_CLIENT_ID for the same Google Web OAuth client.
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+# High-entropy value, at least 32 characters; used only by the Worker vault.
+GOOGLE_OAUTH_VAULT_KEY=

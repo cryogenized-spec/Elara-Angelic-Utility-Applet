@@ -25,7 +25,7 @@ const stateLabels: Record<GoogleOAuthStatus['state'], string> = {
   disconnected: 'Not connected',
   connected: 'Connected',
   'needs-consent': 'Needs authorization',
-  'token-recovery': 'Recovering session',
+  'token-recovery': 'Authorization worker unavailable',
   'reauthorization-required': 'Reauthorization required',
   'partially-authorized': 'Partially authorized',
   revoked: 'Access revoked',
@@ -77,8 +77,6 @@ export function GoogleOAuthSettings() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Google authorization could not be completed.');
     } finally {
-      // Cleared on success too: a stuck busy flag disabled Disconnect and
-      // every other action until reload (found by the real-flow E2E).
       setBusyCapability(null);
     }
   }
@@ -106,7 +104,7 @@ export function GoogleOAuthSettings() {
         <div>
           <span className="panel-kicker">GOOGLE</span>
           <strong>Google Workspace</strong>
-          <span>Connect Google directly from Elara. Access is granted one capability at a time. Google Chat is not part of this Workspace surface.</span>
+          <span>Connect your own Google account. Access is granted one capability at a time. Google Chat is not part of this Workspace surface.</span>
         </div>
         <div className="google-oauth-settings__state" data-state={status.state}>
           <span className="google-oauth-settings__dot" aria-hidden="true" />
@@ -160,7 +158,7 @@ export function GoogleOAuthSettings() {
 
       <div className="setting-card google-oauth-settings__note">
         <strong>Stay connected</strong>
-        <span>Elara stores only non-secret authorization metadata, including which Google scopes were actually granted. Access tokens stay in memory. Enabling Docs, Drive, or Sheets read can satisfy the others’ reads because they share app-file access — writes still require an explicit Enable writes action. Library search is a separate, more sensitive consent.</span>
+        <span>Elara is self-hosted. If this installation is paired to your own Worker, Google refresh credentials are encrypted in that Worker vault and the browser receives only short-lived access tokens. Without a paired Worker, Google remains interactive-only in the browser. Elara stores only non-secret authorization metadata locally. Docs, Drive, and Sheets share app-file read access; writes still require an explicit Enable writes action. Library search is a separate, more sensitive consent.</span>
       </div>
     </div>
   );

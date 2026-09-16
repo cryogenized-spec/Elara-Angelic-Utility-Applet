@@ -1,9 +1,19 @@
 // Typed test bindings: the real worker Env surface under test.
 declare module 'cloudflare:test' {
-  import type { Env } from '../src/index';
+  import type { Env } from '../src/entry';
   export const env: Env;
   export const SELF: {
     fetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response>;
+  };
+  export const fetchMock: {
+    activate(): void;
+    disableNetConnect(): void;
+    assertNoPendingInterceptors(): void;
+    get(origin: string): {
+      intercept(options: { path: string; method?: string }): {
+        reply(statusCode: number, data: string, responseOptions?: { headers?: Record<string, string> }): unknown;
+      };
+    };
   };
   /** Deletes all Durable Object instances and their storage (test isolation). */
   export function reset(): Promise<void>;

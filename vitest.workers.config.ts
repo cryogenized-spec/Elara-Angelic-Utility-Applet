@@ -22,6 +22,7 @@ export default defineConfig({
         compatibilityDate: '2026-08-22',
         durableObjects: {
           AUTONOMY: { className: 'TestAutonomyEngine', useSQLite: true },
+          GOOGLE_OAUTH: { className: 'TestGoogleOAuthVault', useSQLite: true },
         },
         workflows: {
           ROUTINE_RUN: { name: 'elara-routine-run', className: 'RoutineRunWorkflow' },
@@ -30,6 +31,9 @@ export default defineConfig({
           GEMINI_API_KEY: 'test-gemini-key',
           ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io',
           ELARA_INSTALLATION_TOKEN: 'test-installation-token-please-ignore',
+          GOOGLE_OAUTH_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
+          GOOGLE_OAUTH_CLIENT_SECRET: 'unit-test-google-client-secret-value',
+          GOOGLE_OAUTH_VAULT_KEY: 'unit-test-google-oauth-vault-key-material-please-ignore',
           C1_MODEL_STUB: '{"disposition":"noop","reason":"test stub"}',
         },
       },

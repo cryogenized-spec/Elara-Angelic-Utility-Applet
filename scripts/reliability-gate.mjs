@@ -17,7 +17,8 @@ const requiredFiles = [
   'src/autonomy/contracts.ts', 'src/autonomy/schedule.ts', 'src/autonomy/policy.ts', 'src/autonomy/outcome.ts', 'src/autonomy/authority.ts', 'src/autonomy/instruction.ts', 'src/autonomy/runner.ts', 'src/autonomy/runner.test.ts', 'src/autonomy/tool-surface.test.ts', 'src/persistence/autonomy.ts', 'src/persistence/autonomy.test.ts', 'src/app/components/AutonomySettings.tsx', 'src/gemini/google-tool-loop.readonly.test.ts',
   'src/autonomy/scheduler.ts', 'src/autonomy/scheduler.test.ts', 'src/autonomy/context.ts', 'src/autonomy/context.test.ts', 'src/autonomy/protocol.ts', 'src/autonomy/protocol.test.ts',
   'src/autonomy/cloud/pairing.ts', 'src/autonomy/cloud/pairing.test.ts', 'src/autonomy/cloud/client.ts', 'src/autonomy/cloud/sync.ts', 'src/autonomy/cloud/sync.test.tsx', 'src/app/components/AutonomyCloud.tsx',
-  'worker/src/autonomy/ports.ts', 'worker/src/autonomy/store.ts', 'worker/src/autonomy/engine.ts', 'worker/src/autonomy/routes.ts', 'worker/src/autonomy/workflow.ts', 'worker/src/autonomy/cloud-execute.ts', 'src/autonomy/history-page.ts', 'src/autonomy/history-page.test.ts', 'src/autonomy/config-identity.ts', 'src/autonomy/config-identity.test.ts', 'src/autonomy/cloud-result.ts', 'src/autonomy/workflow-identity.ts', 'src/autonomy/envelope.ts', 'worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts', 'worker/test/helpers.ts', 'vitest.workers.config.ts',
+  'worker/src/entry.ts', 'worker/src/google/oauth-provider.ts', 'worker/src/google/oauth-routes.ts', 'worker/src/google/oauth-vault.ts',
+  'worker/src/autonomy/ports.ts', 'worker/src/autonomy/store.ts', 'worker/src/autonomy/engine.ts', 'worker/src/autonomy/routes.ts', 'worker/src/autonomy/workflow.ts', 'worker/src/autonomy/cloud-execute.ts', 'src/autonomy/history-page.ts', 'src/autonomy/history-page.test.ts', 'src/autonomy/config-identity.ts', 'src/autonomy/config-identity.test.ts', 'src/autonomy/cloud-result.ts', 'src/autonomy/workflow-identity.ts', 'src/autonomy/envelope.ts', 'worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts', 'worker/test/google-oauth-vault.test.ts', 'worker/test/google-oauth-routes.test.ts', 'worker/test/helpers.ts', 'vitest.workers.config.ts',
   'scripts/verify-autonomy-worker.mjs', 'e2e/autonomy-cloud.spec.ts',
   'e2e/roleplay-world.spec.ts', 'e2e/autonomy.spec.ts',
 ];
@@ -137,15 +138,7 @@ if (!lockboxSource.includes("name: 'AES-GCM'")) throw new Error('Reliability gat
 if (!lockboxSource.includes('crypto.getRandomValues')) throw new Error('Reliability gate: Lockbox encryption must use random salt and IV material.');
 if (lockboxSource.includes('localStorage.setItem')) throw new Error('Reliability gate: Gemini API credential must never be written to localStorage.');
 if (!lockboxSource.includes('removeLegacyPlaintextKey')) throw new Error('Reliability gate: legacy plaintext Gemini API storage must be explicitly removed.');
-// The Lockbox holds a keyed set of credentials, so the session store is a
-// module-level Map rather than a single nullable string. The invariant is
-// unchanged and is what these two checks assert: decrypted material lives in
-// module memory for the page session only, and locking clears it.
 if (!lockboxSource.includes('const unlockedSecrets = new Map<LockboxSecretId, string>();')) throw new Error('Reliability gate: decrypted credentials must remain session-memory-only.');
-// Both paths out of an unlocked session — locking and clearing the Lockbox —
-// must wipe the decrypted material. Counting occurrences is a blunt instrument,
-// but it does catch a regression that drops either call site, which a plain
-// presence check cannot.
 if (lockboxSource.split('unlockedSecrets.clear();').length - 1 < 2) throw new Error('Reliability gate: locking and clearing the Lockbox must both clear decrypted credentials from session memory.');
 
 const lockboxTestSource = readFileSync(join(root, 'src/persistence/gemini-api-key.test.ts'), 'utf8');
@@ -158,7 +151,6 @@ if (characterPersistence.includes('LEGACY_DEFAULT_MARKER')) throw new Error('Rel
 if (!characterPersistence.includes('return value.slice(0, MAX_INSTRUCTION_LENGTH);')) throw new Error('Reliability gate: configured master prompt must be preserved without prompt substitution.');
 if (!characterPersistence.includes('this.version(6)')) throw new Error('Reliability gate: character persistence must retain a current schema version after clearing the default prompt.');
 if (!characterPersistence.includes("record.systemInstruction = '';")) throw new Error('Reliability gate: persisted Character Master must be clear after the default-removal migration.');
-
 
 // ---------------------------------------------------------------------------
 // Phase B invariants (Autonomous Elara design §4.4, §7, §8, §10): the cloud
@@ -177,20 +169,32 @@ while (workerStack.length) {
 }
 
 // Worker runtime must never import the browser memory store, browser
-// persistence, or the browser Google OAuth authority (design §8/§10/§11).
-const forbiddenWorkerImports = /memory\/store|persistence\/|google\/oauth|retrieveMemories|dexie/i;
+// persistence, or browser Google OAuth authority. Server-side Google OAuth is
+// allowed only in worker/src/google/oauth-* and is pinned below as a reviewed
+// credential authority.
+const forbiddenWorkerImports = /memory\/store|persistence\/|(?:\.\.\/)+src\/google\/oauth|retrieveMemories|dexie/i;
+const serverGoogleOauthMarker = /accounts\.google\.com|googleapis\.com\/oauth|refresh_token|authorization.?code/i;
 for (const path of workerSourceFiles) {
   const source = readFileSync(path, 'utf8');
   const importLines = source.split('\n').filter((line) => /^\s*(?:import|export)\s.*from\s+['"]/.test(line) || /^\s*import\s+['"]/.test(line)).join('\n');
-  if (forbiddenWorkerImports.test(importLines)) throw new Error(`Reliability gate: worker module must not import browser-only concerns (memory store / persistence / OAuth / Dexie): ${path}`);
-  // No server-side Google credentials or OAuth exchange anywhere in the worker.
-  if (/accounts\.google\.com|googleapis\.com\/oauth|refresh_token|authorization.?code/i.test(source)) throw new Error(`Reliability gate: server-side Google OAuth markers must not appear in worker code: ${path}`);
+  if (forbiddenWorkerImports.test(importLines)) throw new Error(`Reliability gate: worker module must not import browser-only concerns (memory store / persistence / browser OAuth / Dexie): ${path}`);
+  const reviewedServerOauthFile = path.includes(join('worker', 'src', 'google', 'oauth-'));
+  if (!reviewedServerOauthFile && serverGoogleOauthMarker.test(source)) throw new Error(`Reliability gate: server-side Google OAuth markers are allowed only in the reviewed worker/src/google/oauth-* authority: ${path}`);
   if (/from ['"]agents['"]|@cloudflare\/agents/.test(source)) throw new Error(`Reliability gate: Agents SDK must not appear: ${path}`);
   if (/cloudflare:workflows/.test(source)) throw new Error(`Reliability gate: do not import cloudflare:workflows (${path}); bind Workflows via wrangler.`);
-  // No Web Push before Phase D.
   if (/vapid|web-push|pushManager|PushSubscription/i.test(source)) throw new Error(`Reliability gate: Web Push must not appear before Phase D: ${path}`);
 }
 if (packageSource.includes('"agents"') || packageJson.dependencies?.agents || packageJson.devDependencies?.agents) throw new Error('Reliability gate: the Agents SDK dependency is deliberately not adopted (design §7.4).');
+
+const googleOauthProviderSource = readFileSync(join(root, 'worker', 'src', 'google', 'oauth-provider.ts'), 'utf8');
+const googleOauthVaultSource = readFileSync(join(root, 'worker', 'src', 'google', 'oauth-vault.ts'), 'utf8');
+const googleOauthRoutesSource = readFileSync(join(root, 'worker', 'src', 'google', 'oauth-routes.ts'), 'utf8');
+const workerCompositionSource = readFileSync(join(root, 'worker', 'src', 'entry.ts'), 'utf8');
+if (!googleOauthProviderSource.includes('https://oauth2.googleapis.com/token') || !googleOauthProviderSource.includes("grant_type: 'refresh_token'")) throw new Error('Reliability gate: durable Google OAuth must exchange and refresh only through the reviewed token provider.');
+if (!googleOauthVaultSource.includes("name: 'AES-GCM'") || !googleOauthVaultSource.includes('GOOGLE_OAUTH_VAULT_KEY')) throw new Error('Reliability gate: Google refresh tokens must be AES-GCM encrypted with the dedicated vault key.');
+if (!googleOauthVaultSource.includes('google_oauth_nonces') || !googleOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: Google OAuth vault writes must be independently signed and replay-protected durably.');
+if (!googleOauthRoutesSource.includes('verifySignedWrite') || !googleOauthRoutesSource.includes('X-Requested-With')) throw new Error('Reliability gate: public Google OAuth writes must retain signed admission and popup CSRF protection.');
+if (!workerCompositionSource.includes('handleGoogleOAuthRoute') || !workerCompositionSource.includes('return coreWorker.fetch(request, env)')) throw new Error('Reliability gate: Worker composition must isolate Google OAuth routing and delegate all existing runtime traffic unchanged.');
 
 // The scheduler seam exists and names its contracts.
 const portsSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'ports.ts'), 'utf8');
@@ -202,7 +206,7 @@ for (const portOperation of ['ensureScheduled', 'cancel(', 'dueWithin']) {
 }
 if (!engineSource.includes('decideRunClaim')) throw new Error('Reliability gate: the DO claim path must use the shared pure decideRunClaim decision.');
 
-// The cron handler is a heartbeat only: no agent execution, no provider calls.
+// The cron handler remains in the existing Worker core and is a heartbeat only.
 const workerEntrySource = readFileSync(join(root, 'worker', 'src', 'index.ts'), 'utf8');
 const scheduledMatch = workerEntrySource.match(/async scheduled\([\s\S]*?\n {2}\},/);
 if (!scheduledMatch) throw new Error('Reliability gate: the worker must export a scheduled() cron handler.');
@@ -212,24 +216,24 @@ for (const forbidden of ['gemini', 'Gemini', 'streamGoogleToolLoop', 'GoogleGenA
 }
 if (!scheduledBody.includes('heartbeat')) throw new Error('Reliability gate: the cron handler must invoke the scheduler heartbeat.');
 
-// No public wake endpoint, ever.
 for (const wakeRoute of ["'/autonomy/wake'", '"/autonomy/wake"', "'/autonomy/heartbeat'", '"/autonomy/heartbeat"']) {
-  if (workerEntrySource.includes(wakeRoute)) throw new Error('Reliability gate: no public wake endpoint may exist.');
+  if (workerEntrySource.includes(wakeRoute) || workerCompositionSource.includes(wakeRoute)) throw new Error('Reliability gate: no public wake endpoint may exist.');
 }
 
-// Exactly one coarse cron trigger, hourly.
 const wranglerSource = readFileSync(join(root, 'worker', 'wrangler.toml'), 'utf8');
 const crons = wranglerSource.match(/crons\s*=\s*\[([^\]]*)\]/);
 if (!crons || crons[1].split(',').filter((entry) => entry.trim()).length !== 1 || !crons[1].includes('0 * * * *')) throw new Error('Reliability gate: the worker must carry exactly one hourly cron trigger.');
+if (!wranglerSource.includes('main = "src/entry.ts"')) throw new Error('Reliability gate: production Worker HTTP composition must use worker/src/entry.ts.');
 if (!wranglerSource.includes('new_sqlite_classes') || !wranglerSource.includes('AutonomyEngine')) throw new Error('Reliability gate: the AutonomyEngine Durable Object must be declared with SQLite storage.');
+if (!wranglerSource.includes('name = "GOOGLE_OAUTH"') || !wranglerSource.includes('class_name = "GoogleOAuthVault"')) throw new Error('Reliability gate: wrangler must bind the dedicated GoogleOAuthVault Durable Object.');
 if (!wranglerSource.includes('class_name = "RoutineRunWorkflow"') || !wranglerSource.includes('binding = "ROUTINE_RUN"')) throw new Error('Reliability gate: wrangler must declare the RoutineRun Workflow binding.');
 const workflowSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'workflow.ts'), 'utf8');
 if (!workflowSource.includes('class RoutineRunWorkflow') || !workflowSource.includes('WorkflowEntrypoint')) throw new Error('Reliability gate: RoutineRunWorkflow must be a WorkflowEntrypoint.');
 if (!engineSource.includes('completeClaim') || !engineSource.includes('dispatchWorkflow')) throw new Error('Reliability gate: the DO must claim then dispatch a Workflow.');
 if (engineSource.includes("path === '/c0/fixture'")) throw new Error('Reliability gate: production DO fetch must not expose /c0/fixture.');
 if (engineSource.includes('claimWithoutDispatch') || engineSource.includes('markDispatchedWithoutAdvance')) throw new Error('Reliability gate: crash fixtures must not be public methods on AutonomyEngine.');
-if (workerEntrySource.includes('TestAutonomyEngine')) throw new Error('Reliability gate: production worker entry must not export TestAutonomyEngine.');
-if (wranglerSource.includes('TestAutonomyEngine')) throw new Error('Reliability gate: production wrangler must not bind TestAutonomyEngine.');
+if (workerEntrySource.includes('TestAutonomyEngine') || workerCompositionSource.includes('TestAutonomyEngine')) throw new Error('Reliability gate: production worker entry must not export TestAutonomyEngine.');
+if (wranglerSource.includes('TestAutonomyEngine') || wranglerSource.includes('TestGoogleOAuthVault')) throw new Error('Reliability gate: production wrangler must not bind test Durable Object classes.');
 if (!engineSource.includes('nextOccurrenceAfterProcessed')) throw new Error('Reliability gate: schedule advance must be occurrence-anchored.');
 if (!engineSource.includes('schedulerLive') || !engineSource.includes('agentExecution')) throw new Error('Reliability gate: scheduler liveness and agent execution must not share one dryRun flag.');
 if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('pruneEnvelopes')) throw new Error('Reliability gate: envelopes must be pruned with runs.');
@@ -239,7 +243,6 @@ if (!workflowSource.includes('executeCloudRoutine')) throw new Error('Reliabilit
 if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('admitProposedEvent')) throw new Error('Reliability gate: event admission policy must run inside the DO transaction.');
 if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('CREATE TABLE IF NOT EXISTS events')) throw new Error('Reliability gate: cloud events must be durable.');
 
-// The shared scheduler domain stays pure (no Cloudflare, browser, or provider imports).
 const allowedSchedulerImports = /^\s*(?:import|export)\s.*from\s+['"](?:zod|\.\/contracts|\.\/schedule|\.\.\/memory\/retrieval|\.\.\/memory\/types)['"];?\s*$/;
 for (const shared of ['src/autonomy/scheduler.ts', 'src/autonomy/context.ts']) {
   const source = readFileSync(join(root, shared), 'utf8');
@@ -252,4 +255,4 @@ for (const shared of ['src/autonomy/scheduler.ts', 'src/autonomy/context.ts']) {
 
 if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24.21.0') throw new Error('Reliability gate: Node baseline must remain 24.21.0.');
 
-process.stdout.write(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24.21.0 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract, plus the Phase B scheduler invariants: SchedulerPort/WakeSource seam, DO single-alarm scheduler with shared pure due-time truth, heartbeat-only cron, no public wake endpoint, worker isolation from browser memory/persistence/OAuth, no server-side Google credentials, no Agents SDK, Workflows bound via wrangler, no Web Push, single hourly cron trigger, and pure shared scheduler/context modules.\n`);
+process.stdout.write(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24.21.0 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, encrypted browser credential persistence, and the reviewed durable Google OAuth server authority with encrypted refresh-token vaulting plus signed replay-protected admission; Phase B scheduler invariants remain intact: SchedulerPort/WakeSource seam, DO single-alarm scheduler with shared pure due-time truth, heartbeat-only cron, no public wake endpoint, worker isolation from browser memory/persistence/OAuth, no Agents SDK, Workflows bound via wrangler, no Web Push, single hourly cron trigger, and pure shared scheduler/context modules.\n`);

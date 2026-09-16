@@ -1,7 +1,7 @@
 ---
 id: SYS-MEM
 status: active
-verified_commit: 2daeef210ecc4ff7be1f3b969c13f58a33117fbe
+verified_commit: 7ab3a8aee8574f2ce32614621ac93c60f7eb67af
 scope: durable memory lifecycle, retrieval, model capabilities, organic observation, evidence maturity, Memory Bank maintenance, archive transfer, and adversarial authority boundaries
 paths: [src/memory, src/gemini/memory-context.ts, src/gemini/memory-observer.ts, src/gemini/google-tool-loop.ts, src/chat/generation-sync.ts, src/google/tools]
 keywords: [memory, recall, observation, retrieval, consolidation, reconciliation, organic-observer, lifecycle, reinforcement, supersession, memory-bank, landmark, audit, archive, import, export, provenance, idempotency, adversarial, capability]
@@ -95,7 +95,7 @@ Organic formation is downstream of conversation durability. `generation-sync.ts`
 | Provenance presentation | `src/memory/provenance.ts` |
 | Portable archive boundary | `src/memory/archive.ts` |
 | Human Memory Bank | `src/app/components/DurableMemorySettings.tsx`, `durable-memory-settings.css` |
-| Browser acceptance | `e2e/memory-bank.spec.ts` |
+| Browser acceptance | `e2e/memory-bank.spec.ts`, `e2e/memory-chat.spec.ts` |
 | Final hostile matrix | `src/memory/adversarial-certification.test.ts` plus owning subsystem tests |
 
 ## 4. Data, retrieval and lifecycle contract
@@ -268,6 +268,7 @@ Pass 6 adds or reuses direct behavioral tests for these boundaries:
 - **Relationship saturation:** support/conflict/related/supersession fail before partial epistemic mutation; organic transactions roll back newly created evidence if consolidation cannot retain the link.
 - **Archive attacks:** strict version/byte/count ceilings, authority-field rejection, duplicate/self/dangling relationship rejection, fresh IDs, scope/provenance/autonomy reset and all-or-nothing transaction.
 - **Memory Bank browser behavior:** landmark/audit/provenance/export/import acceptance remains E2E-covered.
+- **Chat browser closure:** a real Playwright chat turn proves `memory.lookup/save/reconcile` are advertised to Gemini, the organic classifier is tool-less, the assistant response exists in IndexedDB before observation starts, the canonical Memory Bank receives the observation, and the `BookOpen` memory activity row survives reload.
 
 A green test that passes for the wrong reason is a defect. Pass 5's media-suite failure demonstrated this rule: altered Settings timing exposed a pre-existing Playwright consent-fixture race; `global-setup.ts` now proves accepted YouTube policy survives reload before shared storage state is captured.
 
@@ -281,11 +282,13 @@ A green test that passes for the wrong reason is a defect. Pass 5's media-suite 
 | 3 | bounded post-turn organic observer | `6e74ced1e6f85014801122bdc1a33c700dcbad2a` |
 | 4 | deterministic evidence lifecycle / contradiction / supersession | `14ae86d8b0a4713b3671183c0073db1bc53ac1dc` |
 | 5 | Memory Bank parity / landmarks / provenance / audit / portable archive | `bdc10d79e1da8964de90debfef73c5ca0bc512cc` |
-| 6 | hostile cross-boundary certification + final hardening | runtime head `2daeef210ecc4ff7be1f3b969c13f58a33117fbe` passed full exact-head CI; this documentation-bearing head is the final merge gate |
+| 6 | hostile cross-boundary certification + final hardening | `766e94b9870ff5d9037950727534daa2e2587e6b` |
 
-Every completed runtime pass was required to clear documentation/verification integrity, architecture/security, secret and supply-chain gates, registry signatures, dependency audit, zero-warning lint, TS6, TS7, unit + coverage ratchets, Worker/Durable Object tests, production build, Playwright E2E and final reliability before merge.
+Every completed runtime pass cleared documentation/verification integrity, architecture/security, secret and supply-chain gates, registry signatures, dependency audit, zero-warning lint, TS6, TS7, unit + coverage ratchets, Worker/Durable Object tests, production build, Playwright E2E and final reliability before merge.
 
 ## 11. Agent handoff
+
+**Program status: CLOSED / CERTIFIED.** The seven-pass durable-memory completion program and its final browser closure audit are merged. Treat frontmatter `verified_commit` as the certified handover baseline for memory work.
 
 For future work, read `AGENTS.md`, route through `documents/manifest.json`, then load this document before modifying any memory path. Inspect only the exact source/tests needed for the requested change.
 
@@ -302,4 +305,4 @@ Preserve these non-negotiables unless the user deliberately changes the product 
 
 If a future `/skills` layer is added, `skills/memory/SKILL.md` should describe **procedure only**: which files to read, invariants to preserve, tests to run and which canonical document to update. It must point back to `SYS-MEM`; it must not become a second architectural source of truth.
 
-The seven-pass memory completion program is functionally complete. Remaining future memory work should be treated as a new scoped feature program, not as unfinished Pass 0-6 work.
+The seven-pass memory completion program is closed. Any future memory change is a new scoped feature or maintenance program and must establish its own baseline, invariants and certification record rather than reopening Pass 0-6.

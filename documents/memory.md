@@ -31,6 +31,7 @@ normal chat
 -> exact-span validation + app-owned metadata
 -> replay-safe MICRO_OBSERVATION transaction
 -> db.memories
+-> optional Generation Activity trace update
 -> unlock next turn
 
 explicit remember
@@ -149,11 +150,13 @@ The full reconciliation runs inside `runMemoryMutationTransaction`. Losing gener
 
 ## 7. Organic observer contract
 
-### 7.1 Evidence boundary
+### 7.1 Evidence boundary and capture criteria
 
 The classifier receives at most 6,000 characters from the current persisted user message. It receives no assistant response, no retrieved durable memory, no Character Master and no tools. Its only useful output is strict JSON containing at most three `{domain,evidence}` candidates.
 
-Allowed domains: `preference`, `persistent_fact`, `project_decision`, `commitment`, `recurring_context`, `shared_event`. `evidence` is capped at 500 characters and must be an exact substring of the full user message. Paraphrases/inferences are discarded. Malformed or extra-property output fails closed. Obvious credential-shaped evidence is deterministically rejected in application code; the classifier is additionally instructed not to select highly sensitive personal facts for automatic persistence.
+Automatic capture is not an unconstrained "the model feels like remembering this" decision. A candidate must fit one of six durable domains: `preference`, `persistent_fact`, `project_decision`, `commitment`, `recurring_context`, or `shared_event`, and it must be likely to remain useful beyond the immediate exchange. Ordinary questions, temporary task wording, acknowledgements, jokes, speculative hypotheticals, quoted third-party claims and incidental chatter are explicitly excluded.
+
+`evidence` is capped at 500 characters and must be an exact substring of the full user message. Paraphrases/inferences are discarded. Malformed or extra-property output fails closed. Obvious credential-shaped evidence is deterministically rejected in application code; the classifier is additionally instructed not to select highly sensitive personal facts for automatic persistence.
 
 The Gemini classifier uses the one canonical browser provider with `memoryContext: none` and an empty tool list. It has an eight-second internal timeout and a 4,000-character output ceiling. Provider failure, invalid JSON, timeout or cancellation becomes a non-fatal unavailable observer result.
 
@@ -161,24 +164,27 @@ The Gemini classifier uses the one canonical browser provider with `memoryContex
 
 Accepted candidates are converted by application code into app-titled, app-tagged low-weight `MICRO_OBSERVATION` records. The classifier never chooses the memory title, kind, confidence, importance, provenance, folder scope or durable identity.
 
-Each write uses the existing `recordObservation -> memory.save -> saveMemoryOnce -> db.memories` path and the existing permission policy. A stable idempotency identity derives from conversation + user message + domain + exact evidence, so a retry of the same persisted user evidence converges on one record even if the assistant generation changes.
+Each write uses the existing `recordObservation -> memory.save -> saveMemoryOnce -> db.memories` path and the existing permission policy. A stable idempotency identity derives from conversation + user message + domain + exact evidence, so a retry of the same persisted user evidence converges on one record even if the assistant generation changes. Provenance metadata stores a SHA-256 fingerprint of the evidence for replay identity rather than duplicating the user-authored prose outside the memory body.
 
 At most three accepted candidates are written inside one canonical memory transaction. A deliberate `memory.*` tool turn skips organic formation. Regeneration variants (`responseVariant > 1`) skip organic formation; a failed first response cannot form memory because its conversation save never crossed the durability boundary.
 
-### 7.3 Turn lifecycle
+### 7.3 Turn lifecycle and Generation Activity visibility
 
-`generation-sync.ts` hands the App one terminal promise covering both stages:
+`generation-sync.ts` hands the App one terminal promise covering the full post-response barrier:
 
 ```text
 save completed conversation
 -> if save fails: reject; no observer
 -> if save succeeds: run bounded observer
 -> observer records / returns empty / safely degrades
+-> if records were created: persist optional "Saved to memory" activity row
 -> resolve terminal barrier
 -> App refreshes thread list, unlocks composer, releases generation
 ```
 
 After the conversation save succeeds, the durable turn—not the currently visible UI thread—is sufficient authority for this best-effort post-turn observation. Navigating during `saving` therefore does not create a second lifecycle or silently roll back the already-saved reply.
+
+Memory activity has a dedicated Lucide brain icon in Generation Activity. Recall remains an application context row, deliberate `memory.lookup` / `memory.save` / `memory.reconcile` remain truthful tool rows, and a successful organic capture adds a persisted `Saved to memory` context row with the number of durable observations recorded. Empty/skipped organic classification does not add noise to the trace. Failure of the optional trace-metadata save is non-fatal because the response and memory have already crossed their durability boundaries.
 
 ## 8. Security and failure semantics
 
@@ -200,7 +206,7 @@ Pass 2 plus the Pass 0-2 hardening review passed documentation, verification, se
 
 Pass 3 is implemented on `memory/pass-3-organic-observer` and remains uncertified until the same exact-head pipeline passes.
 
-Pass 3 tests pin: trivial-turn skip; exact-user-span evidence; app-owned kind/title/tags/confidence/importance/scope; paraphrase rejection; credential rejection; strict schema; duplicate-candidate collapse; retry idempotency; deliberate-memory and regeneration exclusion; classifier failure isolation; tool-less/memory-less Gemini classifier calls; bounded output; explicit provider completion; response-save-before-observer ordering; no observer after failed persistence; and observer degradation without chat failure.
+Pass 3 tests pin: trivial-turn skip; exact-user-span evidence; app-owned kind/title/tags/confidence/importance/scope; paraphrase rejection; credential rejection; strict schema; duplicate-candidate collapse; retry idempotency and evidence-fingerprint privacy; deliberate-memory and regeneration exclusion; classifier failure isolation; tool-less/memory-less Gemini classifier calls; bounded output; explicit provider completion; response-save-before-observer ordering; no observer after failed persistence; observer degradation without chat failure; non-fatal activity-trace persistence; and dedicated memory icon/labels for recall, deliberate memory tools and organic capture.
 
 ## 10. Completion passes
 

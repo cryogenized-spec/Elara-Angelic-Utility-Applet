@@ -20,6 +20,7 @@ export const googleScopeRegistry: readonly GoogleScopeDescriptor[] = [
   { capability: 'calendar.events.write', scope: 'https://www.googleapis.com/auth/calendar.events', access: 'write', sensitivity: 'sensitive', rationale: 'Create and edit Calendar events when explicitly required.' },
   { capability: 'calendar.list.read', scope: 'https://www.googleapis.com/auth/calendar.calendarlist.readonly', access: 'read', sensitivity: 'sensitive', rationale: 'Read subscribed calendar list without calendar mutation.' },
   { capability: 'calendar.settings.read', scope: 'https://www.googleapis.com/auth/calendar.settings.readonly', access: 'read', sensitivity: 'sensitive', rationale: 'Read Calendar settings without calendar mutation.' },
+  { capability: 'calendar.freebusy.read', scope: 'https://www.googleapis.com/auth/calendar.freebusy', access: 'read', sensitivity: 'sensitive', rationale: 'Read availability without exposing event details.' },
   { capability: 'tasks.read', scope: 'https://www.googleapis.com/auth/tasks.readonly', access: 'read', sensitivity: 'sensitive', rationale: 'Read Google Tasks without mutation rights.' },
   { capability: 'tasks.write', scope: 'https://www.googleapis.com/auth/tasks', access: 'write', sensitivity: 'sensitive', rationale: 'Create, edit, organize, and delete Google Tasks.' },
   { capability: 'docs.read', scope: 'https://www.googleapis.com/auth/drive.file', access: 'read', sensitivity: 'non-sensitive', rationale: 'App-file Docs reads; library discovery is a separate capability.' },

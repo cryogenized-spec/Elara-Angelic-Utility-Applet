@@ -221,7 +221,7 @@ describe('memory tool handlers', () => {
     expect(await countMemories()).toBe(1);
   });
 
-  it('supersedes through an opaque ref while preserving the old active record', async () => {
+  it('supersedes through an opaque ref while preserving the old dormant record', async () => {
     const target = await saveMemory({ title: 'Old preference', body: 'The user prefers the old layout.', kind: 'CORE' });
     const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'old layout' }));
     const [ref] = refsFromLookup(lookup);
@@ -237,7 +237,8 @@ describe('memory tool handlers', () => {
     const replacement = records.find((record) => record.id !== target.id);
 
     expect(result).toMatchObject({ reconciled: true, relation: 'supersede', replacementKind: 'CONTEXTUAL' });
-    expect(old?.lifecycle).toBe('active');
+    expect(old?.lifecycle).toBe('dormant');
+    expect(old?.body).toBe(target.body);
     expect(replacement?.supersedes).toContain(target.id);
     expect(old?.supersededBy).toContain(replacement?.id);
   });

@@ -1,7 +1,7 @@
 ---
 id: SYS-GAUTH
 status: active
-verified_commit: pending-pass-0-certification
+verified_commit: 3ca672db8efe8710bba0bc83d536583c577a9e0e
 scope: Google identity, OAuth capability, scope and durable credential authority
 paths: [src/google/oauth]
 keywords: [google, oauth, gis, scope, capability, token, account, durable, refresh]

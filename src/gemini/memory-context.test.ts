@@ -30,6 +30,33 @@ describe('Gemini durable-memory context boundary', () => {
     expect(result).toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
   });
 
+  it('prefers captured turn conversation over a newly active UI thread', async () => {
+    const origin = await createFolderPath('Projects/Origin');
+    const navigated = await createFolderPath('Projects/Navigated');
+    await db.folderAssignments.put({ id: 'thread-origin', threadId: 'thread-origin', folderId: origin.id, updatedAt: Date.now() });
+    await db.folderAssignments.put({ id: 'thread-navigated', threadId: 'thread-navigated', folderId: navigated.id, updatedAt: Date.now() });
+    await saveMemory({ title: 'Origin-only note', body: 'Memory from the originating conversation.', folderId: origin.id, confidence: 1, importance: 1 });
+    await saveMemory({ title: 'Navigated-only note', body: 'Memory from the newly active conversation.', folderId: navigated.id, confidence: 1, importance: 1 });
+
+    // Simulate navigation after the turn was elected but before provider memory composition.
+    window.localStorage.setItem('elara.active-thread', 'thread-navigated');
+    const context = await loadMemoryContext('memory conversation', 'thread-origin');
+
+    expect(context).toContain('Memory from the originating conversation.');
+    expect(context).not.toContain('Memory from the newly active conversation.');
+  });
+
+  it('passes captured conversation identity through the safe loader boundary', async () => {
+    const seen: Array<string | undefined> = [];
+    const loader = async (_query: string, conversationId?: string) => {
+      seen.push(conversationId);
+      return 'private memory body';
+    };
+    await expect(loadMemoryContextResult('q', loader, 'thread-captured')).resolves.toEqual({ context: 'private memory body', status: 'used' });
+    await expect(loadMemoryContextSafely('q', loader, 'thread-captured')).resolves.toBe('private memory body');
+    expect(seen).toEqual(['thread-captured', 'thread-captured']);
+  });
+
   it('reports only a coarse used/empty/unavailable status beside the private context', async () => {
     await expect(loadMemoryContextResult('q', async () => 'private memory body')).resolves.toEqual({ context: 'private memory body', status: 'used' });
     await expect(loadMemoryContextResult('q', async () => '   ')).resolves.toEqual({ context: '   ', status: 'empty' });

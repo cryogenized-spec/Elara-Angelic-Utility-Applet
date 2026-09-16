@@ -119,12 +119,19 @@ type CredentialSnapshot = {
   refreshIv: string;
   subject: string | null;
   email: string | null;
+  updatedAt: number;
 };
 
 async function credentialSnapshot(): Promise<CredentialSnapshot | null> {
   return (await stub() as DurableObjectStub & {
     credentialSnapshot(): Promise<CredentialSnapshot | null>;
   }).credentialSnapshot();
+}
+
+async function forceCredentialUpdatedAt(updatedAt: number): Promise<void> {
+  await (await stub() as DurableObjectStub & {
+    forceCredentialUpdatedAt(updatedAt: number): Promise<void>;
+  }).forceCredentialUpdatedAt(updatedAt);
 }
 
 describe('GoogleOAuthVault', () => {
@@ -154,8 +161,33 @@ describe('GoogleOAuthVault', () => {
 
     const refreshed = await doFetch(await signedWrite('/google/oauth/token', '{}'));
     expect(refreshed.status).toBe(200);
-    expect(await refreshed.json()).toEqual(expect.objectContaining({ accessToken: 'access-token-refreshed', connected: true }));
+    const refreshedJson = await refreshed.json() as Record<string, unknown>;
+    expect(refreshedJson).toEqual(expect.objectContaining({ accessToken: 'access-token-refreshed', connected: true }));
+    expect(refreshedJson.updatedAt).toBe(exchangeJson.updatedAt);
     expect(provider.refresh).toBe(1);
+  });
+
+  it('advances a replacement grant revision even when the stored revision is ahead of wall clock', async () => {
+    mockProvider([
+      DEFAULT_EXCHANGE,
+      {
+        accessToken: 'access-token-replacement',
+        refreshToken: 'replacement-refresh-token',
+        subject: DEFAULT_EXCHANGE.subject,
+        email: DEFAULT_EXCHANGE.email,
+        name: DEFAULT_EXCHANGE.name,
+      },
+    ]);
+    const first = await exchange('first-revision-code');
+    const firstJson = await first.json() as { updatedAt: number };
+    const forcedPreviousRevision = firstJson.updatedAt + 10_000;
+    await forceCredentialUpdatedAt(forcedPreviousRevision);
+
+    const second = await exchange('replacement-grant-code');
+    expect(second.status).toBe(200);
+    const secondJson = await second.json() as { updatedAt: number };
+    expect(secondJson.updatedAt).toBeGreaterThan(forcedPreviousRevision);
+    expect((await credentialSnapshot())?.updatedAt).toBe(secondJson.updatedAt);
   });
 
   it('reuses an existing encrypted refresh token only when the stable Google subject matches', async () => {

@@ -5,6 +5,7 @@ export const googleCapabilityKeySchema = z.enum([
   'calendar.events.write',
   'calendar.list.read',
   'calendar.settings.read',
+  'calendar.freebusy.read',
   'tasks.read',
   'tasks.write',
   'docs.read',

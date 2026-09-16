@@ -5,6 +5,11 @@ const pageTokenSchema = z.string().trim().min(1).max(2048);
 const querySchema = z.string().trim().max(2000);
 const timestampValueSchema = z.string().trim().min(1).max(128);
 const timestampSchema = timestampValueSchema.optional();
+const calendarQueryTimestampValueSchema = timestampValueSchema.regex(
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/,
+  'Calendar query bounds must be RFC 3339 timestamps with an explicit UTC offset.',
+);
+const calendarQueryTimestampSchema = calendarQueryTimestampValueSchema.optional();
 const timeZoneSchema = z.string().trim().min(1).max(200).optional();
 const metadataHeadersSchema = z.array(z.string().trim().min(1).max(200)).max(50).optional();
 
@@ -19,8 +24,8 @@ export const googleReadToolArgumentSchemas = {
 
   'calendar.listEvents': z.object({
     calendarId: idSchema.optional(),
-    timeMin: timestampSchema,
-    timeMax: timestampSchema,
+    timeMin: calendarQueryTimestampSchema,
+    timeMax: calendarQueryTimestampSchema,
     pageToken: pageTokenSchema.optional(),
     maxResults: z.number().int().min(1).max(250).optional(),
     query: querySchema.optional(),
@@ -36,8 +41,8 @@ export const googleReadToolArgumentSchemas = {
   'calendar.getSettings': z.object({}).strict(),
 
   'calendar.queryFreeBusy': z.object({
-    timeMin: timestampValueSchema,
-    timeMax: timestampValueSchema,
+    timeMin: calendarQueryTimestampValueSchema,
+    timeMax: calendarQueryTimestampValueSchema,
     calendarIds: z.array(idSchema).min(1).max(50),
     timeZone: timeZoneSchema,
   }).strict(),

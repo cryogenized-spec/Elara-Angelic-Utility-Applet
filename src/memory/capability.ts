@@ -19,6 +19,8 @@ export interface MemoryCapabilityContext {
   provenanceNote?: string;
   /** Application-owned replay key. Never model supplied. */
   idempotencyKey?: string;
+  /** Application-owned turn authority guard for async durable mutations. */
+  isMutationAllowed?: () => boolean;
 }
 
 export interface MemoryCapability {
@@ -58,7 +60,7 @@ export const memory: MemoryCapability = {
       folderId: context.folderId,
       source,
     };
-    return context.idempotencyKey ? saveMemoryOnce(input, source.note!) : saveMemory(input);
+    return context.idempotencyKey ? saveMemoryOnce(input, source.note!, context.isMutationAllowed) : saveMemory(input);
   },
   async forget(id, context = {}) {
     authorizeMemoryMutation('forget', context);

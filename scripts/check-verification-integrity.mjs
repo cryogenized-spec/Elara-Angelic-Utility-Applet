@@ -120,6 +120,7 @@ try {
     test: 'vitest run',
     'coverage:check': 'node scripts/check-coverage.mjs',
     'test:coverage': 'vitest run --coverage && npm run coverage:check',
+    'test:google-oauth-lifecycle': 'node scripts/google-oauth-lifecycle-gate.mjs && vitest run src/google/oauth/authority.test.ts && vitest run --config vitest.workers.config.ts worker/test/google-oauth-vault.test.ts',
     'test:workers': 'vitest run --config vitest.workers.config.ts',
     build: 'tsc -p tsconfig.json --noEmit && vite build',
     e2e: 'playwright test',
@@ -160,6 +161,11 @@ if (appPerformanceNowCount !== 2) fail(`src/app/App.tsx performance.now() surfac
 const securityGate = read('scripts/security-architecture-gate.mjs');
 for (const marker of ['forbiddenCapabilities', 'forbiddenNodeAuthority', 'dynamic Function constructor', 'direct HTML injection', 'DOM HTML parser injection', 'DOM fragment parser injection', 'XMLHttpRequest transport', 'sendBeacon transport', 'remote dynamic module import', 'reviewedScriptLoaders', 'reviewedWorkerAuthorities', 'reviewedDexieAuthorities', 'reviewedLockboxConsumers', 'reviewedAutonomyCredentialConsumers', 'reviewedPairingTokenConsumers', 'reviewedRawFetchAuthorities', 'reviewedGlobalFetchReferences', 'reviewedGoogleServiceImporters', 'reviewedConfirmationBrokerConsumers', 'StoredAutonomyPairing']) {
   if (!securityGate.includes(marker)) fail(`security architecture gate lost required capability check: ${marker}`);
+}
+
+const oauthLifecycleGate = read('scripts/google-oauth-lifecycle-gate.mjs');
+for (const marker of ['validateLifecycleContracts', 'stable provider subject continuity', 'authoritative vault revision change', 'stable-subject continuity removal', 'grant-revision invalidation removal', 'grant-revision churn on token refresh', 'deliberate OAuth lifecycle mutation escaped certification']) {
+  if (!oauthLifecycleGate.includes(marker)) fail(`Google OAuth lifecycle gate lost required certification proof: ${marker}`);
 }
 
 const secretScan = read('scripts/secret-scan.mjs');
@@ -238,7 +244,8 @@ if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci rather than 
 if (/contents:\s*write/.test(workflow)) fail('certification workflow may not retain repository write authority');
 if (/persist-credentials:\s*true/.test(workflow)) fail('certification workflow may not persist checkout credentials');
 if (!workflow.includes('permissions: {}')) fail('workflow-wide GITHUB_TOKEN permissions must default to none');
-const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run secrets:check', 'npm run supply-chain:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm audit signatures', 'npm audit --audit-level=high', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:coverage', 'npm run test:workers', 'npm run build', './node_modules/.bin/playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
+if (!workflow.includes('name: Google OAuth lifecycle regression')) fail('CI workflow lost the named Google OAuth lifecycle regression step');
+const orderedCommands = ['npm run docs:check', 'npm run verify:gates', 'npm run security:check', 'npm run secrets:check', 'npm run supply-chain:check', 'npm run test:quality', 'npm ci --no-audit --no-fund', 'npm audit signatures', 'npm audit --audit-level=high', 'npm run lint', 'npm run typecheck', 'npm run typecheck:ts7', 'npm run test:google-oauth-lifecycle', 'npm run test:coverage', 'npm run test:workers', 'npm run build', './node_modules/.bin/playwright install --with-deps chromium', 'npm run e2e -- --project=chromium --project=android-portrait --project=onboarding', 'npm run reliability:check'];
 let previousIndex = -1;
 for (const command of orderedCommands) {
   const index = workflow.indexOf(command, previousIndex + 1);
@@ -268,4 +275,4 @@ if (errors.length) {
   process.stderr.write(`Verification integrity failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
   process.exit(1);
 }
-process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; security, secret scanning, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node/npm controls, signed-registry and high-severity audits, exact-head checkout, and certified-before-deploy ordering pinned; no repository write authority, persisted checkout credentials, skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);
+process.stdout.write(`Verification integrity passed: ${e2eFiles.filter((file) => file.endsWith('.spec.ts')).length} E2E specs plus unit/worker test controls checked; zero-warning lint contract pinned; TS6 and TS7 typecheck commands pinned; Google OAuth lifecycle certification, security, secret scanning, supply-chain, test-quality, adversarial coverage sentinel, exact 185-file whole-source coverage ratchet, immutable Actions/Node/npm controls, signed-registry and high-severity audits, exact-head checkout, and certified-before-deploy ordering pinned; no repository write authority, persisted checkout credentials, skip/focus controls, direct app-state imports, unreviewed writable IndexedDB fixtures, CI bypass markers, unreasoned lint disables, TypeScript suppressions, or reviewed-script drift detected.\n`);

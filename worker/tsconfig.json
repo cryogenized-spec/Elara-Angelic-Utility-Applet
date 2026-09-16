@@ -13,7 +13,8 @@
     "skipLibCheck": true,
     "isolatedModules": true,
     "allowSyntheticDefaultImports": true,
-    "esModuleInterop": true
+    "esModuleInterop": true,
+    "jsx": "react-jsx"
   },
   "include": [
     "src/**/*.ts",

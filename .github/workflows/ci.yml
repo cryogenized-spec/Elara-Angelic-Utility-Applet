@@ -80,6 +80,9 @@ jobs:
       - name: Typecheck (TS7 compatibility)
         run: npm run typecheck:ts7
 
+      - name: Google OAuth lifecycle regression
+        run: npm run test:google-oauth-lifecycle
+
       - name: Unit tests + coverage ratchet
         run: npm run test:coverage
 

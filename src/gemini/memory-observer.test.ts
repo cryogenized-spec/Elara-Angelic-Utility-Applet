@@ -88,4 +88,40 @@ describe('Gemini organic memory classifier boundary', () => {
 
     await expect(geminiOrganicMemoryExtractor('gemini-3.8-flash')('I prefer compact layouts.')).rejects.toThrow(/exceeded its bound/i);
   });
+
+  it('passes a pre-aborted parent cancellation into the canonical provider signal', async () => {
+    const parent = new AbortController();
+    parent.abort();
+    streamReply.mockImplementationOnce((_request: GeminiTurnRequest, signal: AbortSignal) => {
+      expect(signal.aborted).toBe(true);
+      return events({ type: 'cancelled', interactionId: 'observer-aborted-before-start' });
+    });
+
+    await expect(
+      geminiOrganicMemoryExtractor('gemini-3.8-flash')('I prefer compact layouts.', parent.signal),
+    ).rejects.toThrow(/did not complete/i);
+  });
+
+  it('relays a parent cancellation that arrives while classification is in flight', async () => {
+    const parent = new AbortController();
+    let providerSignal: AbortSignal | undefined;
+    streamReply.mockImplementationOnce((_request: GeminiTurnRequest, signal: AbortSignal) => {
+      providerSignal = signal;
+      return (async function* waitForAbort(): AsyncGenerator<GeminiStreamEvent> {
+        if (!signal.aborted) {
+          await new Promise<void>((resolve) => signal.addEventListener('abort', () => resolve(), { once: true }));
+        }
+        yield { type: 'cancelled', interactionId: 'observer-aborted-in-flight' };
+      })();
+    });
+
+    const pending = geminiOrganicMemoryExtractor('gemini-3.8-flash')('I prefer compact layouts.', parent.signal);
+    await vi.waitFor(() => expect(providerSignal).toBeDefined());
+    expect(providerSignal?.aborted).toBe(false);
+
+    parent.abort();
+
+    await expect(pending).rejects.toThrow(/did not complete/i);
+    expect(providerSignal?.aborted).toBe(true);
+  });
 });

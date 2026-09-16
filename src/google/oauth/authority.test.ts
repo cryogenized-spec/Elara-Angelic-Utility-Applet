@@ -21,6 +21,7 @@ import { googleOAuthAuthority } from './authority';
 import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE } from './capability-policy';
 
 const CALENDAR_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
+const CALENDAR_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 const EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email';
 const OPENID_SCOPE = 'openid';
 const EXPECTED_SCOPE = (scope: string) => `${scope} ${EMAIL_SCOPE} ${OPENID_SCOPE}`;
@@ -234,6 +235,67 @@ describe('direct Google OAuth authority', () => {
     expect(persisted).toContain('durable@example.com');
     expect(persisted).not.toContain('durable-access-token');
     expect(persisted).not.toContain('test-installation-secret');
+  });
+
+  it('does not let paired provider scopes silently enable a local write capability', async () => {
+    pairingMock.mockReturnValue(TEST_PAIRING);
+    pairingTokenMock.mockResolvedValue('test-installation-secret');
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE],
+      account: { email: 'durable@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+    codeMock.mockResolvedValue({ code: 'explicit-write-consent-code', scope: `${CALENDAR_WRITE_SCOPE} ${EMAIL_SCOPE}` });
+    let exchangeCalls = 0;
+    let refreshCalls = 0;
+
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = requestMethod(input, init);
+      if (url === 'https://worker.example/google/oauth/status' && method === 'GET') {
+        return new Response(JSON.stringify({
+          connected: true,
+          scopes: [CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE, EMAIL_SCOPE],
+          account: { email: 'durable@example.com' },
+          updatedAt: 250,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/exchange' && method === 'POST') {
+        exchangeCalls += 1;
+        return new Response(JSON.stringify({
+          connected: true,
+          accessToken: 'write-consented-access-token',
+          expiresIn: 3600,
+          scopes: [CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE, EMAIL_SCOPE],
+          account: { email: 'durable@example.com' },
+          updatedAt: 251,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/token' && method === 'POST') {
+        refreshCalls += 1;
+        return new Response(JSON.stringify({
+          connected: true,
+          accessToken: 'scope-only-refresh-token',
+          expiresIn: 3600,
+          scopes: [CALENDAR_READ_SCOPE, CALENDAR_WRITE_SCOPE, EMAIL_SCOPE],
+          account: { email: 'durable@example.com' },
+          updatedAt: 250,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    }) as unknown as typeof fetch;
+
+    await googleOAuthAuthority.authorize('calendar.events.write');
+
+    expect(codeMock).toHaveBeenCalledWith(expect.objectContaining({
+      scope: EXPECTED_SCOPE(CALENDAR_WRITE_SCOPE),
+    }));
+    expect(exchangeCalls).toBe(1);
+    expect(refreshCalls).toBe(0);
+    const persisted = JSON.parse(localStorage.getItem('elara.google.authorization.v2') ?? '{}') as { enabledCapabilities?: string[] };
+    expect(persisted.enabledCapabilities).toEqual(expect.arrayContaining(['calendar.events.read', 'calendar.events.write']));
   });
 
   it('refreshes a paired durable grant without opening GIS again after browser session loss', async () => {

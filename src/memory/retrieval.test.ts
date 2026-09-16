@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FolderState } from '../persistence/folders';
-import { isMemoryRetrievable, memoryScopeForConversation, rankAndBudgetMemories } from './retrieval';
+import { formatMemoryContext, isMemoryRetrievable, memoryScopeForConversation, rankAndBudgetMemories } from './retrieval';
 import type { DurableMemory } from './types';
 
 const makeMemory = (overrides: Partial<DurableMemory>): DurableMemory => ({
@@ -58,20 +58,32 @@ describe('canonical memory retrieval engine', () => {
     expect(result.reduce((sum, memory) => sum + memory.title.length + memory.body.length, 0)).toBeLessThanOrEqual(12);
   });
 
-  it('excludes archived, expired, and out-of-scope records', () => {
+  it('excludes archived, expired, superseded, and out-of-scope records', () => {
     const scope = { folderId: 'folder-a', includeGlobal: false, now: 10_000 };
     const active = makeMemory({ id: 'active', folderId: 'folder-a' });
     const archived = makeMemory({ id: 'archived', lifecycle: 'archived', folderId: 'folder-a' });
     const expired = makeMemory({ id: 'expired', folderId: 'folder-a', expiresAt: 5_000 });
+    const superseded = makeMemory({ id: 'superseded', folderId: 'folder-a', lifecycle: 'dormant', supersededBy: ['replacement'] });
     const other = makeMemory({ id: 'other', folderId: 'folder-b' });
     const global = makeMemory({ id: 'global', folderId: null, kind: 'CORE' });
-    const result = rankAndBudgetMemories([active, archived, expired, other, global], scope);
+    const result = rankAndBudgetMemories([active, archived, expired, superseded, other, global], scope);
     expect(result.map((memory) => memory.id)).toEqual(['active']);
     expect(isMemoryRetrievable(active, scope)).toBe(true);
     expect(isMemoryRetrievable(archived, scope)).toBe(false);
     expect(isMemoryRetrievable(expired, scope)).toBe(false);
+    expect(isMemoryRetrievable(superseded, scope)).toBe(false);
     expect(isMemoryRetrievable(other, scope)).toBe(false);
     expect(isMemoryRetrievable(global, scope)).toBe(false);
+  });
+
+  it('marks dormant and conflicted context explicitly without exposing relationship ids', () => {
+    const memory = {
+      ...makeMemory({ id: 'conflicted', lifecycle: 'dormant', conflictingMemoryIds: ['secret-internal-id'] }),
+      score: 1,
+    };
+    const context = formatMemoryContext([memory]);
+    expect(context).toContain('[CONTEXTUAL; dormant; unresolved-conflict]');
+    expect(context).not.toContain('secret-internal-id');
   });
 
   it('keeps global memories opt-in when a folder is selected', () => {

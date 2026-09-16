@@ -5,6 +5,7 @@ export class TestGoogleOAuthVault extends GoogleOAuthVault {
     refreshCipher: string;
     refreshIv: string;
     scopes: string;
+    subject: string | null;
     email: string | null;
     displayName: string | null;
     updatedAt: number;
@@ -16,6 +17,7 @@ export class TestGoogleOAuthVault extends GoogleOAuthVault {
       refreshCipher: row.refresh_cipher,
       refreshIv: row.refresh_iv,
       scopes: row.scopes,
+      subject: row.subject,
       email: row.email,
       displayName: row.display_name,
       updatedAt: row.updated_at,

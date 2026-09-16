@@ -1,7 +1,9 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../persistence/conversation';
-import { listMemories } from './store';
+import { listMemories, updateMemory } from './store';
+import { memory } from './capability';
+import { MEMORY_MAX_RELATIONSHIPS } from './normalize';
 import {
   ORGANIC_OBSERVATION_CONFIDENCE,
   ORGANIC_OBSERVATION_IMPORTANCE,
@@ -108,6 +110,33 @@ describe('bounded organic memory observer', () => {
     const target = memories.find((item) => item.kind === 'CONTEXTUAL');
     expect(target).toMatchObject({ reinforcementCount: 3, confidence: 0.84, importance: 0.47, lifecycle: 'active' });
     expect(memories.some((item) => item.kind === 'CORE')).toBe(false);
+  });
+
+  it('rolls back a new organic observation when its support target is saturated', async () => {
+    const evidence = 'I prefer the compact editor layout';
+    const target = await memory.save({
+      title: 'Established preference',
+      body: evidence,
+      kind: 'CONTEXTUAL',
+      confidence: 0.88,
+      importance: 0.6,
+      tags: ['organic', 'domain:preference'],
+    });
+    const full = Array.from({ length: MEMORY_MAX_RELATIONSHIPS }, (_, index) => `existing-${index}`);
+    await updateMemory(target.id, { supportingMemoryIds: full, reinforcementCount: 64 });
+
+    const result = await observePersistedTurn({
+      ...baseRequest(async () => ({ candidates: [{ domain: 'preference', evidence }] })),
+      messageId: 'user_message_overflow',
+    });
+    const memories = await listMemories();
+
+    expect(result).toEqual({ status: 'unavailable', count: 0 });
+    expect(memories).toHaveLength(1);
+    expect(memories[0].id).toBe(target.id);
+    expect(memories[0].supportingMemoryIds).toEqual(full);
+    expect(memories[0].reinforcementCount).toBe(64);
+    expect(memories[0].confidence).toBe(0.88);
   });
 
   it('does not infer semantic support from differently worded evidence', async () => {

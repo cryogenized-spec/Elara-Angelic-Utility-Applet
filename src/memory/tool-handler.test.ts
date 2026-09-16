@@ -2,28 +2,31 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
 import { googleToolRegistry } from '../google/tools/registry';
-import type { GoogleToolDescriptor } from '../google/tools/contracts';
+import type { GoogleToolDescriptor, GoogleToolName } from '../google/tools/contracts';
 import type { GoogleToolExecutionContext } from '../google/tools/executor';
-import { countMemories, listMemories } from './store';
+import { countMemories, getMemory, listMemories, saveMemory } from './store';
 import { memoryToolHandlers } from './tool-handler';
 
-function requireMemoryDescriptor(): GoogleToolDescriptor {
-  const found = googleToolRegistry.find((tool) => tool.name === 'memory.save');
-  if (!found) throw new Error('memory.save descriptor missing from test registry.');
+function requireMemoryDescriptor(name: GoogleToolName): GoogleToolDescriptor {
+  const found = googleToolRegistry.find((tool) => tool.name === name);
+  if (!found) throw new Error(`${name} descriptor missing from test registry.`);
   return found;
 }
 
-const descriptor = requireMemoryDescriptor();
-const handler = memoryToolHandlers['memory.save'];
-if (!handler) throw new Error('memory.save handler missing.');
+function handlerFor(name: GoogleToolName) {
+  const handler = memoryToolHandlers[name];
+  if (!handler) throw new Error(`${name} handler missing.`);
+  return handler;
+}
 
-function context(overrides: Partial<GoogleToolExecutionContext> = {}): GoogleToolExecutionContext {
+function contextFor(tool: GoogleToolName, argumentsValue: Record<string, unknown>, overrides: Partial<GoogleToolExecutionContext> = {}): GoogleToolExecutionContext {
+  const descriptor = requireMemoryDescriptor(tool);
   return {
-    tool: 'memory.save',
+    tool,
     descriptor,
     capability: 'memory.durable.local',
-    risk: 'write',
-    arguments: { title: 'Preferred layout', body: 'Remember that the user explicitly prefers the compact layout.' },
+    risk: descriptor.risk,
+    arguments: argumentsValue,
     callId: 'call_1',
     conversationId: 'thread_1',
     messageId: 'message_1',
@@ -33,7 +36,26 @@ function context(overrides: Partial<GoogleToolExecutionContext> = {}): GoogleToo
   };
 }
 
-describe('memory.save tool handler', () => {
+function refsFromLookup(value: unknown): string[] {
+  const matches = (value as { matches?: unknown }).matches;
+  if (!Array.isArray(matches)) throw new Error('Lookup result has no matches array.');
+  return matches.map((entry) => {
+    const ref = (entry as { ref?: unknown }).ref;
+    if (typeof ref !== 'string') throw new Error('Lookup result has no opaque ref.');
+    return ref;
+  });
+}
+
+async function addFolder(id: string, parentId: string | null, contextScope: 'folder' | 'global' = 'folder'): Promise<void> {
+  const now = Date.now();
+  await db.folders.put({ id, name: id, parentId, contextScope, createdAt: now, updatedAt: now });
+}
+
+async function assignThread(folderId: string | null): Promise<void> {
+  await db.folderAssignments.put({ id: 'thread_1', threadId: 'thread_1', folderId, updatedAt: Date.now() });
+}
+
+describe('memory tool handlers', () => {
   beforeEach(async () => {
     await db.transaction('rw', db.memories, db.folders, db.folderAssignments, async () => {
       await db.memories.clear();
@@ -42,56 +64,163 @@ describe('memory.save tool handler', () => {
     });
   });
 
-  it('binds provenance and folder scope from application context, not model arguments', async () => {
-    const now = Date.now();
-    await db.folders.put({ id: 'folder_1', name: 'Project', parentId: null, contextScope: 'folder', createdAt: now, updatedAt: now });
-    await db.folderAssignments.put({ id: 'thread_1', threadId: 'thread_1', folderId: 'folder_1', updatedAt: now });
+  it('binds deliberate-save provenance and folder scope from application context', async () => {
+    await addFolder('folder_1', null);
+    await assignThread('folder_1');
+    const saveHandler = handlerFor('memory.save');
 
-    const result = await handler(context());
+    const result = await saveHandler(contextFor('memory.save', { title: 'Preferred layout', body: 'Remember that the user explicitly prefers the compact layout.' }));
     const records = await listMemories();
 
     expect(result).toMatchObject({ saved: true, kind: 'CONTEXTUAL' });
+    expect(result).not.toHaveProperty('ref');
     expect(records).toHaveLength(1);
     expect(records[0]).toMatchObject({
       title: 'Preferred layout',
-      body: 'Remember that the user explicitly prefers the compact layout.',
-      kind: 'CONTEXTUAL',
       folderId: 'folder_1',
       source: { source: 'elara', conversationId: 'thread_1', messageId: 'message_1' },
     });
   });
 
-  it('replays one generation/call identity without creating a duplicate', async () => {
-    const first = await handler(context());
-    const replay = await handler(context());
+  it('returns scoped opaque lookup refs without mutating recall telemetry', async () => {
+    await addFolder('parent', null);
+    await addFolder('child', 'parent', 'global');
+    await addFolder('other', null);
+    await assignThread('child');
+    const child = await saveMemory({ title: 'Project child', body: 'Project child fact.', folderId: 'child' });
+    const parent = await saveMemory({ title: 'Project parent', body: 'Project parent fact.', folderId: 'parent' });
+    const global = await saveMemory({ title: 'Project global', body: 'Project global fact.', folderId: null });
+    const other = await saveMemory({ title: 'Project other', body: 'Project other fact.', folderId: 'other' });
+    await saveMemory({ title: 'Project observation', body: 'Project micro evidence.', kind: 'MICRO_OBSERVATION', folderId: 'child' });
 
-    expect(replay).toEqual(first);
+    const result = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'project' }));
+    const refs = refsFromLookup(result);
+    const serialized = JSON.stringify(result);
+
+    expect(refs).toHaveLength(3);
+    expect(refs.every((ref) => /^memref_[a-f0-9]{32}$/.test(ref))).toBe(true);
+    for (const durableId of [child.id, parent.id, global.id, other.id]) expect(serialized).not.toContain(durableId);
+    expect((await getMemory(child.id))?.recallCount).toBe(0);
+    expect((await getMemory(parent.id))?.recallCount).toBe(0);
+    expect((await getMemory(global.id))?.recallCount).toBe(0);
+  });
+
+  it('rejects raw durable ids and cross-generation lookup refs', async () => {
+    const target = await saveMemory({ title: 'Project preference', body: 'The user prefers compact mode.' });
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: target.id,
+      relation: 'support',
+      title: 'Evidence',
+      body: 'The user repeated the preference.',
+    }))).rejects.toThrow('reference is unavailable');
+
+    const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'compact mode' }));
+    const [ref] = refsFromLookup(lookup);
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'support',
+      title: 'Evidence',
+      body: 'The user repeated the preference.',
+    }, { generationId: 'generation_2' }))).rejects.toThrow('reference is unavailable');
+  });
+
+  it('creates supporting micro-evidence and replays without duplicate reinforcement', async () => {
+    const target = await saveMemory({ title: 'Compact layout', body: 'The user prefers compact layout.' });
+    const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'compact layout' }));
+    const [ref] = refsFromLookup(lookup);
+    const reconcileContext = contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'support',
+      title: 'Repeated preference',
+      body: 'The user explicitly selected compact layout again.',
+      tags: ['preference'],
+    });
+
+    const first = await handlerFor('memory.reconcile')(reconcileContext);
+    const replay = await handlerFor('memory.reconcile')(reconcileContext);
+    const records = await listMemories();
+    const updatedTarget = await getMemory(target.id);
+    const observations = records.filter((record) => record.kind === 'MICRO_OBSERVATION');
+
+    expect(first).toEqual(replay);
+    expect(updatedTarget?.reinforcementCount).toBe(1);
+    expect(observations).toHaveLength(1);
+    expect(updatedTarget?.supportingMemoryIds).toContain(observations[0].id);
+  });
+
+  it('revalidates scope before reconcile and rejects a ref after the thread moves', async () => {
+    await addFolder('folder_a', null);
+    await addFolder('folder_b', null);
+    await assignThread('folder_a');
+    await saveMemory({ title: 'Scoped preference', body: 'Only visible in folder A.', folderId: 'folder_a' });
+    const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'scoped preference' }));
+    const [ref] = refsFromLookup(lookup);
+    await assignThread('folder_b');
+
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'support',
+      title: 'Evidence',
+      body: 'This should not cross the new scope boundary.',
+    }))).rejects.toThrow('current scope');
     expect(await countMemories()).toBe(1);
   });
 
-  it('allows a distinct provider call to create a distinct deliberate memory', async () => {
-    await handler(context());
-    await handler(context({ callId: 'call_2', arguments: { title: 'Second choice', body: 'Remember the second explicit choice.' } }));
-    expect(await countMemories()).toBe(2);
+  it('supersedes through an opaque ref while preserving the old active record', async () => {
+    const target = await saveMemory({ title: 'Old preference', body: 'The user prefers the old layout.', kind: 'CORE' });
+    const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'old layout' }));
+    const [ref] = refsFromLookup(lookup);
+
+    const result = await handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'supersede',
+      title: 'New preference',
+      body: 'The user explicitly changed to the new layout.',
+    }));
+    const records = await listMemories();
+    const old = await getMemory(target.id);
+    const replacement = records.find((record) => record.id !== target.id);
+
+    expect(result).toMatchObject({ reconciled: true, relation: 'supersede', replacementKind: 'CONTEXTUAL' });
+    expect(old?.lifecycle).toBe('active');
+    expect(replacement?.supersedes).toContain(target.id);
+    expect(old?.supersededBy).toContain(replacement?.id);
   });
 
-  it('fails closed when authoritative turn identity is missing', async () => {
+  it('rolls back the compound reconciliation if turn authority is lost before commit', async () => {
+    const target = await saveMemory({ title: 'Stable preference', body: 'The user prefers the stable setting.' });
+    const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'stable setting' }));
+    const [ref] = refsFromLookup(lookup);
+    let checks = 0;
+    const isGenerationActive = () => {
+      checks += 1;
+      return checks < 6;
+    };
+
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'support',
+      title: 'Late evidence',
+      body: 'This mutation should roll back when the generation loses authority.',
+    }, { isGenerationActive }))).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(await countMemories()).toBe(1);
+    expect((await getMemory(target.id))?.reinforcementCount).toBe(0);
+  });
+
+  it('fails closed when save authority identity is missing or cancelled', async () => {
+    const saveHandler = handlerFor('memory.save');
     for (const overrides of [
       { conversationId: undefined },
       { messageId: undefined },
       { generationId: undefined },
       { callId: undefined },
     ]) {
-      await expect(handler(context(overrides))).rejects.toThrow(/provenance|unavailable/i);
+      await expect(saveHandler(contextFor('memory.save', { title: 'T', body: 'B' }, overrides))).rejects.toThrow(/provenance|unavailable/i);
     }
-    expect(await countMemories()).toBe(0);
-  });
-
-  it('does not write after cancellation or generation de-election', async () => {
     const controller = new AbortController();
     controller.abort();
-    await expect(handler(context({ signal: controller.signal }))).rejects.toMatchObject({ name: 'AbortError' });
-    await expect(handler(context({ isGenerationActive: () => false }))).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(saveHandler(contextFor('memory.save', { title: 'T', body: 'B' }, { signal: controller.signal }))).rejects.toMatchObject({ name: 'AbortError' });
     expect(await countMemories()).toBe(0);
   });
 });

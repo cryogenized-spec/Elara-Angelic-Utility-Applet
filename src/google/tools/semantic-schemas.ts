@@ -2,8 +2,56 @@ import { z } from 'zod';
 
 const idSchema = z.string().trim().min(1).max(500);
 const emailSchema = z.string().trim().email().max(320);
-const timestampSchema = z.string().trim().min(1).max(128);
-const timeZoneSchema = z.string().trim().min(1).max(200).optional();
+const ALL_DAY_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
+const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))?$/i;
+
+function daysInMonth(year: number, month: number): number {
+  if (month === 2) {
+    const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
+    return leap ? 29 : 28;
+  }
+  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+}
+
+function hasValidDateParts(year: number, month: number, day: number): boolean {
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month);
+}
+
+function isValidAllDayDate(value: string): boolean {
+  const match = ALL_DAY_DATE_PATTERN.exec(value);
+  if (!match) return false;
+  const [, year, month, day] = match;
+  return hasValidDateParts(Number(year), Number(month), Number(day));
+}
+
+function isValidCalendarDateTime(value: string): boolean {
+  const match = DATE_TIME_PATTERN.exec(value);
+  if (!match) return false;
+  const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] = match;
+  if (!hasValidDateParts(Number(year), Number(month), Number(day))) return false;
+  if (Number(hour) > 23 || Number(minute) > 59 || Number(second) > 59) return false;
+  if (offsetHour !== undefined && (Number(offsetHour) > 23 || Number(offsetMinute) > 59)) return false;
+  return true;
+}
+
+function isValidCalendarBoundary(value: string): boolean {
+  return isValidAllDayDate(value) || isValidCalendarDateTime(value);
+}
+
+function isValidIanaTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+const timestampSchema = z.string().trim().min(1).max(128)
+  .refine(isValidCalendarBoundary, 'Calendar boundary must be a real YYYY-MM-DD date or valid RFC 3339-style date-time.');
+const timeZoneSchema = z.string().trim().min(1).max(200)
+  .refine(isValidIanaTimeZone, 'Calendar time zone must be a valid IANA time zone.')
+  .optional();
 const concreteEtagSchema = z.string().trim().min(1).max(1024).regex(/^(?:W\/)?"[^"]+"$/, 'Calendar mutations require one concrete provider ETag.');
 const recurrenceSchema = z.array(
   z.string().trim().min(1).max(2000).regex(/^(?:RRULE|EXRULE|RDATE|EXDATE):/i, 'Recurrence entries must begin with RRULE:, EXRULE:, RDATE:, or EXDATE:.'),

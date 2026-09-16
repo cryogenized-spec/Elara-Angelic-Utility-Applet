@@ -17,6 +17,7 @@ import type { GoogleCapabilityKey } from '../google/oauth/contracts';
 import { withRuntimeContext } from './runtime-context';
 import { consumeRuntimeContextRefresh } from './runtime-context-freshness';
 import { documentToolHandlers } from '../documents/tool-handler';
+import { composeSystemInstructionWithStatus } from './memory-context';
 
 export interface GoogleToolLoopOptions {
   readonly tools?: readonly GoogleToolName[];
@@ -150,14 +151,32 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     }
   }
 
-  // One freshness decision per turn, after validation (a rejected turn is not a
-  // model invocation and records no refresh) and skipped entirely for
-  // headless callers that suppress interactive runtime context. Freshness is
-  // application-level, not per-thread. Tool continuations within the turn
-  // reuse this same instruction.
+  // One runtime-context and memory decision per elected top-level turn. Gemini
+  // Interactions treats system_instruction as interaction-scoped, so the exact
+  // composed instruction is frozen here and re-sent on every tool continuation.
+  // The provider is told memoryContext:'none' to prevent a second retrieval or
+  // mid-turn drift after a memory mutation.
   const refreshRuntimeContext = options.suppressRuntimeContext === true ? false : consumeRuntimeContextRefresh(Date.now());
-  const systemInstruction = options.suppressRuntimeContext === true ? request.systemInstruction?.trim() : withRuntimeContext(request.systemInstruction, { includeClock: refreshRuntimeContext });
-  let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction }, signal);
+  const runtimeInstruction = options.suppressRuntimeContext === true ? request.systemInstruction?.trim() : withRuntimeContext(request.systemInstruction, { includeClock: refreshRuntimeContext });
+  let systemInstruction = runtimeInstruction;
+  if (request.memoryContext !== 'none') {
+    const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
+    const memoryStartedAt = performance.now();
+    const composed = await composeSystemInstructionWithStatus(runtimeInstruction, query, request.conversationId);
+    systemInstruction = composed.instruction;
+    const durationMs = Math.max(0, performance.now() - memoryStartedAt);
+    if (composed.memoryStatus !== 'empty') {
+      yield {
+        type: 'context-activity',
+        category: 'memory',
+        label: 'Memory',
+        detail: composed.memoryStatus === 'used' ? 'Recalled relevant durable memory.' : 'Memory retrieval was unavailable; continued without it.',
+        durationMs,
+        outcome: composed.memoryStatus,
+      };
+    }
+  }
+  let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction, memoryContext: 'none' }, signal);
   let executedCalls = 0;
   let toolBudgetExhausted = false;
 

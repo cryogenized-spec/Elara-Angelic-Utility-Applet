@@ -12,7 +12,7 @@ describe('Pass 8 generation durability boundaries', () => {
     expect(statusAfterNavigation('idle')).toBe('idle');
   });
 
-  it('hands a rejecting terminal save to the turn owner without changing its identity', async () => {
+  it('hands the composite terminal durability barrier to the turn owner and preserves save rejection', async () => {
     const base: ConversationState = {
       id: 'thread-1',
       title: 'Durability',
@@ -58,7 +58,8 @@ describe('Pass 8 generation durability boundaries', () => {
     expect(status).toBe('saving');
     expect(conversation.messages.at(-1)?.text).toBe('Answer.');
     expect(structured).toBeNull();
-    expect(handedOff).toBe(savePromise);
+    expect(handedOff).not.toBeNull();
+    expect(handedOff).not.toBe(savePromise);
     if (!handedOff) throw new Error('terminal persistence was not handed off');
     await expect(handedOff).rejects.toBe(failure);
   });

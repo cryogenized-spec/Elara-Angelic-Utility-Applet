@@ -23,6 +23,10 @@ function validate(record: DurableMemory): DurableMemory {
   return result.data;
 }
 
+function assertMutationAllowed(isMutationAllowed: () => boolean): void {
+  if (!isMutationAllowed()) throw new DOMException('The memory mutation lost turn authority.', 'AbortError');
+}
+
 export async function saveMemory(input: MemoryInput): Promise<DurableMemory> {
   const now = Date.now();
   const normalized = normalizeMemoryInput(input, now);
@@ -54,12 +58,26 @@ export async function saveMemoryOnce(input: MemoryInput, provenanceNote: string,
   if (!note) throw new Error('Memory idempotency provenance is required.');
   if (input.source?.note !== note) throw new Error('Memory idempotency provenance mismatch.');
   return db.transaction('rw', db.memories, async () => {
-    if (!isMutationAllowed()) throw new DOMException('The memory mutation lost turn authority.', 'AbortError');
+    assertMutationAllowed(isMutationAllowed);
     const existing = (await table().toArray()).find((record) => record?.source?.note === note);
     if (existing) return validate(existing);
     const saved = await saveMemory(input);
-    if (!isMutationAllowed()) throw new DOMException('The memory mutation lost turn authority.', 'AbortError');
+    assertMutationAllowed(isMutationAllowed);
     return saved;
+  });
+}
+
+/**
+ * Run a compound memory mutation as one canonical transaction. Nested store
+ * calls participate in this transaction; losing turn authority anywhere before
+ * commit throws and rolls the whole compound operation back.
+ */
+export async function runMemoryMutationTransaction<T>(operation: () => Promise<T>, isMutationAllowed: () => boolean = () => true): Promise<T> {
+  return db.transaction('rw', db.memories, async () => {
+    assertMutationAllowed(isMutationAllowed);
+    const result = await operation();
+    assertMutationAllowed(isMutationAllowed);
+    return result;
   });
 }
 

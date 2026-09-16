@@ -1,4 +1,4 @@
-import { GoogleCalendarService } from '../calendar/service';
+import { GoogleCalendarService, type CalendarSendUpdates } from '../calendar/service';
 import { GoogleChatService } from '../chat/service';
 import { GoogleDocsService } from '../docs/service';
 import { GoogleDriveService } from '../drive/service';
@@ -60,6 +60,12 @@ function valuesArg(args: Record<string, unknown>): readonly (readonly unknown[])
   if (!Array.isArray(value) || value.some((row) => !Array.isArray(row))) throw new Error('Google Sheets values must be an array of rows.');
   return value as readonly (readonly unknown[])[];
 }
+function calendarSendUpdates(args: Record<string, unknown>): CalendarSendUpdates | undefined {
+  const value = args.sendUpdates;
+  if (value === undefined) return undefined;
+  if (value !== 'all' && value !== 'externalOnly') throw new Error('Google Calendar sendUpdates must be all or externalOnly.');
+  return value;
+}
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
   const chunkSize = 0x8000;
@@ -72,18 +78,51 @@ function bytesToBase64(bytes: Uint8Array): string {
 export const googleServiceToolHandlers: GoogleToolHandlers = {
   ...googleReadToolHandlers,
 
-  'calendar.createEvent': async ({ arguments: raw }) => {
+  'calendar.createEvent': async ({ arguments: raw, callId }) => {
     const args = objectArgs(raw);
     const attendees = stringArrayArg(args, 'attendees');
+    const recurrence = stringArrayArg(args, 'recurrence');
     return calendar.createSemanticEvent({
       calendarId: stringArg(args, 'calendarId', false),
       summary: stringArg(args, 'summary')!,
       start: stringArg(args, 'start')!,
       end: stringArg(args, 'end')!,
+      timeZone: stringArg(args, 'timeZone', false),
       location: stringArg(args, 'location', false),
       description: stringArg(args, 'description', false),
       ...(attendees ? { attendees } : {}),
+      ...(recurrence ? { recurrence } : {}),
+      sendUpdates: calendarSendUpdates(args),
+      ...(callId ? { idempotencyKey: callId } : {}),
     });
+  },
+  'calendar.updateEvent': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    const attendees = stringArrayArg(args, 'attendees');
+    const recurrence = stringArrayArg(args, 'recurrence');
+    return calendar.updateSemanticEvent({
+      calendarId: stringArg(args, 'calendarId', false),
+      eventId: stringArg(args, 'eventId')!,
+      etag: stringArg(args, 'etag')!,
+      summary: stringArg(args, 'summary', false),
+      start: stringArg(args, 'start', false),
+      end: stringArg(args, 'end', false),
+      timeZone: stringArg(args, 'timeZone', false),
+      location: stringArg(args, 'location', false),
+      description: stringArg(args, 'description', false),
+      ...(attendees ? { attendees } : {}),
+      ...(recurrence ? { recurrence } : {}),
+      sendUpdates: calendarSendUpdates(args),
+    });
+  },
+  'calendar.deleteEvent': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return calendar.deleteEvent(
+      stringArg(args, 'calendarId', false),
+      stringArg(args, 'eventId')!,
+      stringArg(args, 'etag')!,
+      calendarSendUpdates(args),
+    );
   },
 
   'tasks.createTask': async ({ arguments: raw }) => {

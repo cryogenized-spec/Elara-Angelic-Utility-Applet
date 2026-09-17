@@ -58,6 +58,13 @@ const recurrenceSchema = z.array(
   z.string().trim().min(1).max(2000).regex(/^(?:RRULE|EXRULE|RDATE|EXDATE):/i, 'Recurrence entries must begin with RRULE:, EXRULE:, RDATE:, or EXDATE:.'),
 ).max(20).optional();
 const sendUpdatesSchema = z.enum(['all', 'externalOnly']).optional();
+const taskTitleSchema = z.string().trim().min(1).max(1024);
+const taskNotesSchema = z.string().trim().max(8192);
+const taskScheduledDateSchema = z.string().trim().refine(
+  isValidAllDayDate,
+  'Google Tasks scheduledDate must be a real YYYY-MM-DD date. Tasks does not support time-of-day scheduling through this field.',
+);
+const taskStatusSchema = z.enum(['needsAction', 'completed']);
 
 function isTimedValue(value: string | undefined): boolean {
   return value?.includes('T') ?? false;
@@ -156,6 +163,23 @@ const calendarUpdateSchema = z.object({
   }
 });
 
+const taskUpdateSchema = z.object({
+  taskListId: idSchema,
+  taskId: idSchema,
+  title: taskTitleSchema.optional(),
+  notes: taskNotesSchema.optional(),
+  scheduledDate: taskScheduledDateSchema.optional(),
+  clearScheduledDate: z.boolean().optional(),
+  status: taskStatusSchema.optional(),
+}).strict().superRefine((value, context) => {
+  if (value.scheduledDate !== undefined && value.clearScheduledDate) {
+    context.addIssue({ code: 'custom', path: ['clearScheduledDate'], message: 'A task update cannot set and clear scheduledDate in the same call.' });
+  }
+  if (value.title === undefined && value.notes === undefined && value.scheduledDate === undefined && !value.clearScheduledDate && value.status === undefined) {
+    context.addIssue({ code: 'custom', message: 'Google Tasks update requires at least one task field change.' });
+  }
+});
+
 export const semanticToolArgumentSchemas = {
   'calendar.createEvent': calendarCreateSchema,
   'calendar.updateEvent': calendarUpdateSchema,
@@ -164,6 +188,38 @@ export const semanticToolArgumentSchemas = {
     eventId: z.string().trim().min(1).max(1024),
     etag: concreteEtagSchema,
     sendUpdates: sendUpdatesSchema,
+  }).strict(),
+  'tasks.createTaskList': z.object({
+    title: taskTitleSchema,
+  }).strict(),
+  'tasks.updateTaskList': z.object({
+    taskListId: idSchema,
+    title: taskTitleSchema,
+  }).strict(),
+  'tasks.deleteTaskList': z.object({
+    taskListId: idSchema,
+  }).strict(),
+  'tasks.createTask': z.object({
+    taskListId: idSchema,
+    title: taskTitleSchema,
+    notes: taskNotesSchema.optional(),
+    scheduledDate: taskScheduledDateSchema.optional(),
+    parent: idSchema.optional(),
+    previous: idSchema.optional(),
+  }).strict(),
+  'tasks.updateTask': taskUpdateSchema,
+  'tasks.moveTask': z.object({
+    taskListId: idSchema,
+    taskId: idSchema,
+    parent: idSchema.optional(),
+    previous: idSchema.optional(),
+  }).strict(),
+  'tasks.deleteTask': z.object({
+    taskListId: idSchema,
+    taskId: idSchema,
+  }).strict(),
+  'tasks.clearCompleted': z.object({
+    taskListId: idSchema,
   }).strict(),
   'gmail.sendMessage': z.object({
     to: z.array(emailSchema).min(1).max(25),

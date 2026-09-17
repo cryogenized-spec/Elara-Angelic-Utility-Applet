@@ -135,6 +135,33 @@ describe('Calendar date and timezone trust boundaries', () => {
     })).toThrow('both include UTC offsets or both rely on the explicit time zone');
   });
 
+  it('requires both timing boundaries whenever an event time is updated', async () => {
+    expect(() => validateSemanticToolArguments('calendar.updateEvent', {
+      eventId: 'evt-1',
+      etag: '"etag-1"',
+      start: '2026-09-22T09:00:00+02:00',
+    })).toThrow('requires both start and end boundaries');
+
+    expect(() => validateSemanticToolArguments('calendar.updateEvent', {
+      eventId: 'evt-1',
+      etag: '"etag-1"',
+      end: '2026-09-22T10:00:00+02:00',
+    })).toThrow('requires both start and end boundaries');
+
+    const { service, authorize } = serviceWithoutNetwork();
+    await expect(service.updateSemanticEvent({
+      eventId: 'evt-1',
+      etag: '"etag-1"',
+      start: '2026-09-22T09:00:00+02:00',
+    })).rejects.toThrow('requires both start and end boundaries');
+    await expect(service.updateSemanticEvent({
+      eventId: 'evt-1',
+      etag: '"etag-1"',
+      end: '2026-09-22T10:00:00+02:00',
+    })).rejects.toThrow('requires both start and end boundaries');
+    expect(authorize).not.toHaveBeenCalled();
+  });
+
   it('accepts consistent all-day, offset-bearing, and timezone-relative pairs', () => {
     expect(() => validateSemanticToolArguments('calendar.createEvent', {
       summary: 'All day',

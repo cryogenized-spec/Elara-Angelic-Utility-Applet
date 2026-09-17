@@ -39,6 +39,7 @@ function isValidCalendarBoundary(value: string): boolean {
 }
 
 function isValidIanaTimeZone(value: string): boolean {
+  if (/^[+-]/.test(value)) return false;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
     return true;
@@ -77,6 +78,23 @@ function requireTimezoneForOffsetFreeBoundary(
   }
 }
 
+function requireMatchingBoundaryModes(
+  start: string | undefined,
+  end: string | undefined,
+  context: z.RefinementCtx,
+): void {
+  if (start === undefined || end === undefined) return;
+  const startTimed = isTimedValue(start);
+  const endTimed = isTimedValue(end);
+  if (startTimed !== endTimed) {
+    context.addIssue({ code: 'custom', path: ['end'], message: 'Calendar start/end must both be date-times or both be all-day dates.' });
+    return;
+  }
+  if (startTimed && hasExplicitOffset(start) !== hasExplicitOffset(end)) {
+    context.addIssue({ code: 'custom', path: ['end'], message: 'Calendar timed start/end must both include UTC offsets or both rely on the explicit time zone.' });
+  }
+}
+
 const calendarCreateSchema = z.object({
   calendarId: idSchema.optional(),
   summary: z.string().trim().min(1).max(1000),
@@ -89,6 +107,7 @@ const calendarCreateSchema = z.object({
   recurrence: recurrenceSchema,
   sendUpdates: sendUpdatesSchema,
 }).strict().superRefine((value, context) => {
+  requireMatchingBoundaryModes(value.start, value.end, context);
   requireTimezoneForOffsetFreeBoundary(value.start, value.timeZone, 'start', context);
   requireTimezoneForOffsetFreeBoundary(value.end, value.timeZone, 'end', context);
   if (value.recurrence?.length && (isTimedValue(value.start) || isTimedValue(value.end)) && !value.timeZone) {
@@ -114,6 +133,7 @@ const calendarUpdateSchema = z.object({
     .some((field) => value[field as keyof typeof value] !== undefined);
   if (!hasEventChange) context.addIssue({ code: 'custom', message: 'Calendar update requires at least one event field change.' });
 
+  requireMatchingBoundaryModes(value.start, value.end, context);
   requireTimezoneForOffsetFreeBoundary(value.start, value.timeZone, 'start', context);
   requireTimezoneForOffsetFreeBoundary(value.end, value.timeZone, 'end', context);
 

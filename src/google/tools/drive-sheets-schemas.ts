@@ -8,6 +8,25 @@ const valuesSchema = z.array(rowSchema).min(1).max(1000);
 const updateRequestSchema = z.record(z.string(), z.unknown());
 const cellValueSchema = z.string().max(50_000);
 
+function isSingleCellA1(value: string): boolean {
+  const normalized = value.trim();
+  const bang = normalized.lastIndexOf('!');
+  const cell = bang >= 0 ? normalized.slice(bang + 1) : normalized;
+  const sheet = bang >= 0 ? normalized.slice(0, bang) : undefined;
+  if (sheet !== undefined) {
+    if (!sheet || sheet.includes('!') || sheet.includes(':') || sheet.includes(',')) return false;
+    const startsQuoted = sheet.startsWith("'");
+    const endsQuoted = sheet.endsWith("'");
+    if (startsQuoted !== endsQuoted) return false;
+  }
+  return /^\$?[A-Za-z]{1,3}\$?[1-9]\d*$/.test(cell);
+}
+
+const singleCellA1Schema = a1RangeSchema.refine(
+  isSingleCellA1,
+  'Google Sheets updateCell requires one A1 cell reference, not a range, row, column, or named range.',
+);
+
 export const driveSheetsToolArgumentSchemas = {
   'drive.searchFiles': z.object({
     query: z.string().trim().max(2000).optional(),
@@ -32,7 +51,6 @@ export const driveSheetsToolArgumentSchemas = {
       name: z.string().trim().min(1).max(500).optional(),
       description: z.string().max(2000).optional(),
       starred: z.boolean().optional(),
-      trashed: z.boolean().optional(),
     }).strict().refine((value) => Object.keys(value).length > 0, 'At least one file field is required.'),
   }).strict(),
   'drive.moveFile': z.object({
@@ -46,7 +64,7 @@ export const driveSheetsToolArgumentSchemas = {
   'sheets.appendRows': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema, values: valuesSchema }).strict(),
   'sheets.updateCell': z.object({
     spreadsheetId: fileIdSchema,
-    range: a1RangeSchema,
+    range: singleCellA1Schema,
     value: cellValueSchema,
   }).strict(),
   'sheets.insertRows': z.object({

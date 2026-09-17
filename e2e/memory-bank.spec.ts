@@ -16,6 +16,32 @@ async function createMemory(page: Page, title: string, body: string): Promise<vo
   await expect(page.locator('.memory-card').filter({ hasText: title }).first()).toBeVisible();
 }
 
+async function seedMalformedMemory(page: Page, id: string): Promise<void> {
+  await page.evaluate(async (corruptId) => {
+    const request = indexedDB.open('elara-angelic-utility-applet');
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const transaction = database.transaction('memories', 'readwrite');
+        transaction.objectStore('memories').put({
+          id: corruptId,
+          title: 'Malformed browser fixture',
+          updatedAt: Date.now(),
+          confidence: 5,
+        });
+        transaction.oncomplete = () => resolve();
+        transaction.onerror = () => reject(transaction.error);
+        transaction.onabort = () => reject(transaction.error);
+      });
+    } finally {
+      database.close();
+    }
+  }, id);
+}
+
 test('Memory Bank landmarks and audit stay on the canonical store', async ({ page }) => {
   await openMemoryBank(page);
   await createMemory(page, 'Pass 5 duplicate', 'A deliberately duplicated durable fact.');
@@ -40,6 +66,25 @@ test('Memory Bank landmarks and audit stay on the canonical store', async ({ pag
   await expect(page.locator('.memory-card')).toHaveCount(2);
 });
 
+test('Memory Bank quarantines a malformed row without hiding healthy memories and repairs it explicitly', async ({ page }) => {
+  await openMemoryBank(page);
+  await createMemory(page, 'Healthy browser memory', 'This valid record must remain usable beside corruption.');
+  await seedMalformedMemory(page, 'memory_corrupt_browser');
+
+  await openMemoryBank(page);
+  await expect(page.locator('.memory-card').filter({ hasText: 'Healthy browser memory' })).toBeVisible();
+  const integrity = page.locator('section.memory-maintenance').filter({ hasText: 'Store integrity needs attention' });
+  await expect(integrity).toContainText('1 malformed record quarantined');
+  await expect(integrity).toContainText('memory_corrupt_browser');
+
+  page.once('dialog', (dialog) => dialog.accept());
+  await integrity.getByRole('button', { name: 'Remove invalid record' }).click();
+
+  await expect(page.locator('section.memory-maintenance').filter({ hasText: 'Store integrity needs attention' })).toHaveCount(0);
+  await expect(page.locator('.memory-card').filter({ hasText: 'Healthy browser memory' })).toBeVisible();
+  await expect(page.getByText(/1 valid · 1 stored · canonical store/)).toBeVisible();
+});
+
 test('Memory Bank exports locally and imports through the guarded archive boundary', async ({ page }) => {
   test.setTimeout(25_000);
   await openMemoryBank(page);
@@ -56,7 +101,7 @@ test('Memory Bank exports locally and imports through the guarded archive bounda
   await expect(page.getByText(/1 memories · 0 CORE records will restart as CONTEXTUAL/)).toBeVisible();
   await page.getByRole('button', { name: 'Import 1' }).click();
   await expect(page.getByRole('status')).toContainText('Imported 1 memories');
-  await expect(page.getByText(/2 stored · canonical store/)).toBeVisible();
+  await expect(page.getByText(/2 valid · 2 stored · canonical store/)).toBeVisible();
 
   await page.getByLabel('Filter').selectOption('provenance:imported');
   await expect(page.locator('.memory-card')).toHaveCount(1);

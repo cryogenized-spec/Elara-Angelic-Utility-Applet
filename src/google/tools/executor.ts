@@ -112,7 +112,7 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     }
     case 'tasks.createTaskList': return `Create Google Tasks list “${value(args, 'title') ?? 'Untitled'}”.`;
     case 'tasks.updateTaskList': return `Rename Google Tasks list ${value(args, 'taskListId') ?? 'selected list'} to “${value(args, 'title') ?? 'Untitled'}”.`;
-    case 'tasks.deleteTaskList': return `Delete Google Tasks list ${value(args, 'taskListId') ?? 'selected list'} and the tasks it contains.`;
+    case 'tasks.deleteTaskList': return `Delete Google Tasks list ${value(args, 'taskListId') ?? 'selected list'} and the tasks it contains. If any contained task is assigned from Google Docs or Chat, Google may also delete that originating assignment.`;
     case 'tasks.createTask': {
       const title = value(args, 'title') ?? 'untitled task';
       const scheduledDate = value(args, 'scheduledDate');

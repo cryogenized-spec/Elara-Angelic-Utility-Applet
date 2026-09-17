@@ -280,12 +280,10 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     const name = stringArg(patch, 'name', false);
     const description = stringArg(patch, 'description', false);
     const starred = optionalBoolean(patch, 'starred');
-    const trashed = optionalBoolean(patch, 'trashed');
     return drive.updateFile(stringArg(args, 'fileId')!, {
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(starred !== undefined ? { starred } : {}),
-      ...(trashed !== undefined ? { trashed } : {}),
     });
   },
   'drive.moveFile': async ({ arguments: raw }) => {
@@ -312,12 +310,12 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'sheets.insertRows': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return sheets.insertRows(
-      stringArg(args, 'spreadsheetId')!,
-      optionalNumber(args, 'sheetId')!,
-      optionalNumber(args, 'startIndex')!,
-      optionalNumber(args, 'count')!,
-    );
+    const spreadsheetId = stringArg(args, 'spreadsheetId')!;
+    const sheetId = optionalNumber(args, 'sheetId')!;
+    const startIndex = optionalNumber(args, 'startIndex')!;
+    const count = optionalNumber(args, 'count')!;
+    await sheets.insertRows(spreadsheetId, sheetId, startIndex, count);
+    return { inserted: true, spreadsheetId, sheetId, startIndex, count };
   },
   'sheets.batchUpdate': async ({ arguments: raw }) => {
     const args = objectArgs(raw);

@@ -76,6 +76,7 @@ describe('Calendar provider boundary hardening', () => {
       eventId: 'event-1',
       etag: '"etag-1"',
       start: '2026-09-22T09:00:00',
+      end: '2026-09-22T10:00:00',
     })).rejects.toThrow('explicit time zone');
     expect(authorize).not.toHaveBeenCalled();
   });

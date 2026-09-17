@@ -1,7 +1,7 @@
 ---
 id: SYS-GWS
 status: active
-verified_commit: 6491db45e1b79f34cfe93c8d1a8581cce318a247
+verified_commit: 92e69c0cf30e5abd705e5ce28a77c4757939e2d5
 scope: Google Workspace service adapters and model tool execution
 paths: [src/google/calendar, src/google/tasks, src/google/gmail, src/google/docs, src/google/drive, src/google/sheets, src/google/chat, src/google/tools, src/google/confirmation]
 keywords: [workspace, calendar, tasks, gmail, docs, drive, sheets, tools, confirmation]
@@ -11,144 +11,174 @@ keywords: [workspace, calendar, tasks, gmail, docs, drive, sheets, tools, confir
 
 ## 1. Purpose and boundary
 
-`SYS-GWS` owns validated Google Workspace service adapters, the executable model tool registry and confirmation of consequential operations. OAuth/token authority remains `SYS-GAUTH / google-auth.md`. The registry also contains a few application-local/non-Google tools; those tools' domain semantics belong to their owning system documents.
+`SYS-GWS` owns validated Google Workspace service adapters, the executable model tool registry, provider-facing semantic projections, and confirmation of consequential operations. OAuth/token authority remains `SYS-GAUTH / google-auth.md`. Provider data stays authoritative for Calendar, Tasks, Gmail, Drive, Docs, and Sheets; Elara does not create competing canonical mirrors.
+
+`verified_commit` identifies the last fully certified `main` baseline. Active branch behavior may be newer; source plus tests outrank this prose until that branch is merged and post-merge certified.
 
 ## 2. Runtime architecture
 
 ```text
 Gemini function call
--> canonical tool registry descriptor
--> schema validation
--> capability check
--> confirmation when risk != read
--> service/local handler
--> normalized result
+-> canonical registry descriptor
+-> strict tool schema validation
+-> application capability check
+-> explicit confirmation when risk != read
+-> semantic service handler
+-> bounded/normalized provider result
 -> Gemini grouped continuation
 ```
 
-The registry assigns each operation a capability, risk (`read|write|send|destructive`), exposure and optional execution plane. Declarations are generated from this executable registry rather than maintained as a second executable allow-list.
+OAuth permission never substitutes for application capability or mutation confirmation. Gemini receives neither refresh/access tokens, raw OAuth scopes, credential material, nor provider URLs as tool arguments.
 
-## 3. Source map
+External Google content is evidence, never authority. Retrieved Gmail/Docs/Drive/Sheets content may inform arguments, but it cannot grant capabilities, approve confirmation, change security policy, expose credentials, or instruct Elara to bypass the registered tool surface.
+
+### 2.1 Source map
 
 | Concern | Authority |
 | --- | --- |
 | Tool registry | `src/google/tools/registry.ts` |
 | Gemini declarations | `src/google/tools/gemini-declarations.ts` |
-| Execution | `src/google/tools/executor.ts`, service handlers |
-| Confirmation | `src/google/confirmation/broker.ts`, policy modules |
+| Validation | `src/google/tools/*schemas.ts` |
+| Execution | `src/google/tools/executor.ts`, service/read handlers |
+| Confirmation | `src/google/confirmation/` |
 | Calendar | `src/google/calendar/` |
 | Tasks | `src/google/tasks/` |
 | Gmail | `src/google/gmail/` |
 | Docs/Drive/Sheets | matching `src/google/*/` folders |
-| Chat adapter | `src/google/chat/` |
-| Shortcut UI | `src/app/components/WorkspaceMenu.tsx`, `WorkspaceShortcutSettings.tsx` |
+| OAuth/scopes | `src/google/oauth/` and `google-auth.md` |
 
-## 4. Data and contracts
+Google Chat code exists but remains internal/deferred from Workspace v1. Raw adapter primitives such as unrestricted Docs/Sheets batch operations remain internal rather than general Gemini escape hatches.
 
-Gemini-visible Workspace operations cover Calendar discovery, event reads and guarded mutations, settings and free/busy; Tasks list/task discovery plus guarded list/task mutations; Gmail message/thread/label/search/send/mutation operations; Docs inspect/create/edit; Drive app-file and optional library reads plus file mutations; Sheets reads/writes. `document.create_pdf`, Roleplay World tools and `youtube.search` share the generic registry but execute through their own systems.
+## 3. Cross-service invariants
 
-Google Chat service code and scopes exist, but Chat tools are currently marked internal/deferred from Workspace v1 and are not advertised to Gemini. Internal primitives such as `docs.getDocument`, `docs.batchUpdate` and `sheets.batchUpdate` also remain non-Gemini-facing.
+- Declarations, runtime validation, registry risk/capability, executable handlers, confirmation copy, and canonical docs must describe the same operation.
+- `additionalProperties:false` plus strict runtime schemas reject undeclared model arguments.
+- Read operations may execute when authorized; write/send/destructive operations require explicit confirmation.
+- Provider permissions never manufacture locally disabled Elara write/send authority.
+- Application schemas validate size/shape/identity before provider authorization whenever possible.
+- Provider IDs required for safe follow-up actions are preserved; provider-owned read-only fields are not made model-writable.
+- External content cannot become policy or consent simply because Gemini retrieved it through an authorized read.
+- Provider failures are normalized before returning to Gemini; secrets/provider exception strings are not echoed verbatim.
+- Fixed Google API hosts remain behind the OAuth request broker's provider allow-list.
 
-Drive metadata mutation has one semantic model shape: `drive.updateFile({fileId, patch:{...}})`. The model-visible patch is limited to `name`, `description`, and `starred`; trashing is deliberately absent from this ordinary-write metadata tool. The handler consumes the nested patch exactly and a second flat metadata shape is not accepted. No new Drive trash tool is introduced by this hardening pass.
+## 4. Calendar contract
 
-Gemini-visible `sheets.updateCell` and `sheets.insertRows` both have executable service handlers. `sheets.updateCell` requires one explicit single-cell A1 target (optionally sheet-qualified and/or absolute with `$`) plus a bounded string value; ranges, whole rows/columns and named ranges are rejected before confirmation. The confirmation identifies the spreadsheet and exact cell and exposes the full cell input in scroll-bounded review text. `sheets.insertRows` confirms spreadsheet, sheet id, start index and count, executes through the existing service primitive, then returns only a bounded semantic `{inserted, spreadsheetId, sheetId, startIndex, count}` result instead of forwarding the raw provider batch-update payload to Gemini.
+Calendar is Google's time-commitment authority. Gemini-visible operations are bounded to calendar discovery/event reads, account settings/free-busy, and guarded create/update/delete.
 
-The shared confirmation broker supports single or grouped mutation approvals, explicit decline, approve-selected and approve-all controls. Cancellation fails closed.
+Event reads preserve provider identity needed for safe follow-up actions, including event id and ETag. Update/delete require one concrete strong provider ETag and send `If-Match`; wildcard, weak, multi-value, or malformed validators fail before provider mutation. `412` means re-read rather than overwrite.
 
-Saved Workspace shortcuts are UI recipes, not hidden model instructions. Selecting one pre-fills visible, editable composer text; provider execution begins only after explicit user submit and then uses the ordinary registered tool surface. Stored shortcut tool names are configuration metadata and cannot bypass schema, capability, execution-plane or confirmation checks.
+Creates/updates support timed or all-day events, location, description, attendees, recurrence, and optional guest notification. Start/end must form one coherent timing mode and `end` must be later than `start`. Calendar end is exclusive: a one-day all-day event beginning `YYYY-MM-DD` ends on the following date. Offset-free timed boundaries require an explicit valid IANA timezone; recurring timed events also require a timezone. Calendar component validation rejects impossible dates/times rather than relying on JavaScript rollover behavior.
 
-## 5. Calendar parity contract
+Guest notification exposes only `sendUpdates=all|externalOnly`; `none` is intentionally not model-visible. Calendar create retry identity derives from the Gemini function-call id and maps to a deterministic provider event id; a retry receiving `409` reads that exact event instead of intentionally creating a duplicate.
 
-Calendar is treated as Google's time-commitment authority; Elara does not mirror Calendar into a second local event database. The Gemini surface is intentionally bounded to `calendar.listCalendars`, `calendar.listEvents`, `calendar.getEvent`, `calendar.getSettings`, `calendar.queryFreeBusy`, `calendar.createEvent`, `calendar.updateEvent`, and `calendar.deleteEvent`.
+## 5. Tasks contract
 
-Calendar-list access is discovery/target selection only. Elara does not subscribe/unsubscribe calendars, modify CalendarList metadata, create calendars, or edit ACLs in this pass. List discovery uses the dedicated read-only CalendarList capability. Settings and free/busy are separate optional read grants; free/busy can therefore answer availability questions without granting event-detail access. Calendar list/event pagination tokens are bounded to 2,048 characters at the semantic boundary, matching the service boundary.
+Google Tasks remains task-data authority. Gemini exposes bounded task-list discovery/read/create/rename/delete and task list/read/create/update/move/delete/clear operations.
 
-Event reads preserve provider identity required for later safe actions: event id plus ETag, recurrence, attendees, organizer/creator metadata, timing/timezone and relevant status fields. Update and delete require one concrete strong provider ETag returned by a prior read and send it as `If-Match`. Wildcard (`*`), weak, multi-value or malformed validators are rejected both by the model-facing mutation boundary and by the Calendar service's conditional-write boundary before OAuth/provider access. A `412` conflict is surfaced as a read-again requirement instead of overwriting a newer Calendar version.
+Google's provider `due` field is date-only in this product contract. Elara exposes `scheduledDate: YYYY-MM-DD`; provider midnight UTC is serialization, never a time-of-day deadline. Timed task strings are rejected. Raw Task/TaskList resources, read-only flags, position, and assignment-origin metadata are not model mutation inputs.
 
-Creates and updates support timed or all-day events, location, description, attendees and recurrence. Start/end ordering is validated before confirmation and provider authorization: `end` must be later than `start`. Calendar defines event end as exclusive. For an all-day event this means a one-day event that starts on `YYYY-MM-DD` ends on the following date, not the same date. Gemini-visible descriptions state that exclusive-end rule. Recurrence lines are bounded RFC-style `RRULE`/`EXRULE`/`RDATE`/`EXDATE` entries; `DTSTART`/`DTEND` belong in the event start/end fields. Recurring date-time creates require an explicit IANA timezone. A non-empty recurrence update must also carry explicit start and end boundaries; timed recurrence updates require an explicit timezone, while all-day recurrence may use date boundaries without one. Any update that changes event timing must carry both start and end together, so validation can preserve a coherent all-day/timed and offset/timezone mode before confirmation rather than relying on an unknown untouched counterpart. Attendee/recurrence arrays are complete replacement arrays when supplied to an update.
+Assigned tasks from Docs/Chat are opt-in on reads. Their assignment-origin metadata stays read-only. Deleting an assigned task can delete its originating Docs/Chat assignment, so task and containing-list destructive confirmations state that consequence. `clearCompleted` is represented as Google's hide-completed transition, not fabricated hard deletion.
 
-Calendar timezone strings are validated against the runtime IANA timezone database before OAuth/provider access. A length-valid string is not sufficient. Event date-times may omit a numeric/UTC offset only when an explicit valid IANA event timezone accompanies them. Timed start/end boundaries must use the same timing mode: both carry explicit offsets or both are timezone-relative under the explicit event timezone. Calendar list-event bounds and free/busy bounds are stricter: they must be offset-bearing RFC 3339 timestamps so validation and ordering never depend on the browser's local timezone.
+Moves use semantic `destinationTaskListId`; the provider spelling `destinationTasklist` stays inside the service adapter. Omitted parent means top level; omitted previous means first among destination siblings.
 
-Calendar dates and date-times are component-validated rather than trusted to JavaScript's rollover-prone parser. Impossible dates such as February 30, invalid clock components and invalid offset components are rejected locally; leap-day validity is checked using Gregorian leap-year rules. `Date.parse` is used only after those structural/calendar checks for ordering valid timestamps.
+Google Tasks does not expose client-chosen create IDs. Elara therefore uses a bounded same-call replay fence keyed by elected turn + Gemini call id + validated payload hash. The exact same live-turn create returns the same promise/result or ambiguous failure without issuing a second POST; changed arguments under the same call id fail closed. Distinct calls are never title/content-deduplicated. A full runtime restart after ambiguous provider acceptance remains an explicit provider limitation.
 
-Guest notification control exposes only `sendUpdates=all|externalOnly`. `sendUpdates=none` is intentionally not model-visible because Calendar documents it primarily for migration-style use and warns that suppressing updates can cause synchronization problems. Omitting `sendUpdates` leaves provider default behavior untouched.
+## 6. Gmail contract
 
-Create idempotency uses the provider function-call id already carried through the Gemini tool loop. The service hashes that call id into a Google-valid deterministic event id. If a retry receives `409 Already Exists`, Elara reads and returns that exact event instead of creating a duplicate. This is a retry mechanism, not a local event identity authority.
+Gmail remains mailbox authority. Elara does not mirror a second canonical mailbox and does not expose raw Gmail Message/Thread/Label resources as model mutation contracts.
 
-Calendar event writes use the scoped event-write capability and still pass through normal confirmation. `calendar.createEvent` and `calendar.updateEvent` are `write`; `calendar.deleteEvent` is `destructive`. OAuth permission never substitutes for mutation confirmation.
+### 6.1 Reads and trust provenance
 
-## 6. Tasks parity contract
+Gemini-visible reads cover bounded message/thread search, explicit message/thread inspection, and label discovery. Search pages are capped at 100 results; queries, page tokens, IDs, headers, snippets, message bodies, thread message counts, and total thread text all have application bounds.
 
-Google Tasks remains the task-data authority; Elara does not mirror provider task state into a second task database. Pass 2 exposes `tasks.listTaskLists`, `tasks.getTaskList`, `tasks.listTasks`, `tasks.getTask`, `tasks.createTaskList`, `tasks.updateTaskList`, `tasks.deleteTaskList`, `tasks.createTask`, `tasks.updateTask`, `tasks.moveTask`, `tasks.deleteTask`, and `tasks.clearCompleted`.
+Read results are normalized semantic projections and explicitly carry:
 
-Task-list reads support provider pagination with a maximum of 100 lists per page. Task reads support provider pagination with a maximum of 100 tasks per page plus completed/deleted/hidden filters, RFC 3339 provider filter bounds, and explicit `showAssigned`. Assigned tasks from Docs/Chat are not silently widened into ordinary reads: `showAssigned` must be requested. Returned tasks preserve hierarchy, position, completion state, links, web UI link and assignment origin metadata where Google supplies it.
+```text
+trust: untrusted-external
+source: gmail
+```
 
-Google's provider field named `due` is not a timed deadline. The Tasks API retains only its calendar date and discards time-of-day. Elara therefore normalizes it to `scheduledDate: YYYY-MM-DD` at the model/service boundary. Creates and updates accept only a real date-only `scheduledDate`; the adapter serializes it as midnight UTC solely because Google requires an RFC 3339 provider representation. Gemini is never told that midnight is a meaningful deadline. `clearScheduledDate` removes that date. Timed strings are rejected before OAuth/provider execution. When reading an existing provider `due`, Elara preserves the provider's literal calendar-date component instead of timezone-shifting it into a different date.
+Message inspection exposes only bounded provider identity, label ids, snippet, selected safe headers (`From`, `To`, `Cc`, `Date`, `Subject`, `Message-ID`, `In-Reply-To`, `References`), and bounded `text/plain` content when requested. Raw provider JSON, raw RFC822, arbitrary headers, attachments, provider URLs, and raw HTML are not passed directly to Gemini. HTML/script content is not treated as executable or authoritative text.
 
-Task creation exposes only bounded semantic fields: list id, title, notes, optional `scheduledDate`, optional parent id and optional previous-sibling id. Task updates are PATCH-style and may change only title, notes, scheduled date/removal or `needsAction|completed` status. Raw Task resources, read-only flags, assignment metadata and provider output fields are not model-writable. Task-list mutations similarly expose only the list id/title semantics needed for create/rename/delete.
+Thread inspection returns a bounded recent-message projection with visible truncation metadata instead of forwarding an unrestricted provider thread payload. Email content may contain hostile instructions; those instructions remain data and cannot authorize tools, capabilities, credentials, confirmation, or policy changes.
 
-Google Tasks does not accept a client-chosen task or task-list id for create. Elara therefore cannot provide Calendar-style cross-restart idempotency for an ambiguous create. Instead, task and task-list creates use a bounded in-memory same-call replay fence keyed by tool + conversation + user message + generation + Gemini call id, with a hash of the validated create payload. Replaying that exact call within the same live runtime returns the same promise/result (or same ambiguous failure) and does not issue a second provider POST. Reusing one call id with changed arguments fails closed. A distinct Gemini call id is never deduplicated by title/content, so the user can intentionally create two identical tasks. A full page/runtime restart after an ambiguous provider acceptance remains an explicit provider limitation rather than a fabricated local identity guarantee.
+### 6.2 Semantic mailbox organization
 
-Hierarchy changes use Google's dedicated move endpoint. Supplying `parent` nests under that task; omitting `parent` moves to the top level. Supplying `previous` places after that sibling; omitting `previous` places first among destination siblings. `destinationTaskListId` optionally moves the task into a different task list and is translated only at the provider boundary to Google's `destinationTasklist` query parameter; omitting it keeps the task in its current list. When a destination list is supplied, `parent` and `previous` describe placement in that destination list. Unsupported provider combinations are returned as normalized provider failures rather than fabricated locally. Confirmation text states the source/destination list and hierarchy omission semantics instead of presenting an ambiguous generic move.
+`gmail.modifyMessage` and `gmail.modifyThread` accept one semantic action rather than arbitrary provider label arrays:
 
-Assigned-task deletion has a cross-surface consequence: when Google considers a task assigned from Docs or Chat, `tasks.delete` can delete both the assigned task and the originating assignment. Elara therefore preserves assignment-origin metadata on reads and the destructive confirmation warns about the Docs/Chat consequence. Task-list deletion uses the same conservative warning because a deleted list may contain assigned tasks whose originating Docs/Chat assignments can also be removed. The confirmation does not claim that Elara pre-read every task in the list. Deleting only the assigned copy is not represented as an API tool because Google requires unassignment at the originating surface for that behavior.
+| Action | Provider label effect |
+| --- | --- |
+| `archive` | remove `INBOX` |
+| `moveToInbox` | add `INBOX` |
+| `markRead` | remove `UNREAD` |
+| `markUnread` | add `UNREAD` |
+| `markSpam` | add `SPAM` |
+| `markNotSpam` | remove `SPAM` |
+| `star` | add `STARRED` |
+| `unstar` | remove `STARRED` |
+| `applyLabel` | add one verified USER label id |
+| `removeLabel` | remove one verified USER label id |
 
-`tasks.clearCompleted` follows Google's actual semantics: completed tasks are marked hidden and stop appearing in normal list results; they are not represented to the user as hard-deleted. The operation remains `destructive` because it is a bulk visibility/state change. `tasks.deleteTaskList`, `tasks.deleteTask`, and `tasks.clearCompleted` are destructive; create/update/move operations are writes. Every mutation still crosses the ordinary confirmation broker after schema and OAuth capability validation.
+`addLabelIds`/`removeLabelIds` are not model inputs. For custom-label operations, the adapter verifies the target is a provider `USER` label before mutation; system labels cannot be smuggled through the custom-label path.
 
-Tasks does not expose a task time-of-day through this API contract. Elara must not infer reminders, timed deadlines, recurring-task rules or other first-party UI behavior that is absent from the API surface. Calendar remains the correct authority for actual timed commitments.
+Trash and untrash remain explicit message/thread operations. Permanent message deletion is not model-visible, and Elara does not request the broader `https://mail.google.com/` scope merely to bypass Trash.
 
-## 7. Invariants
+### 6.3 Label administration
 
-- Model-visible declarations derive from the executable registry; no shadow executable allow-list.
-- `additionalProperties:false` and service schemas reject undeclared arguments.
-- Reads may execute when authorized; write/send/destructive operations require confirmation.
-- Confirmation is separate from OAuth: permission to call an API is not consent to mutate data.
-- Tool schemas never contain credentials, raw scopes or provider URLs.
-- Browser/worker execution-plane filtering is explicit; browser-only tools are not silently advertised by the Worker.
-- Workspace shortcuts never create hidden synthetic user turns.
-- Calendar provider scopes do not manufacture local Elara capabilities.
-- Calendar model mutations and the service conditional-write boundary require one concrete strong provider ETag; wildcard/weak/multi-value validators are forbidden and mutation uses conditional `If-Match`.
-- Calendar start/end ordering is rejected before confirmation; event end is exclusive and one-day all-day events use the following date as `end`.
-- Any Calendar timing update carries both start and end boundaries; one-sided timing patches are rejected before confirmation and provider authorization.
-- Non-empty Calendar recurrence updates carry explicit start/end context; timed recurrence carries an explicit valid IANA timezone.
-- Calendar timezone inputs are validated against the runtime IANA timezone database before provider access.
-- Calendar dates/date-times reject impossible calendar and clock components instead of accepting JavaScript rollover normalization.
-- Offset-free event date-times require an explicit valid IANA event timezone; timed boundary pairs use one consistent offset/timezone mode; list/free-busy bounds always carry explicit UTC offsets.
-- Calendar list/event page tokens are bounded to 2,048 characters consistently with the service boundary.
-- Calendar create retry identity derives from the existing provider call id; ambiguous retries do not intentionally create a second event.
-- Calendar list/settings/free-busy remain optional capabilities and do not broaden the core Calendar event grant.
-- Tasks scheduling is date-only at the model boundary; provider midnight is serialization, never time semantics.
-- Task-list and task page bounds are 100 and agree across service, schemas, Gemini declarations, tests and this contract.
-- Raw Google Task/TaskList resources are not Gemini mutation inputs.
-- Assigned-task visibility is opt-in and assignment origin remains read-only metadata.
-- Task creates are replay-fenced only for the exact same Gemini call in the same live elected turn; distinct call ids are never content-deduplicated.
-- Task moves may stay within one list or use semantic `destinationTaskListId` for a cross-list provider move; raw `destinationTasklist` is not a model input.
-- Task hierarchy moves state the source/destination list and provider meaning of omitted parent/previous before confirmation.
-- Assigned-task deletion, including deletion through a containing task list, warns that Docs/Chat source assignments may also be deleted.
-- Clearing completed tasks is represented as Google's hidden-task transition, not as fabricated hard deletion.
-- Drive metadata update has one nested `patch` argument contract from declaration through handler; the model-visible patch cannot trash a file.
-- Gemini-visible `sheets.updateCell`/`sheets.insertRows` have executable handlers; single-cell writes require one A1 cell and an explicit bounded string, confirmations expose exact targets, and row insertion returns a bounded semantic result instead of raw provider batch output.
+Label administration is bounded to USER labels:
+
+- create accepts only a bounded label name;
+- rename accepts USER `labelId + name`, verifies provider type, then uses the provider partial-update path;
+- delete verifies USER type before deletion.
+
+Deleting a USER label removes that label from affected messages/threads; it does not delete those messages. Raw Label resource objects, colors, provider counts, or arbitrary fields are not model-writable.
+
+Current OAuth sensitivity metadata follows Google's live Gmail scope catalog: `gmail.labels` is non-sensitive, `gmail.send` is sensitive, and `gmail.readonly` / `gmail.modify` are restricted. Production restricted-scope verification/compliance remains a deployment concern, not a reason to widen scopes.
+
+### 6.4 Send and reply
+
+New mail and replies are separate semantic tools.
+
+`gmail.sendMessage` accepts bounded validated `to`, optional `cc`, `subject`, and plain-text `body`. Elara limits a single call to 50 total To+Cc recipients. Recipient and subject validation is repeated at the direct service boundary; CR/LF header injection is rejected.
+
+`gmail.replyMessage` requires explicit `threadId`, recipient, subject, body, the prior RFC `Message-ID` as `inReplyTo`, and an optional prior `References` chain. The adapter constructs RFC mail carrying the provider thread id plus `In-Reply-To` and `References`; the supplied subject must represent the target conversation subject. Reply identity comes from a prior Gmail read rather than invented model state.
+
+Both send/reply are `send` risk. Confirmation identifies the target/thread and subject and exposes the complete validated body through the confirmation broker's scroll-bounded `reviewText`; a benign prefix cannot hide an unreviewed tail.
+
+Gmail does not expose a Calendar-style client-chosen message resource id for deterministic reconciliation. Elara therefore uses a same-call elected-turn replay fence keyed by tool + conversation + user message + generation + Gemini call id + validated payload hash. Replaying the exact same send/reply in the same live turn returns the same promise/result or retained ambiguous failure and does not issue a second `messages.send`. Reusing the call id with changed arguments fails closed. Distinct calls remain distinct. After a full page/runtime restart, an ambiguous provider acceptance remains an explicit limitation rather than a fabricated exactly-once guarantee.
+
+## 7. Drive / Docs / Sheets current boundary
+
+These services remain pre-Pass-4 groundwork plus audited hardening, not final parity.
+
+Drive model access uses app-file boundaries by default, with broader library read as separate deliberate consent. `drive.updateFile` has one nested semantic `patch`; the model-visible patch permits only `name`, `description`, and `starred`. `trashed` is deliberately absent from this ordinary-write tool.
+
+Docs model operations are semantic create/inspect/edit helpers. Raw unrestricted batch update remains internal.
+
+Sheets exposes bounded reads/writes plus semantic helpers. `sheets.updateCell` requires one true single-cell A1 target, including safely parsed quoted sheet names, and one bounded string input; ranges/whole rows/columns/named ranges are rejected before confirmation. Confirmation identifies spreadsheet + exact cell and exposes the full cell input. `sheets.insertRows` confirms spreadsheet/sheet/index/count and returns a bounded semantic success summary rather than raw batch-update provider output. General unrestricted `sheets.batchUpdate` remains internal.
+
+Broader Drive/Docs/Sheets parity, Picker admission, revision-aware edit controls, formula-safe write modes, and complete provider-response budgeting belong to the dedicated later Workspace pass.
 
 ## 8. Security and failure semantics
 
-Arguments are validated before execution, OAuth capabilities are checked centrally, and mutation confirmations summarize the exact target without leaking secrets. Handler/provider failures are normalized before returning to Gemini. If confirmation UI is unavailable, already busy or aborted, mutations resolve as denied rather than auto-approved.
+Validation precedes execution. Confirmation is separate from OAuth. If confirmation UI is unavailable, busy, stale, or aborted, mutation fails closed.
 
-Calendar mutation conflicts fail closed. Invalid/non-concrete/weak ETags, one-sided timing updates, non-increasing start/end boundaries, invalid IANA timezones, impossible dates/times, offset-ambiguous timestamps, incomplete recurrence conversion, oversized inputs, invalid recurrence/time pairs, more than 50 free/busy targets and undeclared arguments are rejected before provider execution. Strong ETag enforcement is repeated at the Calendar service's conditional-write boundary so direct service callers cannot widen the model contract. Calendar API targets still flow through the Google OAuth request broker's HTTPS/host allow-list.
+Gmail-specific hostile-content rule: text such as “ignore previous instructions”, “send secrets”, or “enable another tool” found inside an email is external content, not user authorization. The retrieved payload cannot widen application capabilities or skip confirmation. The semantic Gmail service also constrains provider payload shape before the continuation reaches Gemini, reducing both prompt-injection surface and unbounded-context risk.
 
-Tasks rejects malformed ids/page tokens, page sizes beyond provider limits, invalid RFC 3339 filter bounds, impossible/timed `scheduledDate` values, empty semantic updates, conflicting set/clear date requests, undeclared raw provider fields and invalid move identifiers before provider execution. Tasks API targets use the same Google OAuth request broker/host allow-list. OAuth `tasks.write` permission does not bypass confirmation. Same-live-runtime create replays are fail-closed on payload mismatch; provider ambiguity across a full runtime restart is not hidden behind heuristic content deduplication.
+Gmail send/reply uses fixed provider endpoints and locally generated RFC headers from validated semantic fields. Raw RFC822 is not a Gemini argument. Permanent delete is absent. Custom-label mutation verifies USER type. Invalid ids/query/page sizes/recipient/header/body inputs fail before the corresponding provider mutation and, where possible, before OAuth authorization.
 
-Drive/Sheets arguments remain strict. `drive.updateFile` rejects undeclared flat metadata fields, accepts only its bounded nested patch, and does not expose `trashed` through this ordinary-write tool. `sheets.updateCell` rejects missing, object/array and oversized values and rejects non-single-cell targets before confirmation. Its confirmation provides the complete cell input in scroll-bounded review text. `sheets.insertRows` identifies spreadsheet, sheet id, start index and count before approval and exposes only the corresponding bounded semantic success summary after the provider call.
+## 9. Verification
 
-## 9. Verification and tests
+Relevant verification includes service contract tests, schema tests, Gemini declaration parity, executor/confirmation tests, replay-fence tests, provider-boundary tests, Worker tests, build, and the Android/Chromium/onboarding Playwright matrix.
 
-Use service contract tests, `src/google/tools/*test*`, Gemini declaration tests, confirmation broker/policy tests and integration/E2E flows. Calendar service tests cover discovery, filters/pagination, detailed ETag reads, settings, free/busy, recurrence/timezone, guest updates, deterministic create retry recovery and conditional PATCH/DELETE. `calendar-parity.test.ts` pins registry risk/capabilities, schemas, handler call-id propagation, strong model ETags, the 2,048-character Calendar page-token boundary, exclusive all-day end semantics, pre-confirmation ordering and confirmation summaries. `recurring-update-timezone.test.ts` and `provider-boundary-hardening.test.ts` pin recurrence conversion, strong service-boundary ETags (including weak-validator rejection), offset/timezone requirements and direct-service fail-closed behavior before authorization. `date-zone-validation.test.ts` pins valid-IANA enforcement, impossible-date rejection, leap-day acceptance, paired timing updates and consistent offset/timezone boundary semantics.
+Gmail-specific regressions live in:
 
-Tasks service tests pin task-list pagination/parity at the provider's 100-item bound, assignment metadata, explicit `showAssigned`, provider-filter forwarding, literal provider-date normalization, invalid scheduled-date fail-closed behavior, semantic PATCH updates, same-list move omission behavior and exact `destinationTasklist` serialization for cross-list moves. `tasks-parity.test.ts` pins registry risk/capabilities, semantic-vs-raw schemas, the 101-item rejection boundary, Gemini declaration parity, semantic cross-list move exposure, rejection of the raw provider move field, and consequence-aware confirmations for task/list deletion, bulk clear and hierarchy/list moves. `create-replay.test.ts` plus the handler-level replay test pin same-call replay convergence, changed-payload rejection, retained ambiguous failures and the ability for separate call ids to create identical tasks intentionally.
+- `src/google/tools/gmail-schemas.test.ts`
+- `src/google/tools/gmail-parity.test.ts`
+- `src/google/gmail/semantic-service.test.ts`
+- `src/google/gmail/send-replay.test.ts`
+- `src/google/oauth/gmail-scope-sensitivity.test.ts`
 
-`drive-sheets-parity.test.ts` invokes the executable handlers for nested Drive metadata updates and the two formerly-unwired Sheets writes. It pins rejection of model-visible Drive trashing, required/bounded single-cell values, true single-cell A1 target validation, declaration parity, exact mutation destinations, full cell-input review before approval, and bounded semantic row-insertion results even when the mocked provider returns oversized response noise.
+Important assertions include: raw provider mutation shapes rejected; reads normalized as `untrusted-external`; arbitrary HTML/custom headers do not cross the semantic projection; USER-label verification; semantic system-label mapping; CR/LF injection rejection; RFC reply headers/thread id; full send-body confirmation; and exact same-call replay suppression without content-deduplicating legitimate distinct sends.
 
-`e2e/workspace-shortcuts.spec.ts` verifies visible shortcut drafting and explicit submission. The reliability gate continues to lock key invariants including Calendar/Tasks write capability, grouped confirmations, registry-derived declarations and explicit accessibility controls.
-
-## 10. Known gaps
-
-Google Chat remains deferred from the Gemini surface. Calendar push/watch synchronization, ACL/calendar administration and CalendarList mutations are deliberately outside Pass 1. Google Tasks time-of-day scheduling/reminders and recurring-task UI semantics are not invented because the Tasks API surface used here does not provide them. Google Tasks create has no client-specified task/task-list id in this contract, so an ambiguous create cannot be deterministically recovered after a full browser/runtime restart; the live same-call replay fence prevents duplicate POSTs only while that elected-turn runtime state exists. Broad provider-response byte budgets, semantic output caps and visible truncation metadata across all Workspace adapters remain a cross-Workspace hardening requirement; isolated Calendar/Tasks-only post-parse caps are not treated as a substitute. Any future orchestration/Kanban layer should consume these normalized service/tool boundaries rather than embedding Google API logic or OAuth state in UI components.
+`verified_commit` must not be advanced to the Gmail branch head until the reviewed exact PR head passes full CI, merges, and the resulting `main` commit passes post-merge certification.

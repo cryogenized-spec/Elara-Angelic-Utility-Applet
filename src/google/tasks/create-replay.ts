@@ -1,4 +1,3 @@
-const TASK_CREATE_REPLAY_TTL_MS = 10 * 60 * 1000;
 const MAX_TASK_CREATE_REPLAYS = 128;
 
 export interface TaskCreateReplayContext {
@@ -11,25 +10,11 @@ export interface TaskCreateReplayContext {
 
 interface ReplayEntry {
   readonly signature: string;
-  readonly expiresAt: number;
   readonly promise: Promise<unknown>;
 }
 
 const replayEntries = new Map<string, ReplayEntry>();
-
-function pruneExpired(now: number): void {
-  for (const [key, entry] of replayEntries) {
-    if (entry.expiresAt <= now) replayEntries.delete(key);
-  }
-}
-
-function reserveCapacity(): void {
-  while (replayEntries.size >= MAX_TASK_CREATE_REPLAYS) {
-    const oldest = replayEntries.keys().next().value as string | undefined;
-    if (!oldest) return;
-    replayEntries.delete(oldest);
-  }
-}
+let activeTurnKey: string | undefined;
 
 async function payloadSignature(payload: unknown): Promise<string> {
   const bytes = new TextEncoder().encode(JSON.stringify(payload));
@@ -37,18 +22,31 @@ async function payloadSignature(payload: unknown): Promise<string> {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
 }
 
-function replayKey(context: TaskCreateReplayContext): string | undefined {
-  const callId = context.callId?.trim();
+function electedTurnKey(context: TaskCreateReplayContext): string | undefined {
   const conversationId = context.conversationId?.trim();
   const messageId = context.messageId?.trim();
   const generationId = context.generationId?.trim();
-  if (!callId || !conversationId || !messageId || !generationId) return undefined;
-  return `${context.tool}\u0000${conversationId}\u0000${messageId}\u0000${generationId}\u0000${callId}`;
+  if (!conversationId || !messageId || !generationId) return undefined;
+  return `${conversationId}\u0000${messageId}\u0000${generationId}`;
+}
+
+function replayKey(context: TaskCreateReplayContext, turnKey: string): string | undefined {
+  const callId = context.callId?.trim();
+  if (!callId) return undefined;
+  return `${context.tool}\u0000${turnKey}\u0000${callId}`;
+}
+
+function electTurn(turnKey: string): void {
+  if (activeTurnKey === turnKey) return;
+  replayEntries.clear();
+  activeTurnKey = turnKey;
 }
 
 /**
  * Prevents the exact same Gemini create call from issuing a second Google Tasks
- * POST while the elected turn is still represented by this live runtime.
+ * POST for the full lifetime of the currently elected turn in this live runtime.
+ * A newly elected turn clears the prior turn's replay state; entries never expire
+ * by wall clock while their turn remains elected.
  *
  * This is deliberately not title/content deduplication and not a provider-state
  * mirror. Distinct call ids can create identical tasks intentionally. Because
@@ -59,12 +57,14 @@ export async function runTaskCreateOnce<T>(
   context: TaskCreateReplayContext,
   payload: unknown,
   operation: () => Promise<T>,
-  now = Date.now(),
+  _now = Date.now(),
 ): Promise<T> {
-  const key = replayKey(context);
+  const turnKey = electedTurnKey(context);
+  if (!turnKey) return operation();
+  const key = replayKey(context, turnKey);
   if (!key) return operation();
 
-  pruneExpired(now);
+  electTurn(turnKey);
   const signature = await payloadSignature(payload);
   const existing = replayEntries.get(key);
   if (existing) {
@@ -72,12 +72,16 @@ export async function runTaskCreateOnce<T>(
     return existing.promise as Promise<T>;
   }
 
-  reserveCapacity();
+  if (replayEntries.size >= MAX_TASK_CREATE_REPLAYS) {
+    throw new Error('Google Tasks create replay capacity was exhausted for the current elected turn.');
+  }
+
   const promise = Promise.resolve().then(operation);
-  replayEntries.set(key, { signature, expiresAt: now + TASK_CREATE_REPLAY_TTL_MS, promise });
+  replayEntries.set(key, { signature, promise });
   return promise;
 }
 
 export function resetTaskCreateReplayForTests(): void {
   replayEntries.clear();
+  activeTurnKey = undefined;
 }

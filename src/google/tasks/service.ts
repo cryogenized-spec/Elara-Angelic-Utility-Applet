@@ -309,9 +309,10 @@ export class GoogleTasksService {
     await this.assertOk(response);
   }
 
-  async moveTask(taskListId: string, taskId: string, parent?: string, previous?: string): Promise<GoogleTask> {
+  async moveTask(taskListId: string, taskId: string, parent?: string, previous?: string, destinationTaskListId?: string): Promise<GoogleTask> {
     const access = await this.oauth.authorize('tasks.write');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}/move`);
+    if (destinationTaskListId) url.searchParams.set('destinationTasklist', boundedId(destinationTaskListId, 'destination task list ID', MAX_TASK_LIST_ID_LENGTH));
     if (parent) url.searchParams.set('parent', boundedId(parent, 'parent ID', MAX_TASK_ID_LENGTH));
     if (previous) url.searchParams.set('previous', boundedId(previous, 'previous task ID', MAX_TASK_ID_LENGTH));
     const response = await access.fetch(url, { method: 'POST' });

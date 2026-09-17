@@ -83,7 +83,7 @@ export const googleReadToolArgumentSchemas = {
 
   'tasks.listTaskLists': z.object({
     pageToken: pageTokenSchema.optional(),
-    maxResults: z.number().int().min(1).max(1000).optional(),
+    maxResults: z.number().int().min(1).max(100).optional(),
   }).strict(),
 
   'tasks.getTaskList': z.object({

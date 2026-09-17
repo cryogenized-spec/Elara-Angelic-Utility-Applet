@@ -21,7 +21,7 @@ function makeOAuth(
         fetch: async (input, init) => {
           const url = String(input);
           const method = init?.method ?? 'GET';
-          const body = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+          const body: unknown = typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
           calls.push({ url, method, body });
           const payload = responder(url, method, body);
           return payload === undefined
@@ -151,7 +151,7 @@ describe('GoogleTasksService', () => {
       return { id: 'list-1', title: (body as { title?: string })?.title ?? 'Life' };
     }));
 
-    await expect(service.listTaskLists('page-1', 1000)).resolves.toMatchObject({ nextPageToken: 'next-list' });
+    await expect(service.listTaskLists('page-1', 100)).resolves.toMatchObject({ nextPageToken: 'next-list' });
     await expect(service.getTaskList('list-1')).resolves.toMatchObject({ id: 'list-1', title: 'Life' });
     await expect(service.createTaskList('Projects')).resolves.toMatchObject({ title: 'Projects' });
     await expect(service.updateTaskList('list-1', 'Projects 2026')).resolves.toMatchObject({ title: 'Projects 2026' });
@@ -159,7 +159,7 @@ describe('GoogleTasksService', () => {
 
     const listUrl = new URL(calls[0]!.url);
     expect(listUrl.searchParams.get('pageToken')).toBe('page-1');
-    expect(listUrl.searchParams.get('maxResults')).toBe('1000');
+    expect(listUrl.searchParams.get('maxResults')).toBe('100');
     expect(requested).toEqual(['tasks.read', 'tasks.read', 'tasks.write', 'tasks.write', 'tasks.write']);
   });
 

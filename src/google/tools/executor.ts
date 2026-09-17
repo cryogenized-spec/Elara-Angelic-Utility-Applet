@@ -93,6 +93,13 @@ function authorizationNeeded(status: GoogleOAuthStatus, capability: ToolCapabili
 function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
 }
+function confirmationPreview(args: Readonly<Record<string, unknown>>, key: string, maxLength = 300): string | undefined {
+  const raw = value(args, key);
+  if (!raw) return undefined;
+  const compact = raw.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength - 1).trimEnd()}…`;
+}
 function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, fallback: string): string {
   const id = value(args, 'id') ?? value(args, 'ref');
   switch (tool) {
@@ -170,7 +177,17 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'roleplay_setting.update': return `Update ${id ?? 'selected entity'}: ${Object.entries(args).filter(([key]) => !['id', 'ref'].includes(key)).map(([key, entry]) => `${key}=${JSON.stringify(entry)}`).join(', ')}.`;
     case 'roleplay_setting.move': return `Move ${id ?? 'selected entity'} under ${typeof args.parentId === 'string' ? args.parentId : 'the world root'}.`;
     case 'roleplay_setting.delete': return `Delete ${id ?? 'selected entity'} and any child entities beneath it.`;
-    case 'memory.save': return `Save durable memory “${value(args, 'title') ?? 'Untitled'}”.`;
+    case 'memory.save': {
+      const title = value(args, 'title') ?? 'Untitled';
+      const body = confirmationPreview(args, 'body') ?? '(empty)';
+      return `Save durable memory “${title}” with content preview: “${body}”.`;
+    }
+    case 'memory.reconcile': {
+      const relation = value(args, 'relation') ?? 'related';
+      const title = value(args, 'title') ?? 'Untitled evidence';
+      const body = confirmationPreview(args, 'body') ?? '(empty)';
+      return `Reconcile the selected durable memory as ${relation} using new evidence “${title}”: “${body}”.`;
+    }
     default: return fallback;
   }
 }

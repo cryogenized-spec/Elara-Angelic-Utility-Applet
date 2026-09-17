@@ -93,22 +93,37 @@ function lookupGrant(ref: string): MemoryLookupGrant {
   return grant;
 }
 
-function resolveLookupRef(ref: string, conversationId: string, messageId: string, generationId: string): string {
+function boundLookupGrant(ref: string, conversationId: string, messageId: string, generationId: string): MemoryLookupGrant {
   const grant = lookupGrant(ref);
   if (grant.conversationId !== conversationId || grant.messageId !== messageId || grant.generationId !== generationId) {
     throw new Error('Memory reference is unavailable for this turn.');
   }
-  return grant.memoryId;
+  return grant;
+}
+
+function resolveLookupRef(ref: string, conversationId: string, messageId: string, generationId: string): string {
+  return boundLookupGrant(ref, conversationId, messageId, generationId).memoryId;
 }
 
 /**
- * Human-readable lookup snapshot for confirmation only. The opaque grant was
- * created from a validated, scoped lookup result; this function confers no
- * mutation authority. The handler separately rechecks provenance, scope and the
- * current canonical target immediately before mutation.
+ * Human-readable lookup snapshot for confirmation only. The same provenance
+ * binding as execution is required before displaying it. This confers no
+ * mutation authority: the handler separately rechecks current scope and the
+ * canonical target immediately before mutation.
  */
-export function describeMemoryReconcileTarget(ref: string): MemoryReconcileConfirmationTarget {
-  return { ...lookupGrant(ref).display };
+export function describeMemoryReconcileTarget(
+  ref: string,
+  conversationId: string | undefined,
+  messageId: string | undefined,
+  generationId: string | undefined,
+): MemoryReconcileConfirmationTarget {
+  const grant = boundLookupGrant(
+    ref,
+    requiredIdentity(conversationId, 'conversation provenance'),
+    requiredIdentity(messageId, 'message provenance'),
+    requiredIdentity(generationId, 'generation provenance'),
+  );
+  return { ...grant.display };
 }
 
 function reconcileSignature(targetMemoryId: string, relation: string, title: string, body: string, tags: readonly string[] | undefined): string {

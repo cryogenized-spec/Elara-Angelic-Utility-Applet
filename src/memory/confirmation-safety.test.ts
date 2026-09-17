@@ -7,6 +7,12 @@ import { confirmationRequestForCall } from '../google/tools/executor';
 import { saveMemory } from './store';
 import { memoryToolHandlers } from './tool-handler';
 
+const confirmationContext = {
+  conversationId: 'thread-confirmation',
+  messageId: 'message-confirmation',
+  generationId: 'generation-confirmation',
+} as const;
+
 function descriptorForLookup(): GoogleToolDescriptor {
   const descriptor = googleToolRegistry.find((tool) => tool.name === 'memory.lookup');
   if (!descriptor) throw new Error('memory.lookup descriptor missing from registry.');
@@ -24,9 +30,9 @@ async function lookupRef(query: string): Promise<string> {
     risk: descriptor.risk,
     arguments: { query },
     callId: 'lookup-call',
-    conversationId: 'thread-confirmation',
-    messageId: 'message-confirmation',
-    generationId: 'generation-confirmation',
+    conversationId: confirmationContext.conversationId,
+    messageId: confirmationContext.messageId,
+    generationId: confirmationContext.generationId,
     isGenerationActive: () => true,
   }) as { matches?: Array<{ ref?: unknown }> };
   const ref = result.matches?.[0]?.ref;
@@ -73,7 +79,7 @@ describe('durable memory write confirmation safety', () => {
         title: 'Corrected layout preference',
         body: proposedBody,
       },
-    }, new Date('2026-09-17T08:00:00Z'));
+    }, new Date('2026-09-17T08:00:00Z'), confirmationContext);
 
     expect(request?.resourceSummary).toContain('Layout preference');
     expect(request?.resourceSummary).toContain('CONTEXTUAL');
@@ -85,5 +91,26 @@ describe('durable memory write confirmation safety', () => {
     expect(request?.resourceSummary).not.toContain(targetRef);
     expect(request?.reviewText).toBe(proposedBody);
     expect(request?.reviewText).toContain('y'.repeat(500));
+  });
+
+  it('refuses to display a reconciliation target outside the lookup grant turn', async () => {
+    await saveMemory({ title: 'Private project note', body: 'Only the originating turn may resolve this display snapshot.' });
+    const targetRef = await lookupRef('private project note');
+
+    const call = {
+      tool: 'memory.reconcile' as const,
+      arguments: {
+        targetRef,
+        relation: 'support',
+        title: 'New evidence',
+        body: 'Supporting evidence.',
+      },
+    };
+
+    expect(confirmationRequestForCall(call, new Date('2026-09-17T08:00:00Z'), {
+      ...confirmationContext,
+      generationId: 'different-generation',
+    })).toBeNull();
+    expect(confirmationRequestForCall(call, new Date('2026-09-17T08:00:00Z'))).toBeNull();
   });
 });

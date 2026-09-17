@@ -59,10 +59,10 @@ describe('GoogleGmailSemanticService', () => {
     await service.organizeMessage('m1', 'archive');
     await service.organizeMessage('m1', 'markUnread');
     await service.organizeMessage('m1', 'star');
-    expect(requests.map((request) => JSON.parse(String(request.init?.body)))).toEqual([
-      { addLabelIds: [], removeLabelIds: ['INBOX'] },
-      { addLabelIds: ['UNREAD'], removeLabelIds: [] },
-      { addLabelIds: ['STARRED'], removeLabelIds: [] },
+    expect(requests.map((request) => String(request.init?.body))).toEqual([
+      JSON.stringify({ addLabelIds: [], removeLabelIds: ['INBOX'] }),
+      JSON.stringify({ addLabelIds: ['UNREAD'], removeLabelIds: [] }),
+      JSON.stringify({ addLabelIds: ['STARRED'], removeLabelIds: [] }),
     ]);
   });
 

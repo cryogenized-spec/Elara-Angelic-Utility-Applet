@@ -110,15 +110,32 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
       const updates = value(args, 'sendUpdates');
       return `Delete Calendar event ${value(args, 'eventId') ?? 'selected event'} using the version just read${updates ? ` and send guest updates (${updates})` : ''}.`;
     }
+    case 'tasks.createTaskList': return `Create Google Tasks list “${value(args, 'title') ?? 'Untitled'}”.`;
+    case 'tasks.updateTaskList': return `Rename Google Tasks list ${value(args, 'taskListId') ?? 'selected list'} to “${value(args, 'title') ?? 'Untitled'}”.`;
+    case 'tasks.deleteTaskList': return `Delete Google Tasks list ${value(args, 'taskListId') ?? 'selected list'} and the tasks it contains.`;
     case 'tasks.createTask': {
-      const task = args.task && typeof args.task === 'object' && !Array.isArray(args.task) ? args.task as Record<string, unknown> : undefined;
-      const title = typeof task?.title === 'string' && task.title.trim() ? task.title.trim() : undefined;
-      return `Create Google Task${title ? ` “${title}”` : ''}${value(args, 'taskListId') ? ` in list ${value(args, 'taskListId')}` : ''}.`;
+      const title = value(args, 'title') ?? 'untitled task';
+      const scheduledDate = value(args, 'scheduledDate');
+      return `Create Google Task “${title}” in list ${value(args, 'taskListId') ?? 'selected list'}${scheduledDate ? ` scheduled for ${scheduledDate} (date only; no task time-of-day)` : ''}.`;
     }
-    case 'tasks.updateTask': return `Update Google Task ${value(args, 'taskId') ?? 'selected task'} in list ${value(args, 'taskListId') ?? 'selected list'}.`;
-    case 'tasks.moveTask': return `Move Google Task ${value(args, 'taskId') ?? 'selected task'} to the requested position.`;
-    case 'tasks.deleteTask': return `Delete Google Task ${value(args, 'taskId') ?? 'selected task'}.`;
-    case 'tasks.clearCompleted': return `Clear completed Google Tasks from list ${value(args, 'taskListId') ?? 'selected list'}.`;
+    case 'tasks.updateTask': {
+      const changes: string[] = [];
+      if (value(args, 'title')) changes.push('title');
+      if (Object.prototype.hasOwnProperty.call(args, 'notes')) changes.push('notes');
+      if (value(args, 'scheduledDate')) changes.push(`scheduled date to ${value(args, 'scheduledDate')}`);
+      if (args.clearScheduledDate === true) changes.push('remove the scheduled date');
+      if (value(args, 'status')) changes.push(`status to ${value(args, 'status')}`);
+      return `Update Google Task ${value(args, 'taskId') ?? 'selected task'} in list ${value(args, 'taskListId') ?? 'selected list'}${changes.length ? `: ${changes.join(', ')}` : ''}.`;
+    }
+    case 'tasks.moveTask': {
+      const parent = value(args, 'parent');
+      const previous = value(args, 'previous');
+      const destination = parent ? `under parent ${parent}` : 'to the top level';
+      const position = previous ? ` after sibling ${previous}` : ' as the first task among its destination siblings';
+      return `Move Google Task ${value(args, 'taskId') ?? 'selected task'} ${destination}${position}.`;
+    }
+    case 'tasks.deleteTask': return `Delete Google Task ${value(args, 'taskId') ?? 'selected task'} from list ${value(args, 'taskListId') ?? 'selected list'}. If it is assigned from Google Docs or Chat, Google also deletes the originating assignment.`;
+    case 'tasks.clearCompleted': return `Clear completed Google Tasks from list ${value(args, 'taskListId') ?? 'selected list'}; Google will hide those completed tasks from normal results.`;
     case 'docs.createDocument': return `Create the Google Doc “${value(args, 'title') ?? 'Untitled'}”.`;
     case 'docs.insertText': return `Insert text at index ${String(args.index ?? '?')} in Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
     case 'docs.appendParagraph': return `Append a paragraph to Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;

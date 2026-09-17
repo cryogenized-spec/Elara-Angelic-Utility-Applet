@@ -172,4 +172,18 @@ describe('GoogleTasksService', () => {
     expect(requested).toEqual(['tasks.write']);
     expect(new URL(calls[0]!.url).search).toBe('');
   });
+
+  it('maps semantic cross-list moves to the provider destinationTasklist query parameter', async () => {
+    const requested: string[] = [];
+    const calls: CapturedCall[] = [];
+    const service = new GoogleTasksService(makeOAuth(requested, calls, () => ({ id: 'task-1', title: 'Review Kanban' })));
+
+    await expect(service.moveTask('list-1', 'task-1', 'parent-2', 'previous-2', 'list-2')).resolves.toMatchObject({ id: 'task-1' });
+
+    const url = new URL(calls[0]!.url);
+    expect(requested).toEqual(['tasks.write']);
+    expect(url.searchParams.get('destinationTasklist')).toBe('list-2');
+    expect(url.searchParams.get('parent')).toBe('parent-2');
+    expect(url.searchParams.get('previous')).toBe('previous-2');
+  });
 });

@@ -213,6 +213,7 @@ function boundedText(value: string | undefined, field: string, maxLength: number
 }
 
 function isValidIanaTimeZone(value: string): boolean {
+  if (/^[+-]/.test(value)) return false;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
     return true;

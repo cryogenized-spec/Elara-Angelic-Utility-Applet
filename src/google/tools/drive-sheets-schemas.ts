@@ -6,6 +6,48 @@ const pageTokenSchema = z.string().trim().min(1).max(2048);
 const rowSchema = z.array(z.unknown()).max(100);
 const valuesSchema = z.array(rowSchema).min(1).max(1000);
 const updateRequestSchema = z.record(z.string(), z.unknown());
+const cellValueSchema = z.string().max(50_000);
+
+function singleCellPart(value: string): string | undefined {
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+
+  if (normalized.startsWith("'")) {
+    let hasTitleContent = false;
+    for (let index = 1; index < normalized.length; index += 1) {
+      const character = normalized[index];
+      if (character !== "'") {
+        hasTitleContent = true;
+        continue;
+      }
+      if (normalized[index + 1] === "'") {
+        hasTitleContent = true;
+        index += 1;
+        continue;
+      }
+      if (!hasTitleContent || normalized[index + 1] !== '!') return undefined;
+      return normalized.slice(index + 2);
+    }
+    return undefined;
+  }
+
+  const bang = normalized.indexOf('!');
+  if (bang < 0) return normalized;
+  if (normalized.indexOf('!', bang + 1) >= 0) return undefined;
+  const sheet = normalized.slice(0, bang);
+  if (!sheet || /[:,']/.test(sheet)) return undefined;
+  return normalized.slice(bang + 1);
+}
+
+function isSingleCellA1(value: string): boolean {
+  const cell = singleCellPart(value);
+  return cell !== undefined && /^\$?[A-Za-z]{1,3}\$?[1-9]\d*$/.test(cell);
+}
+
+const singleCellA1Schema = a1RangeSchema.refine(
+  isSingleCellA1,
+  'Google Sheets updateCell requires one A1 cell reference, not a range, row, column, or named range.',
+);
 
 export const driveSheetsToolArgumentSchemas = {
   'drive.searchFiles': z.object({
@@ -31,7 +73,6 @@ export const driveSheetsToolArgumentSchemas = {
       name: z.string().trim().min(1).max(500).optional(),
       description: z.string().max(2000).optional(),
       starred: z.boolean().optional(),
-      trashed: z.boolean().optional(),
     }).strict().refine((value) => Object.keys(value).length > 0, 'At least one file field is required.'),
   }).strict(),
   'drive.moveFile': z.object({
@@ -45,8 +86,8 @@ export const driveSheetsToolArgumentSchemas = {
   'sheets.appendRows': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema, values: valuesSchema }).strict(),
   'sheets.updateCell': z.object({
     spreadsheetId: fileIdSchema,
-    range: a1RangeSchema,
-    value: z.unknown(),
+    range: singleCellA1Schema,
+    value: cellValueSchema,
   }).strict(),
   'sheets.insertRows': z.object({
     spreadsheetId: fileIdSchema,

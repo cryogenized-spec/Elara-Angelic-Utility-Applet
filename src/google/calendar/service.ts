@@ -19,7 +19,7 @@ const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 250;
 const ALL_DAY_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))?$/i;
-const CONCRETE_ETAG_PATTERN = /^(?:W\/)?"[^"]+"$/;
+const CONCRETE_ETAG_PATTERN = /^"[^"]+"$/;
 
 export type CalendarSendUpdates = 'all' | 'externalOnly';
 export type CalendarMinAccessRole = 'freeBusyReader' | 'reader' | 'writerWithoutPrivateAccess' | 'writer' | 'owner';

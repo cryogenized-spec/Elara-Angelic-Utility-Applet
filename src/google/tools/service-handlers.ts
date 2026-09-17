@@ -5,6 +5,7 @@ import { GoogleDriveService } from '../drive/service';
 import { GoogleGmailService } from '../gmail/service';
 import { googleOAuthAuthority } from '../oauth/authority';
 import { GoogleSheetsService } from '../sheets/service';
+import { runTaskCreateOnce } from '../tasks/create-replay';
 import { GoogleTasksService, type GoogleTaskStatus } from '../tasks/service';
 import type { GoogleToolHandlers } from './executor';
 import { googleReadToolHandlers } from './read-handlers';
@@ -131,22 +132,35 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     );
   },
 
-  'tasks.createTaskList': async ({ arguments: raw }) => tasks.createTaskList(stringArg(objectArgs(raw), 'title')!),
+  'tasks.createTaskList': async ({ arguments: raw, callId, conversationId, messageId, generationId }) => {
+    const title = stringArg(objectArgs(raw), 'title')!;
+    const payload = { title };
+    return runTaskCreateOnce(
+      { tool: 'tasks.createTaskList', callId, conversationId, messageId, generationId },
+      payload,
+      () => tasks.createTaskList(title),
+    );
+  },
   'tasks.updateTaskList': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
     return tasks.updateTaskList(stringArg(args, 'taskListId')!, stringArg(args, 'title')!);
   },
   'tasks.deleteTaskList': async ({ arguments: raw }) => tasks.deleteTaskList(stringArg(objectArgs(raw), 'taskListId')!),
-  'tasks.createTask': async ({ arguments: raw }) => {
+  'tasks.createTask': async ({ arguments: raw, callId, conversationId, messageId, generationId }) => {
     const args = objectArgs(raw);
-    return tasks.createSemanticTask({
+    const input = {
       taskListId: stringArg(args, 'taskListId')!,
       title: stringArg(args, 'title')!,
       notes: stringArg(args, 'notes', false),
       scheduledDate: stringArg(args, 'scheduledDate', false),
       parent: stringArg(args, 'parent', false),
       previous: stringArg(args, 'previous', false),
-    });
+    };
+    return runTaskCreateOnce(
+      { tool: 'tasks.createTask', callId, conversationId, messageId, generationId },
+      input,
+      () => tasks.createSemanticTask(input),
+    );
   },
   'tasks.updateTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
@@ -262,15 +276,14 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'drive.updateFile': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    const name = stringArg(args, 'name', false);
-    const description = stringArg(args, 'description', false);
-    const starred = optionalBoolean(args, 'starred');
-    const trashed = optionalBoolean(args, 'trashed');
+    const patch = recordArg(args, 'patch')!;
+    const name = stringArg(patch, 'name', false);
+    const description = stringArg(patch, 'description', false);
+    const starred = optionalBoolean(patch, 'starred');
     return drive.updateFile(stringArg(args, 'fileId')!, {
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(starred !== undefined ? { starred } : {}),
-      ...(trashed !== undefined ? { trashed } : {}),
     });
   },
   'drive.moveFile': async ({ arguments: raw }) => {
@@ -290,6 +303,19 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   'sheets.appendRows': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
     return sheets.appendRows(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args));
+  },
+  'sheets.updateCell': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return sheets.updateCell(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, args.value);
+  },
+  'sheets.insertRows': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    const spreadsheetId = stringArg(args, 'spreadsheetId')!;
+    const sheetId = optionalNumber(args, 'sheetId')!;
+    const startIndex = optionalNumber(args, 'startIndex')!;
+    const count = optionalNumber(args, 'count')!;
+    await sheets.insertRows(spreadsheetId, sheetId, startIndex, count);
+    return { inserted: true, spreadsheetId, sheetId, startIndex, count };
   },
   'sheets.batchUpdate': async ({ arguments: raw }) => {
     const args = objectArgs(raw);

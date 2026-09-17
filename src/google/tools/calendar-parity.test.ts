@@ -28,6 +28,7 @@ import { googleToolRegistry } from './registry';
 import { googleServiceToolHandlers } from './service-handlers';
 import { validateGoogleReadToolArguments } from './read-schemas';
 import { validateSemanticToolArguments } from './semantic-schemas';
+import { googleGeminiFunctionDeclarations } from './gemini-declarations';
 import { confirmationRequestForCall, type GoogleToolExecutionContext } from './executor';
 
 function context(tool: GoogleToolExecutionContext['tool'], arguments_: Record<string, unknown>, callId?: string): GoogleToolExecutionContext {
@@ -58,6 +59,7 @@ describe('Calendar parity tool boundary', () => {
   it('rejects unsafe or incomplete Calendar model arguments', () => {
     expect(() => validateSemanticToolArguments('calendar.updateEvent', { eventId: 'event-1', etag: '"v1"' })).toThrow('at least one event field change');
     expect(() => validateSemanticToolArguments('calendar.updateEvent', { eventId: 'event-1', etag: '"v1"', summary: 'New', sendUpdates: 'none' })).toThrow();
+    expect(() => validateSemanticToolArguments('calendar.updateEvent', { eventId: 'event-1', etag: 'W/"v1"', summary: 'New' })).toThrow(/strong provider ETag/i);
     expect(() => validateSemanticToolArguments('calendar.deleteEvent', { eventId: 'event-1' })).toThrow();
     expect(() => validateGoogleReadToolArguments('calendar.queryFreeBusy', {
       timeMin: '2026-09-20T08:00:00Z',
@@ -65,6 +67,32 @@ describe('Calendar parity tool boundary', () => {
       calendarIds: Array.from({ length: 51 }, (_, index) => `calendar-${index}`),
     })).toThrow();
     expect(() => validateGoogleReadToolArguments('calendar.listCalendars', { maxResults: 251 })).toThrow();
+    expect(validateGoogleReadToolArguments('calendar.listEvents', { pageToken: 'x'.repeat(2048) })).toMatchObject({ pageToken: 'x'.repeat(2048) });
+    expect(() => validateGoogleReadToolArguments('calendar.listEvents', { pageToken: 'x'.repeat(2049) })).toThrow();
+  });
+
+  it('rejects invalid Calendar ordering before confirmation and explains exclusive all-day ends to Gemini', () => {
+    expect(() => validateSemanticToolArguments('calendar.createEvent', {
+      summary: 'One day',
+      start: '2026-10-01',
+      end: '2026-10-01',
+    })).toThrow(/end is exclusive/i);
+
+    expect(() => validateSemanticToolArguments('calendar.updateEvent', {
+      eventId: 'event-1',
+      etag: '"v1"',
+      start: '2026-10-01T10:00:00Z',
+      end: '2026-10-01T09:00:00Z',
+    })).toThrow(/end must be after start/i);
+
+    expect(validateSemanticToolArguments('calendar.createEvent', {
+      summary: 'One day',
+      start: '2026-10-01',
+      end: '2026-10-02',
+    })).toMatchObject({ start: '2026-10-01', end: '2026-10-02' });
+
+    const declaration = googleGeminiFunctionDeclarations.find((entry) => entry.name === 'calendar.createEvent');
+    expect(declaration?.description).toMatch(/end date is exclusive/i);
   });
 
   it('carries Gemini call identity into retry-safe Calendar creation', async () => {

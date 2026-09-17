@@ -57,6 +57,24 @@ describe('GoogleTasksService', () => {
     expect(calls[0]?.method).toBe('GET');
   });
 
+  it('preserves the literal provider due date instead of timezone-shifting date-only task semantics', async () => {
+    const requested: string[] = [];
+    const calls: CapturedCall[] = [];
+    const service = new GoogleTasksService(makeOAuth(requested, calls, () => ({
+      id: 'task-offset',
+      title: 'External client task',
+      due: '2026-01-05T23:30:00.000-05:00',
+      status: 'needsAction',
+    })));
+
+    await expect(service.getTask('list-1', 'task-offset')).resolves.toMatchObject({
+      id: 'task-offset',
+      scheduledDate: '2026-01-05',
+    });
+    expect(requested).toEqual(['tasks.read']);
+    expect(calls[0]?.method).toBe('GET');
+  });
+
   it('serializes semantic scheduledDate as provider midnight without exposing task time semantics', async () => {
     const requested: string[] = [];
     const calls: CapturedCall[] = [];

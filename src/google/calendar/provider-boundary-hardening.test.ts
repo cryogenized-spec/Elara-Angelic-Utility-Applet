@@ -15,25 +15,32 @@ function disconnectedService() {
 }
 
 describe('Calendar provider boundary hardening', () => {
-  it('rejects wildcard and non-concrete ETags at model validation', () => {
+  it('rejects wildcard, weak, and non-concrete ETags at model validation', () => {
     expect(() => validateSemanticToolArguments('calendar.updateEvent', {
       eventId: 'event-1', etag: '*', summary: 'Unsafe overwrite',
-    })).toThrow('concrete provider ETag');
+    })).toThrow('concrete strong provider ETag');
+    expect(() => validateSemanticToolArguments('calendar.updateEvent', {
+      eventId: 'event-1', etag: 'W/"weak"', summary: 'Unsafe weak overwrite',
+    })).toThrow('concrete strong provider ETag');
     expect(() => validateSemanticToolArguments('calendar.deleteEvent', {
       eventId: 'event-1', etag: '"one", "two"',
-    })).toThrow('concrete provider ETag');
+    })).toThrow('concrete strong provider ETag');
     expect(() => validateSemanticToolArguments('calendar.updateEvent', {
       eventId: 'event-1', etag: '"etag-1"', summary: 'Safe update',
     })).not.toThrow();
   });
 
-  it('rejects wildcard ETags at the service boundary before authorization', async () => {
+  it('rejects wildcard and weak ETags at the service boundary before authorization', async () => {
     const { service, authorize } = disconnectedService();
 
     await expect(service.updateSemanticEvent({
       eventId: 'event-1', etag: '*', summary: 'Unsafe overwrite',
     })).rejects.toThrow('concrete provider ETag');
+    await expect(service.updateSemanticEvent({
+      eventId: 'event-1', etag: 'W/"weak"', summary: 'Unsafe weak overwrite',
+    })).rejects.toThrow('concrete provider ETag');
     await expect(service.deleteEvent('primary', 'event-1', '*')).rejects.toThrow('concrete provider ETag');
+    await expect(service.deleteEvent('primary', 'event-1', 'W/"weak"')).rejects.toThrow('concrete provider ETag');
     expect(authorize).not.toHaveBeenCalled();
   });
 

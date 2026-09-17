@@ -46,15 +46,19 @@ describe('Drive and Sheets executable parity', () => {
     sheetsMocks.insertRows.mockReset();
   });
 
-  it('executes the declared nested Drive metadata patch exactly', async () => {
+  it('executes the declared nested Drive metadata patch exactly and excludes trashing', async () => {
     driveMocks.updateFile.mockResolvedValue({ id: 'file-1', name: 'Renamed' });
     const args = validateDriveSheetsToolArguments('drive.updateFile', {
       fileId: 'file-1',
       patch: { name: 'Renamed', starred: true },
     });
+    expect(() => validateDriveSheetsToolArguments('drive.updateFile', {
+      fileId: 'file-1',
+      patch: { trashed: true },
+    })).toThrow();
+
     const handler = googleServiceToolHandlers['drive.updateFile'];
     expect(handler).toBeTypeOf('function');
-
     await handler!(context('drive.updateFile', args));
 
     expect(driveMocks.updateFile).toHaveBeenCalledWith('file-1', { name: 'Renamed', starred: true });
@@ -76,6 +80,21 @@ describe('Drive and Sheets executable parity', () => {
     expect(declaration?.parameters.properties.value).toMatchObject({ type: 'string', maxLength: 50_000 });
   });
 
+  it('accepts only a single A1 cell target for sheets.updateCell', () => {
+    expect(validateDriveSheetsToolArguments('sheets.updateCell', {
+      spreadsheetId: 'sheet-1', range: "'My Sheet'!$B$2", value: 'ready',
+    })).toMatchObject({ range: "'My Sheet'!$B$2" });
+    expect(validateDriveSheetsToolArguments('sheets.updateCell', {
+      spreadsheetId: 'sheet-1', range: 'A1', value: 'ready',
+    })).toMatchObject({ range: 'A1' });
+
+    for (const range of ['Sheet1!A1:B2', 'A:A', '1:1', 'NamedRange']) {
+      expect(() => validateDriveSheetsToolArguments('sheets.updateCell', {
+        spreadsheetId: 'sheet-1', range, value: 'ready',
+      })).toThrow(/one A1 cell reference/i);
+    }
+  });
+
   it('wires sheets.updateCell from validated model arguments to the existing service method', async () => {
     sheetsMocks.updateCell.mockResolvedValue({ range: 'Sheet1!B2', values: [['ready']] });
     const args = validateDriveSheetsToolArguments('sheets.updateCell', {
@@ -91,8 +110,8 @@ describe('Drive and Sheets executable parity', () => {
     expect(sheetsMocks.updateCell).toHaveBeenCalledWith('sheet-1', 'Sheet1!B2', 'ready');
   });
 
-  it('wires sheets.insertRows from validated model arguments to the existing service method', async () => {
-    sheetsMocks.insertRows.mockResolvedValue({ replies: [] });
+  it('wires sheets.insertRows and returns only a bounded semantic result', async () => {
+    sheetsMocks.insertRows.mockResolvedValue({ replies: Array.from({ length: 10_000 }, () => ({ provider: 'noise' })) });
     const args = validateDriveSheetsToolArguments('sheets.insertRows', {
       spreadsheetId: 'sheet-1',
       sheetId: 42,
@@ -102,8 +121,13 @@ describe('Drive and Sheets executable parity', () => {
     const handler = googleServiceToolHandlers['sheets.insertRows'];
     expect(handler).toBeTypeOf('function');
 
-    await handler!(context('sheets.insertRows', args));
-
+    await expect(handler!(context('sheets.insertRows', args))).resolves.toEqual({
+      inserted: true,
+      spreadsheetId: 'sheet-1',
+      sheetId: 42,
+      startIndex: 3,
+      count: 2,
+    });
     expect(sheetsMocks.insertRows).toHaveBeenCalledWith('sheet-1', 42, 3, 2);
   });
 

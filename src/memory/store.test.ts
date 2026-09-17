@@ -1,7 +1,7 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
-import { archiveMemory, deleteMemory, getMemory, promoteMemory, reinforceMemory, retrieveMemories, runMemoryMutationTransaction, saveMemory, saveMemoryOnce, updateMemory } from './store';
+import { archiveMemory, deleteMemory, getMemory, listMemories, promoteMemory, reinforceMemory, retrieveMemories, runMemoryMutationTransaction, saveMemory, saveMemoryOnce, updateMemory } from './store';
 
 describe('canonical durable memory store', () => {
   beforeEach(async () => { await db.memories.clear(); });
@@ -41,6 +41,21 @@ describe('canonical durable memory store', () => {
     expect(memory.tags).toEqual(['preference']);
     await expect(saveMemory({ title: '', body: 'Missing title' })).rejects.toThrow('Memory title is required.');
     await expect(saveMemory({ title: 'Missing body', body: '   ' })).rejects.toThrow('Memory body is required.');
+  });
+
+  it('quarantines malformed rows without disabling valid functional reads', async () => {
+    const healthy = await saveMemory({ title: 'Healthy record', body: 'Valid context must remain usable.' });
+    await db.memories.put({
+      id: 'memory_corrupt',
+      title: 'Corrupt row',
+      updatedAt: Date.now() + 10_000,
+      confidence: 5,
+    } as never);
+
+    await expect(listMemories()).resolves.toEqual([expect.objectContaining({ id: healthy.id })]);
+    await expect(retrieveMemories({ includeGlobal: true, query: 'valid context' })).resolves.toEqual([
+      expect.objectContaining({ id: healthy.id }),
+    ]);
   });
 
   it('saves one logical mutation exactly once and rejects changed replay payloads', async () => {
@@ -108,6 +123,26 @@ describe('canonical durable memory store', () => {
     expect(archived.lifecycle).toBe('archived');
     await deleteMemory(memory.id);
     expect(await getMemory(memory.id)).toBeUndefined();
+  });
+
+  it('keeps manual promotion single-stage and never uses promotion as an implicit restore', async () => {
+    const micro = await saveMemory({ kind: 'MICRO_OBSERVATION', title: 'Promotion source', body: 'One stage at a time.' });
+    await expect(promoteMemory(micro.id, 'CORE')).rejects.toThrow(/exactly one stage/i);
+    expect((await getMemory(micro.id))?.kind).toBe('MICRO_OBSERVATION');
+    expect((await getMemory(micro.id))?.reinforcementCount).toBe(0);
+
+    const episodic = await promoteMemory(micro.id, 'EPISODIC');
+    expect(episodic.kind).toBe('EPISODIC');
+    expect(episodic.reinforcementCount).toBe(1);
+
+    const core = await saveMemory({ kind: 'CORE', title: 'Core memory', body: 'Already at the top.' });
+    await expect(promoteMemory(core.id)).rejects.toThrow(/highest kind/i);
+    expect((await getMemory(core.id))?.reinforcementCount).toBe(0);
+
+    await archiveMemory(core.id);
+    await expect(promoteMemory(core.id)).rejects.toThrow(/restore an archived memory/i);
+    expect((await getMemory(core.id))?.lifecycle).toBe('archived');
+    expect((await getMemory(core.id))?.reinforcementCount).toBe(0);
   });
 
   it('keeps folder scope isolated and global scope explicit', async () => {

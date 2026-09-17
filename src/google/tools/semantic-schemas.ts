@@ -211,6 +211,7 @@ export const semanticToolArgumentSchemas = {
   'tasks.moveTask': z.object({
     taskListId: idSchema,
     taskId: idSchema,
+    destinationTaskListId: idSchema.optional(),
     parent: idSchema.optional(),
     previous: idSchema.optional(),
   }).strict(),

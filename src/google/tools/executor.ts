@@ -58,11 +58,6 @@ export interface GoogleToolExecutorOptions {
   readonly generationId?: string;
   readonly isGenerationActive?: () => boolean;
 }
-export interface GoogleToolConfirmationContext {
-  readonly conversationId?: string;
-  readonly messageId?: string;
-  readonly generationId?: string;
-}
 export type GoogleToolExecutionResult =
   | { readonly ok: true; readonly correlationId: string; readonly tool: GoogleToolName; readonly result: unknown }
   | { readonly ok: false; readonly correlationId: string; readonly tool?: GoogleToolName; readonly code: 'INVALID_TOOL_CALL' | 'AUTHORIZATION_REQUIRED' | 'CONFIRMATION_REQUIRED' | 'USER_DECLINED' | 'HANDLER_UNAVAILABLE' | 'EXECUTION_FAILED'; readonly failure: GoogleToolFailure; readonly confirmation?: WriteConfirmationRequest; readonly requiredCapability?: GoogleCapabilityKey };
@@ -84,10 +79,7 @@ function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Recor
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Tool arguments must be an object.');
   return Object.freeze({ ...(value as Record<string, unknown>) });
 }
-/**
- * Narrows a capability to one backed by a Google OAuth scope. Written as a
- * predicate rather than a set lookup so the compiler narrows at every call site.
- */
+/** Narrows a capability to one backed by a Google OAuth scope. */
 function isGoogleOAuthCapability(capability: ToolCapability): capability is GoogleCapabilityKey {
   return !NON_OAUTH_CAPABILITIES.has(capability);
 }
@@ -204,43 +196,20 @@ export function confirmationRequestForCall(call: GoogleToolCall, now = new Date(
   if (!descriptor || !evaluateWriteConfirmation(descriptor.risk).requiresConfirmation) return null;
   let args: Readonly<Record<string, unknown>>;
   try { args = validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
-  return staticConfirmationRequest(parsed.data.tool, args, descriptor, now.toISOString());
-}
-
-/**
- * Build the actual runtime confirmation. Memory reconciliation resolves its
- * opaque, turn-bound grant through application state before asking the human so
- * the affected record is identifiable. The mutation handler revalidates again
- * after approval; this read is descriptive, not authority.
- */
-export async function confirmationRequestForExecution(
-  call: GoogleToolCall,
-  context: GoogleToolConfirmationContext,
-  now = new Date(),
-): Promise<WriteConfirmationRequest | null> {
-  const parsed = googleToolCallSchema.safeParse(call);
-  if (!parsed.success) return null;
-  const descriptor = findDescriptor(parsed.data.tool);
-  if (!descriptor || !evaluateWriteConfirmation(descriptor.risk).requiresConfirmation) return null;
-  let args: Readonly<Record<string, unknown>>;
-  try { args = validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
   const request = staticConfirmationRequest(parsed.data.tool, args, descriptor, now.toISOString());
   if (parsed.data.tool !== 'memory.reconcile') return request;
-
   const targetRef = value(args, 'targetRef');
-  const relation = value(args, 'relation');
-  if (!targetRef || !relation || !['support', 'conflict', 'related', 'supersede'].includes(relation)) throw new Error('Memory reconciliation target is unavailable for confirmation.');
-  const target = await describeMemoryReconcileTarget(
-    targetRef,
-    relation as 'support' | 'conflict' | 'related' | 'supersede',
-    context.conversationId,
-    context.messageId,
-    context.generationId,
-  );
-  return {
-    ...request,
-    resourceSummary: `Reconcile durable memory “${target.title}” (${target.kind}; ${target.lifecycle}) as ${relation}. Current content: “${target.excerpt}”. Proposed evidence/replacement: “${value(args, 'title') ?? 'Untitled evidence'}”. Review the full proposed body below before approving.`,
-  };
+  const relation = value(args, 'relation') ?? 'related';
+  if (!targetRef) return null;
+  try {
+    const target = describeMemoryReconcileTarget(targetRef);
+    return {
+      ...request,
+      resourceSummary: `Reconcile durable memory “${target.title}” (${target.kind}; ${target.lifecycle}) as ${relation}. Current content: “${target.excerpt}”. Proposed evidence/replacement: “${value(args, 'title') ?? 'Untitled evidence'}”. Review the full proposed body below before approving.`,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function executeGoogleTool(call: GoogleToolInvocation, options: GoogleToolExecutorOptions): Promise<GoogleToolExecutionResult> {
@@ -263,14 +232,8 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   }
   const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {
-    let confirmation: WriteConfirmationRequest;
-    try {
-      const prepared = await confirmationRequestForExecution(validCall, options, options.now?.() ?? new Date());
-      if (!prepared) return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) };
-      confirmation = prepared;
-    } catch {
-      return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
-    }
+    const confirmation = confirmationRequestForCall(validCall, options.now?.() ?? new Date());
+    if (!confirmation) return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) };
     const confirm = options.confirm ?? requestGoogleToolConfirmation;
     let approved: boolean;
     let confirmationInvoked = false;

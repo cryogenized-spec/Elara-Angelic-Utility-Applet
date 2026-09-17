@@ -31,7 +31,8 @@ export interface GoogleTask {
   readonly title?: string;
   readonly etag?: string;
   readonly notes?: string;
-  readonly due?: string;
+  /** Date-only scheduling semantics. Google Tasks discards time-of-day from its provider `due` field. */
+  readonly scheduledDate?: string;
   readonly status?: GoogleTaskStatus;
   readonly completed?: string;
   readonly parent?: string;
@@ -65,7 +66,7 @@ export interface CreateSemanticTaskInput {
   readonly taskListId: string;
   readonly title: string;
   readonly notes?: string;
-  readonly dueDate?: string;
+  readonly scheduledDate?: string;
   readonly parent?: string;
   readonly previous?: string;
 }
@@ -75,8 +76,8 @@ export interface UpdateSemanticTaskInput {
   readonly taskId: string;
   readonly title?: string;
   readonly notes?: string;
-  readonly dueDate?: string;
-  readonly clearDue?: boolean;
+  readonly scheduledDate?: string;
+  readonly clearScheduledDate?: boolean;
   readonly status?: GoogleTaskStatus;
 }
 
@@ -146,13 +147,26 @@ function validDateParts(year: number, month: number, day: number): boolean {
   return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month);
 }
 
-function boundedDueDate(value: string): string {
+function normalizeScheduledDate(value: string): string {
   const normalized = value.trim();
   const match = DATE_PATTERN.exec(normalized);
-  if (!match) throw new Error('Google Tasks due date must be YYYY-MM-DD.');
+  if (!match) throw new Error('Google Tasks scheduled date must be YYYY-MM-DD; Tasks does not support a time-of-day here.');
   const [, year, month, day] = match;
-  if (!validDateParts(Number(year), Number(month), Number(day))) throw new Error('Google Tasks due date is not a real calendar date.');
-  return `${normalized}T00:00:00.000Z`;
+  if (!validDateParts(Number(year), Number(month), Number(day))) throw new Error('Google Tasks scheduled date is not a real calendar date.');
+  return normalized;
+}
+
+function providerDueForScheduledDate(value: string): string {
+  return `${normalizeScheduledDate(value)}T00:00:00.000Z`;
+}
+
+function scheduledDateFromProviderDue(value: string | undefined): string | undefined {
+  if (!value) return undefined;
+  const date = value.slice(0, 10);
+  const match = DATE_PATTERN.exec(date);
+  if (!match) return undefined;
+  const [, year, month, day] = match;
+  return validDateParts(Number(year), Number(month), Number(day)) ? date : undefined;
 }
 
 function boundedFilterTimestamp(value: string | undefined, field: string): string | undefined {
@@ -264,7 +278,7 @@ export class GoogleTasksService {
   async createSemanticTask(input: CreateSemanticTaskInput): Promise<GoogleTask> {
     const body: Record<string, unknown> = { title: boundedText(input.title, 'task title', MAX_TITLE_LENGTH) };
     if (input.notes !== undefined) body.notes = boundedText(input.notes, 'task notes', MAX_NOTES_LENGTH, true);
-    if (input.dueDate !== undefined) body.due = boundedDueDate(input.dueDate);
+    if (input.scheduledDate !== undefined) body.due = providerDueForScheduledDate(input.scheduledDate);
     return this.writeTask(
       'POST',
       `lists/${encodeURIComponent(boundedId(input.taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks`,
@@ -274,12 +288,12 @@ export class GoogleTasksService {
   }
 
   async updateSemanticTask(input: UpdateSemanticTaskInput): Promise<GoogleTask> {
-    if (input.dueDate !== undefined && input.clearDue) throw new Error('Google Tasks update cannot set and clear the due date at the same time.');
+    if (input.scheduledDate !== undefined && input.clearScheduledDate) throw new Error('Google Tasks update cannot set and clear the scheduled date at the same time.');
     const body: Record<string, unknown> = {};
     if (input.title !== undefined) body.title = boundedText(input.title, 'task title', MAX_TITLE_LENGTH);
     if (input.notes !== undefined) body.notes = boundedText(input.notes, 'task notes', MAX_NOTES_LENGTH, true);
-    if (input.dueDate !== undefined) body.due = boundedDueDate(input.dueDate);
-    if (input.clearDue) body.due = null;
+    if (input.scheduledDate !== undefined) body.due = providerDueForScheduledDate(input.scheduledDate);
+    if (input.clearScheduledDate) body.due = null;
     if (input.status !== undefined) body.status = input.status;
     if (Object.keys(body).length === 0) throw new Error('Google Tasks update requires at least one task field change.');
     return this.writeTask(
@@ -346,7 +360,7 @@ export class GoogleTasksService {
       title: item.title,
       etag: item.etag,
       notes: item.notes,
-      due: item.due,
+      scheduledDate: scheduledDateFromProviderDue(item.due),
       status: taskStatus(item.status),
       completed: item.completed,
       parent: item.parent,

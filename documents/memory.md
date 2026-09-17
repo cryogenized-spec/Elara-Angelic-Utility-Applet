@@ -43,7 +43,7 @@ normal chat
 
 explicit remember
 -> declared memory.save
--> central write confirmation with bounded durable-content preview
+-> central write confirmation with full durable-content review
 -> app-owned conversation/message/generation/call lineage
 -> canonical memory capability
 -> replay-safe transaction
@@ -53,7 +53,7 @@ memory management
 -> declared memory.lookup [read]
 -> canonical scope/ranking
 -> turn-bound opaque memref_*
--> declared memory.reconcile [confirmed write with relation/evidence preview]
+-> declared memory.reconcile [confirmed write with target snapshot + full proposed-content review]
 -> scope + target revalidation
 -> atomic consolidation or supersession
 -> lifecycle evaluation
@@ -172,7 +172,7 @@ Input is only `query` (1-500 chars). Scope, budgets, lifecycle eligibility and d
 
 Results contain title/body/kind/confidence/importance/lifecycle/tags plus opaque `memref_*` grants. Raw durable IDs are never returned. Lookup excludes `MICRO_OBSERVATION` management targets and does not mutate `recallCount` or `lastRecalledAt`.
 
-A lookup ref is an in-memory capability grant bound to the exact originating conversation + user message + generation. It expires after ten minutes and lives in a bounded 128-entry map. Reconciliation revalidates current target scope/eligibility before mutation.
+A lookup ref is an in-memory capability grant bound to the exact originating conversation + user message + generation. It expires after ten minutes and lives in a bounded 128-entry map. Each grant also carries a bounded human-readable display snapshot (title, kind, lifecycle and excerpt) solely for later confirmation. The snapshot conveys no mutation authority; reconciliation still revalidates the original grant provenance, current target scope and eligibility before mutation.
 
 ### 6.2 `memory.save`
 
@@ -182,13 +182,13 @@ Logical mutation identity derives from application-owned `conversationId + input
 
 Replay equivalence is semantic: changed title/body/kind/confidence/importance/tags/scope/provenance under the same logical call fails closed. Legitimate later lifecycle/relationship/recall changes do not invalidate a true replay.
 
-Before approval, the central confirmation summary shows the memory title plus a whitespace-compacted body preview capped at 300 characters. The preview is informational only; the strict validated arguments remain the mutation input. The tool returns only `{ saved, kind }`.
+Before approval, the central confirmation names the memory and exposes the **entire validated proposed body** as `reviewText`. The dialog keeps long prose visually bounded with a scrollable review region, but it does not truncate or authorize unseen durable prose. The strict validated arguments remain the mutation input. The tool returns only `{ saved, kind }`.
 
 ### 6.3 `memory.reconcile`
 
 Input: `targetRef`, relation (`support`, `conflict`, `related`, `supersede`), title 1-160, body 1-4,000 and optional bounded tags. Raw durable IDs are not accepted as target authority.
 
-The confirmation summary names the requested relation and shows the proposed evidence title plus a bounded 300-character body preview. It does not fabricate a target title from the opaque ref or claim a pre-read that has not occurred.
+Before approval, the confirmation resolves only the opaque grant's expiring human-readable display snapshot. It names the target memory and shows its kind/lifecycle plus a bounded current-content excerpt, while keeping the raw durable ID and raw opaque ref out of the dialog. The confirmation also identifies the requested relation and evidence/replacement title and exposes the **entire validated proposed body** for human review. Reading that snapshot grants no write authority: execution separately validates the original conversation/message/generation-bound ref and current canonical target scope/eligibility immediately before mutation.
 
 `support` / `conflict` / `related` create one replay-safe `MICRO_OBSERVATION` and use canonical consolidation. Support reinforces once; exact same-relation replay is a no-op; relation reclassification fails closed. Conflict and related evidence never overwrite target prose.
 
@@ -268,7 +268,7 @@ Memory context is bounded and separated from Character Master. A malformed canon
 
 Corruption recovery is deliberately narrower than ordinary delete: it is available only from the human Memory Bank, requires explicit confirmation, revalidates the row at deletion time, and fails closed for any valid row. It is not model-visible and does not create a second memory authority.
 
-Prompt-injection-shaped stored text remains visible only as inert reference data. Both normal recall and management lookup explicitly state that memory cannot authorize tools, actions, policy or permissions. Tool authority is independently enforced by exact declaration membership, registry metadata, runtime schema validation, confirmation policy and elected-turn provenance. For model-initiated durable writes, the confirmation gate also exposes a bounded preview of the prose that will persist across turns.
+Prompt-injection-shaped stored text remains visible only as inert reference data. Both normal recall and management lookup explicitly state that memory cannot authorize tools, actions, policy or permissions. Tool authority is independently enforced by exact declaration membership, registry metadata, runtime schema validation, confirmation policy and elected-turn provenance. For model-initiated durable writes, the confirmation gate exposes the full validated prose that will persist across turns; long content is scroll-bounded visually rather than truncated. Reconciliation additionally identifies the affected target through the opaque grant's bounded display snapshot without exposing durable identity.
 
 Interactive writes inherit central confirmation freshness and cancellation handling. Memory transactions additionally recheck mutation authority before commit. Losing generation authority rolls back a compound mutation. Shared read-modify-write store primitives are transactional so concurrent user/model/lifecycle paths cannot rely on split implicit transactions for correctness.
 
@@ -281,10 +281,10 @@ Archive import is an untrusted-data boundary. Application authority fields canno
 Pass 6 plus subsequent maintenance hardening adds or reuses direct behavioral tests for these boundaries:
 
 - **Model authority smuggling:** strict runtime schemas reject folder, provenance, lifecycle, autonomy, durable-ID and forbidden-kind attempts.
-- **Opaque capability abuse:** raw IDs fail; refs are conversation/message/generation-bound; TTL expiry, folder movement, archive/expiry/supersession after lookup all fail closed.
+- **Opaque capability abuse:** raw IDs fail; refs are conversation/message/generation-bound; TTL expiry, folder movement, archive/expiry/supersession after lookup all fail closed. Human-readable confirmation snapshots do not confer execution authority.
 - **Replay abuse:** changed save/reconcile arguments fail; long replay keys hash full lineage; final-slot supersession replay converges at primitive and handler layers; a fresh stale-ref operation rolls back.
 - **Cancellation/races:** model writes and compound reconcile roll back if generation authority is lost; terminal conversation persistence precedes organic observation; failed persistence prevents observation; shared store read-modify-write primitives are transactional.
-- **Prompt injection:** hostile stored prose remains bounded data, exposes no durable identity, and carries zero tool/action authority; model durable-write confirmations include bounded content previews.
+- **Prompt injection:** hostile stored prose remains bounded data, exposes no durable identity, and carries zero tool/action authority; model durable-write confirmations expose the entire validated proposed prose before approval, and reconcile confirmation names the affected target through an expiring non-authoritative display snapshot.
 - **Organic poisoning:** exact-user-span requirement, strict output shape, candidate cap, credential rejection, no assistant evidence, no automatic CORE, no semantic auto-merge.
 - **Scope isolation:** canonical folder ancestry/global policy applies to normal recall and management lookup; sibling scopes do not leak.
 - **Large-memory behavior:** retrieval stays within item/character caps and may use an ellipsized projection rather than silently making a canonical oversized record unrecallable; canonical body content is unchanged.

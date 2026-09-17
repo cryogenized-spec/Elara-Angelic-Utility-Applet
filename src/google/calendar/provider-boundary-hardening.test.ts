@@ -18,10 +18,10 @@ describe('Calendar provider boundary hardening', () => {
   it('rejects wildcard and non-concrete ETags at model validation', () => {
     expect(() => validateSemanticToolArguments('calendar.updateEvent', {
       eventId: 'event-1', etag: '*', summary: 'Unsafe overwrite',
-    })).toThrow('concrete provider ETag');
+    })).toThrow('concrete strong provider ETag');
     expect(() => validateSemanticToolArguments('calendar.deleteEvent', {
       eventId: 'event-1', etag: '"one", "two"',
-    })).toThrow('concrete provider ETag');
+    })).toThrow('concrete strong provider ETag');
     expect(() => validateSemanticToolArguments('calendar.updateEvent', {
       eventId: 'event-1', etag: '"etag-1"', summary: 'Safe update',
     })).not.toThrow();

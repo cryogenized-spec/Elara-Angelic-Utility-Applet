@@ -80,15 +80,20 @@ describe('Drive and Sheets executable parity', () => {
     expect(declaration?.parameters.properties.value).toMatchObject({ type: 'string', maxLength: 50_000 });
   });
 
-  it('accepts only a single A1 cell target for sheets.updateCell', () => {
-    expect(validateDriveSheetsToolArguments('sheets.updateCell', {
-      spreadsheetId: 'sheet-1', range: "'My Sheet'!$B$2", value: 'ready',
-    })).toMatchObject({ range: "'My Sheet'!$B$2" });
-    expect(validateDriveSheetsToolArguments('sheets.updateCell', {
-      spreadsheetId: 'sheet-1', range: 'A1', value: 'ready',
-    })).toMatchObject({ range: 'A1' });
+  it('accepts only a single A1 cell target while preserving valid quoted sheet names', () => {
+    for (const range of [
+      'A1',
+      "'My Sheet'!$B$2",
+      "'January, 2026'!A1",
+      "'Bang!'!A1",
+      "'Bob''s Sheet'!$C$7",
+    ]) {
+      expect(validateDriveSheetsToolArguments('sheets.updateCell', {
+        spreadsheetId: 'sheet-1', range, value: 'ready',
+      })).toMatchObject({ range });
+    }
 
-    for (const range of ['Sheet1!A1:B2', 'A:A', '1:1', 'NamedRange']) {
+    for (const range of ['Sheet1!A1:B2', 'A:A', '1:1', 'NamedRange', "'unterminated!A1", "''!A1"]) {
       expect(() => validateDriveSheetsToolArguments('sheets.updateCell', {
         spreadsheetId: 'sheet-1', range, value: 'ready',
       })).toThrow(/one A1 cell reference/i);

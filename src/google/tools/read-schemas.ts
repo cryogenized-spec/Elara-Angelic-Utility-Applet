@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const idSchema = z.string().trim().min(1).max(500);
 const pageTokenSchema = z.string().trim().min(1).max(5000);
+const calendarPageTokenSchema = z.string().trim().min(1).max(2048);
 const querySchema = z.string().trim().max(2000);
 const timestampValueSchema = z.string().trim().min(1).max(128);
 const RFC3339_OFFSET_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))$/i;
@@ -49,7 +50,7 @@ const metadataHeadersSchema = z.array(z.string().trim().min(1).max(200)).max(50)
 
 export const googleReadToolArgumentSchemas = {
   'calendar.listCalendars': z.object({
-    pageToken: pageTokenSchema.optional(),
+    pageToken: calendarPageTokenSchema.optional(),
     maxResults: z.number().int().min(1).max(250).optional(),
     showHidden: z.boolean().optional(),
     minAccessRole: z.enum(['freeBusyReader', 'reader', 'writerWithoutPrivateAccess', 'writer', 'owner']).optional(),
@@ -60,7 +61,7 @@ export const googleReadToolArgumentSchemas = {
     calendarId: idSchema.optional(),
     timeMin: offsetTimestampSchema,
     timeMax: offsetTimestampSchema,
-    pageToken: pageTokenSchema.optional(),
+    pageToken: calendarPageTokenSchema.optional(),
     maxResults: z.number().int().min(1).max(250).optional(),
     query: querySchema.optional(),
     timeZone: timeZoneSchema,

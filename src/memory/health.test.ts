@@ -57,6 +57,15 @@ describe('durable memory health scan', () => {
     await expect(deleteInvalidMemoryRecord('<unknown>')).rejects.toThrow(/concrete invalid memory id/i);
   });
 
+  it('preserves whitespace-sensitive primary keys when removing a reported corrupt row', async () => {
+    const exactId = '  memory_corrupt_whitespace  ';
+    await db.memories.put({ id: exactId, title: 'Broken whitespace-key record' } as never);
+
+    await expect(inspectMemoryStore()).resolves.toMatchObject({ invalidIds: [exactId] });
+    await expect(deleteInvalidMemoryRecord(exactId)).resolves.toBeUndefined();
+    await expect(db.memories.get(exactId)).resolves.toBeUndefined();
+  });
+
   it('marks malformed records without usable ids as unknown', () => {
     expect(normalizeInvalidMemoryId({ title: 'No id' })).toBe('<unknown>');
     expect(normalizeInvalidMemoryId({ id: '' })).toBe('<unknown>');

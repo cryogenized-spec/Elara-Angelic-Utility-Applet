@@ -106,14 +106,24 @@ function resolveLookupRef(ref: string, conversationId: string, messageId: string
 }
 
 /**
- * Human-readable lookup snapshot for confirmation only. Resolving the opaque
- * grant for display confers no mutation authority and exposes no durable ID.
- * Actual reconciliation separately requires the original conversation,
- * message and generation binding, then rechecks current canonical scope before
- * any mutation can commit.
+ * Human-readable lookup snapshot for confirmation only. Display is permitted
+ * only for the exact conversation + user message + generation that received
+ * the opaque grant. This confers no mutation authority and exposes no durable
+ * ID; execution separately rechecks current canonical scope before commit.
  */
-export function describeMemoryReconcileTarget(ref: string): MemoryReconcileConfirmationTarget {
-  return { ...lookupGrant(ref).display };
+export function describeMemoryReconcileTarget(
+  ref: string,
+  conversationId: string | undefined,
+  messageId: string | undefined,
+  generationId: string | undefined,
+): MemoryReconcileConfirmationTarget {
+  const grant = boundLookupGrant(
+    ref,
+    requiredIdentity(conversationId, 'conversation provenance'),
+    requiredIdentity(messageId, 'message provenance'),
+    requiredIdentity(generationId, 'generation provenance'),
+  );
+  return { ...grant.display };
 }
 
 function reconcileSignature(targetMemoryId: string, relation: string, title: string, body: string, tags: readonly string[] | undefined): string {

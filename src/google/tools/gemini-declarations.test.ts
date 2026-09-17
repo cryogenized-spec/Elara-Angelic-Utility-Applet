@@ -47,8 +47,9 @@ describe('Gemini capability declarations', () => {
 
   it('declares concrete arguments for other high-value write tools', () => {
     const createTask = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'tasks.createTask');
-    expect(createTask?.parameters.required).toEqual(['taskListId', 'task']);
-    expect(createTask?.parameters.properties).toHaveProperty('task');
+    expect(createTask?.parameters.required).toEqual(['taskListId', 'title']);
+    expect(createTask?.parameters.properties).toHaveProperty('title');
+    expect(createTask?.parameters.properties).not.toHaveProperty('task');
 
     const sendMail = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'gmail.sendMessage');
     expect(sendMail?.parameters.required).toEqual(['to', 'subject', 'body']);

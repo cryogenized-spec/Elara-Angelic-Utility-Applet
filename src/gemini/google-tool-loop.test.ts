@@ -103,7 +103,7 @@ describe('streamGoogleToolLoop', () => {
     const confirm = vi.fn(async (request: WriteConfirmationRequest) => request.risk === 'write');
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-write-1', model: 'gemini-3.8-flash' },
-      { type: 'tool-call', interactionId: 'interaction-write-1', index: 0, callId: 'call-write-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', task: { title: 'Buy milk' } } },
+      { type: 'tool-call', interactionId: 'interaction-write-1', index: 0, callId: 'call-write-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', title: 'Buy milk' } },
     ));
     streamToolResult.mockReturnValueOnce(events(
       { type: 'completed', interactionId: 'interaction-write-2', status: 'completed', durationMs: 12 },
@@ -130,7 +130,7 @@ describe('streamGoogleToolLoop', () => {
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-batch-1', model: 'gemini-3.8-flash' },
       { type: 'tool-call', interactionId: 'interaction-batch-1', index: 0, callId: 'call-event-1', name: 'calendar.createEvent', arguments: { calendarId: 'primary', summary: 'Design review', start: '2026-09-08T10:00:00Z', end: '2026-09-08T11:00:00Z' } },
-      { type: 'tool-call', interactionId: 'interaction-batch-1', index: 1, callId: 'call-task-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', task: { title: 'Send recap' } } },
+      { type: 'tool-call', interactionId: 'interaction-batch-1', index: 1, callId: 'call-task-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', title: 'Send recap' } },
     ));
     streamToolResult.mockReturnValueOnce(events({ type: 'completed', interactionId: 'interaction-batch-2', status: 'completed', durationMs: 12 }));
 
@@ -191,12 +191,12 @@ describe('streamGoogleToolLoop', () => {
     const handler = vi.fn(async () => ({ id: 'task-1' }));
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-1', model: 'gemini-3.8-flash' },
-      { type: 'tool-call', interactionId: 'interaction-1', index: 0, callId: 'call-1', name: 'tasks.createTask', arguments: { taskListId: 'primary' } },
+      { type: 'tool-call', interactionId: 'interaction-1', index: 0, callId: 'call-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', title: 'First task' } },
     ));
     streamToolResult.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-2', model: 'gemini-3.8-flash' },
       { type: 'text-delta', index: 1, text: 'Done, with more to do.' },
-      { type: 'tool-call', interactionId: 'interaction-2', index: 2, callId: 'call-2', name: 'tasks.createTask', arguments: { taskListId: 'primary' } },
+      { type: 'tool-call', interactionId: 'interaction-2', index: 2, callId: 'call-2', name: 'tasks.createTask', arguments: { taskListId: 'primary', title: 'Second task' } },
       { type: 'completed', interactionId: 'interaction-2', status: 'completed', durationMs: 9 },
     ));
 
@@ -219,7 +219,7 @@ describe('streamGoogleToolLoop', () => {
     const handler = vi.fn(async () => ({ id: 'task-1' }));
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-1', model: 'gemini-3.8-flash' },
-      { type: 'tool-call', interactionId: 'interaction-1', index: 0, callId: 'call-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', task: { title: 'Buy milk' } } },
+      { type: 'tool-call', interactionId: 'interaction-1', index: 0, callId: 'call-1', name: 'tasks.createTask', arguments: { taskListId: 'primary', title: 'Buy milk' } },
     ));
     streamToolResult.mockReturnValueOnce(events(
       { type: 'completed', interactionId: 'interaction-2', status: 'completed', durationMs: 3 },

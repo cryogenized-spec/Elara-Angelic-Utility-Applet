@@ -5,7 +5,7 @@ import { GoogleDriveService } from '../drive/service';
 import { GoogleGmailService } from '../gmail/service';
 import { googleOAuthAuthority } from '../oauth/authority';
 import { GoogleSheetsService } from '../sheets/service';
-import { GoogleTasksService } from '../tasks/service';
+import { GoogleTasksService, type GoogleTaskStatus } from '../tasks/service';
 import type { GoogleToolHandlers } from './executor';
 import { googleReadToolHandlers } from './read-handlers';
 
@@ -64,6 +64,12 @@ function calendarSendUpdates(args: Record<string, unknown>): CalendarSendUpdates
   const value = args.sendUpdates;
   if (value === undefined) return undefined;
   if (value !== 'all' && value !== 'externalOnly') throw new Error('Google Calendar sendUpdates must be all or externalOnly.');
+  return value;
+}
+function taskStatus(args: Record<string, unknown>): GoogleTaskStatus | undefined {
+  const value = args.status;
+  if (value === undefined) return undefined;
+  if (value !== 'needsAction' && value !== 'completed') throw new Error('Google Tasks status must be needsAction or completed.');
   return value;
 }
 function bytesToBase64(bytes: Uint8Array): string {
@@ -125,17 +131,44 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     );
   },
 
+  'tasks.createTaskList': async ({ arguments: raw }) => tasks.createTaskList(stringArg(objectArgs(raw), 'title')!),
+  'tasks.updateTaskList': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return tasks.updateTaskList(stringArg(args, 'taskListId')!, stringArg(args, 'title')!);
+  },
+  'tasks.deleteTaskList': async ({ arguments: raw }) => tasks.deleteTaskList(stringArg(objectArgs(raw), 'taskListId')!),
   'tasks.createTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return tasks.createTask(stringArg(args, 'taskListId')!, recordArg(args, 'task')!, stringArg(args, 'parent', false), stringArg(args, 'previous', false));
+    return tasks.createSemanticTask({
+      taskListId: stringArg(args, 'taskListId')!,
+      title: stringArg(args, 'title')!,
+      notes: stringArg(args, 'notes', false),
+      scheduledDate: stringArg(args, 'scheduledDate', false),
+      parent: stringArg(args, 'parent', false),
+      previous: stringArg(args, 'previous', false),
+    });
   },
   'tasks.updateTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return tasks.updateTask(stringArg(args, 'taskListId')!, stringArg(args, 'taskId')!, recordArg(args, 'task')!);
+    return tasks.updateSemanticTask({
+      taskListId: stringArg(args, 'taskListId')!,
+      taskId: stringArg(args, 'taskId')!,
+      title: stringArg(args, 'title', false),
+      notes: stringArg(args, 'notes', false),
+      scheduledDate: stringArg(args, 'scheduledDate', false),
+      clearScheduledDate: optionalBoolean(args, 'clearScheduledDate'),
+      status: taskStatus(args),
+    });
   },
   'tasks.moveTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return tasks.moveTask(stringArg(args, 'taskListId')!, stringArg(args, 'taskId')!, stringArg(args, 'parent', false), stringArg(args, 'previous', false));
+    return tasks.moveTask(
+      stringArg(args, 'taskListId')!,
+      stringArg(args, 'taskId')!,
+      stringArg(args, 'parent', false),
+      stringArg(args, 'previous', false),
+      stringArg(args, 'destinationTaskListId', false),
+    );
   },
   'tasks.deleteTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);

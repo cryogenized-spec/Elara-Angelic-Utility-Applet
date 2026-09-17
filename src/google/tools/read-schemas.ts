@@ -1,11 +1,10 @@
 import { z } from 'zod';
 
 const idSchema = z.string().trim().min(1).max(500);
-const pageTokenSchema = z.string().trim().min(1).max(2048);
+const pageTokenSchema = z.string().trim().min(1).max(5000);
 const querySchema = z.string().trim().max(2000);
 const timestampValueSchema = z.string().trim().min(1).max(128);
-const timestampSchema = timestampValueSchema.optional();
-const CALENDAR_QUERY_TIMESTAMP_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))$/i;
+const RFC3339_OFFSET_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:Z|[+-](\d{2}):(\d{2}))$/i;
 
 function daysInMonth(year: number, month: number): number {
   if (month === 2) {
@@ -15,8 +14,8 @@ function daysInMonth(year: number, month: number): number {
   return [4, 6, 9, 11].includes(month) ? 30 : 31;
 }
 
-function isValidCalendarQueryTimestamp(value: string): boolean {
-  const match = CALENDAR_QUERY_TIMESTAMP_PATTERN.exec(value);
+function isValidOffsetTimestamp(value: string): boolean {
+  const match = RFC3339_OFFSET_PATTERN.exec(value);
   if (!match) return false;
   const [, year, month, day, hour, minute, second, , offsetHour, offsetMinute] = match;
   const numericYear = Number(year);
@@ -38,11 +37,11 @@ function isValidIanaTimeZone(value: string): boolean {
   }
 }
 
-const calendarQueryTimestampValueSchema = timestampValueSchema.refine(
-  isValidCalendarQueryTimestamp,
-  'Calendar query bounds must be real RFC 3339 timestamps with an explicit UTC offset.',
+const offsetTimestampValueSchema = timestampValueSchema.refine(
+  isValidOffsetTimestamp,
+  'Timestamp bounds must be real RFC 3339 timestamps with an explicit UTC offset.',
 );
-const calendarQueryTimestampSchema = calendarQueryTimestampValueSchema.optional();
+const offsetTimestampSchema = offsetTimestampValueSchema.optional();
 const timeZoneSchema = z.string().trim().min(1).max(200)
   .refine(isValidIanaTimeZone, 'Calendar time zone must be a valid IANA time zone.')
   .optional();
@@ -59,8 +58,8 @@ export const googleReadToolArgumentSchemas = {
 
   'calendar.listEvents': z.object({
     calendarId: idSchema.optional(),
-    timeMin: calendarQueryTimestampSchema,
-    timeMax: calendarQueryTimestampSchema,
+    timeMin: offsetTimestampSchema,
+    timeMax: offsetTimestampSchema,
     pageToken: pageTokenSchema.optional(),
     maxResults: z.number().int().min(1).max(250).optional(),
     query: querySchema.optional(),
@@ -76,14 +75,19 @@ export const googleReadToolArgumentSchemas = {
   'calendar.getSettings': z.object({}).strict(),
 
   'calendar.queryFreeBusy': z.object({
-    timeMin: calendarQueryTimestampValueSchema,
-    timeMax: calendarQueryTimestampValueSchema,
+    timeMin: offsetTimestampValueSchema,
+    timeMax: offsetTimestampValueSchema,
     calendarIds: z.array(idSchema).min(1).max(50),
     timeZone: timeZoneSchema,
   }).strict(),
 
   'tasks.listTaskLists': z.object({
     pageToken: pageTokenSchema.optional(),
+    maxResults: z.number().int().min(1).max(100).optional(),
+  }).strict(),
+
+  'tasks.getTaskList': z.object({
+    taskListId: idSchema,
   }).strict(),
 
   'tasks.listTasks': z.object({
@@ -92,11 +96,12 @@ export const googleReadToolArgumentSchemas = {
     showCompleted: z.boolean().optional(),
     showDeleted: z.boolean().optional(),
     showHidden: z.boolean().optional(),
-    dueMin: timestampSchema,
-    dueMax: timestampSchema,
-    updatedMin: timestampSchema,
-    completedMin: timestampSchema,
-    completedMax: timestampSchema,
+    showAssigned: z.boolean().optional(),
+    dueMin: offsetTimestampSchema,
+    dueMax: offsetTimestampSchema,
+    updatedMin: offsetTimestampSchema,
+    completedMin: offsetTimestampSchema,
+    completedMax: offsetTimestampSchema,
     maxResults: z.number().int().min(1).max(100).optional(),
   }).strict(),
 

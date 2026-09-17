@@ -162,7 +162,13 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'tasks.moveTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return tasks.moveTask(stringArg(args, 'taskListId')!, stringArg(args, 'taskId')!, stringArg(args, 'parent', false), stringArg(args, 'previous', false));
+    return tasks.moveTask(
+      stringArg(args, 'taskListId')!,
+      stringArg(args, 'taskId')!,
+      stringArg(args, 'parent', false),
+      stringArg(args, 'previous', false),
+      stringArg(args, 'destinationTaskListId', false),
+    );
   },
   'tasks.deleteTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);

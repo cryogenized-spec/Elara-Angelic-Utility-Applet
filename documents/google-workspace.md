@@ -77,7 +77,7 @@ Calendar event writes use the scoped event-write capability and still pass throu
 
 Google Tasks remains the task-data authority; Elara does not mirror provider task state into a second task database. Pass 2 exposes `tasks.listTaskLists`, `tasks.getTaskList`, `tasks.listTasks`, `tasks.getTask`, `tasks.createTaskList`, `tasks.updateTaskList`, `tasks.deleteTaskList`, `tasks.createTask`, `tasks.updateTask`, `tasks.moveTask`, `tasks.deleteTask`, and `tasks.clearCompleted`.
 
-Task-list reads support provider pagination with a maximum of 1,000 lists per page. Task reads support provider pagination with a maximum of 100 tasks per page plus completed/deleted/hidden filters, RFC 3339 provider filter bounds, and explicit `showAssigned`. Assigned tasks from Docs/Chat are not silently widened into ordinary reads: `showAssigned` must be requested. Returned tasks preserve hierarchy, position, completion state, links, web UI link and assignment origin metadata where Google supplies it.
+Task-list reads support provider pagination with a maximum of 100 lists per page. Task reads support provider pagination with a maximum of 100 tasks per page plus completed/deleted/hidden filters, RFC 3339 provider filter bounds, and explicit `showAssigned`. Assigned tasks from Docs/Chat are not silently widened into ordinary reads: `showAssigned` must be requested. Returned tasks preserve hierarchy, position, completion state, links, web UI link and assignment origin metadata where Google supplies it.
 
 Google's provider field named `due` is not a timed deadline. The Tasks API retains only its calendar date and discards time-of-day. Elara therefore normalizes it to `scheduledDate: YYYY-MM-DD` at the model/service boundary. Creates and updates accept only a real date-only `scheduledDate`; the adapter serializes it as midnight UTC solely because Google requires an RFC 3339 provider representation. Gemini is never told that midnight is a meaningful deadline. `clearScheduledDate` removes that date. Timed strings are rejected before OAuth/provider execution.
 
@@ -85,7 +85,7 @@ Task creation exposes only bounded semantic fields: list id, title, notes, optio
 
 Hierarchy changes use Google's dedicated move endpoint. Supplying `parent` nests under that task; omitting `parent` moves to the top level. Supplying `previous` places after that sibling; omitting `previous` places first among destination siblings. Confirmation text states these omission semantics rather than presenting an ambiguous generic move.
 
-Assigned-task deletion has a cross-surface consequence: when Google considers a task assigned from Docs or Chat, `tasks.delete` can delete both the assigned task and the originating assignment. Elara therefore preserves assignment-origin metadata on reads and the destructive confirmation warns about the Docs/Chat consequence. Deleting only the assigned copy is not represented as an API tool because Google requires unassignment at the originating surface for that behavior.
+Assigned-task deletion has a cross-surface consequence: when Google considers a task assigned from Docs or Chat, `tasks.delete` can delete both the assigned task and the originating assignment. Elara therefore preserves assignment-origin metadata on reads and the destructive confirmation warns about the Docs/Chat consequence. Task-list deletion uses the same conservative warning because a deleted list may contain assigned tasks whose originating Docs/Chat assignments can also be removed. The confirmation does not claim that Elara pre-read every task in the list. Deleting only the assigned copy is not represented as an API tool because Google requires unassignment at the originating surface for that behavior.
 
 `tasks.clearCompleted` follows Google's actual semantics: completed tasks are marked hidden and stop appearing in normal list results; they are not represented to the user as hard-deleted. The operation remains `destructive` because it is a bulk visibility/state change. `tasks.deleteTaskList`, `tasks.deleteTask`, and `tasks.clearCompleted` are destructive; create/update/move operations are writes. Every mutation still crosses the ordinary confirmation broker after schema and OAuth capability validation.
 
@@ -110,10 +110,11 @@ Tasks does not expose a task time-of-day through this API contract. Elara must n
 - Calendar create retry identity derives from the existing provider call id; ambiguous retries do not intentionally create a second event.
 - Calendar list/settings/free-busy remain optional capabilities and do not broaden the core Calendar event grant.
 - Tasks scheduling is date-only at the model boundary; provider midnight is serialization, never time semantics.
+- Task-list and task page bounds are 100 and agree across service, schemas, Gemini declarations, tests and this contract.
 - Raw Google Task/TaskList resources are not Gemini mutation inputs.
 - Assigned-task visibility is opt-in and assignment origin remains read-only metadata.
 - Task hierarchy moves state the provider meaning of omitted parent/previous before confirmation.
-- Assigned-task deletion warns that Docs/Chat source assignments may also be deleted.
+- Assigned-task deletion, including deletion through a containing task list, warns that Docs/Chat source assignments may also be deleted.
 - Clearing completed tasks is represented as Google's hidden-task transition, not as fabricated hard deletion.
 
 ## 8. Security and failure semantics
@@ -128,7 +129,7 @@ Tasks rejects malformed ids/page tokens, page sizes beyond provider limits, inva
 
 Use service contract tests, `src/google/tools/*test*`, Gemini declaration tests, confirmation broker/policy tests and integration/E2E flows. Calendar service tests cover discovery, filters/pagination, detailed ETag reads, settings, free/busy, recurrence/timezone, guest updates, deterministic create retry recovery and conditional PATCH/DELETE. `calendar-parity.test.ts` pins registry risk/capabilities, schemas, handler call-id propagation and confirmation summaries. `recurring-update-timezone.test.ts` and `provider-boundary-hardening.test.ts` pin recurrence conversion, concrete ETags, offset/timezone requirements and direct-service fail-closed behavior before authorization. `date-zone-validation.test.ts` pins valid-IANA enforcement, impossible-date rejection, leap-day acceptance, paired timing updates and consistent offset/timezone boundary semantics.
 
-Tasks service tests pin task-list pagination/parity, assignment metadata, explicit `showAssigned`, provider-filter forwarding, date-only provider conversion, invalid scheduled-date fail-closed behavior, semantic PATCH updates and move omission behavior. `tasks-parity.test.ts` pins registry risk/capabilities, semantic-vs-raw schemas, Gemini declarations and consequence-aware confirmations for task/list deletion, bulk clear and hierarchy moves.
+Tasks service tests pin task-list pagination/parity at the provider's 100-item bound, assignment metadata, explicit `showAssigned`, provider-filter forwarding, date-only provider conversion, invalid scheduled-date fail-closed behavior, semantic PATCH updates and move omission behavior. `tasks-parity.test.ts` pins registry risk/capabilities, semantic-vs-raw schemas, the 101-item rejection boundary, Gemini declaration parity and consequence-aware confirmations for task/list deletion, bulk clear and hierarchy moves.
 
 `e2e/workspace-shortcuts.spec.ts` verifies visible shortcut drafting and explicit submission. The reliability gate continues to lock key invariants including Calendar/Tasks write capability, grouped confirmations, registry-derived declarations and explicit accessibility controls.
 

@@ -18,7 +18,7 @@ export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'tasks.deleteTaskList', risk: 'destructive', capability: 'tasks.write', exposure: 'gemini', description: 'Delete an explicit Google Tasks task list.' },
   { name: 'tasks.createTask', risk: 'write', capability: 'tasks.write', exposure: 'gemini', description: 'Create a task using bounded semantic fields, optional date-only scheduling, and explicit hierarchy placement.' },
   { name: 'tasks.updateTask', risk: 'write', capability: 'tasks.write', exposure: 'gemini', description: 'Patch explicit task fields such as title, notes, date-only scheduling, or completion status.' },
-  { name: 'tasks.moveTask', risk: 'write', capability: 'tasks.write', exposure: 'gemini', description: 'Move a task within its list by explicit parent and/or previous-sibling placement.' },
+  { name: 'tasks.moveTask', risk: 'write', capability: 'tasks.write', exposure: 'gemini', description: 'Move a task within its list or to an explicit destination task list, with optional parent and previous-sibling placement.' },
   { name: 'tasks.deleteTask', risk: 'destructive', capability: 'tasks.write', exposure: 'gemini', description: 'Delete one task; assigned tasks can also delete the originating Docs or Chat assignment.' },
   { name: 'tasks.clearCompleted', risk: 'destructive', capability: 'tasks.write', exposure: 'gemini', description: 'Clear completed tasks from a list, causing Google to hide those completed tasks from normal results.' },
   { name: 'docs.getDocument', risk: 'read', capability: 'docs.read', exposure: 'internal', description: 'Retrieve the raw Google document resource. Adapter primitive; not Gemini-visible.' },

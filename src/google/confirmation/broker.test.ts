@@ -51,4 +51,23 @@ describe('Google confirmation broker', () => {
     dismissGoogleToolConfirmation();
     await expect(next).resolves.toEqual([false]);
   });
+
+  it('renders the entire durable-memory review text before approval', async () => {
+    const fullBody = `Persist this exact durable content.\n${'z'.repeat(4_000)}`;
+    const memoryRequest: WriteConfirmationRequest = {
+      ...request('memory.save'),
+      resourceSummary: 'Save durable memory “Long review”. Review the full proposed body below before approving.',
+      reviewText: fullBody,
+    };
+
+    const pending = requestGoogleToolConfirmations([memoryRequest]);
+    const review = document.querySelector<HTMLElement>('.google-confirmation-item__review-text');
+    expect(review).not.toBeNull();
+    expect(review?.textContent).toBe(fullBody);
+    expect(review?.style.maxHeight).toBe('12rem');
+    expect(review?.style.overflow).toBe('auto');
+
+    dismissGoogleToolConfirmation();
+    await expect(pending).resolves.toEqual([false]);
+  });
 });

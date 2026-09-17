@@ -24,12 +24,26 @@ describe('Google Tasks create replay fence', () => {
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
-  it('fails closed when the same call id is replayed with changed arguments', async () => {
+  it('retains same-call replay protection for the full elected turn rather than a fixed TTL', async () => {
+    const operation = vi.fn().mockResolvedValue({ id: 'task-1' });
+    const payload = { taskListId: 'list-1', title: 'Long-running turn' };
+
+    await runTaskCreateOnce(baseContext, payload, operation, 1000);
+    await runTaskCreateOnce(baseContext, payload, operation, 1000 + 24 * 60 * 60 * 1000);
+
+    expect(operation).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when the same call id is replayed with changed arguments even much later in the same turn', async () => {
     const operation = vi.fn().mockResolvedValue({ id: 'task-1' });
     await runTaskCreateOnce(baseContext, { taskListId: 'list-1', title: 'First' }, operation, 1000);
 
-    await expect(runTaskCreateOnce(baseContext, { taskListId: 'list-1', title: 'Changed' }, operation, 1001))
-      .rejects.toThrow(/changed arguments/i);
+    await expect(runTaskCreateOnce(
+      baseContext,
+      { taskListId: 'list-1', title: 'Changed' },
+      operation,
+      1000 + 24 * 60 * 60 * 1000,
+    )).rejects.toThrow(/changed arguments/i);
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
@@ -40,6 +54,18 @@ describe('Google Tasks create replay fence', () => {
 
     await runTaskCreateOnce(baseContext, payload, firstOperation, 1000);
     await runTaskCreateOnce({ ...baseContext, callId: 'call-2' }, payload, secondOperation, 1001);
+
+    expect(firstOperation).toHaveBeenCalledOnce();
+    expect(secondOperation).toHaveBeenCalledOnce();
+  });
+
+  it('clears prior replay state when a new elected turn arrives', async () => {
+    const firstOperation = vi.fn().mockResolvedValue({ id: 'task-1' });
+    const secondOperation = vi.fn().mockResolvedValue({ id: 'task-2' });
+    const payload = { taskListId: 'list-1', title: 'Same call id, new turn' };
+
+    await runTaskCreateOnce(baseContext, payload, firstOperation, 1000);
+    await runTaskCreateOnce({ ...baseContext, generationId: 'generation-2' }, payload, secondOperation, 1001);
 
     expect(firstOperation).toHaveBeenCalledOnce();
     expect(secondOperation).toHaveBeenCalledOnce();
@@ -61,7 +87,7 @@ describe('Google Tasks create replay fence', () => {
     const payload = { taskListId: 'list-1', title: 'Review inventory' };
 
     await expect(runTaskCreateOnce(baseContext, payload, operation, 1000)).rejects.toThrow('network response lost');
-    await expect(runTaskCreateOnce(baseContext, payload, operation, 1001)).rejects.toThrow('network response lost');
+    await expect(runTaskCreateOnce(baseContext, payload, operation, 1000 + 24 * 60 * 60 * 1000)).rejects.toThrow('network response lost');
     expect(operation).toHaveBeenCalledTimes(1);
   });
 });

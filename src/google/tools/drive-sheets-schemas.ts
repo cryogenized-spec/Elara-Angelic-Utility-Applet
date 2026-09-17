@@ -8,18 +8,40 @@ const valuesSchema = z.array(rowSchema).min(1).max(1000);
 const updateRequestSchema = z.record(z.string(), z.unknown());
 const cellValueSchema = z.string().max(50_000);
 
-function isSingleCellA1(value: string): boolean {
+function singleCellPart(value: string): string | undefined {
   const normalized = value.trim();
-  const bang = normalized.lastIndexOf('!');
-  const cell = bang >= 0 ? normalized.slice(bang + 1) : normalized;
-  const sheet = bang >= 0 ? normalized.slice(0, bang) : undefined;
-  if (sheet !== undefined) {
-    if (!sheet || sheet.includes('!') || sheet.includes(':') || sheet.includes(',')) return false;
-    const startsQuoted = sheet.startsWith("'");
-    const endsQuoted = sheet.endsWith("'");
-    if (startsQuoted !== endsQuoted) return false;
+  if (!normalized) return undefined;
+
+  if (normalized.startsWith("'")) {
+    let hasTitleContent = false;
+    for (let index = 1; index < normalized.length; index += 1) {
+      const character = normalized[index];
+      if (character !== "'") {
+        hasTitleContent = true;
+        continue;
+      }
+      if (normalized[index + 1] === "'") {
+        hasTitleContent = true;
+        index += 1;
+        continue;
+      }
+      if (!hasTitleContent || normalized[index + 1] !== '!') return undefined;
+      return normalized.slice(index + 2);
+    }
+    return undefined;
   }
-  return /^\$?[A-Za-z]{1,3}\$?[1-9]\d*$/.test(cell);
+
+  const bang = normalized.indexOf('!');
+  if (bang < 0) return normalized;
+  if (normalized.indexOf('!', bang + 1) >= 0) return undefined;
+  const sheet = normalized.slice(0, bang);
+  if (!sheet || /[:,']/.test(sheet)) return undefined;
+  return normalized.slice(bang + 1);
+}
+
+function isSingleCellA1(value: string): boolean {
+  const cell = singleCellPart(value);
+  return cell !== undefined && /^\$?[A-Za-z]{1,3}\$?[1-9]\d*$/.test(cell);
 }
 
 const singleCellA1Schema = a1RangeSchema.refine(

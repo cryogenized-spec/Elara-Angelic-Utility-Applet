@@ -46,6 +46,24 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
       const summary = document.createElement('span');
       summary.textContent = request.resourceSummary;
       body.append(strong, summary);
+
+      if (request.reviewText) {
+        const review = document.createElement('span');
+        review.className = 'google-confirmation-item__review';
+        const reviewLabel = document.createElement('strong');
+        reviewLabel.textContent = 'Full content to review before approval';
+        const reviewText = document.createElement('span');
+        reviewText.className = 'google-confirmation-item__review-text';
+        reviewText.textContent = request.reviewText;
+        reviewText.style.display = 'block';
+        reviewText.style.whiteSpace = 'pre-wrap';
+        reviewText.style.overflowWrap = 'anywhere';
+        reviewText.style.maxHeight = '12rem';
+        reviewText.style.overflow = 'auto';
+        review.append(reviewLabel, reviewText);
+        body.append(review);
+      }
+
       card.append(checkbox, body);
       list.appendChild(card);
     });

@@ -63,7 +63,7 @@ const TOOL_CONFIRMATION_HEARTBEAT_MS = 20_000;
 // do?" (classification). They must never be conflated, and namespace prefixes
 // are never a security mechanism. Applied at BOTH declaration time and call
 // time. Separately, every call must be in the exact declared tool set for this
-// turn, regardless of whether the turn is read-only or write-enabled.
+// turn, regardless of whether the turn itself allows writes.
 // ---------------------------------------------------------------------------
 
 const registryRiskByName: ReadonlyMap<string, string> = new Map(googleToolRegistry.map((descriptor) => [descriptor.name, descriptor.risk]));
@@ -229,7 +229,11 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
         continue;
       }
-      const confirmation = confirmationRequestForCall(call, executeOptions.now?.() ?? new Date());
+      const confirmation = confirmationRequestForCall(call, executeOptions.now?.() ?? new Date(), {
+        conversationId: executeOptions.conversationId,
+        messageId: executeOptions.messageId,
+        generationId: executeOptions.generationId,
+      });
       if (confirmation) mutationEntries.push({ call, confirmation });
       else immediateCalls.push(call);
     }

@@ -49,6 +49,18 @@ export interface GmailLabelView {
   readonly threadsUnread?: number;
 }
 
+export interface GmailMutationAck {
+  readonly changed: true;
+  readonly target: 'message' | 'thread';
+  readonly id: string;
+  readonly action: GmailOrganizeAction | 'trash' | 'untrash';
+}
+
+export interface GmailSendAck {
+  readonly sent: true;
+  readonly threadId?: string;
+}
+
 interface ProviderHeader { readonly name?: unknown; readonly value?: unknown }
 interface ProviderBody { readonly data?: unknown; readonly size?: unknown; readonly attachmentId?: unknown }
 interface ProviderPart {
@@ -239,6 +251,13 @@ function validateMessageId(value: string): string {
   if (normalized.length > 1_000 || !MESSAGE_ID_PATTERN.test(normalized)) throw new Error('Gmail reply Message-ID is invalid.');
   return normalized;
 }
+function parseReferenceIds(value: string | undefined): string[] {
+  if (!value) return [];
+  return value.split(/\s+/).filter((item) => MESSAGE_ID_PATTERN.test(item)).slice(-20);
+}
+function replySubjectKey(value: string): string {
+  return value.trim().replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/i, '').trim().toLocaleLowerCase();
+}
 function rawRfc822ToBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value);
   let binary = '';
@@ -315,35 +334,52 @@ export class GoogleGmailSemanticService {
   }
   async getLabel(labelId: string): Promise<GmailLabelView> { const id = requiredId(labelId, 'Gmail label id'); const access = await this.oauth.authorize('gmail.read'); return normalizeLabel(await this.readJson<ProviderLabel>(await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`))); }
 
-  async organizeMessage(messageId: string, action: GmailOrganizeAction, labelId?: string): Promise<unknown> { return this.organize('messages', requiredId(messageId, 'Gmail message id'), action, labelId); }
-  async organizeThread(threadId: string, action: GmailOrganizeAction, labelId?: string): Promise<unknown> { return this.organize('threads', requiredId(threadId, 'Gmail thread id'), action, labelId); }
-  async trashMessage(messageId: string): Promise<unknown> { return this.postWrite(`messages/${encodeURIComponent(requiredId(messageId, 'Gmail message id'))}/trash`); }
-  async untrashMessage(messageId: string): Promise<unknown> { return this.postWrite(`messages/${encodeURIComponent(requiredId(messageId, 'Gmail message id'))}/untrash`); }
-  async trashThread(threadId: string): Promise<unknown> { return this.postWrite(`threads/${encodeURIComponent(requiredId(threadId, 'Gmail thread id'))}/trash`); }
-  async untrashThread(threadId: string): Promise<unknown> { return this.postWrite(`threads/${encodeURIComponent(requiredId(threadId, 'Gmail thread id'))}/untrash`); }
+  async organizeMessage(messageId: string, action: GmailOrganizeAction, labelId?: string): Promise<GmailMutationAck> { return this.organize('messages', requiredId(messageId, 'Gmail message id'), action, labelId); }
+  async organizeThread(threadId: string, action: GmailOrganizeAction, labelId?: string): Promise<GmailMutationAck> { return this.organize('threads', requiredId(threadId, 'Gmail thread id'), action, labelId); }
+  async trashMessage(messageId: string): Promise<GmailMutationAck> { const id = requiredId(messageId, 'Gmail message id'); await this.postWrite(`messages/${encodeURIComponent(id)}/trash`); return { changed: true, target: 'message', id, action: 'trash' }; }
+  async untrashMessage(messageId: string): Promise<GmailMutationAck> { const id = requiredId(messageId, 'Gmail message id'); await this.postWrite(`messages/${encodeURIComponent(id)}/untrash`); return { changed: true, target: 'message', id, action: 'untrash' }; }
+  async trashThread(threadId: string): Promise<GmailMutationAck> { const id = requiredId(threadId, 'Gmail thread id'); await this.postWrite(`threads/${encodeURIComponent(id)}/trash`); return { changed: true, target: 'thread', id, action: 'trash' }; }
+  async untrashThread(threadId: string): Promise<GmailMutationAck> { const id = requiredId(threadId, 'Gmail thread id'); await this.postWrite(`threads/${encodeURIComponent(id)}/untrash`); return { changed: true, target: 'thread', id, action: 'untrash' }; }
 
   async createLabel(name: string): Promise<GmailLabelView> { const safeName = this.labelName(name); const access = await this.oauth.authorize('gmail.labels'); return normalizeLabel(await this.sendJson<ProviderLabel>('https://gmail.googleapis.com/gmail/v1/users/me/labels', { name: safeName }, 'POST', access)); }
   async updateLabel(labelId: string, name: string): Promise<GmailLabelView> { const id = requiredId(labelId, 'Gmail label id'); const safeName = this.labelName(name); const access = await this.oauth.authorize('gmail.labels'); await this.requireUserLabel(id, access); return normalizeLabel(await this.sendJson<ProviderLabel>(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`, { name: safeName }, 'PATCH', access)); }
   async deleteLabel(labelId: string): Promise<void> { const id = requiredId(labelId, 'Gmail label id'); const access = await this.oauth.authorize('gmail.labels'); await this.requireUserLabel(id, access); const response = await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`, { method: 'DELETE' }); if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); }
 
-  async sendMessage(input: { readonly to: readonly string[]; readonly cc?: readonly string[]; readonly subject: string; readonly body: string }): Promise<unknown> {
+  async sendMessage(input: { readonly to: readonly string[]; readonly cc?: readonly string[]; readonly subject: string; readonly body: string }): Promise<GmailSendAck> {
     const to = validateRecipients(input.to, true); const cc = validateRecipients(input.cc, false); if (to.length + cc.length > 50) throw new Error('Gmail send exceeds the 50-recipient application limit.'); const subject = validateSubject(input.subject); const body = validateBody(input.body);
     const raw = composeRaw([`To: ${to.join(', ')}`, ...(cc.length ? [`Cc: ${cc.join(', ')}`] : []), `Subject: ${subject}`], body);
-    return this.sendEncoded(raw);
+    const access = await this.oauth.authorize('gmail.send');
+    await this.sendAndDiscard('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw) }, access);
+    return { sent: true };
   }
-  async replyMessage(input: { readonly threadId: string; readonly to: string; readonly subject: string; readonly body: string; readonly inReplyTo: string; readonly references?: readonly string[] }): Promise<unknown> {
-    const threadId = requiredId(input.threadId, 'Gmail thread id'); const to = validateAddress(input.to); const subject = validateSubject(input.subject); const body = validateBody(input.body); const inReplyTo = validateMessageId(input.inReplyTo); const prior = (input.references ?? []).slice(0, 20).map(validateMessageId); const references = [...new Set([...prior, inReplyTo])];
+  async replyMessage(input: { readonly threadId: string; readonly to: string; readonly subject: string; readonly body: string; readonly inReplyTo: string }): Promise<GmailSendAck> {
+    const threadId = requiredId(input.threadId, 'Gmail thread id'); const to = validateAddress(input.to); const subject = validateSubject(input.subject); const body = validateBody(input.body); const inReplyTo = validateMessageId(input.inReplyTo);
+    const access = await this.oauth.authorize('gmail.modify');
+    const threadUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}`);
+    threadUrl.searchParams.set('format', 'metadata');
+    threadUrl.searchParams.append('metadataHeaders', 'Subject');
+    threadUrl.searchParams.append('metadataHeaders', 'Message-ID');
+    threadUrl.searchParams.append('metadataHeaders', 'References');
+    const thread = await this.readJson<ProviderThread>(await access.fetch(threadUrl));
+    const messages = Array.isArray(thread.messages) ? thread.messages.filter((item): item is ProviderMessage => Boolean(item) && typeof item === 'object') : [];
+    const target = messages.find((message) => headerMap(message.payload?.headers).get('message-id') === inReplyTo);
+    if (!target) throw new Error('Gmail reply target Message-ID is not present in the selected thread.');
+    const targetHeaders = headerMap(target.payload?.headers);
+    const providerSubject = targetHeaders.get('subject');
+    if (!providerSubject || replySubjectKey(providerSubject) !== replySubjectKey(subject)) throw new Error('Gmail reply subject does not match the selected thread.');
+    const references = [...new Set([...parseReferenceIds(targetHeaders.get('references')), inReplyTo])];
     const raw = composeRaw([`To: ${to}`, `Subject: ${subject}`, `In-Reply-To: ${inReplyTo}`, `References: ${references.join(' ')}`], body);
-    const access = await this.oauth.authorize('gmail.send'); return this.sendJson('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw), threadId }, 'POST', access);
+    await this.sendAndDiscard('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw), threadId }, access);
+    return { sent: true, threadId };
   }
 
-  private async organize(kind: 'messages' | 'threads', id: string, action: GmailOrganizeAction, labelId?: string): Promise<unknown> {
-    const access = await this.oauth.authorize('gmail.modify'); if ((action === 'applyLabel' || action === 'removeLabel') && labelId) await this.requireUserLabel(requiredId(labelId, 'Gmail user label id'), access); const labels = actionLabels(action, labelId); return this.sendJson(`https://gmail.googleapis.com/gmail/v1/users/me/${kind}/${encodeURIComponent(id)}/modify`, labels, 'POST', access);
+  private async organize(kind: 'messages' | 'threads', id: string, action: GmailOrganizeAction, labelId?: string): Promise<GmailMutationAck> {
+    const access = await this.oauth.authorize('gmail.modify'); if ((action === 'applyLabel' || action === 'removeLabel') && labelId) await this.requireUserLabel(requiredId(labelId, 'Gmail user label id'), access); const labels = actionLabels(action, labelId); await this.sendAndDiscard(`https://gmail.googleapis.com/gmail/v1/users/me/${kind}/${encodeURIComponent(id)}/modify`, labels, access); return { changed: true, target: kind === 'messages' ? 'message' : 'thread', id, action };
   }
   private async requireUserLabel(id: string, access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<void> { const label = normalizeLabel(await this.readJson<ProviderLabel>(await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`))); if (label.type !== 'user') throw new Error('Gmail custom-label operations require a USER label id.'); }
-  private async postWrite(path: string): Promise<unknown> { const access = await this.oauth.authorize('gmail.modify'); return this.sendJson(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, undefined, 'POST', access); }
-  private async sendEncoded(raw: string): Promise<unknown> { const access = await this.oauth.authorize('gmail.send'); return this.sendJson('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw) }, 'POST', access); }
+  private async postWrite(path: string): Promise<void> { const access = await this.oauth.authorize('gmail.modify'); await this.sendAndDiscard(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, undefined, access); }
   private labelName(name: string): string { const normalized = name.trim(); if (!normalized || normalized.length > 500 || /[\r\n]/.test(normalized) || normalized.includes('\0')) throw new Error('Gmail label name is invalid.'); return normalized; }
+  private async sendAndDiscard(url: string, body: unknown, access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<void> { const response = await access.fetch(url, { method: 'POST', headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); }
   private async sendJson<T = unknown>(url: string, body: unknown, method: 'POST' | 'PATCH', access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<T> { const response = await access.fetch(url, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); return this.readJson<T>(response); }
   private async readJson<T>(response: Response): Promise<T> { if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); return (await response.json()) as T; }
 }

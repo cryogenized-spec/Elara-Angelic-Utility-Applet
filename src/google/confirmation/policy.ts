@@ -5,6 +5,8 @@ export const writeConfirmationSchema = z.object({
   tool: z.string().min(1),
   risk: z.enum(['write', 'destructive', 'send']),
   resourceSummary: z.string().min(1),
+  /** Optional full text that the human must be able to inspect before approving the mutation. */
+  reviewText: z.string().min(1).max(10_000).optional(),
   requestedAt: z.string().datetime(),
 });
 

@@ -15,7 +15,7 @@ function serviceWithoutNetwork() {
 }
 
 describe('Calendar date and timezone trust boundaries', () => {
-  it('rejects non-IANA time zones in model-visible Calendar schemas', () => {
+  it('rejects non-IANA and fixed-offset time zones in model-visible Calendar schemas', () => {
     expect(() => validateSemanticToolArguments('calendar.createEvent', {
       summary: 'Invalid zone',
       start: '2026-09-22T09:00:00',
@@ -24,12 +24,23 @@ describe('Calendar date and timezone trust boundaries', () => {
       recurrence: ['RRULE:FREQ=WEEKLY;COUNT=2'],
     })).toThrow('valid IANA time zone');
 
+    expect(() => validateSemanticToolArguments('calendar.createEvent', {
+      summary: 'Offset identifier',
+      start: '2026-09-22T09:00:00',
+      end: '2026-09-22T10:00:00',
+      timeZone: '+02:00',
+    })).toThrow('valid IANA time zone');
+
     expect(() => validateGoogleReadToolArguments('calendar.listEvents', {
       timeZone: 'not/a-zone',
     })).toThrow('valid IANA time zone');
+
+    expect(() => validateGoogleReadToolArguments('calendar.listEvents', {
+      timeZone: '+02:00',
+    })).toThrow('valid IANA time zone');
   });
 
-  it('rejects non-IANA time zones at the service boundary before authorization', async () => {
+  it('rejects non-IANA and fixed-offset time zones at the service boundary before authorization', async () => {
     const { service, authorize } = serviceWithoutNetwork();
 
     await expect(service.createSemanticEvent({
@@ -40,7 +51,15 @@ describe('Calendar date and timezone trust boundaries', () => {
       recurrence: ['RRULE:FREQ=WEEKLY;COUNT=2'],
     })).rejects.toThrow('valid IANA time zone');
 
+    await expect(service.createSemanticEvent({
+      summary: 'Offset identifier',
+      start: '2026-09-22T09:00:00',
+      end: '2026-09-22T10:00:00',
+      timeZone: '+02:00',
+    })).rejects.toThrow('valid IANA time zone');
+
     await expect(service.listEventPage({ timeZone: 'not/a-zone' })).rejects.toThrow('valid IANA time zone');
+    await expect(service.listEventPage({ timeZone: '+02:00' })).rejects.toThrow('valid IANA time zone');
     expect(authorize).not.toHaveBeenCalled();
   });
 
@@ -93,7 +112,51 @@ describe('Calendar date and timezone trust boundaries', () => {
     })).not.toThrow();
   });
 
-  it('rejects mixed offset and timezone-relative event boundaries', async () => {
+  it('rejects mixed event timing modes in semantic schemas before execution', () => {
+    expect(() => validateSemanticToolArguments('calendar.createEvent', {
+      summary: 'Mixed offset semantics',
+      start: '2026-09-22T09:00:00+02:00',
+      end: '2026-09-22T10:00:00',
+      timeZone: 'Africa/Johannesburg',
+    })).toThrow('both include UTC offsets or both rely on the explicit time zone');
+
+    expect(() => validateSemanticToolArguments('calendar.createEvent', {
+      summary: 'Mixed all-day semantics',
+      start: '2026-09-22',
+      end: '2026-09-22T10:00:00+02:00',
+    })).toThrow('both be date-times or both be all-day dates');
+
+    expect(() => validateSemanticToolArguments('calendar.updateEvent', {
+      eventId: 'evt-1',
+      etag: '"etag-1"',
+      start: '2026-09-22T09:00:00+02:00',
+      end: '2026-09-22T10:00:00',
+      timeZone: 'Africa/Johannesburg',
+    })).toThrow('both include UTC offsets or both rely on the explicit time zone');
+  });
+
+  it('accepts consistent all-day, offset-bearing, and timezone-relative pairs', () => {
+    expect(() => validateSemanticToolArguments('calendar.createEvent', {
+      summary: 'All day',
+      start: '2026-09-22',
+      end: '2026-09-23',
+    })).not.toThrow();
+
+    expect(() => validateSemanticToolArguments('calendar.createEvent', {
+      summary: 'Offset pair',
+      start: '2026-09-22T09:00:00+02:00',
+      end: '2026-09-22T10:00:00+02:00',
+    })).not.toThrow();
+
+    expect(() => validateSemanticToolArguments('calendar.createEvent', {
+      summary: 'Zone pair',
+      start: '2026-09-22T09:00:00',
+      end: '2026-09-22T10:00:00',
+      timeZone: 'Africa/Johannesburg',
+    })).not.toThrow();
+  });
+
+  it('rejects mixed offset and timezone-relative event boundaries at the service boundary', async () => {
     const { service, authorize } = serviceWithoutNetwork();
     await expect(service.createSemanticEvent({
       summary: 'Mixed semantics',

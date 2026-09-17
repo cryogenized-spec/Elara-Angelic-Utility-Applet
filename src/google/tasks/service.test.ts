@@ -163,6 +163,15 @@ describe('GoogleTasksService', () => {
     expect(requested).toEqual(['tasks.read', 'tasks.read', 'tasks.write', 'tasks.write', 'tasks.write']);
   });
 
+  it('rejects task-list page sizes above 100 without making a provider fetch', async () => {
+    const requested: string[] = [];
+    const calls: CapturedCall[] = [];
+    const service = new GoogleTasksService(makeOAuth(requested, calls, () => ({ items: [] })));
+
+    await expect(service.listTaskLists(undefined, 101)).rejects.toThrow(/integer from 1 to 100/i);
+    expect(calls).toEqual([]);
+  });
+
   it('uses write capability for reordering and omits hierarchy parameters when moving to first top-level position', async () => {
     const requested: string[] = [];
     const calls: CapturedCall[] = [];

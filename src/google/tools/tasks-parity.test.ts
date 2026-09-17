@@ -100,8 +100,34 @@ describe('Google Tasks Pass 2 semantic boundary', () => {
     expect(update.parameters.properties).toHaveProperty('clearScheduledDate');
     expect(update.parameters.properties).not.toHaveProperty('task');
 
+    const move = declaration('tasks.moveTask');
+    expect(move.parameters.required).toEqual(['taskListId', 'taskId']);
+    expect(move.parameters.properties).toHaveProperty('destinationTaskListId');
+
     expect(declaration('tasks.getTaskList').parameters.required).toEqual(['taskListId']);
     expect(declaration('tasks.deleteTaskList').parameters.required).toEqual(['taskListId']);
+  });
+
+  it('accepts a bounded destination list for cross-list moves and rejects undeclared move fields', () => {
+    expect(validateSemanticToolArguments('tasks.moveTask', {
+      taskListId: 'list-1',
+      taskId: 'task-1',
+      destinationTaskListId: 'list-2',
+      parent: 'parent-2',
+      previous: 'previous-2',
+    })).toEqual({
+      taskListId: 'list-1',
+      taskId: 'task-1',
+      destinationTaskListId: 'list-2',
+      parent: 'parent-2',
+      previous: 'previous-2',
+    });
+
+    expect(() => validateSemanticToolArguments('tasks.moveTask', {
+      taskListId: 'list-1',
+      taskId: 'task-1',
+      destinationTasklist: 'provider-raw-name',
+    })).toThrow();
   });
 
   it('makes destructive confirmation consequences explicit', () => {
@@ -127,12 +153,20 @@ describe('Google Tasks Pass 2 semantic boundary', () => {
     expect(clear?.resourceSummary).toMatch(/hide/i);
   });
 
-  it('explains hierarchy omission semantics before a move is confirmed', () => {
+  it('explains hierarchy and cross-list destination semantics before a move is confirmed', () => {
     const move = confirmationRequestForCall({
       tool: 'tasks.moveTask',
       arguments: { taskListId: 'list-1', taskId: 'task-1' },
     }, new Date('2026-09-17T04:00:00Z'));
+    expect(move?.resourceSummary).toMatch(/within list list-1/i);
     expect(move?.resourceSummary).toMatch(/top level/i);
     expect(move?.resourceSummary).toMatch(/first task/i);
+
+    const crossListMove = confirmationRequestForCall({
+      tool: 'tasks.moveTask',
+      arguments: { taskListId: 'list-1', taskId: 'task-1', destinationTaskListId: 'list-2', parent: 'parent-2' },
+    }, new Date('2026-09-17T04:00:00Z'));
+    expect(crossListMove?.resourceSummary).toMatch(/from list list-1 to list list-2/i);
+    expect(crossListMove?.resourceSummary).toMatch(/under parent parent-2/i);
   });
 });

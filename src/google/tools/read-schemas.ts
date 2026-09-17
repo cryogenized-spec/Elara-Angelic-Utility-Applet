@@ -29,6 +29,7 @@ function isValidCalendarQueryTimestamp(value: string): boolean {
 }
 
 function isValidIanaTimeZone(value: string): boolean {
+  if (/^[+-]/.test(value)) return false;
   try {
     new Intl.DateTimeFormat('en-US', { timeZone: value }).format(0);
     return true;

@@ -99,7 +99,16 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'calendar.createEvent': {
       const summary = value(args, 'summary') ?? 'untitled event';
       const start = value(args, 'start');
-      return `Create Calendar event “${summary}”${start ? ` at ${start}` : ''}.`;
+      const updates = value(args, 'sendUpdates');
+      return `Create Calendar event “${summary}”${start ? ` at ${start}` : ''}${updates ? ` and send guest updates (${updates})` : ''}.`;
+    }
+    case 'calendar.updateEvent': {
+      const updates = value(args, 'sendUpdates');
+      return `Update Calendar event ${value(args, 'eventId') ?? 'selected event'} using the version just read${updates ? ` and send guest updates (${updates})` : ''}.`;
+    }
+    case 'calendar.deleteEvent': {
+      const updates = value(args, 'sendUpdates');
+      return `Delete Calendar event ${value(args, 'eventId') ?? 'selected event'} using the version just read${updates ? ` and send guest updates (${updates})` : ''}.`;
     }
     case 'tasks.createTask': {
       const task = args.task && typeof args.task === 'object' && !Array.isArray(args.task) ? args.task as Record<string, unknown> : undefined;

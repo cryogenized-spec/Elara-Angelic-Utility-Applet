@@ -3,31 +3,52 @@ import { googleToolRegistry } from './registry';
 import { googleGeminiFunctionDeclarations, googleGeminiFunctionNames } from './gemini-declarations';
 
 describe('Gemini capability declarations', () => {
-  it('exposes Gemini-visible registered tools, including confirmation-gated writes', () => {
+  it('exposes Gemini-visible registered tools, including Calendar parity and confirmation-gated writes', () => {
     expect(googleGeminiFunctionNames()).toEqual(googleToolRegistry.filter((tool) => tool.exposure === 'gemini').map((tool) => tool.name));
-    expect(googleGeminiFunctionNames()).toContain('tasks.createTask');
-    expect(googleGeminiFunctionNames()).toContain('gmail.sendMessage');
-    expect(googleGeminiFunctionNames()).toContain('sheets.writeRange');
-    expect(googleGeminiFunctionNames()).toContain('calendar.createEvent');
+    expect(googleGeminiFunctionNames()).toEqual(expect.arrayContaining([
+      'calendar.listCalendars', 'calendar.listEvents', 'calendar.getEvent', 'calendar.getSettings', 'calendar.queryFreeBusy',
+      'calendar.createEvent', 'calendar.updateEvent', 'calendar.deleteEvent',
+      'tasks.createTask', 'gmail.sendMessage', 'sheets.writeRange',
+    ]));
     expect(googleGeminiFunctionNames()).not.toContain('docs.batchUpdate');
     expect(googleGeminiFunctionNames()).not.toContain('sheets.batchUpdate');
     expect(googleGeminiFunctionNames()).not.toContain('chat.listMessages');
   });
 
   it('derives model-visible descriptions from the application registry', () => {
-    expect(googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.listEvents')?.description).toBe('List calendar events with explicit filters and pagination.');
+    expect(googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.listEvents')?.description).toContain('timezone');
+    expect(googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.updateEvent')?.description).toContain('ETag');
     expect(googleGeminiFunctionDeclarations.find((tool) => tool.name === 'roleplay_setting.update')?.description).toContain('Roleplay World Canvas');
   });
 
-  it('declares concrete arguments for high-value write tools', () => {
-    const createTask = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'tasks.createTask');
-    expect(createTask?.parameters.required).toEqual(['taskListId', 'task']);
-    expect(createTask?.parameters.properties).toHaveProperty('task');
+  it('declares concrete Calendar read-before-write and scheduling arguments', () => {
+    const listCalendars = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.listCalendars');
+    expect(listCalendars?.parameters.properties).toHaveProperty('showOwnOrganizationOnly');
+    expect(listCalendars?.parameters.properties).toHaveProperty('minAccessRole');
+
+    const freeBusy = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.queryFreeBusy');
+    expect(freeBusy?.parameters.required).toEqual(['timeMin', 'timeMax', 'calendarIds']);
+    expect(freeBusy?.parameters.properties).toHaveProperty('calendarIds');
 
     const createEvent = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.createEvent');
     expect(createEvent?.parameters.required).toEqual(['summary', 'start', 'end']);
-    expect(createEvent?.parameters.properties).toHaveProperty('calendarId');
-    expect(createEvent?.parameters.properties).toHaveProperty('summary');
+    expect(createEvent?.parameters.properties).toHaveProperty('recurrence');
+    expect(createEvent?.parameters.properties).toHaveProperty('sendUpdates');
+
+    const updateEvent = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.updateEvent');
+    expect(updateEvent?.parameters.required).toEqual(['eventId', 'etag']);
+    expect(updateEvent?.parameters.properties).toHaveProperty('etag');
+
+    const deleteEvent = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'calendar.deleteEvent');
+    expect(deleteEvent?.parameters.required).toEqual(['eventId', 'etag']);
+
+    expect(JSON.stringify(createEvent?.parameters.properties.sendUpdates)).not.toContain('none');
+  });
+
+  it('declares concrete arguments for other high-value write tools', () => {
+    const createTask = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'tasks.createTask');
+    expect(createTask?.parameters.required).toEqual(['taskListId', 'task']);
+    expect(createTask?.parameters.properties).toHaveProperty('task');
 
     const sendMail = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'gmail.sendMessage');
     expect(sendMail?.parameters.required).toEqual(['to', 'subject', 'body']);

@@ -88,6 +88,20 @@ export function isMemoryRetrievable(memory: DurableMemory, scope: MemoryRetrieva
   return memory.folderId === (scope.folderId ?? null);
 }
 
+function fitMemoryToRemainingBudget(memory: RetrievedMemory, remainingCharacters: number): RetrievedMemory | null {
+  const payloadCharacters = memory.title.length + memory.body.length;
+  if (payloadCharacters <= remainingCharacters) return memory;
+
+  // Canonical memories may intentionally be much larger than one prompt budget.
+  // Keep the durable row intact and return a visibly truncated projection instead
+  // of making the record permanently unrecallable.
+  const bodyBudget = remainingCharacters - memory.title.length;
+  if (bodyBudget < 2) return null;
+  const excerpt = `${memory.body.slice(0, bodyBudget - 1).trimEnd()}…`;
+  if (excerpt.length < 2) return null;
+  return { ...memory, body: excerpt };
+}
+
 export function rankAndBudgetMemories(memories: DurableMemory[], scope: MemoryRetrievalScope = {}): RetrievedMemory[] {
   const now = scope.now ?? Date.now();
   const maxItems = Math.max(1, Math.min(scope.maxItems ?? DEFAULT_MAX_ITEMS, 20));
@@ -101,10 +115,10 @@ export function rankAndBudgetMemories(memories: DurableMemory[], scope: MemoryRe
   let characters = 0;
   for (const memory of candidates) {
     if (selected.length >= maxItems) break;
-    const payloadCharacters = memory.title.length + memory.body.length;
-    if (characters + payloadCharacters > maxCharacters) continue;
-    selected.push(memory);
-    characters += payloadCharacters;
+    const fitted = fitMemoryToRemainingBudget(memory, maxCharacters - characters);
+    if (!fitted) continue;
+    selected.push(fitted);
+    characters += fitted.title.length + fitted.body.length;
   }
   return selected;
 }

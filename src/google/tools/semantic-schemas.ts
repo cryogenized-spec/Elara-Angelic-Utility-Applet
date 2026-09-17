@@ -53,7 +53,7 @@ const timestampSchema = z.string().trim().min(1).max(128)
 const timeZoneSchema = z.string().trim().min(1).max(200)
   .refine(isValidIanaTimeZone, 'Calendar time zone must be a valid IANA time zone.')
   .optional();
-const concreteEtagSchema = z.string().trim().min(1).max(1024).regex(/^(?:W\/)?"[^"]+"$/, 'Calendar mutations require one concrete provider ETag.');
+const concreteEtagSchema = z.string().trim().min(1).max(1024).regex(/^"[^"]+"$/, 'Calendar mutations require one concrete strong provider ETag.');
 const recurrenceSchema = z.array(
   z.string().trim().min(1).max(2000).regex(/^(?:RRULE|EXRULE|RDATE|EXDATE):/i, 'Recurrence entries must begin with RRULE:, EXRULE:, RDATE:, or EXDATE:.'),
 ).max(20).optional();
@@ -102,6 +102,26 @@ function requireMatchingBoundaryModes(
   }
 }
 
+function calendarBoundaryMillis(value: string): number {
+  if (isValidAllDayDate(value)) return Date.parse(`${value}T00:00:00Z`);
+  return Date.parse(hasExplicitOffset(value) ? value : `${value}Z`);
+}
+
+function requireEndAfterStart(
+  start: string | undefined,
+  end: string | undefined,
+  context: z.RefinementCtx,
+): void {
+  if (start === undefined || end === undefined) return;
+  if (calendarBoundaryMillis(end) <= calendarBoundaryMillis(start)) {
+    context.addIssue({
+      code: 'custom',
+      path: ['end'],
+      message: 'Calendar end must be after start. For all-day events, end is exclusive: a one-day event ends on the following date.',
+    });
+  }
+}
+
 const calendarCreateSchema = z.object({
   calendarId: idSchema.optional(),
   summary: z.string().trim().min(1).max(1000),
@@ -115,6 +135,7 @@ const calendarCreateSchema = z.object({
   sendUpdates: sendUpdatesSchema,
 }).strict().superRefine((value, context) => {
   requireMatchingBoundaryModes(value.start, value.end, context);
+  requireEndAfterStart(value.start, value.end, context);
   requireTimezoneForOffsetFreeBoundary(value.start, value.timeZone, 'start', context);
   requireTimezoneForOffsetFreeBoundary(value.end, value.timeZone, 'end', context);
   if (value.recurrence?.length && (isTimedValue(value.start) || isTimedValue(value.end)) && !value.timeZone) {
@@ -151,6 +172,7 @@ const calendarUpdateSchema = z.object({
   }
 
   requireMatchingBoundaryModes(value.start, value.end, context);
+  requireEndAfterStart(value.start, value.end, context);
   requireTimezoneForOffsetFreeBoundary(value.start, value.timeZone, 'start', context);
   requireTimezoneForOffsetFreeBoundary(value.end, value.timeZone, 'end', context);
 

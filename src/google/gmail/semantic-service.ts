@@ -119,7 +119,7 @@ function boundedListSize(value: number | undefined): number | undefined {
 }
 function boundedHeader(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined;
-  const normalized = value.replace(/[\u0000]/g, '').trim();
+  const normalized = value.split('\0').join('').trim();
   if (!normalized) return undefined;
   return normalized.slice(0, MAX_HEADER_LENGTH);
 }
@@ -174,7 +174,7 @@ function normalizeMessage(resource: ProviderMessage, includeBody: boolean): Gmai
   const headers = headerMap(resource.payload?.headers);
   const chunks: string[] = [];
   if (includeBody) plainTextParts(resource.payload, chunks);
-  const joined = chunks.join('\n').replace(/\u0000/g, '');
+  const joined = chunks.join('\n').split('\0').join('');
   const bodyText = joined ? joined.slice(0, MAX_BODY_TEXT_CHARS) : undefined;
   return {
     trust: 'untrusted-external',
@@ -343,7 +343,7 @@ export class GoogleGmailSemanticService {
   private async requireUserLabel(id: string, access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<void> { const label = normalizeLabel(await this.readJson<ProviderLabel>(await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`))); if (label.type !== 'user') throw new Error('Gmail custom-label operations require a USER label id.'); }
   private async postWrite(path: string): Promise<unknown> { const access = await this.oauth.authorize('gmail.modify'); return this.sendJson(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, undefined, 'POST', access); }
   private async sendEncoded(raw: string): Promise<unknown> { const access = await this.oauth.authorize('gmail.send'); return this.sendJson('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw) }, 'POST', access); }
-  private labelName(name: string): string { const normalized = name.trim(); if (!normalized || normalized.length > 500 || /[\r\n\u0000]/.test(normalized)) throw new Error('Gmail label name is invalid.'); return normalized; }
+  private labelName(name: string): string { const normalized = name.trim(); if (!normalized || normalized.length > 500 || /[\r\n]/.test(normalized) || normalized.includes('\0')) throw new Error('Gmail label name is invalid.'); return normalized; }
   private async sendJson<T = unknown>(url: string, body: unknown, method: 'POST' | 'PATCH', access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<T> { const response = await access.fetch(url, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); return this.readJson<T>(response); }
   private async readJson<T>(response: Response): Promise<T> { if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); return (await response.json()) as T; }
 }

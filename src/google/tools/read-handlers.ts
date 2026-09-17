@@ -40,7 +40,11 @@ export const googleReadToolHandlers: GoogleToolHandlers = {
   },
   'tasks.listTaskLists': async ({ arguments: args }) => {
     const parsed = readArgs('tasks.listTaskLists', args);
-    return tasks.listTaskLists(parsed.pageToken);
+    return tasks.listTaskLists(parsed.pageToken, parsed.maxResults);
+  },
+  'tasks.getTaskList': async ({ arguments: args }) => {
+    const parsed = readArgs('tasks.getTaskList', args);
+    return tasks.getTaskList(parsed.taskListId);
   },
   'tasks.listTasks': async ({ arguments: args }) => {
     const parsed = readArgs('tasks.listTasks', args);
@@ -49,6 +53,7 @@ export const googleReadToolHandlers: GoogleToolHandlers = {
       showCompleted: parsed.showCompleted,
       showDeleted: parsed.showDeleted,
       showHidden: parsed.showHidden,
+      showAssigned: parsed.showAssigned,
       dueMin: parsed.dueMin,
       dueMax: parsed.dueMax,
       updatedMin: parsed.updatedMin,

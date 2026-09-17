@@ -68,6 +68,19 @@ describe('canonical memory retrieval engine', () => {
     expect(result.reduce((sum, memory) => sum + memory.title.length + memory.body.length, 0)).toBeLessThanOrEqual(12);
   });
 
+  it('recalls an oversized high-ranked record as a bounded visible excerpt instead of skipping it forever', () => {
+    const canonicalBody = `critical project context ${'x'.repeat(9_000)}`;
+    const result = rankAndBudgetMemories([
+      makeMemory({ id: 'oversized', title: 'Critical project', body: canonicalBody, importance: 1, confidence: 1 }),
+    ], { query: 'critical project', maxCharacters: 6_000 });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.id).toBe('oversized');
+    expect(result[0]?.body).not.toBe(canonicalBody);
+    expect(result[0]?.body.endsWith('…')).toBe(true);
+    expect((result[0]?.title.length ?? 0) + (result[0]?.body.length ?? 0)).toBeLessThanOrEqual(6_000);
+  });
+
   it('excludes archived, expired, superseded, dormant micro-evidence, and out-of-scope records', () => {
     const scope = { folderId: 'folder-a', includeGlobal: false, now: 10_000 };
     const active = makeMemory({ id: 'active', folderId: 'folder-a' });

@@ -41,16 +41,16 @@ export async function inspectMemoryStore(): Promise<MemoryStoreHealth> {
  * Human-invoked recovery for a row that failed the canonical schema. This is
  * deliberately incapable of deleting a valid memory: callers must identify a
  * concrete invalid primary key and the row is revalidated immediately before
- * deletion.
+ * deletion. Whitespace is used only to reject a blank identifier; IndexedDB
+ * keys are exact, so lookup/delete must preserve the health scan's raw key.
  */
 export async function deleteInvalidMemoryRecord(id: string): Promise<void> {
-  const normalized = id.trim();
-  if (!normalized || normalized === '<unknown>') throw new Error('A concrete invalid memory id is required.');
+  if (!id.trim() || id === '<unknown>') throw new Error('A concrete invalid memory id is required.');
 
   await db.transaction('rw', db.memories, async () => {
-    const record = await db.memories.get(normalized);
+    const record = await db.memories.get(id);
     if (!record) throw new Error('Invalid memory record was not found.');
     if (durableMemorySchema.safeParse(record).success) throw new Error('Valid memory records cannot be removed by corruption repair.');
-    await db.memories.delete(normalized);
+    await db.memories.delete(id);
   });
 }

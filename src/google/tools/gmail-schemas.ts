@@ -20,7 +20,6 @@ const rfcMessageIdSchema = z.string().trim().min(3).max(1_000).regex(
   /^<[^<>\r\n]+>$/,
   'Gmail reply message IDs must be RFC-style Message-ID values enclosed in angle brackets.',
 );
-const referencesSchema = z.array(rfcMessageIdSchema).max(20).optional();
 
 export const gmailOrganizeActionSchema = z.enum([
   'archive',
@@ -87,7 +86,6 @@ export const gmailToolArgumentSchemas = {
     subject: subjectSchema,
     body: bodySchema,
     inReplyTo: rfcMessageIdSchema,
-    references: referencesSchema,
   }).strict(),
 } as const;
 

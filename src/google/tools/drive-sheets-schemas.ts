@@ -6,6 +6,11 @@ const pageTokenSchema = z.string().trim().min(1).max(2048);
 const rowSchema = z.array(z.unknown()).max(100);
 const valuesSchema = z.array(rowSchema).min(1).max(1000);
 const updateRequestSchema = z.record(z.string(), z.unknown());
+const cellValueSchema = z.union([
+  z.string().max(50_000),
+  z.number().finite(),
+  z.boolean(),
+]);
 
 export const driveSheetsToolArgumentSchemas = {
   'drive.searchFiles': z.object({
@@ -46,7 +51,7 @@ export const driveSheetsToolArgumentSchemas = {
   'sheets.updateCell': z.object({
     spreadsheetId: fileIdSchema,
     range: a1RangeSchema,
-    value: z.unknown(),
+    value: cellValueSchema,
   }).strict(),
   'sheets.insertRows': z.object({
     spreadsheetId: fileIdSchema,

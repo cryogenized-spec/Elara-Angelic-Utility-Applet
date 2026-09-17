@@ -128,11 +128,14 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
       return `Update Google Task ${value(args, 'taskId') ?? 'selected task'} in list ${value(args, 'taskListId') ?? 'selected list'}${changes.length ? `: ${changes.join(', ')}` : ''}.`;
     }
     case 'tasks.moveTask': {
+      const sourceList = value(args, 'taskListId') ?? 'selected list';
+      const destinationList = value(args, 'destinationTaskListId');
       const parent = value(args, 'parent');
       const previous = value(args, 'previous');
-      const destination = parent ? `under parent ${parent}` : 'to the top level';
+      const listMove = destinationList ? ` from list ${sourceList} to list ${destinationList}` : ` within list ${sourceList}`;
+      const destination = parent ? ` under parent ${parent}` : ' to the top level';
       const position = previous ? ` after sibling ${previous}` : ' as the first task among its destination siblings';
-      return `Move Google Task ${value(args, 'taskId') ?? 'selected task'} ${destination}${position}.`;
+      return `Move Google Task ${value(args, 'taskId') ?? 'selected task'}${listMove}${destination}${position}.`;
     }
     case 'tasks.deleteTask': return `Delete Google Task ${value(args, 'taskId') ?? 'selected task'} from list ${value(args, 'taskListId') ?? 'selected list'}. If it is assigned from Google Docs or Chat, Google also deletes the originating assignment.`;
     case 'tasks.clearCompleted': return `Clear completed Google Tasks from list ${value(args, 'taskListId') ?? 'selected list'}; Google will hide those completed tasks from normal results.`;

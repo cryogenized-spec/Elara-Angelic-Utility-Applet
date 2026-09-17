@@ -13,7 +13,7 @@ const subjectSchema = z.string().trim().min(1).max(500).refine(
 );
 const bodySchema = z.string().min(1).max(200_000);
 const labelNameSchema = z.string().trim().min(1).max(500).refine(
-  (value) => !/[\r\n\u0000]/.test(value),
+  (value) => !/[\r\n]/.test(value) && !value.includes('\0'),
   'Gmail label names must not contain line breaks or NUL characters.',
 );
 const rfcMessageIdSchema = z.string().trim().min(3).max(1_000).regex(

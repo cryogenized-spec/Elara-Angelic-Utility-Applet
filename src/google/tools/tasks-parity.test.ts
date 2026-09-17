@@ -49,7 +49,7 @@ describe('Google Tasks Pass 2 semantic boundary', () => {
   });
 
   it('pins task-list parity and assigned-task reads in the read schema', () => {
-    expect(validateGoogleReadToolArguments('tasks.listTaskLists', { maxResults: 1000 })).toEqual({ maxResults: 1000 });
+    expect(validateGoogleReadToolArguments('tasks.listTaskLists', { maxResults: 100 })).toEqual({ maxResults: 100 });
     expect(validateGoogleReadToolArguments('tasks.getTaskList', { taskListId: 'list-1' })).toEqual({ taskListId: 'list-1' });
     expect(validateGoogleReadToolArguments('tasks.listTasks', {
       taskListId: 'list-1',
@@ -62,7 +62,7 @@ describe('Google Tasks Pass 2 semantic boundary', () => {
       taskListId: 'list-1',
       dueMin: '2026-09-01T00:00:00',
     })).toThrow(/explicit UTC offset/i);
-    expect(() => validateGoogleReadToolArguments('tasks.listTaskLists', { maxResults: 1001 })).toThrow();
+    expect(() => validateGoogleReadToolArguments('tasks.listTaskLists', { maxResults: 101 })).toThrow();
   });
 
   it('registers all Tasks operations with the expected risk and capability boundary', () => {
@@ -87,6 +87,9 @@ describe('Google Tasks Pass 2 semantic boundary', () => {
   });
 
   it('publishes semantic Gemini declarations rather than raw Task objects', () => {
+    const taskLists = declaration('tasks.listTaskLists');
+    expect(taskLists.parameters.properties.maxResults).toMatchObject({ maximum: 100 });
+
     const create = declaration('tasks.createTask');
     expect(create.parameters.required).toEqual(['taskListId', 'title']);
     expect(create.parameters.properties).toHaveProperty('scheduledDate');
@@ -114,6 +117,8 @@ describe('Google Tasks Pass 2 semantic boundary', () => {
       arguments: { taskListId: 'list-1' },
     }, new Date('2026-09-17T04:00:00Z'));
     expect(deleteList?.resourceSummary).toMatch(/tasks it contains/i);
+    expect(deleteList?.resourceSummary).toMatch(/Docs or Chat/i);
+    expect(deleteList?.resourceSummary).toMatch(/originating assignment/i);
 
     const clear = confirmationRequestForCall({
       tool: 'tasks.clearCompleted',

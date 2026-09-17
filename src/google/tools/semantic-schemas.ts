@@ -133,6 +133,16 @@ const calendarUpdateSchema = z.object({
     .some((field) => value[field as keyof typeof value] !== undefined);
   if (!hasEventChange) context.addIssue({ code: 'custom', message: 'Calendar update requires at least one event field change.' });
 
+  const updatesStart = value.start !== undefined;
+  const updatesEnd = value.end !== undefined;
+  if (updatesStart !== updatesEnd) {
+    context.addIssue({
+      code: 'custom',
+      path: [updatesStart ? 'end' : 'start'],
+      message: 'Changing Calendar event timing requires both start and end boundaries.',
+    });
+  }
+
   requireMatchingBoundaryModes(value.start, value.end, context);
   requireTimezoneForOffsetFreeBoundary(value.start, value.timeZone, 'start', context);
   requireTimezoneForOffsetFreeBoundary(value.end, value.timeZone, 'end', context);

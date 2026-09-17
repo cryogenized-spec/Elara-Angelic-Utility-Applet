@@ -24,6 +24,13 @@ interface ReconcileReplay {
   expiresAt: number;
 }
 
+export interface MemoryReconcileConfirmationTarget {
+  title: string;
+  excerpt: string;
+  kind: string;
+  lifecycle: string;
+}
+
 const lookupGrants = new Map<string, MemoryLookupGrant>();
 const reconcileReplays = new Map<string, ReconcileReplay>();
 
@@ -76,6 +83,45 @@ function resolveLookupRef(ref: string, conversationId: string, messageId: string
 
 function reconcileSignature(targetMemoryId: string, relation: string, title: string, body: string, tags: readonly string[] | undefined): string {
   return JSON.stringify([targetMemoryId, relation, title, body, tags ?? []]);
+}
+
+/**
+ * Resolve a turn-bound opaque memory reference for the human confirmation layer.
+ * This reads application-owned grant/store state only; it never accepts a model-
+ * supplied durable id. The execution handler revalidates again immediately before
+ * mutation, so confirmation cannot become mutation authority by itself.
+ */
+export async function describeMemoryReconcileTarget(
+  ref: string,
+  relation: 'support' | 'conflict' | 'related' | 'supersede',
+  conversationId: string | undefined,
+  messageId: string | undefined,
+  generationId: string | undefined,
+): Promise<MemoryReconcileConfirmationTarget> {
+  const boundConversationId = requiredIdentity(conversationId, 'conversation provenance');
+  const boundMessageId = requiredIdentity(messageId, 'message provenance');
+  const boundGenerationId = requiredIdentity(generationId, 'generation provenance');
+  const targetMemoryId = resolveLookupRef(ref, boundConversationId, boundMessageId, boundGenerationId);
+  const folderState = await loadFolderState();
+  const scope = memoryScopeForConversation(boundConversationId, folderState);
+  const target = await getMemory(targetMemoryId);
+  const normallyRetrievable = target ? isMemoryRetrievable(target, scope) : false;
+  const supersessionReplayCandidate = Boolean(
+    target
+    && relation === 'supersede'
+    && target.supersededBy.length > 0
+    && isMemoryRetrievable({ ...target, supersededBy: [] }, scope),
+  );
+  if (!target || target.kind === 'MICRO_OBSERVATION' || (!normallyRetrievable && !supersessionReplayCandidate)) {
+    throw new Error('Memory reference is unavailable for the current scope.');
+  }
+  const compact = target.body.replace(/\s+/g, ' ').trim();
+  return {
+    title: target.title,
+    excerpt: compact.length > 240 ? `${compact.slice(0, 239).trimEnd()}…` : compact,
+    kind: target.kind,
+    lifecycle: target.lifecycle,
+  };
 }
 
 export const memoryToolHandlers: GoogleToolHandlers = {

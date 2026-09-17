@@ -54,7 +54,7 @@ function arrangeWriteTurn() {
       index: 0,
       callId: 'call-write',
       name: 'tasks.createTask',
-      arguments: { taskListId: 'primary', task: { title: 'Buy milk' } },
+      arguments: { taskListId: 'primary', title: 'Buy milk' },
     },
   ));
   streamToolResult.mockReturnValueOnce(events(

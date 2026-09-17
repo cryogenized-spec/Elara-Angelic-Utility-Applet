@@ -561,6 +561,11 @@ export class GoogleCalendarService {
   async updateSemanticEvent(input: CalendarEventSemanticUpdateInput): Promise<CalendarEventDetail> {
     const safeEventId = boundedText(input.eventId, 'event ID', MAX_EVENT_ID_LENGTH);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
+    const updatesStart = input.start !== undefined;
+    const updatesEnd = input.end !== undefined;
+    if (updatesStart !== updatesEnd) {
+      throw new Error('Changing Google Calendar event timing requires both start and end boundaries.');
+    }
     const safeTimeZone = boundedTimeZone(input.timeZone);
     const safeRecurrence = input.recurrence !== undefined ? validateRecurrence(input.recurrence) ?? [] : undefined;
     if (safeRecurrence?.length && (input.start === undefined || input.end === undefined)) {

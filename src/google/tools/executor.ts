@@ -97,8 +97,9 @@ function value(args: Readonly<Record<string, unknown>>, key: string): string | u
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
 }
 function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<string, unknown>>): string | undefined {
-  if (tool !== 'memory.save' && tool !== 'memory.reconcile') return undefined;
-  return value(args, 'body');
+  if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
+  if (tool === 'sheets.updateCell' && typeof args.value === 'string') return args.value || '(empty string)';
+  return undefined;
 }
 function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, fallback: string): string {
   const id = value(args, 'id') ?? value(args, 'ref');
@@ -172,6 +173,8 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'drive.moveFile': return `Move Drive file ${value(args, 'fileId') ?? 'selected file'} to ${value(args, 'parentId') ?? 'the requested folder'}.`;
     case 'sheets.writeRange': return `Write the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}.`;
     case 'sheets.appendRows': return `Append the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}.`;
+    case 'sheets.updateCell': return `Write one cell at ${value(args, 'range') ?? 'the selected cell'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}. Review the exact cell input below before approving.`;
+    case 'sheets.insertRows': return `Insert ${String(args.count ?? '?')} row(s) into sheet ${String(args.sheetId ?? '?')} of spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}, starting at zero-based row index ${String(args.startIndex ?? '?')}.`;
     case 'sheets.batchUpdate': return `Apply the requested spreadsheet changes to ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}.`;
     case 'roleplay_setting.create': return `Create ${String(args.type)} “${String(args.name)}” under ${typeof args.parentId === 'string' ? args.parentId : 'the world root'}.`;
     case 'roleplay_setting.update': return `Update ${id ?? 'selected entity'}: ${Object.entries(args).filter(([key]) => !['id', 'ref'].includes(key)).map(([key, entry]) => `${key}=${JSON.stringify(entry)}`).join(', ')}.`;

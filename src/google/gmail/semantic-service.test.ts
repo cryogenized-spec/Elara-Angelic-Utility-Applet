@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
 import { GoogleGmailSemanticService } from './semantic-service';
 
-function authority(fetcher: (url: RequestInfo | URL, init?: RequestInit) => Promise<Response> | Response, calls: string[] = []): GoogleOAuthAuthority {
+function authority(fetcher: (url: RequestInfo | URL, init?: RequestInit) => Promise<Response>, calls: string[] = []): GoogleOAuthAuthority {
   return {
     authorize: async (capability) => {
       calls.push(capability);

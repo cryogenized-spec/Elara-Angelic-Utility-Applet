@@ -161,6 +161,36 @@ describe('GoogleGmailSemanticService', () => {
     expect(requests.some((request) => request.includes('/messages/m6?'))).toBe(true);
   });
 
+  it('preserves newest replies when the aggregate thread body budget is exhausted', async () => {
+    const references = ['old', 'middle', 'new'].map((id) => ({ id, threadId: 'thread-budget' }));
+    const bodies: Record<string, string> = {
+      old: 'o'.repeat(100_000),
+      middle: 'm'.repeat(100_000),
+      new: 'n'.repeat(100_000),
+    };
+    const service = new GoogleGmailSemanticService(authority(async (url) => {
+      const target = new URL(String(url));
+      if (target.pathname.endsWith('/threads/thread-budget')) {
+        return json({ id: 'thread-budget', messages: references });
+      }
+      const messageId = target.pathname.split('/').at(-1) ?? '';
+      return json({
+        id: messageId,
+        threadId: 'thread-budget',
+        payload: { mimeType: 'text/plain', body: { data: b64url(bodies[messageId] ?? '') } },
+      });
+    }));
+
+    const result = await service.getThread('thread-budget', 'full');
+
+    expect(result.messages.map((message) => message.id)).toEqual(['old', 'middle', 'new']);
+    expect(result.messages.at(-1)?.bodyText).toBe(bodies.new);
+    expect(result.messages[1]?.bodyText).toHaveLength(50_000);
+    expect(result.messages[0]?.bodyText).toBeUndefined();
+    expect(result.messages[0]?.bodyTruncated).toBe(true);
+    expect(result.messagesTruncated).toBe(true);
+  });
+
   it('rejects oversized Gmail provider JSON before materializing it', async () => {
     const service = new GoogleGmailSemanticService(authority(async () => new Response('{}', {
       status: 200,

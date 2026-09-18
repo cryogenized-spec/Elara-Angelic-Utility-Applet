@@ -56,9 +56,12 @@ describe('GoogleGmailSemanticService', () => {
   it('translates semantic mailbox actions to the documented mutable system labels', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const service = new GoogleGmailSemanticService(authority(async (url, init) => { requests.push({ url: String(url), init }); return json({ id: 'm1' }); }));
-    await service.organizeMessage('m1', 'archive');
-    await service.organizeMessage('m1', 'markUnread');
-    await service.organizeMessage('m1', 'star');
+    const archived = await service.organizeMessage('m1', 'archive');
+    const unread = await service.organizeMessage('m1', 'markUnread');
+    const starred = await service.organizeMessage('m1', 'star');
+    expect(archived).toEqual({ changed: true, target: 'message', id: 'm1', action: 'archive' });
+    expect(unread).toEqual({ changed: true, target: 'message', id: 'm1', action: 'markUnread' });
+    expect(starred).toEqual({ changed: true, target: 'message', id: 'm1', action: 'star' });
     expect(requests.map((request) => String(request.init?.body))).toEqual([
       JSON.stringify({ addLabelIds: [], removeLabelIds: ['INBOX'] }),
       JSON.stringify({ addLabelIds: ['UNREAD'], removeLabelIds: [] }),

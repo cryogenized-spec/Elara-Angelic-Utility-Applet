@@ -179,7 +179,6 @@ for (const path of reviewedAutonomyCredentialConsumers) if (!actualAutonomyCrede
 const reviewedPairingTokenConsumers = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
-  'src/ui/noto-emoji.ts',
 ]);
 const actualPairingTokenConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -228,6 +227,7 @@ for (const [path, source] of runtime) {
 const reviewedRawFetchAuthorities = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
+  'src/ui/noto-emoji.ts',
 ]);
 const reviewedGlobalFetchReferences = new Set([
   'src/media/youtube/readiness.ts',

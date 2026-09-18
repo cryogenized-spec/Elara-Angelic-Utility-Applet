@@ -7,6 +7,7 @@ import {
   notoEmojiCssUrl,
   previewNotoEmoji,
   restoreNotoEmoji,
+  suspendNotoEmojiRendering,
 } from './noto-emoji';
 
 class FakeFontFace {
@@ -95,6 +96,13 @@ describe('Noto Emoji activity font authority', () => {
     expect(fetchMock).not.toHaveBeenCalled();
     expect((await cache.keys())).toHaveLength(1);
     expect(addedFaces.at(-1)?.family).toBe('Elara Noto Emoji');
+  });
+
+  it('can suspend a stale committed subset before a new preference map is exposed', async () => {
+    await commitNotoEmoji(DEFAULT_GENERATION_ACTIVITY_GLYPHS);
+    expect(getNotoEmojiReady()).toBe(true);
+    suspendNotoEmojiRendering();
+    expect(getNotoEmojiReady()).toBe(false);
   });
 
   it('uses a transient session font on startup cache miss without creating durable cache', async () => {

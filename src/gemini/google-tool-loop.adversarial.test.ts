@@ -184,6 +184,93 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     expect(executeGoogleTool).toHaveBeenCalledOnce();
   });
 
+  it('admits every missing Gmail reply prerequisite before confirmation', async () => {
+    const order: string[] = [];
+    const enabled = new Set<'gmail.send' | 'gmail.read'>();
+    const stagedOauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
+      getStatus: async () => ({
+        state: 'partially-authorized',
+        grantedCapabilities: [...enabled],
+        enabledCapabilities: [...enabled],
+        grantedProviderScopes: [],
+      }),
+      disconnect: async () => undefined,
+    };
+    const handler = vi.fn(async () => ({ sent: true }));
+
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-reply-both', model: 'gemini-3.8-flash' },
+      {
+        type: 'tool-call',
+        interactionId: 'interaction-reply-both',
+        index: 0,
+        callId: 'call-reply-both',
+        name: 'gmail.replyMessage',
+        arguments: { threadId: 't1', to: 'bob@example.com', subject: 'Re: Hello', body: 'Body', inReplyTo: '<m1@example.com>' },
+      },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction-reply-both-done', status: 'completed', durationMs: 4 },
+    ));
+    requestGoogleCapabilityGrant.mockImplementation(async (capability: string) => {
+      order.push(`grant:${capability}`);
+      enabled.add(capability as 'gmail.send' | 'gmail.read');
+      return true;
+    });
+    requestGoogleToolConfirmations.mockImplementationOnce(async () => {
+      order.push('confirm');
+      return [true];
+    });
+    executeGoogleTool.mockImplementationOnce(async () => {
+      order.push('execute');
+      return { ok: true, result: { sent: true } };
+    });
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Reply to Bob.', tools: ['gmail.replyMessage'] },
+      { tools: ['gmail.replyMessage'], readOnly: false, executor: { oauth: stagedOauth, handlers: { 'gmail.replyMessage': handler } } },
+    )) {
+      // consume
+    }
+
+    expect(order).toEqual(['grant:gmail.send', 'grant:gmail.read', 'confirm', 'execute']);
+    expect(requestGoogleCapabilityGrant).toHaveBeenCalledTimes(2);
+    expect(requestGoogleToolConfirmations).toHaveBeenCalledOnce();
+  });
+
+  it('starts confirmation freshness only after OAuth admission completes', async () => {
+    let now = new Date('2026-09-15T12:00:00.000Z');
+    let authorized = false;
+    const stagedOauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
+      getStatus: async () => ({
+        state: 'partially-authorized',
+        grantedCapabilities: authorized ? ['tasks.write'] : [],
+        enabledCapabilities: authorized ? ['tasks.write'] : [],
+        grantedProviderScopes: [],
+      }),
+      disconnect: async () => undefined,
+    };
+
+    arrangeWriteTurn();
+    requestGoogleCapabilityGrant.mockImplementationOnce(async () => {
+      now = new Date('2026-09-15T12:06:00.000Z');
+      authorized = true;
+      return true;
+    });
+    requestGoogleToolConfirmations.mockImplementationOnce(async (requests) => {
+      expect(requests[0]?.requestedAt).toBe('2026-09-15T12:06:00.000Z');
+      return [true];
+    });
+    executeGoogleTool.mockResolvedValueOnce({ ok: true, result: { id: 'task-1' } });
+
+    await consumeWriteTurn(() => now, undefined, stagedOauth);
+
+    expect(requestGoogleToolConfirmations).toHaveBeenCalledOnce();
+    expect(executeGoogleTool).toHaveBeenCalledOnce();
+  });
+
   it('does not execute a grouped mutation after the confirmation the user saw has expired', async () => {
     let now = new Date('2026-09-15T12:00:00.000Z');
     arrangeWriteTurn();

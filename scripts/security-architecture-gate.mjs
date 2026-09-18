@@ -179,6 +179,7 @@ for (const path of reviewedAutonomyCredentialConsumers) if (!actualAutonomyCrede
 const reviewedPairingTokenConsumers = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
+  'src/ui/noto-emoji.ts',
 ]);
 const actualPairingTokenConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -253,6 +254,18 @@ for (const [path, source] of runtime) {
 for (const path of reviewedRawFetchAuthorities) {
   const source = runtime.get(path) ?? '';
   if (!ownsUnqualifiedFetch(source)) fail(`reviewed global fetch authority disappeared or moved: ${path}`);
+}
+
+const notoEmojiFontSource = read('src/ui/noto-emoji.ts');
+for (const marker of [
+  "const GOOGLE_FONTS_CSS_ORIGIN = 'https://fonts.googleapis.com'",
+  "const GOOGLE_FONTS_BINARY_ORIGIN = 'https://fonts.gstatic.com'",
+  "credentials: 'omit'",
+  "referrerPolicy: 'no-referrer'",
+  "cache: 'no-store'",
+  'MAX_FONT_BYTES',
+]) {
+  if (!notoEmojiFontSource.includes(marker)) fail(`Noto Emoji egress boundary is missing: ${marker}`);
 }
 for (const path of reviewedGlobalFetchReferences) {
   const source = runtime.get(path) ?? '';

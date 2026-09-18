@@ -246,7 +246,7 @@ describe('direct Google OAuth authority', () => {
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     let active = true;
     let apiCalls = 0;
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
       const url = requestUrl(input);
       if (url.includes('userinfo') || url.includes('openidconnect')) return userinfoResponse();
       apiCalls += 1;
@@ -255,7 +255,8 @@ describe('direct Google OAuth authority', () => {
         return new Response('expired', { status: 401 });
       }
       return new Response('should-not-run', { status: 200 });
-    });
+    };
+    const fetchMock = vi.fn(fetchImpl);
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     const assertActive = () => {

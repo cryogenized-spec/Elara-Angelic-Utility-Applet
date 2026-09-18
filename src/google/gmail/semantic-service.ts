@@ -101,6 +101,9 @@ const MAX_ID_LENGTH = 500;
 const MAX_HEADER_LENGTH = 4_000;
 const MAX_SNIPPET_LENGTH = 2_000;
 const MAX_BODY_TEXT_CHARS = 100_000;
+const MAX_BODY_BASE64_CHARS = 600_000;
+const MAX_MIME_DEPTH = 20;
+const MAX_MIME_PARTS = 500;
 const MAX_THREAD_MESSAGES = 20;
 const MAX_THREAD_BODY_CHARS = 150_000;
 const MAX_RAW_MESSAGE_BYTES = 8 * 1024 * 1024;
@@ -158,36 +161,68 @@ function headerMap(headers: unknown): Map<string, string> {
   }
   return result;
 }
-function decodeBase64Url(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !value) return undefined;
+interface MimeWalkState {
+  parts: number;
+  chars: number;
+  truncated: boolean;
+}
+
+function decodeBase64Url(value: unknown): { text?: string; truncated: boolean } {
+  if (typeof value !== 'string' || !value) return { truncated: false };
+  const clipped = value.length > MAX_BODY_BASE64_CHARS;
+  const source = clipped ? value.slice(0, MAX_BODY_BASE64_CHARS - (MAX_BODY_BASE64_CHARS % 4)) : value;
   try {
-    const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+    const normalized = source.replace(/-/g, '+').replace(/_/g, '/');
     const padded = normalized + '='.repeat((4 - (normalized.length % 4)) % 4);
     const binary = atob(padded);
     const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+    return { text: new TextDecoder('utf-8', { fatal: false }).decode(bytes), truncated: clipped };
   } catch {
-    return undefined;
+    return { truncated: clipped };
   }
 }
-function plainTextParts(part: ProviderPart | undefined, sink: string[]): void {
-  if (!part || sink.join('\n').length >= MAX_BODY_TEXT_CHARS) return;
-  const mimeType = typeof part.mimeType === 'string' ? part.mimeType.toLowerCase() : '';
-  const data = decodeBase64Url(part.body?.data);
-  if ((mimeType === 'text/plain' || (!mimeType && data)) && data) sink.push(data);
-  if (!Array.isArray(part.parts)) return;
-  for (const child of part.parts.slice(0, 100)) {
-    if (child && typeof child === 'object') plainTextParts(child as ProviderPart, sink);
-    if (sink.join('\n').length >= MAX_BODY_TEXT_CHARS) break;
+function plainTextParts(part: ProviderPart | undefined, sink: string[], state: MimeWalkState, depth = 0): void {
+  if (!part || state.chars >= MAX_BODY_TEXT_CHARS) return;
+  if (depth > MAX_MIME_DEPTH || state.parts >= MAX_MIME_PARTS) {
+    state.truncated = true;
+    return;
   }
+  state.parts += 1;
+
+  const filename = typeof part.filename === 'string' ? part.filename.trim() : '';
+  const attachmentId = typeof part.body?.attachmentId === 'string' ? part.body.attachmentId.trim() : '';
+  if (filename || attachmentId) return;
+
+  const mimeType = typeof part.mimeType === 'string' ? part.mimeType.toLowerCase() : '';
+  const decoded = decodeBase64Url(part.body?.data);
+  if (decoded.truncated) state.truncated = true;
+  if ((mimeType === 'text/plain' || (!mimeType && decoded.text)) && decoded.text) {
+    const separator = sink.length ? 1 : 0;
+    const remaining = Math.max(0, MAX_BODY_TEXT_CHARS - state.chars - separator);
+    const text = decoded.text.slice(0, remaining);
+    if (text) {
+      sink.push(text);
+      state.chars += separator + text.length;
+    }
+    if (text.length < decoded.text.length) state.truncated = true;
+  }
+
+  if (!Array.isArray(part.parts) || state.chars >= MAX_BODY_TEXT_CHARS) return;
+  for (const child of part.parts.slice(0, 100)) {
+    if (child && typeof child === 'object') plainTextParts(child as ProviderPart, sink, state, depth + 1);
+    if (state.truncated && (state.parts >= MAX_MIME_PARTS || depth >= MAX_MIME_DEPTH)) break;
+    if (state.chars >= MAX_BODY_TEXT_CHARS) break;
+  }
+  if (part.parts.length > 100) state.truncated = true;
 }
 function normalizeMessage(resource: ProviderMessage, includeBody: boolean): GmailMessageView {
   const id = requiredId(typeof resource.id === 'string' ? resource.id : '', 'Gmail message id');
   const headers = headerMap(resource.payload?.headers);
   const chunks: string[] = [];
-  if (includeBody) plainTextParts(resource.payload, chunks);
+  const mimeState: MimeWalkState = { parts: 0, chars: 0, truncated: false };
+  if (includeBody) plainTextParts(resource.payload, chunks, mimeState);
   const joined = chunks.join('\n').split('\0').join('');
-  const bodyText = joined ? joined.slice(0, MAX_BODY_TEXT_CHARS) : undefined;
+  const bodyText = joined || undefined;
   return {
     trust: 'untrusted-external',
     source: 'gmail',
@@ -207,7 +242,7 @@ function normalizeMessage(resource: ProviderMessage, includeBody: boolean): Gmai
       ...(headers.get('in-reply-to') ? { inReplyTo: headers.get('in-reply-to') } : {}),
       ...(headers.get('references') ? { references: headers.get('references') } : {}),
     }),
-    ...(bodyText !== undefined ? { bodyText, bodyTruncated: joined.length > MAX_BODY_TEXT_CHARS } : {}),
+    ...(bodyText !== undefined ? { bodyText, bodyTruncated: mimeState.truncated } : mimeState.truncated ? { bodyTruncated: true } : {}),
   };
 }
 function normalizeLabel(resource: ProviderLabel): GmailLabelView {

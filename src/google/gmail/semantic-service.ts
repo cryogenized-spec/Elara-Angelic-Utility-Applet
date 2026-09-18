@@ -354,13 +354,13 @@ export class GoogleGmailSemanticService {
   }
   async replyMessage(input: { readonly threadId: string; readonly to: string; readonly subject: string; readonly body: string; readonly inReplyTo: string }): Promise<GmailSendAck> {
     const threadId = requiredId(input.threadId, 'Gmail thread id'); const to = validateAddress(input.to); const subject = validateSubject(input.subject); const body = validateBody(input.body); const inReplyTo = validateMessageId(input.inReplyTo);
-    const access = await this.oauth.authorize('gmail.modify');
+    const readAccess = await this.oauth.authorize('gmail.read');
     const threadUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}`);
     threadUrl.searchParams.set('format', 'metadata');
     threadUrl.searchParams.append('metadataHeaders', 'Subject');
     threadUrl.searchParams.append('metadataHeaders', 'Message-ID');
     threadUrl.searchParams.append('metadataHeaders', 'References');
-    const thread = await this.readJson<ProviderThread>(await access.fetch(threadUrl));
+    const thread = await this.readJson<ProviderThread>(await readAccess.fetch(threadUrl));
     const messages = Array.isArray(thread.messages) ? thread.messages.filter((item): item is ProviderMessage => Boolean(item) && typeof item === 'object') : [];
     const target = messages.find((message) => headerMap(message.payload?.headers).get('message-id') === inReplyTo);
     if (!target) throw new Error('Gmail reply target Message-ID is not present in the selected thread.');
@@ -369,7 +369,8 @@ export class GoogleGmailSemanticService {
     if (!providerSubject || replySubjectKey(providerSubject) !== replySubjectKey(subject)) throw new Error('Gmail reply subject does not match the selected thread.');
     const references = [...new Set([...parseReferenceIds(targetHeaders.get('references')), inReplyTo])];
     const raw = composeRaw([`To: ${to}`, `Subject: ${subject}`, `In-Reply-To: ${inReplyTo}`, `References: ${references.join(' ')}`], body);
-    await this.sendAndDiscard('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw), threadId }, access);
+    const sendAccess = await this.oauth.authorize('gmail.send');
+    await this.sendAndDiscard('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw), threadId }, sendAccess);
     return { sent: true, threadId };
   }
 

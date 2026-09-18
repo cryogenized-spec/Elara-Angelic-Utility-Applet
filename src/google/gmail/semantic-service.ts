@@ -403,26 +403,40 @@ export class GoogleGmailSemanticService {
     const messages: GmailMessageView[] = [];
 
     if (safeFormat === 'full') {
+      const fetched: GmailMessageView[] = [];
       for (const reference of selected) {
         if (typeof reference.id !== 'string') continue;
         const messageId = requiredId(reference.id, 'Gmail message id');
         const messageUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`);
         messageUrl.searchParams.set('format', 'full');
         const resource = await this.readJson<ProviderMessage>(await access.fetch(messageUrl));
-        const normalized = normalizeMessage(resource, true);
+        fetched.push(normalizeMessage(resource, true));
+      }
+
+      // Spend the aggregate body budget from newest to oldest while preserving
+      // chronological output order. Older long messages may lose body text, but
+      // they must never prevent the thread's newest replies from being returned.
+      const budgeted = new Array<GmailMessageView>(fetched.length);
+      for (let index = fetched.length - 1; index >= 0; index -= 1) {
+        const normalized = fetched[index];
         if (!normalized.bodyText) {
-          messages.push(normalized);
+          budgeted[index] = normalized;
+          continue;
+        }
+        if (remainingBody <= 0) {
+          const { bodyText: _omitted, ...metadata } = normalized;
+          budgeted[index] = { ...metadata, bodyTruncated: true };
           continue;
         }
         const text = normalized.bodyText.slice(0, remainingBody);
         remainingBody -= text.length;
-        messages.push({
+        budgeted[index] = {
           ...normalized,
           bodyText: text,
           bodyTruncated: normalized.bodyTruncated || text.length < normalized.bodyText.length,
-        });
-        if (remainingBody <= 0) break;
+        };
       }
+      messages.push(...budgeted);
     } else {
       for (const resource of selected) messages.push(normalizeMessage(resource, false));
     }

@@ -98,7 +98,32 @@ describe('direct Google OAuth authority', () => {
       grantedCapabilities: [],
       enabledCapabilities: [],
       grantedProviderScopes: [],
+      sessionReady: false,
     });
+  });
+
+  it('connects a Google account with identity-only scopes and a live browser session', async () => {
+    tokenMock.mockResolvedValueOnce(token('account-access-token', EMAIL_SCOPE));
+    const authorized = await googleOAuthAuthority.authorize('google.account');
+
+    expect(tokenMock).toHaveBeenCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: `${EMAIL_SCOPE} ${OPENID_SCOPE}`,
+      prompt: '',
+    });
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.enabledCapabilities).toContain('google.account');
+    expect(status.grantedCapabilities).toContain('google.account');
+    expect(status.grantedProviderScopes).toContain(EMAIL_SCOPE);
+    expect(status.sessionReady).toBe(true);
+    expect(status.account).toEqual({ email: 'test@example.com', displayName: 'Test User' });
+    expect(authorized.capability).toBe('google.account');
+
+    const stored = localStorage.getItem('elara.google.authorization.v2') ?? '';
+    expect(stored).toContain('google.account');
+    expect(stored).not.toContain('account-access-token');
+    expect(stored).not.toContain('gmail.');
+    expect(stored).not.toContain('calendar.');
   });
 
   it('records GIS scopes and persists metadata without persisting the access token', async () => {
@@ -119,6 +144,7 @@ describe('direct Google OAuth authority', () => {
     expect(status.grantedCapabilities).toContain('calendar.events.read');
     expect(status.grantedProviderScopes).toContain(CALENDAR_READ_SCOPE);
     expect(status.account?.email).toBe('test@example.com');
+    expect(status.sessionReady).toBe(true);
     expect(authorized.capability).toBe('calendar.events.read');
   });
 
@@ -452,7 +478,18 @@ describe('direct Google OAuth authority', () => {
       state: 'disconnected',
       grantedCapabilities: [],
       enabledCapabilities: [],
+it('disconnects the local browser authorization state and revokes the active token', async () => {
+    tokenMock.mockResolvedValueOnce(token('access-123', CALENDAR_READ_SCOPE));
+    await googleOAuthAuthority.authorize('calendar.events.read');
+    await googleOAuthAuthority.disconnect();
+
+    expect(revokeMock).toHaveBeenCalledWith('access-123');
+    await expect(googleOAuthAuthority.getStatus()).resolves.toEqual({
+      state: 'disconnected',
+      grantedCapabilities: [],
+      enabledCapabilities: [],
       grantedProviderScopes: [],
+      sessionReady: false,
     });
     expect(localStorage.getItem('elara.google.authorization.v2')).toBeNull();
   });

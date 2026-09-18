@@ -236,12 +236,17 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   let args: Readonly<Record<string, unknown>>;
   try { args = validateArguments(validCall.tool, validCall.arguments); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) }; }
   const capability = safeCapability(descriptor.capability);
+  const prerequisites = (descriptor.prerequisiteCapabilities ?? []).map(safeCapability);
+  const requiredCapabilities = [...new Set<ToolCapability>([capability, ...prerequisites])];
   const isRoleplayTool = validCall.tool.startsWith('roleplay_setting.');
   if (isRoleplayTool && !(await loadRoleplayPreferences()).enabled) return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
-  if (isGoogleOAuthCapability(capability)) {
+  const oauthCapabilities = requiredCapabilities.filter(isGoogleOAuthCapability);
+  if (oauthCapabilities.length) {
     let status: GoogleOAuthStatus;
     try { status = await options.oauth.getStatus(); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) }; }
-    if (authorizationNeeded(status, capability)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: capability };
+    for (const required of oauthCapabilities) {
+      if (authorizationNeeded(status, required)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: required };
+    }
   }
   const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {

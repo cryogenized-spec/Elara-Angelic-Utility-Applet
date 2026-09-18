@@ -70,12 +70,13 @@ export function GenerationActivityGlyphSettings({
   }
 
   function enterCustom(key: GenerationActivityGlyphKey, raw: string): void {
-    setCustomInputs((current) => ({ ...current, [key]: raw }));
     const normalized = normalizeGenerationActivityGlyph(raw, '');
     if (!normalized) {
+      setCustomInputs((current) => ({ ...current, [key]: raw }));
       setInvalidKey(key);
       return;
     }
+    setCustomInputs((current) => ({ ...current, [key]: normalized }));
     setInvalidKey(null);
     onChange(withGlyph(value, key, normalized));
   }

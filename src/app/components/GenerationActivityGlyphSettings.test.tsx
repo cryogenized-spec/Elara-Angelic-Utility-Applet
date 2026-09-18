@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_GENERATION_ACTIVITY_GLYPHS, type GenerationActivityGlyphs } from '../../domain/preferences';
 import { GenerationActivityGlyphSettings } from './GenerationActivityGlyphSettings';
 
-const previewNotoEmoji = vi.fn(async () => true);
+const { previewNotoEmoji } = vi.hoisted(() => ({ previewNotoEmoji: vi.fn(async () => true) }));
 vi.mock('../../ui/noto-emoji', () => ({
   NOTO_EMOJI_PREVIEW_FAMILY: 'Elara Noto Emoji Preview',
   previewNotoEmoji: (value: GenerationActivityGlyphs) => previewNotoEmoji(value),

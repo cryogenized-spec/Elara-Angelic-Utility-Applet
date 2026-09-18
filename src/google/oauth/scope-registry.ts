@@ -16,6 +16,7 @@ export interface GoogleScopeDescriptor {
  * each capability and review this table against Google's live scope catalog.
  */
 export const googleScopeRegistry: readonly GoogleScopeDescriptor[] = [
+  { capability: 'google.account', scope: 'https://www.googleapis.com/auth/userinfo.email', access: 'read', sensitivity: 'non-sensitive', rationale: 'Establish Google account identity and a user-driven authorization session without requesting Workspace data access.' },
   { capability: 'calendar.events.read', scope: 'https://www.googleapis.com/auth/calendar.events.readonly', access: 'read', sensitivity: 'sensitive', rationale: 'Read Calendar events without granting calendar mutation.' },
   { capability: 'calendar.events.write', scope: 'https://www.googleapis.com/auth/calendar.events', access: 'write', sensitivity: 'sensitive', rationale: 'Create and edit Calendar events when explicitly required.' },
   { capability: 'calendar.list.read', scope: 'https://www.googleapis.com/auth/calendar.calendarlist.readonly', access: 'read', sensitivity: 'sensitive', rationale: 'Read subscribed calendar list without calendar mutation.' },

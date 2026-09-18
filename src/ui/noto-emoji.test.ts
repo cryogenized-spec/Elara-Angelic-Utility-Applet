@@ -19,20 +19,26 @@ class FakeFontFace {
   async load(): Promise<FakeFontFace> { return this; }
 }
 
+function cacheKey(key: RequestInfo | URL): string {
+  if (typeof key === 'string') return key;
+  if (key instanceof URL) return key.toString();
+  return key.url;
+}
+
 class FakeCache {
   private readonly entries = new Map<string, Response>();
   async match(key: RequestInfo | URL): Promise<Response | undefined> {
-    const response = this.entries.get(String(key));
+    const response = this.entries.get(cacheKey(key));
     return response?.clone();
   }
   async put(key: RequestInfo | URL, value: Response): Promise<void> {
-    this.entries.set(String(key), value.clone());
+    this.entries.set(cacheKey(key), value.clone());
   }
   async keys(): Promise<Request[]> {
     return [...this.entries.keys()].map((url) => new Request(url));
   }
   async delete(key: RequestInfo | URL): Promise<boolean> {
-    return this.entries.delete(typeof key === 'string' ? key : key.toString());
+    return this.entries.delete(cacheKey(key));
   }
 }
 

@@ -19,6 +19,10 @@ export const DRIVE_LIMITS = {
   maxEtagLength: 1_024,
   maxNameLength: 500,
   maxDescriptionLength: 2_000,
+  /** Parent ids kept from one provider file; Drive files rarely have more, and a hostile response must not grow the model result. */
+  maxParents: 20,
+  /** Cap for provider-supplied free text (timestamps, links, validators) projected into a tool result. */
+  maxProviderTextLength: 2_000,
 } as const;
 
 export type DriveLimits = typeof DRIVE_LIMITS;

@@ -72,7 +72,7 @@ export const driveSheetsToolArgumentSchemas = {
   'drive.createFile': z.object({
     name: z.string().trim().min(1).max(500),
     mimeType: z.string().trim().min(1).max(200).optional(),
-    parents: z.array(fileIdSchema).max(20).optional(),
+    parents: z.array(fileIdSchema).max(DRIVE_LIMITS.maxParents).optional(),
   }).strict(),
   'drive.updateFile': z.object({
     fileId: fileIdSchema,

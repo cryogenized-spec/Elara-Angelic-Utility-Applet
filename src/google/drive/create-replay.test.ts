@@ -24,6 +24,31 @@ describe('Google Drive create replay fence', () => {
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
+  it('collapses two concurrent copies of the same call into one create', async () => {
+    const operation = vi.fn(async () => ({ id: 'file-1' }));
+    const payload = { name: 'Plan', parents: ['folder-1'] };
+
+    const [first, second] = await Promise.all([
+      runDriveCreateOnce(baseContext, payload, operation, 1000),
+      runDriveCreateOnce(baseContext, payload, operation, 1000),
+    ]);
+
+    expect(first).toEqual({ id: 'file-1' });
+    expect(second).toEqual({ id: 'file-1' });
+    expect(operation).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when a concurrent copy of the same call id changes its arguments', async () => {
+    const operation = vi.fn(async () => ({ id: 'file-1' }));
+
+    const first = runDriveCreateOnce(baseContext, { name: 'Plan' }, operation, 1000);
+    const secondAssertion = expect(runDriveCreateOnce(baseContext, { name: 'Other' }, operation, 1000)).rejects.toThrow(/changed arguments/i);
+
+    await expect(first).resolves.toEqual({ id: 'file-1' });
+    await secondAssertion;
+    expect(operation).toHaveBeenCalledTimes(1);
+  });
+
   it('fails closed when the same call id is replayed with changed arguments', async () => {
     const operation = vi.fn().mockResolvedValue({ id: 'file-1' });
     await runDriveCreateOnce(baseContext, { name: 'Plan' }, operation, 1000);

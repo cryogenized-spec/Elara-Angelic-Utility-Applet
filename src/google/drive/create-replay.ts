@@ -9,7 +9,7 @@ export interface DriveCreateReplayContext {
 }
 
 interface ReplayEntry {
-  readonly signature: string;
+  readonly signature: Promise<string>;
   readonly promise: Promise<unknown>;
 }
 
@@ -67,10 +67,14 @@ export async function runDriveCreateOnce<T>(
   if (!key) return operation();
 
   electTurn(turnKey);
-  const signature = await payloadSignature(payload);
+  // The digest starts before the duplicate check and the entry is published
+  // without an intervening await, so two concurrent copies of the same call
+  // cannot both miss the fence and issue a second create POST.
+  const signature = payloadSignature(payload);
   const existing = replayEntries.get(key);
   if (existing) {
-    if (existing.signature !== signature) throw new Error('Google Drive create replay changed arguments for the same tool call.');
+    const [entrySignature, callSignature] = await Promise.all([existing.signature, signature]);
+    if (entrySignature !== callSignature) throw new Error('Google Drive create replay changed arguments for the same tool call.');
     return existing.promise as Promise<T>;
   }
 
@@ -78,7 +82,7 @@ export async function runDriveCreateOnce<T>(
     throw new Error('Google Drive create replay capacity was exhausted for the current elected turn.');
   }
 
-  const promise = Promise.resolve().then(operation);
+  const promise = signature.then(() => operation());
   replayEntries.set(key, { signature, promise });
   return promise;
 }

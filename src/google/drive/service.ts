@@ -101,8 +101,8 @@ function requireFileId(fileId: string): string {
   return requireText(fileId, 'file ID', DRIVE_LIMITS.maxFileIdLength);
 }
 
-function boundedText(value: unknown): string | undefined {
-  return typeof value === 'string' ? value.slice(0, 2_000) : undefined;
+function boundedText(value: unknown, maxLength: number = DRIVE_LIMITS.maxProviderTextLength): string | undefined {
+  return typeof value === 'string' ? value.slice(0, maxLength) : undefined;
 }
 
 function asProviderSize(value: unknown): number | undefined {
@@ -118,18 +118,27 @@ function asFileSummary(value: unknown): GoogleDriveFileSummary {
   const file = value as DriveFileResponse;
   const capabilities = typeof file.capabilities === 'object' && file.capabilities !== null ? file.capabilities as Record<string, unknown> : null;
   const canDownload = typeof capabilities?.canDownload === 'boolean' ? capabilities.canDownload : undefined;
-  const parents = Array.isArray(file.parents) ? file.parents.filter((parent): parent is string => typeof parent === 'string') : undefined;
+  // Every provider-supplied field that reaches a tool result is bounded here:
+  // a malformed or hostile response must not grow the model-visible payload.
+  const parents = Array.isArray(file.parents)
+    ? file.parents
+      .filter((parent): parent is string => typeof parent === 'string')
+      .slice(0, DRIVE_LIMITS.maxParents)
+      .map((parent) => parent.slice(0, DRIVE_LIMITS.maxFileIdLength))
+    : undefined;
   const size = asProviderSize(file.size);
-  const description = boundedText(file.description);
+  const description = boundedText(file.description, DRIVE_LIMITS.maxDescriptionLength);
   const createdTime = boundedText(file.createdTime);
   const etag = boundedText(file.etag);
+  const modifiedTime = boundedText(file.modifiedTime);
+  const webViewLink = boundedText(file.webViewLink);
   return {
     id: requireText(String(file.id ?? ''), 'file ID', DRIVE_LIMITS.maxFileIdLength),
-    name: String(file.name ?? ''),
-    mimeType: String(file.mimeType ?? 'application/octet-stream'),
-    ...(typeof file.modifiedTime === 'string' ? { modifiedTime: file.modifiedTime } : {}),
+    name: boundedText(file.name, DRIVE_LIMITS.maxNameLength) ?? '',
+    mimeType: boundedText(file.mimeType, DRIVE_LIMITS.maxExportMimeTypeLength) ?? 'application/octet-stream',
+    ...(modifiedTime !== undefined ? { modifiedTime } : {}),
     ...(createdTime !== undefined ? { createdTime } : {}),
-    ...(typeof file.webViewLink === 'string' ? { webViewLink: file.webViewLink } : {}),
+    ...(webViewLink !== undefined ? { webViewLink } : {}),
     ...(parents?.length ? { parents } : {}),
     ...(size !== undefined ? { size } : {}),
     ...(typeof file.starred === 'boolean' ? { starred: file.starred } : {}),
@@ -178,8 +187,10 @@ async function readBinaryResponse(response: Response, operation: string, limit: 
     }
   } catch (cause) {
     await reader.cancel().catch(() => undefined);
-    throw cause;
+    if (cause instanceof DriveTransferError || (cause instanceof DOMException && cause.name === 'AbortError')) throw cause;
+    throw new DriveTransferError('DRIVE_TRANSFER_FAILED', `${operation} failed while reading the response.`, cause);
   }
+  if (signal?.aborted) throw new DOMException(`${operation} was cancelled.`, 'AbortError');
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
@@ -232,6 +243,22 @@ function transferLimit(maxBytes: number | undefined): number {
 }
 
 /**
+ * Read an explicit trashed opt-in out of Drive query text.
+ *
+ * Quoted literals are removed first, so a *file name* containing the word
+ * "trashed" cannot be mistaken for the caller's own predicate, and an
+ * unbalanced literal is never trusted as an opt-in. A malformed query therefore
+ * keeps the conservative `trashed = false` boundary rather than widening it.
+ */
+function hasExplicitTrashedPredicate(query: string): boolean {
+  const stripped = query.replace(/'(?:[^'\\]|\\.)*'/g, "''").replace(/"(?:[^"\\]|\\.)*"/g, '""');
+  const singles = (stripped.match(/'/g) ?? []).length;
+  const doubles = (stripped.match(/"/g) ?? []).length;
+  if (singles % 2 !== 0 || doubles % 2 !== 0) return false;
+  return /\btrashed\b/i.test(stripped);
+}
+
+/**
  * Drive returns trashed files alongside live ones unless the query says
  * otherwise. Elara's reads exclude trashed files by default; `showTrashed` (or an
  * explicit `trashed` predicate in the caller's own query, which is honored
@@ -241,7 +268,9 @@ export function driveQueryWithTrashBoundary(query: string | undefined, showTrash
   const trimmed = boundedParameter(query, 'query', DRIVE_LIMITS.maxQueryLength);
   if (showTrashed) return trimmed;
   if (!trimmed) return 'trashed = false';
-  if (/\btrashed\b/i.test(trimmed)) return trimmed;
+  // Only a predicate counts as an explicit opt-in. A file whose *name* contains
+  // the word "trashed" must not be able to suppress the boundary.
+  if (hasExplicitTrashedPredicate(trimmed)) return trimmed;
   return `${trimmed} and trashed = false`;
 }
 
@@ -301,7 +330,10 @@ export class GoogleDriveService {
     const access = await this.oauth.authorize('drive.files.app.write');
     const body: Record<string, unknown> = { name: requireText(input.name, 'file name') };
     if (input.mimeType?.trim()) body.mimeType = requireText(input.mimeType, 'MIME type', DRIVE_LIMITS.maxExportMimeTypeLength);
-    if (input.parents?.length) body.parents = input.parents.map((parent) => requireFileId(parent));
+    if (input.parents?.length) {
+      // Collapse duplicates: the same parent id twice is still one parent.
+      body.parents = Array.from(new Set(input.parents.map((parent) => requireFileId(parent))));
+    }
 
     const response = await access.fetch(`${DRIVE_API}/files?fields=${encodeURIComponent(DRIVE_FILE_FIELDS)}`, {
       method: 'POST',
@@ -341,16 +373,22 @@ export class GoogleDriveService {
    * stays in its current folder as well as appearing in the destination.
    */
   async moveFile(fileId: string, etag: string, parentId: string, previousParentId?: string): Promise<GoogleDriveFileSummary> {
+    const destination = requireFileId(parentId);
+    const previous = previousParentId?.trim() ? requireFileId(previousParentId) : undefined;
+    if (previous && previous === destination) {
+      throw new Error('Google Drive move cannot remove and add the same parent.');
+    }
+    const headers = conditionalHeaders(etag);
     const access = await this.oauth.authorize('drive.files.app.write');
     const params = new URLSearchParams({
-      addParents: requireFileId(parentId),
+      addParents: destination,
       fields: DRIVE_FILE_FIELDS,
     });
-    if (previousParentId?.trim()) params.set('removeParents', requireFileId(previousParentId));
+    if (previous) params.set('removeParents', previous);
 
     const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?${params.toString()}`, {
       method: 'PATCH',
-      headers: conditionalHeaders(etag),
+      headers,
     });
     if (!response.ok) throwMutationFailure(response, 'move');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
@@ -362,10 +400,13 @@ export class GoogleDriveService {
    * keeps the file recoverable.
    */
   async trashFile(fileId: string, etag: string): Promise<GoogleDriveFileSummary> {
+    // The validator is checked before any authorization or request, exactly like
+    // the other conditional writes.
+    const headers = { 'content-type': 'application/json', ...conditionalHeaders(etag) };
     const access = await this.oauth.authorize('drive.files.app.write');
     const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?fields=${encodeURIComponent(DRIVE_FILE_FIELDS)}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json', ...conditionalHeaders(etag) },
+      headers,
       body: JSON.stringify({ trashed: true }),
     });
     if (!response.ok) throwMutationFailure(response, 'trash');

@@ -63,7 +63,7 @@ describe('Drive and Sheets executable parity', () => {
     expect(handler).toBeTypeOf('function');
     await handler!(context('drive.updateFile', args));
 
-    expect(driveMocks.updateFile).toHaveBeenCalledWith('file-1', '"etag-1"', { name: 'Renamed', starred: true });
+    expect(driveMocks.updateFile).toHaveBeenCalledWith('file-1', '"etag-1"', { name: 'Renamed', starred: true }, {});
   });
 
   it('requires a bounded string cell input in both schema and Gemini declaration', () => {

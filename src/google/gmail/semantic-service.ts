@@ -370,14 +370,59 @@ export class GoogleGmailSemanticService {
   }
 
   async getThread(threadId: string, format: GmailReadFormat = 'full', metadataHeaders?: readonly string[]): Promise<GmailThreadView> {
-    const id = requiredId(threadId, 'Gmail thread id'); const safeFormat: GmailReadFormat = format === 'minimal' || format === 'metadata' ? format : 'full';
-    const url = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(id)}`); url.searchParams.set('format', safeFormat);
-    for (const header of (metadataHeaders ?? []).slice(0, 50)) if (header.trim() && header.length <= 200) url.searchParams.append('metadataHeaders', header.trim());
-    const access = await this.oauth.authorize('gmail.read'); const data = await this.readJson<ProviderThread>(await access.fetch(url));
-    const all = Array.isArray(data.messages) ? data.messages.filter((item): item is ProviderMessage => Boolean(item) && typeof item === 'object') : [];
-    const selected = all.slice(Math.max(0, all.length - MAX_THREAD_MESSAGES)); let remainingBody = MAX_THREAD_BODY_CHARS;
-    const messages = selected.map((item) => { const normalized = normalizeMessage(item, safeFormat === 'full'); if (!normalized.bodyText) return normalized; const text = normalized.bodyText.slice(0, remainingBody); remainingBody -= text.length; return { ...normalized, bodyText: text, bodyTruncated: normalized.bodyTruncated || text.length < normalized.bodyText.length }; });
-    return { trust: 'untrusted-external', source: 'gmail', id, ...(typeof data.historyId === 'string' ? { historyId: data.historyId.slice(0, 128) } : {}), messages, messageCount: all.length, messagesTruncated: all.length > messages.length || remainingBody <= 0 };
+    const id = requiredId(threadId, 'Gmail thread id');
+    const safeFormat: GmailReadFormat = format === 'minimal' || format === 'metadata' ? format : 'full';
+    const safeHeaders = (metadataHeaders ?? []).map((header) => header.trim()).filter(Boolean).slice(0, 50);
+
+    const threadUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(id)}`);
+    threadUrl.searchParams.set('format', safeFormat === 'full' ? 'minimal' : safeFormat);
+    if (safeFormat === 'metadata') {
+      for (const header of safeHeaders) if (header.length <= 200) threadUrl.searchParams.append('metadataHeaders', header);
+    }
+
+    const access = await this.oauth.authorize('gmail.read');
+    const data = await this.readJson<ProviderThread>(await access.fetch(threadUrl));
+    const all = Array.isArray(data.messages)
+      ? data.messages.filter((item): item is ProviderMessage => Boolean(item) && typeof item === 'object')
+      : [];
+    const selected = all.slice(Math.max(0, all.length - MAX_THREAD_MESSAGES));
+    let remainingBody = MAX_THREAD_BODY_CHARS;
+    const messages: GmailMessageView[] = [];
+
+    if (safeFormat === 'full') {
+      for (const reference of selected) {
+        if (typeof reference.id !== 'string') continue;
+        const messageId = requiredId(reference.id, 'Gmail message id');
+        const messageUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${encodeURIComponent(messageId)}`);
+        messageUrl.searchParams.set('format', 'full');
+        const resource = await this.readJson<ProviderMessage>(await access.fetch(messageUrl));
+        const normalized = normalizeMessage(resource, true);
+        if (!normalized.bodyText) {
+          messages.push(normalized);
+          continue;
+        }
+        const text = normalized.bodyText.slice(0, remainingBody);
+        remainingBody -= text.length;
+        messages.push({
+          ...normalized,
+          bodyText: text,
+          bodyTruncated: normalized.bodyTruncated || text.length < normalized.bodyText.length,
+        });
+        if (remainingBody <= 0) break;
+      }
+    } else {
+      for (const resource of selected) messages.push(normalizeMessage(resource, false));
+    }
+
+    return {
+      trust: 'untrusted-external',
+      source: 'gmail',
+      id,
+      ...(typeof data.historyId === 'string' ? { historyId: data.historyId.slice(0, 128) } : {}),
+      messages,
+      messageCount: all.length,
+      messagesTruncated: all.length > messages.length || remainingBody <= 0,
+    };
   }
 
   async listLabels(): Promise<readonly GmailLabelView[]> {
@@ -538,5 +583,35 @@ export class GoogleGmailSemanticService {
     );
     return this.readJson<T>(response);
   }
-  private async readJson<T>(response: Response): Promise<T> { if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); return (await response.json()) as T; }
+  private async readJson<T>(response: Response): Promise<T> {
+    if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`);
+    const declaredLength = Number(response.headers.get('content-length'));
+    if (Number.isFinite(declaredLength) && declaredLength > MAX_RAW_MESSAGE_BYTES) {
+      throw new Error('Gmail provider response exceeded the application byte budget.');
+    }
+    if (!response.body) return (await response.json()) as T;
+
+    const reader = response.body.getReader();
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      total += value.byteLength;
+      if (total > MAX_RAW_MESSAGE_BYTES) {
+        void reader.cancel();
+        throw new Error('Gmail provider response exceeded the application byte budget.');
+      }
+      chunks.push(value);
+    }
+
+    const bytes = new Uint8Array(total);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    return JSON.parse(new TextDecoder('utf-8', { fatal: false }).decode(bytes)) as T;
+  }
 }

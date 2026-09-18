@@ -39,7 +39,7 @@ describe('Generation Activity glyph normalization', () => {
       memory: '♥',
     });
     const text = generationActivityGlyphText(normalized);
-    expect(text.startsWith('◇♥')).toBe(true);
+    expect(text.startsWith('◇ ♥')).toBe(true);
     expect([...text].filter((item) => item === '◇')).toHaveLength(1);
   });
 });

@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { GoogleOAuthAuthority } from '../google/oauth/contracts';
 
 const { streamReply, streamToolResult } = vi.hoisted(() => ({
   streamReply: vi.fn(),
@@ -65,7 +66,7 @@ function arrangeWriteTurn() {
 async function consumeWriteTurn(
   now: () => Date,
   writeHandler = vi.fn(async () => ({ id: 'task-1' })),
-  oauthAuthority = oauth,
+  oauthAuthority: GoogleOAuthAuthority = oauth,
 ) {
   for await (const _event of streamGoogleToolLoop(
     {

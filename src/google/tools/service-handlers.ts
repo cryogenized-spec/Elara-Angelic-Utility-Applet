@@ -286,9 +286,9 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     // the first result instead of creating a second file, and a replayed call
     // id with different arguments fails closed.
     return runDriveCreateOnce(
-      { tool: 'drive.createFile', callId, conversationId, messageId, generationId, signal, isGenerationActive },
+      { tool: 'drive.createFile', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
       input,
-      () => drive.createFile(input, { signal, isGenerationActive }),
+      () => drive.createFile(input, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) }),
     );
   },
   'drive.updateFile': async ({ arguments: raw, signal, isGenerationActive }) => {
@@ -301,7 +301,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(starred !== undefined ? { starred } : {}),
-    }, { signal, isGenerationActive });
+    }, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
   },
   'drive.moveFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
@@ -310,12 +310,12 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'etag')!,
       stringArg(args, 'parentId')!,
       stringArg(args, 'previousParentId', false),
-      { signal, isGenerationActive },
+      { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
     );
   },
   'drive.trashFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, { signal, isGenerationActive });
+    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
   },
 
   'sheets.getSpreadsheet': async ({ arguments: raw }) => sheets.getSpreadsheet(stringArg(objectArgs(raw), 'spreadsheetId')!),

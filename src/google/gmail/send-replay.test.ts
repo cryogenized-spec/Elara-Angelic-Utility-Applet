@@ -63,6 +63,30 @@ describe('Gmail send replay fence', () => {
     expect(secondOperation).toHaveBeenCalledOnce();
   });
 
+  it('does not let a stale older turn clear a newer ambiguous-send replay fence', async () => {
+    let activeGeneration = 'generation-2';
+    const newerContext = {
+      ...baseContext,
+      generationId: 'generation-2',
+      isGenerationActive: () => activeGeneration === 'generation-2',
+    };
+    const staleOlderContext = {
+      ...baseContext,
+      generationId: 'generation-1',
+      isGenerationActive: () => activeGeneration === 'generation-1',
+    };
+    const payload = { to: ['person@example.com'], subject: 'Hello', body: 'Body' };
+    const newerOperation = vi.fn().mockRejectedValue(new Error('network response lost'));
+    const staleOperation = vi.fn().mockResolvedValue({ id: 'stale-send' });
+
+    await expect(runGmailSendOnce(newerContext, payload, newerOperation)).rejects.toThrow('network response lost');
+    await expect(runGmailSendOnce(staleOlderContext, payload, staleOperation)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(runGmailSendOnce(newerContext, payload, newerOperation)).rejects.toThrow('network response lost');
+
+    expect(staleOperation).not.toHaveBeenCalled();
+    expect(newerOperation).toHaveBeenCalledTimes(1);
+  });
+
   it('does not claim replay safety without elected-turn provenance', async () => {
     const operation = vi.fn().mockResolvedValue({ id: 'sent-1' });
     const context = { tool: 'gmail.sendMessage' as const, callId: 'call-1' };

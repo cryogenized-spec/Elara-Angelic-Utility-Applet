@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { GoogleOAuthAuthority } from '../google/oauth/contracts';
+import type { WriteConfirmationRequest } from '../google/confirmation/policy';
 
 const { streamReply, streamToolResult } = vi.hoisted(() => ({
   streamReply: vi.fn(),
@@ -259,7 +260,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       authorized = true;
       return true;
     });
-    requestGoogleToolConfirmations.mockImplementationOnce(async (requests) => {
+    requestGoogleToolConfirmations.mockImplementationOnce(async (requests: readonly WriteConfirmationRequest[]) => {
       expect(requests[0]?.requestedAt).toBe('2026-09-15T12:06:00.000Z');
       return [true];
     });

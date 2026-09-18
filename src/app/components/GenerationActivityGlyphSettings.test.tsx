@@ -24,10 +24,9 @@ function Harness() {
 }
 
 function changeInputValue(input: HTMLInputElement, value: string): void {
-  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
-  if (!setter) throw new Error('expected native input value setter');
   act(() => {
-    setter.call(input, value);
+    const applied = Reflect.set(HTMLInputElement.prototype, 'value', value, input);
+    if (!applied) throw new Error('expected native input value setter');
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }

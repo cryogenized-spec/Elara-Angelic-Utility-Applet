@@ -229,28 +229,27 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
         continue;
       }
-      const confirmation = confirmationRequestForCall(call, executeOptions.now?.() ?? new Date(), {
-        conversationId: executeOptions.conversationId,
-        messageId: executeOptions.messageId,
-        generationId: executeOptions.generationId,
-      });
-      if (!confirmation) {
+      if (isRegistryReadTool(call.name)) {
         immediateCalls.push(call);
         continue;
       }
 
-      let requiredCapability: GoogleCapabilityKey | null;
-      try {
-        requiredCapability = await googleToolAuthorizationRequirement(call, executeOptions.oauth);
-      } catch {
-        results.push(errorToolResult(call, 'EXECUTION_FAILED'));
-        continue;
-      }
+      let admissionFailed = false;
+      for (;;) {
+        let requiredCapability: GoogleCapabilityKey | null;
+        try {
+          requiredCapability = await googleToolAuthorizationRequirement(call, executeOptions.oauth);
+        } catch {
+          results.push(errorToolResult(call, 'EXECUTION_FAILED'));
+          admissionFailed = true;
+          break;
+        }
+        if (!requiredCapability) break;
 
-      if (requiredCapability) {
         if (executeOptions.confirm || options.headless) {
           results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
-          continue;
+          admissionFailed = true;
+          break;
         }
 
         yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
@@ -266,19 +265,23 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         }
         if (!granted || signal?.aborted || request.isGenerationActive?.() === false) {
           results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
-          continue;
+          admissionFailed = true;
+          break;
         }
+      }
+      if (admissionFailed) continue;
 
-        try {
-          requiredCapability = await googleToolAuthorizationRequirement(call, executeOptions.oauth);
-        } catch {
-          results.push(errorToolResult(call, 'EXECUTION_FAILED'));
-          continue;
-        }
-        if (requiredCapability) {
-          results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
-          continue;
-        }
+      // Timestamp the confirmation only after all prerequisite authorization
+      // completes. A long Google consent flow must not consume the confirmation
+      // freshness window before the user can even see the approval request.
+      const confirmation = confirmationRequestForCall(call, executeOptions.now?.() ?? new Date(), {
+        conversationId: executeOptions.conversationId,
+        messageId: executeOptions.messageId,
+        generationId: executeOptions.generationId,
+      });
+      if (!confirmation) {
+        immediateCalls.push(call);
+        continue;
       }
 
       mutationEntries.push({ call, confirmation });

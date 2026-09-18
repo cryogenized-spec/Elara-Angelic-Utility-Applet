@@ -43,7 +43,8 @@ class FakeCache {
 }
 
 let cache: FakeCache;
-let fetchMock: ReturnType<typeof vi.fn>;
+let fetchMock: ReturnType<typeof vi.fn<typeof fetch>>;
+let cacheOpenMock: ReturnType<typeof vi.fn<() => Promise<FakeCache>>>;
 const addedFaces: FakeFontFace[] = [];
 
 function stylesheet(): string {
@@ -53,15 +54,16 @@ function stylesheet(): string {
 beforeEach(() => {
   cache = new FakeCache();
   addedFaces.length = 0;
-  fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+  fetchMock = vi.fn<typeof fetch>(async (input) => {
     const url = String(input);
     if (url.startsWith('https://fonts.googleapis.com/css2')) return new Response(stylesheet(), { status: 200 });
     if (url === 'https://fonts.gstatic.com/s/notoemoji/test.woff2') return new Response(new Uint8Array([1, 2, 3, 4]), { status: 200 });
     throw new Error(`unexpected fetch ${url}`);
   });
+  cacheOpenMock = vi.fn<() => Promise<FakeCache>>(async () => cache);
   vi.stubGlobal('fetch', fetchMock);
   vi.stubGlobal('FontFace', FakeFontFace);
-  vi.stubGlobal('caches', { open: vi.fn(async () => cache) });
+  vi.stubGlobal('caches', { open: cacheOpenMock });
   Object.defineProperty(document, 'fonts', {
     configurable: true,
     value: {
@@ -85,10 +87,9 @@ describe('Noto Emoji activity font authority', () => {
   });
 
   it('previews through no-store network fetches without touching CacheStorage', async () => {
-    const cacheOpen = (globalThis.caches.open as ReturnType<typeof vi.fn>);
     await expect(previewNotoEmoji(DEFAULT_GENERATION_ACTIVITY_GLYPHS)).resolves.toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(cacheOpen).not.toHaveBeenCalled();
+    expect(cacheOpenMock).not.toHaveBeenCalled();
     expect(addedFaces.at(-1)?.family).toBe('Elara Noto Emoji Preview');
   });
 

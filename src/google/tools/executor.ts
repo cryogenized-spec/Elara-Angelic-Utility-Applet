@@ -6,6 +6,7 @@ import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleOAuthAu
 import { isCapabilityAuthorized } from '../oauth/capability-policy';
 import { classifyGoogleToolFailure, type GoogleToolFailure } from './diagnostics';
 import { validateDriveSheetsToolArguments, driveSheetsToolArgumentSchemas, type DriveSheetsToolName } from './drive-sheets-schemas';
+import { validateGmailToolArguments, gmailToolArgumentSchemas, type GmailToolName } from './gmail-schemas';
 import { validateSemanticToolArguments, semanticToolArgumentSchemas, type SemanticToolName } from './semantic-schemas';
 import { validateGoogleReadToolArguments, googleReadToolArgumentSchemas, type GoogleReadToolName } from './read-schemas';
 import { validateRoleplayWorldToolArguments, roleplayWorldToolArgumentSchemas, type RoleplayWorldToolName } from './roleplay-world-schemas';
@@ -78,6 +79,7 @@ function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Recor
   if (Object.prototype.hasOwnProperty.call(memoryToolArgumentSchemas, tool)) return validateMemoryToolArguments(tool as MemoryToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(youtubeToolArgumentSchemas, tool)) return validateYouTubeToolArguments(tool as YouTubeToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(roleplayWorldToolArgumentSchemas, tool)) return validateRoleplayWorldToolArguments(tool as RoleplayWorldToolName, value) as Readonly<Record<string, unknown>>;
+  if (Object.prototype.hasOwnProperty.call(gmailToolArgumentSchemas, tool)) return validateGmailToolArguments(tool as GmailToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(semanticToolArgumentSchemas, tool)) return validateSemanticToolArguments(tool as SemanticToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(driveSheetsToolArgumentSchemas, tool)) return validateDriveSheetsToolArguments(tool as DriveSheetsToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(googleReadToolArgumentSchemas, tool)) return validateGoogleReadToolArguments(tool as GoogleReadToolName, value) as Readonly<Record<string, unknown>>;
@@ -91,13 +93,40 @@ function isGoogleOAuthCapability(capability: ToolCapability): capability is Goog
 function authorizationNeeded(status: GoogleOAuthStatus, capability: ToolCapability): boolean {
   if (!isGoogleOAuthCapability(capability)) return false;
   const stateNeedsRecovery = status.state === 'disconnected' || status.state === 'needs-consent' || status.state === 'revoked' || status.state === 'reauthorization-required';
-  return !isCapabilityAuthorized(capability, status.grantedCapabilities) || stateNeedsRecovery;
+  return !isCapabilityAuthorized(capability, status.grantedCapabilities) || stateNeedsRecovery || status.sessionReady === false;
+}
+
+function oauthCapabilitiesForDescriptor(descriptor: GoogleToolDescriptor): readonly GoogleCapabilityKey[] {
+  const capability = safeCapability(descriptor.capability);
+  const prerequisites = (descriptor.prerequisiteCapabilities ?? []).map(safeCapability);
+  return [...new Set<ToolCapability>([capability, ...prerequisites])].filter(isGoogleOAuthCapability);
+}
+
+/**
+ * Pure admission probe used by the Gemini loop before it displays a mutation
+ * confirmation. It validates the tool shape and returns the first missing
+ * Google capability without running a handler or confirmation broker.
+ */
+export async function googleToolAuthorizationRequirement(
+  call: GoogleToolCall,
+  oauth: GoogleOAuthAuthority,
+): Promise<GoogleCapabilityKey | null> {
+  const parsed = googleToolCallSchema.safeParse(call);
+  if (!parsed.success) return null;
+  const descriptor = findDescriptor(parsed.data.tool);
+  if (!descriptor) return null;
+  try { validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
+  const required = oauthCapabilitiesForDescriptor(descriptor);
+  if (!required.length) return null;
+  const status = await oauth.getStatus();
+  return required.find((capability) => authorizationNeeded(status, capability)) ?? null;
 }
 function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
 }
 function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<string, unknown>>): string | undefined {
   if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
+  if ((tool === 'gmail.sendMessage' || tool === 'gmail.replyMessage') && typeof args.body === 'string') return args.body;
   if (tool === 'sheets.updateCell' && typeof args.value === 'string') return args.value || '(empty string)';
   return undefined;
 }
@@ -155,19 +184,17 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'chat.createMessage': return `Post a Google Chat message to ${value(args, 'spaceName') ?? 'the selected space'}.`;
     case 'chat.updateMessage': return `Update Google Chat message ${value(args, 'messageName') ?? 'selected message'}.`;
     case 'chat.deleteMessage': return `Delete Google Chat message ${value(args, 'messageName') ?? 'selected message'}.`;
-    case 'gmail.modifyMessage': return `Change labels on Gmail message ${value(args, 'messageId') ?? 'selected message'}.`;
-    case 'gmail.modifyThread': return `Change labels on Gmail thread ${value(args, 'threadId') ?? 'selected thread'}.`;
+    case 'gmail.modifyMessage': return `${value(args, 'action') ?? 'Organize'} Gmail message ${value(args, 'messageId') ?? 'selected message'}${value(args, 'labelId') ? ` using USER label ${value(args, 'labelId')}` : ''}.`;
+    case 'gmail.modifyThread': return `${value(args, 'action') ?? 'Organize'} Gmail thread ${value(args, 'threadId') ?? 'selected thread'}${value(args, 'labelId') ? ` using USER label ${value(args, 'labelId')}` : ''}.`;
     case 'gmail.trashMessage': return `Move Gmail message ${value(args, 'messageId') ?? 'selected message'} to Trash.`;
     case 'gmail.untrashMessage': return `Restore Gmail message ${value(args, 'messageId') ?? 'selected message'} from Trash.`;
     case 'gmail.trashThread': return `Move Gmail thread ${value(args, 'threadId') ?? 'selected thread'} to Trash.`;
     case 'gmail.untrashThread': return `Restore Gmail thread ${value(args, 'threadId') ?? 'selected thread'} from Trash.`;
-    case 'gmail.createLabel': return 'Create a Gmail label from the requested label definition.';
-    case 'gmail.updateLabel': return `Update Gmail label ${value(args, 'labelId') ?? 'selected label'}.`;
-    case 'gmail.deleteLabel': return `Delete Gmail label ${value(args, 'labelId') ?? 'selected label'}.`;
-    case 'gmail.sendMessage': {
-      const to = Array.isArray(args.to) ? args.to.filter((item): item is string => typeof item === 'string').join(', ') : 'recipient';
-      return `Send email to ${to} with subject “${value(args, 'subject') ?? '(no subject)'}”.`;
-    }
+    case 'gmail.createLabel': return `Create Gmail USER label “${value(args, 'name') ?? 'Untitled'}”.`;
+    case 'gmail.updateLabel': return `Rename Gmail USER label ${value(args, 'labelId') ?? 'selected label'} to “${value(args, 'name') ?? 'Untitled'}”.`;
+    case 'gmail.deleteLabel': return `Delete Gmail USER label ${value(args, 'labelId') ?? 'selected label'} permanently and remove that label from messages and threads. The messages themselves are not deleted.`;
+    case 'gmail.sendMessage': { const to = Array.isArray(args.to) ? args.to.filter((item): item is string => typeof item === 'string').join(', ') : 'recipient'; return `Send a new email to ${to} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`; }
+    case 'gmail.replyMessage': return `Reply in Gmail thread ${value(args, 'threadId') ?? 'selected thread'} to ${value(args, 'to') ?? 'recipient'} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`;
     case 'drive.createFile': return `Create the Drive file “${value(args, 'name') ?? 'Untitled'}”.`;
     case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the requested metadata changes.`;
     case 'drive.moveFile': return `Move Drive file ${value(args, 'fileId') ?? 'selected file'} to ${value(args, 'parentId') ?? 'the requested folder'}.`;
@@ -237,10 +264,13 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   const capability = safeCapability(descriptor.capability);
   const isRoleplayTool = validCall.tool.startsWith('roleplay_setting.');
   if (isRoleplayTool && !(await loadRoleplayPreferences()).enabled) return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
-  if (isGoogleOAuthCapability(capability)) {
+  const oauthCapabilities = oauthCapabilitiesForDescriptor(descriptor);
+  if (oauthCapabilities.length) {
     let status: GoogleOAuthStatus;
     try { status = await options.oauth.getStatus(); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) }; }
-    if (authorizationNeeded(status, capability)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: capability };
+    for (const required of oauthCapabilities) {
+      if (authorizationNeeded(status, required)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: required };
+    }
   }
   const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {

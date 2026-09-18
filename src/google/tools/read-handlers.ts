@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { GoogleCalendarService } from '../calendar/service';
 import { GoogleTasksService } from '../tasks/service';
-import { GoogleGmailService } from '../gmail/service';
+import { GoogleGmailSemanticService } from '../gmail/semantic-service';
 import { googleOAuthAuthority } from '../oauth/authority';
 import type { GoogleToolHandlers } from './executor';
 import { googleToolNameSchema, type GoogleToolName } from './contracts';
@@ -9,7 +9,7 @@ import { googleReadToolArgumentSchemas, validateGoogleReadToolArguments } from '
 
 const calendar = new GoogleCalendarService(googleOAuthAuthority);
 const tasks = new GoogleTasksService(googleOAuthAuthority);
-const gmail = new GoogleGmailService(googleOAuthAuthority);
+const gmail = new GoogleGmailSemanticService(googleOAuthAuthority);
 
 const readToolNames = Object.keys(googleReadToolArgumentSchemas).filter((name): name is GoogleToolName => googleToolNameSchema.safeParse(name).success);
 

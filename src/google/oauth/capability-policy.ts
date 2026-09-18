@@ -169,6 +169,7 @@ export function resolveAuthorizingCapability(
 }
 
 export const CAPABILITY_CONSENT_COPY: Readonly<Record<GoogleCapabilityKey, string>> = {
+  'google.account': 'Connect your Google account to establish an authorization session. Workspace data permissions are requested separately when you use those features.',
   'calendar.events.read': 'To continue, Elara needs permission to read your Google Calendar.',
   'calendar.events.write': 'To continue, Elara needs permission to create or edit Google Calendar events.',
   'calendar.list.read': 'To continue, Elara needs permission to see which calendars you subscribe to.',

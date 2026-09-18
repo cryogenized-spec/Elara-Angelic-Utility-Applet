@@ -98,7 +98,55 @@ describe('direct Google OAuth authority', () => {
       grantedCapabilities: [],
       enabledCapabilities: [],
       grantedProviderScopes: [],
+      sessionReady: false,
     });
+  });
+
+  it('connects a Google account with identity-only scopes and a live browser session', async () => {
+    tokenMock.mockResolvedValueOnce(token('account-access-token', EMAIL_SCOPE));
+    const authorized = await googleOAuthAuthority.authorize('google.account');
+
+    expect(tokenMock).toHaveBeenCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: `${EMAIL_SCOPE} ${OPENID_SCOPE}`,
+      prompt: '',
+    });
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.enabledCapabilities).toContain('google.account');
+    expect(status.grantedCapabilities).toContain('google.account');
+    expect(status.grantedProviderScopes).toContain(EMAIL_SCOPE);
+    expect(status.sessionReady).toBe(true);
+    expect(status.account).toEqual({ email: 'test@example.com', displayName: 'Test User' });
+    expect(authorized.capability).toBe('google.account');
+
+    const stored = localStorage.getItem('elara.google.authorization.v2') ?? '';
+    expect(stored).toContain('google.account');
+    expect(stored).not.toContain('account-access-token');
+    expect(stored).not.toContain('gmail.');
+    expect(stored).not.toContain('calendar.');
+  });
+
+  it('refreshes the account session without dropping already-enabled Workspace scopes', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['google.account', 'calendar.events.read'],
+      grantedProviderScopes: [EMAIL_SCOPE, CALENDAR_READ_SCOPE],
+      account: { email: 'test@example.com', displayName: 'Test User' },
+      updatedAt: new Date().toISOString(),
+    }));
+    tokenMock.mockResolvedValueOnce(token('fresh-session-token', `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE}`));
+
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(false);
+    await googleOAuthAuthority.authorize('google.account');
+
+    expect(tokenMock).toHaveBeenCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE} ${OPENID_SCOPE}`,
+      prompt: '',
+    });
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.sessionReady).toBe(true);
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
   });
 
   it('records GIS scopes and persists metadata without persisting the access token', async () => {
@@ -119,6 +167,7 @@ describe('direct Google OAuth authority', () => {
     expect(status.grantedCapabilities).toContain('calendar.events.read');
     expect(status.grantedProviderScopes).toContain(CALENDAR_READ_SCOPE);
     expect(status.account?.email).toBe('test@example.com');
+    expect(status.sessionReady).toBe(true);
     expect(authorized.capability).toBe('calendar.events.read');
   });
 
@@ -183,6 +232,44 @@ describe('direct Google OAuth authority', () => {
     });
 
     expect(response.status).toBe(200);
+    expect(tokenMock).toHaveBeenLastCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
+      prompt: 'none',
+    });
+  });
+
+  it('rechecks caller authority immediately before a post-401 provider retry', async () => {
+    tokenMock
+      .mockResolvedValueOnce(token('access-old', CALENDAR_READ_SCOPE))
+      .mockResolvedValueOnce(token('access-new', CALENDAR_READ_SCOPE));
+    const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
+    let active = true;
+    let apiCalls = 0;
+    const fetchImpl = async (input: RequestInfo | URL): Promise<Response> => {
+      const url = requestUrl(input);
+      if (url.includes('userinfo') || url.includes('openidconnect')) return userinfoResponse();
+      apiCalls += 1;
+      if (apiCalls === 1) {
+        active = false;
+        return new Response('expired', { status: 401 });
+      }
+      return new Response('should-not-run', { status: 200 });
+    };
+    const fetchMock = vi.fn(fetchImpl);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const assertActive = () => {
+      if (!active) throw new DOMException('stale turn', 'AbortError');
+    };
+
+    await expect(authorized.fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'guarded' }) },
+      assertActive,
+    )).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(apiCalls).toBe(1);
     expect(tokenMock).toHaveBeenLastCalledWith({
       clientId: 'test-client.apps.googleusercontent.com',
       scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
@@ -416,6 +503,7 @@ describe('direct Google OAuth authority', () => {
       grantedCapabilities: [],
       enabledCapabilities: [],
       grantedProviderScopes: [],
+      sessionReady: false,
     });
     expect(localStorage.getItem('elara.google.authorization.v2')).toBeNull();
   });

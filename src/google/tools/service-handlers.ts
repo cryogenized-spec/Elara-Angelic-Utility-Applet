@@ -2,19 +2,21 @@ import { GoogleCalendarService, type CalendarSendUpdates } from '../calendar/ser
 import { GoogleChatService } from '../chat/service';
 import { GoogleDocsService } from '../docs/service';
 import { GoogleDriveService } from '../drive/service';
-import { GoogleGmailService } from '../gmail/service';
+import { runGmailSendOnce } from '../gmail/send-replay';
+import { GoogleGmailSemanticService, type GmailTurnGuard } from '../gmail/semantic-service';
 import { googleOAuthAuthority } from '../oauth/authority';
 import { GoogleSheetsService } from '../sheets/service';
 import { runTaskCreateOnce } from '../tasks/create-replay';
 import { GoogleTasksService, type GoogleTaskStatus } from '../tasks/service';
 import type { GoogleToolHandlers } from './executor';
+import type { GmailOrganizeAction } from './gmail-schemas';
 import { googleReadToolHandlers } from './read-handlers';
 
 const calendar = new GoogleCalendarService(googleOAuthAuthority);
 const chat = new GoogleChatService(googleOAuthAuthority);
 const docs = new GoogleDocsService(googleOAuthAuthority);
 const drive = new GoogleDriveService(googleOAuthAuthority);
-const gmail = new GoogleGmailService(googleOAuthAuthority);
+const gmail = new GoogleGmailSemanticService(googleOAuthAuthority);
 const sheets = new GoogleSheetsService(googleOAuthAuthority);
 const tasks = new GoogleTasksService(googleOAuthAuthority);
 
@@ -72,6 +74,17 @@ function taskStatus(args: Record<string, unknown>): GoogleTaskStatus | undefined
   if (value === undefined) return undefined;
   if (value !== 'needsAction' && value !== 'completed') throw new Error('Google Tasks status must be needsAction or completed.');
   return value;
+}
+function gmailAction(args: Record<string, unknown>): GmailOrganizeAction {
+  const value = stringArg(args, 'action')!;
+  if (!['archive', 'moveToInbox', 'markRead', 'markUnread', 'markSpam', 'markNotSpam', 'star', 'unstar', 'applyLabel', 'removeLabel'].includes(value)) throw new Error('Unsupported Gmail organize action.');
+  return value as GmailOrganizeAction;
+}
+function gmailTurnGuard(signal: AbortSignal | undefined, isGenerationActive: (() => boolean) | undefined): GmailTurnGuard {
+  return {
+    ...(signal ? { signal } : {}),
+    ...(isGenerationActive ? { isGenerationActive } : {}),
+  };
 }
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = '';
@@ -225,33 +238,86 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'chat.deleteMessage': async ({ arguments: raw }) => chat.deleteMessage(stringArg(objectArgs(raw), 'messageName')!),
 
-  'gmail.modifyMessage': async ({ arguments: raw }) => {
+  'gmail.modifyMessage': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return gmail.modifyMessage(stringArg(args, 'messageId')!, stringArrayArg(args, 'addLabelIds') ?? [], stringArrayArg(args, 'removeLabelIds') ?? []);
+    return gmail.organizeMessage(
+      stringArg(args, 'messageId')!,
+      gmailAction(args),
+      stringArg(args, 'labelId', false),
+      gmailTurnGuard(signal, isGenerationActive),
+    );
   },
-  'gmail.modifyThread': async ({ arguments: raw }) => {
+  'gmail.modifyThread': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return gmail.modifyThread(stringArg(args, 'threadId')!, stringArrayArg(args, 'addLabelIds') ?? [], stringArrayArg(args, 'removeLabelIds') ?? []);
+    return gmail.organizeThread(
+      stringArg(args, 'threadId')!,
+      gmailAction(args),
+      stringArg(args, 'labelId', false),
+      gmailTurnGuard(signal, isGenerationActive),
+    );
   },
-  'gmail.trashMessage': async ({ arguments: raw }) => gmail.trashMessage(stringArg(objectArgs(raw), 'messageId')!),
-  'gmail.untrashMessage': async ({ arguments: raw }) => gmail.untrashMessage(stringArg(objectArgs(raw), 'messageId')!),
-  'gmail.trashThread': async ({ arguments: raw }) => gmail.trashThread(stringArg(objectArgs(raw), 'threadId')!),
-  'gmail.untrashThread': async ({ arguments: raw }) => gmail.untrashThread(stringArg(objectArgs(raw), 'threadId')!),
-  'gmail.createLabel': async ({ arguments: raw }) => gmail.createLabel(recordArg(objectArgs(raw), 'label')!),
-  'gmail.updateLabel': async ({ arguments: raw }) => {
+  'gmail.trashMessage': async ({ arguments: raw, signal, isGenerationActive }) => gmail.trashMessage(
+    stringArg(objectArgs(raw), 'messageId')!,
+    gmailTurnGuard(signal, isGenerationActive),
+  ),
+  'gmail.untrashMessage': async ({ arguments: raw, signal, isGenerationActive }) => gmail.untrashMessage(
+    stringArg(objectArgs(raw), 'messageId')!,
+    gmailTurnGuard(signal, isGenerationActive),
+  ),
+  'gmail.trashThread': async ({ arguments: raw, signal, isGenerationActive }) => gmail.trashThread(
+    stringArg(objectArgs(raw), 'threadId')!,
+    gmailTurnGuard(signal, isGenerationActive),
+  ),
+  'gmail.untrashThread': async ({ arguments: raw, signal, isGenerationActive }) => gmail.untrashThread(
+    stringArg(objectArgs(raw), 'threadId')!,
+    gmailTurnGuard(signal, isGenerationActive),
+  ),
+  'gmail.createLabel': async ({ arguments: raw, signal, isGenerationActive }) => gmail.createLabel(
+    stringArg(objectArgs(raw), 'name')!,
+    gmailTurnGuard(signal, isGenerationActive),
+  ),
+  'gmail.updateLabel': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return gmail.updateLabel(stringArg(args, 'labelId')!, recordArg(args, 'label')!);
+    return gmail.updateLabel(
+      stringArg(args, 'labelId')!,
+      stringArg(args, 'name')!,
+      gmailTurnGuard(signal, isGenerationActive),
+    );
   },
-  'gmail.deleteLabel': async ({ arguments: raw }) => gmail.deleteLabel(stringArg(objectArgs(raw), 'labelId')!),
-  'gmail.sendMessage': async ({ arguments: raw }) => {
+  'gmail.deleteLabel': async ({ arguments: raw, signal, isGenerationActive }) => gmail.deleteLabel(
+    stringArg(objectArgs(raw), 'labelId')!,
+    gmailTurnGuard(signal, isGenerationActive),
+  ),
+  'gmail.sendMessage': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return gmail.sendComposedMessage({
+    const payload = {
       to: stringArrayArg(args, 'to') ?? [],
       cc: stringArrayArg(args, 'cc'),
       subject: stringArg(args, 'subject')!,
       body: stringArg(args, 'body')!,
-      threadId: stringArg(args, 'threadId', false),
-    });
+    };
+    const guard = gmailTurnGuard(signal, isGenerationActive);
+    return runGmailSendOnce(
+      { tool: 'gmail.sendMessage', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
+      payload,
+      () => gmail.sendMessage(payload, guard),
+    );
+  },
+  'gmail.replyMessage': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
+    const args = objectArgs(raw);
+    const payload = {
+      threadId: stringArg(args, 'threadId')!,
+      to: stringArg(args, 'to')!,
+      subject: stringArg(args, 'subject')!,
+      body: stringArg(args, 'body')!,
+      inReplyTo: stringArg(args, 'inReplyTo')!,
+    };
+    const guard = gmailTurnGuard(signal, isGenerationActive);
+    return runGmailSendOnce(
+      { tool: 'gmail.replyMessage', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
+      payload,
+      () => gmail.replyMessage(payload, guard),
+    );
   },
 
   'drive.searchFiles': async ({ arguments: raw }) => {

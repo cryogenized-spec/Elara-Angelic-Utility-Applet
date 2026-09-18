@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const googleCapabilityKeySchema = z.enum([
+  'google.account',
   'calendar.events.read',
   'calendar.events.write',
   'calendar.list.read',
@@ -28,7 +29,12 @@ export type GoogleCapabilityKey = z.infer<typeof googleCapabilityKeySchema>;
 
 export interface AuthorizedGoogleRequest {
   readonly capability: GoogleCapabilityKey;
-  readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * Optional guard runs immediately before each real provider fetch, including
+   * a retry after token refresh. It must throw when the caller has lost the
+   * authority to perform the request.
+   */
+  readonly fetch: (input: RequestInfo | URL, init?: RequestInit, beforeProviderFetch?: () => void) => Promise<Response>;
 }
 
 /**
@@ -55,6 +61,8 @@ export interface GoogleOAuthStatus {
   readonly enabledCapabilities: readonly GoogleCapabilityKey[];
   /** Provider scopes actually returned by Google (GIS `scope` or durable code exchange equivalent). */
   readonly grantedProviderScopes: readonly string[];
+  /** True only while a usable short-lived Google access token is live in browser memory. */
+  readonly sessionReady?: boolean;
   readonly account?: {
     readonly email: string;
     readonly displayName?: string;

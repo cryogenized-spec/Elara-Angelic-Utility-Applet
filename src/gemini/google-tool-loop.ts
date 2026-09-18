@@ -1,6 +1,6 @@
 import type { GeminiToolContinuationRequest, GeminiToolResult, GeminiTurnRequest, GeminiStreamEvent } from './contracts';
 import { geminiTurnPort } from './provider';
-import { executeGoogleTool, confirmationRequestForCall, type GoogleToolHandlers, type GoogleToolExecutorOptions } from '../google/tools/executor';
+import { executeGoogleTool, confirmationRequestForCall, googleToolAuthorizationRequirement, type GoogleToolHandlers, type GoogleToolExecutorOptions } from '../google/tools/executor';
 import type { GoogleToolCall, GoogleToolName } from '../google/tools/contracts';
 import { googleToolRegistry } from '../google/tools/registry';
 import { googleServiceToolHandlers } from '../google/tools/service-handlers';
@@ -206,7 +206,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const allowedCalls = pendingCalls.slice(0, allowedCount);
     for (const call of pendingCalls.slice(allowedCalls.length)) results.push(errorToolResult(call, 'Google tool-call limit exceeded for this turn.'));
 
-    const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
+    const admittedMutationCalls: PendingToolCall[] = [];
     const immediateCalls: PendingToolCall[] = [];
     for (const call of allowedCalls) {
       if (!(tools as readonly string[]).includes(call.name)) {
@@ -229,7 +229,58 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
         continue;
       }
-      const confirmation = confirmationRequestForCall(call, executeOptions.now?.() ?? new Date(), {
+      if (isRegistryReadTool(call.name)) {
+        immediateCalls.push(call);
+        continue;
+      }
+
+      let admissionFailed = false;
+      for (;;) {
+        let requiredCapability: GoogleCapabilityKey | null;
+        try {
+          requiredCapability = await googleToolAuthorizationRequirement(call, executeOptions.oauth);
+        } catch {
+          results.push(errorToolResult(call, 'EXECUTION_FAILED'));
+          admissionFailed = true;
+          break;
+        }
+        if (!requiredCapability) break;
+
+        if (executeOptions.confirm || options.headless) {
+          results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
+          admissionFailed = true;
+          break;
+        }
+
+        yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
+        const pendingGrant = requestGoogleCapabilityGrant(requiredCapability, signal);
+        let granted: boolean;
+        for (;;) {
+          const outcome = await Promise.race([
+            pendingGrant.then((value) => ({ settled: true as const, value })),
+            delay(TOOL_CONFIRMATION_HEARTBEAT_MS).then(() => ({ settled: false as const })),
+          ]);
+          if (outcome.settled) { granted = outcome.value; break; }
+          yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
+        }
+        if (!granted || signal?.aborted || request.isGenerationActive?.() === false) {
+          results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
+          admissionFailed = true;
+          break;
+        }
+      }
+      if (admissionFailed) continue;
+
+      admittedMutationCalls.push(call);
+    }
+
+    // Admission for the entire mutation batch finishes before any confirmation
+    // timestamp is minted. A later OAuth consent flow must not age an earlier
+    // confirmation before the user has even seen the grouped approval UI.
+    const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
+    const confirmationNow = executeOptions.now?.() ?? new Date();
+    for (const call of admittedMutationCalls) {
+      const confirmation = confirmationRequestForCall(call, confirmationNow, {
         conversationId: executeOptions.conversationId,
         messageId: executeOptions.messageId,
         generationId: executeOptions.generationId,
@@ -322,31 +373,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(entry.call, 'USER_DECLINED'));
         continue;
       }
-      let result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+      const result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
         return;
-      }
-      if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
-        yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
-        const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
-        // Assigned on the only loop exit (break) before any read.
-        let granted: boolean;
-        for (;;) {
-          const outcome = await Promise.race([
-            pendingGrant.then((value) => ({ settled: true as const, value })),
-            delay(TOOL_CONFIRMATION_HEARTBEAT_MS).then(() => ({ settled: false as const })),
-          ]);
-          if (outcome.settled) { granted = outcome.value; break; }
-          yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
-        }
-        if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) {
-          if (!isConfirmationFresh(entry.confirmation.requestedAt, executeOptions.now?.() ?? new Date())) {
-            results.push(errorToolResult(entry.call, 'USER_DECLINED'));
-            continue;
-          }
-          result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
-        }
       }
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };

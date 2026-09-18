@@ -70,6 +70,13 @@ describe('Google capability policy', () => {
     expect(effective).not.toContain('drive.files.app.write');
   });
 
+  it('treats account identity as explicit local authority rather than a raw provider grant', () => {
+    const scope = getGoogleScope('google.account').scope;
+    expect(computeEffectiveCapabilities([], [scope])).toEqual([]);
+    expect(computeEffectiveCapabilities(['google.account'], [scope])).toEqual(['google.account']);
+    expect(authorizationStateFor(['google.account'], ['google.account'], false)).toBe('partially-authorized');
+  });
+
   it('does not treat a Google drive.file grant as Elara authority by itself', () => {
     expect(computeEffectiveCapabilities([], [DRIVE_APP_FILE_SCOPE])).toEqual([]);
   });
@@ -121,7 +128,7 @@ describe('effective-capability invariants', () => {
     { enabled: ['docs.write', 'gmail.modify'], scopes: [] },
     { enabled: ['docs.read', 'gmail.read', 'calendar.events.read'], scopes: [] },
     // Raw provider grants with no enabled capability must manufacture nothing.
-    { enabled: [], scopes: [DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE, scopeOf('calendar.events.write'), scopeOf('calendar.events.read'), scopeOf('gmail.modify'), scopeOf('gmail.read'), scopeOf('tasks.write'), scopeOf('tasks.read')] },
+    { enabled: [], scopes: [scopeOf('google.account'), DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE, scopeOf('calendar.events.write'), scopeOf('calendar.events.read'), scopeOf('gmail.modify'), scopeOf('gmail.read'), scopeOf('tasks.write'), scopeOf('tasks.read')] },
   ];
 
   it('never reports a provider-backed capability effective that the current scope set cannot satisfy', () => {
@@ -222,6 +229,7 @@ describe('the `connected` definition is pinned to v1 core', () => {
 
   it('names the capabilities that must never move `connected`', () => {
     const neverMovesConnected: readonly GoogleCapabilityKey[] = [
+      'google.account',
       'chat.read',
       'chat.write',
       'calendar.list.read',

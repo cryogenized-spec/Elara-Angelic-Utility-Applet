@@ -244,13 +244,6 @@ export const semanticToolArgumentSchemas = {
   'tasks.clearCompleted': z.object({
     taskListId: idSchema,
   }).strict(),
-  'gmail.sendMessage': z.object({
-    to: z.array(emailSchema).min(1).max(25),
-    cc: z.array(emailSchema).max(25).optional(),
-    subject: z.string().trim().min(1).max(500),
-    body: z.string().min(1).max(200_000),
-    threadId: idSchema.optional(),
-  }).strict(),
   'docs.inspectDocument': z.object({ documentId: idSchema }).strict(),
   'docs.insertText': z.object({
     documentId: idSchema,

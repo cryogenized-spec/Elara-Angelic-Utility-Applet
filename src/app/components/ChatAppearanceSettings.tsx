@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react';
-import { MEDIA_PLAYER_SURFACE_PRESETS, type ChatAppearancePreferences, type MediaPlayerSurfacePreset } from '../../domain/preferences';
+import { MEDIA_PLAYER_SURFACE_PRESETS, type ChatAppearancePreferences, type GenerationActivityGlyphs, type MediaPlayerSurfacePreset } from '../../domain/preferences';
 import { HexColourField } from './HexColourField';
+import { GenerationActivityGlyphSettings } from './GenerationActivityGlyphSettings';
 import './chat-appearance-settings.css';
 
 const GRADIENTS = [
@@ -61,7 +62,7 @@ async function prepareBackgroundImage(file: File): Promise<string> {
   throw new Error('That image is too large to store safely. Please choose a smaller image.');
 }
 
-export function ChatAppearanceSettings({ value, onChange }: { value: ChatAppearancePreferences; onChange: (value: ChatAppearancePreferences) => void }) {
+export function ChatAppearanceSettings({ value, onChange, activityGlyphs, onActivityGlyphsChange }: { value: ChatAppearancePreferences; onChange: (value: ChatAppearancePreferences) => void; activityGlyphs: GenerationActivityGlyphs; onActivityGlyphsChange: (value: GenerationActivityGlyphs) => void }) {
   const backgroundInput = useRef<HTMLInputElement>(null);
   const [backgroundError, setBackgroundError] = useState<string | null>(null);
   const [backgroundBusy, setBackgroundBusy] = useState(false);
@@ -116,6 +117,7 @@ export function ChatAppearanceSettings({ value, onChange }: { value: ChatAppeara
     <div className="setting-card appearance-card">
       <strong>Generation activity</strong><span>Accent colour for Thinking, tools, timing and reasoning summaries.</span>
       <HexColourField label="Activity accent" colourAriaLabel="Generation activity accent colour" hexAriaLabel="Generation activity accent hex" value={value.generationActivityAccent} fallback="#6EA8FF" onCommit={(generationActivityAccent) => patch({ generationActivityAccent })} />
+      <GenerationActivityGlyphSettings value={activityGlyphs} onChange={onActivityGlyphsChange} />
     </div>
     <div className="setting-card appearance-card">
       <strong>Media player</strong><span>Styles only Elara's shell around the official YouTube player. Native YouTube controls and the iframe remain untouched.</span>

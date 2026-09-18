@@ -1,6 +1,7 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage } from '../../domain/chat';
 import type { GenerationState } from '../../chat/generation-state';
+import type { GenerationActivityGlyphs } from '../../domain/preferences';
 import { deleteMessage } from '../../persistence/conversation';
 import { GenerationActivity } from './GenerationTrace';
 import { Icon } from '../../ui/icons';
@@ -23,7 +24,7 @@ function responseGroupFor(message: ChatMessage): string {
  * message body is parsed by `react-markdown`), so it must not re-render when
  * unrelated shell state — the composer draft above all — changes.
  */
-export const ConversationSurface = memo(function ConversationSurface({ messages, generation, onRegenerate }: { messages: ChatMessage[]; generation: GenerationState | null; onRegenerate: (messageId: string) => void }) {
+export const ConversationSurface = memo(function ConversationSurface({ messages, generation, onRegenerate, activityGlyphs }: { messages: ChatMessage[]; generation: GenerationState | null; onRegenerate: (messageId: string) => void; activityGlyphs?: GenerationActivityGlyphs }) {
   const conversationRef = useRef<HTMLElement>(null);
   const conversationStreamRef = useRef<HTMLDivElement>(null);
   const activityAnchorRef = useRef<HTMLDivElement>(null);
@@ -310,7 +311,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         const anchorsCurrentGeneration = Boolean(generation?.generationId && selected.generationActivity?.id === generation.generationId);
         return <article className="message message-assistant" key={groupId}>
           <header className="message-meta"><span>ELARA</span><time dateTime={new Date(selected.createdAt).toISOString()}>{new Date(selected.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>
-          {selected.generationActivity && <div ref={anchorsCurrentGeneration ? activityAnchorRef : undefined}><GenerationActivity record={selected.generationActivity} thoughtSummary={selected.providerTurn?.usage?.thoughtSummary} /></div>}
+          {selected.generationActivity && <div ref={anchorsCurrentGeneration ? activityAnchorRef : undefined}><GenerationActivity record={selected.generationActivity} thoughtSummary={selected.providerTurn?.usage?.thoughtSummary} glyphs={activityGlyphs} /></div>}
           {variants.length > 1 && <div className="response-variants" aria-label="Generated response variants">
             <button type="button" className="response-variants__button" aria-label="Previous response" disabled={selectedIndex === 0} onClick={() => setSelectedVariants((current) => ({ ...current, [groupId]: Math.max(0, selectedIndex - 1) }))}>‹</button>
             <span className="response-variants__pagination" aria-live="polite">{selectedIndex + 1}/{variants.length}</span>
@@ -326,7 +327,7 @@ export const ConversationSurface = memo(function ConversationSurface({ messages,
         </article>;
       })}
 
-      {hasLivePanel && generation && <div ref={activityAnchorRef}><GenerationActivity key={generation.generationId} generation={generation} /></div>}
+      {hasLivePanel && generation && <div ref={activityAnchorRef}><GenerationActivity key={generation.generationId} generation={generation} glyphs={activityGlyphs} /></div>}
 
       {activeAssistant && hasRenderableMessageContent(activeAssistant) && <article className="message message-assistant message-assistant--streaming" key={activeAssistant.id}>
         <header className="message-meta"><span>ELARA</span><time dateTime={new Date(activeAssistant.createdAt).toISOString()}>{new Date(activeAssistant.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time></header>

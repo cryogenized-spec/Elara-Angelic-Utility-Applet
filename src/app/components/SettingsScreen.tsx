@@ -19,7 +19,7 @@ import { AutonomySettings } from './AutonomySettings';
 import { PlaybackPreferenceSettings } from './media/PlaybackPreferenceSettings';
 import { YouTubePolicyConsent } from './media/YouTubePolicyConsent';
 import type { CharacterProfile } from '../../domain/character';
-import type { ChatAppearancePreferences, RoleplayPreferences } from '../../domain/preferences';
+import type { ChatAppearancePreferences, GenerationActivityGlyphs, RoleplayPreferences } from '../../domain/preferences';
 import './model-settings.css';
 import './character-settings.css';
 import './roleplay-settings.css';
@@ -121,10 +121,11 @@ export function SettingsScreen({
   enterToSend: boolean;
   onEnterToSendChange: (value: boolean) => void;
   initialSection?: SettingsSection;
-  onBack: () => void;
+  onBack: (activityGlyphs: GenerationActivityGlyphs) => void;
 }) {
   const [section, setSection] = useState<SettingsSection>(initialSection ?? 'appearance');
   const [customUrl, setCustomUrl] = useState('');
+  const [activityGlyphDraft, setActivityGlyphDraft] = useState<GenerationActivityGlyphs>(() => chatAppearance.generationActivityGlyphs);
   const [customError, setCustomError] = useState<string | null>(null);
   const model = getGeminiModel(selectedModel);
   const applyPortraitScale = onPortraitScaleChange as (scale: PortraitScale) => void;
@@ -148,7 +149,7 @@ export function SettingsScreen({
   return (
     <main className="settings-screen" style={{ fontFamily: fontFamilyForCss(font), '--body-font-size': '15px' } as React.CSSProperties}>
       <header className="settings-header">
-        <button className="icon-button" type="button" aria-label="Back to chat" onClick={onBack}><Icon name="chevron" /></button>
+        <button className="icon-button" type="button" aria-label="Back to chat" onClick={() => onBack(activityGlyphDraft)}><Icon name="chevron" /></button>
         <div><div className="eyebrow">{character.name}</div><h1>Settings</h1></div>
       </header>
       <div className="settings-layout">
@@ -156,7 +157,7 @@ export function SettingsScreen({
           {settingsSections.map((item) => <button className={`settings-nav__item${section === item.id ? ' is-active' : ''}`} key={item.id} type="button" onClick={() => setSection(item.id)}><Icon name={item.icon} size={18} /><span>{item.label}</span></button>)}
         </nav>
         <section className="settings-panel" aria-live="polite">
-          {section === 'appearance' && <div className="settings-copy"><span className="panel-kicker">PRESENCE</span><h2>Appearance</h2><p>Character presentation and the independent Android chat backdrop live here.</p><RangeSlider id="portrait-scale" label="Character presentation scale" min={1} max={3} step={0.5} value={portraitScale} valueLabel={`${portraitScale}×`} minLabel="1×" maxLabel="3×" onChange={(value) => applyPortraitScale(Math.min(3, Math.max(1, value)) as PortraitScale)} /><div className="background-picker"><div className="background-picker__header"><strong>Character banner ambience</strong><span>Presentation layer only.</span></div><div className="background-options" role="radiogroup" aria-label="Character banner background">{portraitBackgrounds.map((option) => { const active = portraitBackground === option.id; return <button key={option.id} type="button" role="radio" aria-checked={active} className={`background-option background-option--${option.id}${active ? ' is-active' : ''}`} onClick={() => onPortraitBackgroundChange(option.id)}><span>{option.label}</span><small>{option.description}</small></button>; })}</div></div><ChatAppearanceSettings value={chatAppearance} onChange={onChatAppearanceChange} /></div>}
+          {section === 'appearance' && <div className="settings-copy"><span className="panel-kicker">PRESENCE</span><h2>Appearance</h2><p>Character presentation and the independent Android chat backdrop live here.</p><RangeSlider id="portrait-scale" label="Character presentation scale" min={1} max={3} step={0.5} value={portraitScale} valueLabel={`${portraitScale}×`} minLabel="1×" maxLabel="3×" onChange={(value) => applyPortraitScale(Math.min(3, Math.max(1, value)) as PortraitScale)} /><div className="background-picker"><div className="background-picker__header"><strong>Character banner ambience</strong><span>Presentation layer only.</span></div><div className="background-options" role="radiogroup" aria-label="Character banner background">{portraitBackgrounds.map((option) => { const active = portraitBackground === option.id; return <button key={option.id} type="button" role="radio" aria-checked={active} className={`background-option background-option--${option.id}${active ? ' is-active' : ''}`} onClick={() => onPortraitBackgroundChange(option.id)}><span>{option.label}</span><small>{option.description}</small></button>; })}</div></div><ChatAppearanceSettings value={chatAppearance} onChange={onChatAppearanceChange} activityGlyphs={activityGlyphDraft} onActivityGlyphsChange={setActivityGlyphDraft} /></div>}
           {section === 'character' && <div className="settings-copy"><span className="panel-kicker">IDENTITY</span><h2>Character</h2><p>Define the AI identity and soft-coded master behaviour. Tool schemas and application capabilities remain hard-coded and separate.</p><CharacterSettings profile={character} onChange={onCharacterChange} /></div>}
           {section === 'memory' && <div className="settings-copy"><span className="panel-kicker">DURABLE CONTEXT</span><h2>Memory Bank</h2><p>Inspect, search, edit, archive, promote, restore, or permanently delete durable memory. This is a projection over the same canonical store used by Gemini retrieval.</p><DurableMemorySettings /></div>}
           {section === 'typography' && <div className="settings-copy"><span className="panel-kicker">TYPE</span><h2>Typography</h2><p>Choose the global font used throughout the app, then tune the text size specifically for the conversation.</p><div className="typography-preview" style={{ fontFamily: fontFamilyForCss(font), fontSize: `${chatTextSize}px` }}><span className="typography-preview__label">LIVE PREVIEW</span><p>The quick brown fox jumps over the lazy dog.</p><p>0123456789 · Aa Bb Cc · crisp, readable, and ready for chat.</p></div><div className="font-options" role="radiogroup" aria-label="Font family">{BUILT_IN_FONTS.map((option) => { const active = font.kind === 'built-in' && font.family === option.family; return <button key={option.family} className={`font-option${active ? ' is-active' : ''}`} type="button" role="radio" aria-checked={active} onClick={() => onFontChange({ kind: 'built-in', family: option.family })} style={{ fontFamily: fontFamilyForCss(option.family) }}><span>{option.family}</span><small>The quick brown fox jumps over the lazy dog.</small></button>; })}{font.kind === 'custom' && <button className="font-option is-active" type="button" role="radio" aria-checked="true" style={{ fontFamily: fontFamilyForCss(font) }}><span>{font.family}</span><small>Custom Google font · loaded from your CSS2 link.</small></button>}</div><div className="custom-font-card"><div><strong>Add a Google font</strong><span>Paste the CSS2 stylesheet URL generated by Google Fonts.</span></div><input className="custom-font-input" value={customUrl} onChange={(event) => { setCustomUrl(event.target.value); setCustomError(null); }} placeholder="https://fonts.googleapis.com/css2?family=..." inputMode="url" aria-label="Google Fonts CSS2 URL" /><button className="custom-font-button" type="button" onClick={applyCustomFont}>Load font</button>{customError && <small className="custom-font-error" role="alert">{customError}</small>}</div><RangeSlider id="chat-text-size" label="Chat text size" min={10} max={24} value={chatTextSize} valueLabel={`${chatTextSize}px`} minLabel="10px" maxLabel="24px" onChange={onChatTextSizeChange} /></div>}

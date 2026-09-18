@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import { BUILT_IN_FONTS, googleFontFamilyFromCss2Url, type FontSelection } from '../ui/fontRegistry';
 import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_AUTONOMY, DEFAULT_ROLEPLAY, MEDIA_PLAYER_SURFACE_PRESETS, type AppUiPreferences, type AutonomyPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
 import { DEFAULT_MEDIA_PLAYBACK_PREFERENCE, normalizeMediaPlaybackPreference, type MediaPlaybackPreference } from '../domain/playback';
+import { normalizeGenerationActivityGlyphs } from '../ui/activity-glyphs';
 
 export const YOUTUBE_POLICY_CONSENT_VERSION = 1 as const;
 export interface YouTubePolicyConsent {
@@ -85,6 +86,7 @@ export function normalizeChatAppearance(value: Partial<ChatAppearancePreferences
     userSurfaceOpacity: clamp(merged.userSurfaceOpacity, 0.2, 1, DEFAULT_CHAT_APPEARANCE.userSurfaceOpacity),
     userSurfaceStyle: merged.userSurfaceStyle === 'solid' || merged.userSurfaceStyle === 'gradient' ? merged.userSurfaceStyle : 'frosted',
     generationActivityAccent: safeHex(merged.generationActivityAccent, DEFAULT_CHAT_APPEARANCE.generationActivityAccent),
+    generationActivityGlyphs: normalizeGenerationActivityGlyphs(merged.generationActivityGlyphs),
     mediaPlayerSurfacePreset,
   };
 }

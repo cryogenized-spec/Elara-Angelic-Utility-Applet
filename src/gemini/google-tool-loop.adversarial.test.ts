@@ -62,7 +62,11 @@ function arrangeWriteTurn() {
   ));
 }
 
-async function consumeWriteTurn(now: () => Date, writeHandler = vi.fn(async () => ({ id: 'task-1' }))) {
+async function consumeWriteTurn(
+  now: () => Date,
+  writeHandler = vi.fn(async () => ({ id: 'task-1' })),
+  oauthAuthority = oauth,
+) {
   for await (const _event of streamGoogleToolLoop(
     {
       model: 'gemini-3.8-flash',
@@ -72,7 +76,7 @@ async function consumeWriteTurn(now: () => Date, writeHandler = vi.fn(async () =
     {
       tools: ['tasks.createTask'],
       readOnly: false,
-      executor: { oauth, handlers: { 'tasks.createTask': writeHandler }, now },
+      executor: { oauth: oauthAuthority, handlers: { 'tasks.createTask': writeHandler }, now },
     },
   )) {
     // consume
@@ -140,6 +144,43 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
       results: [expect.objectContaining({ callId: 'call-memory', result: { ok: false, error: 'TOOL_NOT_PERMITTED' } })],
     }), undefined);
+  });
+
+  it('grants missing OAuth before collecting mutation confirmation', async () => {
+    const order: string[] = [];
+    let authorized = false;
+    const stagedOauth = {
+      authorize: async (capability: string) => ({ capability: capability as never, fetch: async () => new Response('{}', { status: 200 }) }),
+      getStatus: async () => ({
+        state: 'partially-authorized' as const,
+        grantedCapabilities: authorized ? ['tasks.write' as const] : [],
+        enabledCapabilities: authorized ? ['tasks.write' as const] : [],
+        grantedProviderScopes: [],
+      }),
+      disconnect: async () => undefined,
+    };
+
+    arrangeWriteTurn();
+    requestGoogleCapabilityGrant.mockImplementationOnce(async () => {
+      order.push('grant');
+      authorized = true;
+      return true;
+    });
+    requestGoogleToolConfirmations.mockImplementationOnce(async () => {
+      order.push('confirm');
+      return [true];
+    });
+    executeGoogleTool.mockImplementationOnce(async () => {
+      order.push('execute');
+      return { ok: true, result: { id: 'task-1' } };
+    });
+
+    await consumeWriteTurn(() => new Date('2026-09-15T12:00:00.000Z'), undefined, stagedOauth);
+
+    expect(order).toEqual(['grant', 'confirm', 'execute']);
+    expect(requestGoogleCapabilityGrant).toHaveBeenCalledWith('tasks.write', undefined);
+    expect(requestGoogleToolConfirmations).toHaveBeenCalledOnce();
+    expect(executeGoogleTool).toHaveBeenCalledOnce();
   });
 
   it('does not execute a grouped mutation after the confirmation the user saw has expired', async () => {

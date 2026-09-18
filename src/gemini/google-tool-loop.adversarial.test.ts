@@ -272,6 +272,72 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     expect(executeGoogleTool).toHaveBeenCalledOnce();
   });
 
+  it('timestamps every grouped confirmation after the entire batch finishes OAuth admission', async () => {
+    let now = new Date('2026-09-15T12:00:00.000Z');
+    let calendarAuthorized = false;
+    const stagedOauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
+      getStatus: async () => ({
+        state: calendarAuthorized ? 'connected' : 'partially-authorized',
+        grantedCapabilities: [
+          'tasks.write',
+          ...(calendarAuthorized ? ['calendar.events.write' as const] : []),
+        ],
+        enabledCapabilities: [
+          'tasks.write',
+          ...(calendarAuthorized ? ['calendar.events.write' as const] : []),
+        ],
+        grantedProviderScopes: [],
+      }),
+      disconnect: async () => undefined,
+    };
+
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-batch-auth', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction-batch-auth', index: 0, callId: 'call-task', name: 'tasks.createTask', arguments: { taskListId: 'primary', title: 'Send recap' } },
+      { type: 'tool-call', interactionId: 'interaction-batch-auth', index: 1, callId: 'call-event', name: 'calendar.createEvent', arguments: { calendarId: 'primary', summary: 'Review', start: '2026-09-15T13:00:00Z', end: '2026-09-15T14:00:00Z' } },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction-batch-auth-done', status: 'completed', durationMs: 4 },
+    ));
+    requestGoogleCapabilityGrant.mockImplementationOnce(async () => {
+      now = new Date('2026-09-15T12:06:00.000Z');
+      calendarAuthorized = true;
+      return true;
+    });
+    requestGoogleToolConfirmations.mockImplementationOnce(async (requests: readonly WriteConfirmationRequest[]) => {
+      expect(requests).toHaveLength(2);
+      expect(requests.map((request) => request.requestedAt)).toEqual([
+        '2026-09-15T12:06:00.000Z',
+        '2026-09-15T12:06:00.000Z',
+      ]);
+      return [true, true];
+    });
+    executeGoogleTool.mockResolvedValue({ ok: true, result: { ok: true } });
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Create both.', tools: ['tasks.createTask', 'calendar.createEvent'] },
+      {
+        tools: ['tasks.createTask', 'calendar.createEvent'],
+        readOnly: false,
+        executor: {
+          oauth: stagedOauth,
+          handlers: {
+            'tasks.createTask': async () => ({ ok: true }),
+            'calendar.createEvent': async () => ({ ok: true }),
+          },
+          now: () => now,
+        },
+      },
+    )) {
+      // consume
+    }
+
+    expect(requestGoogleCapabilityGrant).toHaveBeenCalledOnce();
+    expect(requestGoogleToolConfirmations).toHaveBeenCalledOnce();
+    expect(executeGoogleTool).toHaveBeenCalledTimes(2);
+  });
+
   it('does not execute a grouped mutation after the confirmation the user saw has expired', async () => {
     let now = new Date('2026-09-15T12:00:00.000Z');
     arrangeWriteTurn();

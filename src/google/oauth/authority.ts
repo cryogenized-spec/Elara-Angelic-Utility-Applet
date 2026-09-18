@@ -457,7 +457,12 @@ async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = f
   return session.accessToken;
 }
 
-async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+async function authorizedFetch(
+  capability: GoogleCapabilityKey,
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  beforeProviderFetch?: () => void,
+): Promise<Response> {
   const target = assertGoogleApiTarget(input);
   const token = await ensureToken(capability, false);
   const request = new Request(target, init);
@@ -466,9 +471,10 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
     const headers = new Headers(request.headers);
     headers.set('Authorization', `Bearer ${accessToken}`);
     headers.set('Accept', headers.get('Accept') ?? 'application/json');
-    return { method: request.method, headers, body };
+    return { method: request.method, headers, body, signal: request.signal };
   };
 
+  beforeProviderFetch?.();
   let response = await fetch(new Request(target, requestOptions(token)));
   if (response.status !== 401) return response;
 
@@ -482,6 +488,7 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
 
   const refreshedToken = currentAccessToken();
   if (!refreshedToken) throw new Error('Google authorization did not return a refreshed access token.');
+  beforeProviderFetch?.();
   response = await fetch(new Request(target, requestOptions(refreshedToken)));
   if (response.status === 401) {
     markReauthorizationRequired();
@@ -496,7 +503,7 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
     const descriptor = getGoogleScope(parsed);
     if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
     await ensureToken(parsed, true);
-    return { capability: parsed, fetch: (input, init) => authorizedFetch(parsed, input, init) } satisfies AuthorizedGoogleRequest;
+    return { capability: parsed, fetch: (input, init, beforeProviderFetch) => authorizedFetch(parsed, input, init, beforeProviderFetch) } satisfies AuthorizedGoogleRequest;
   },
 
   async getStatus() {

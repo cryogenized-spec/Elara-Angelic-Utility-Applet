@@ -241,7 +241,7 @@ save completed conversation
 -> unlock composer / release generation
 ```
 
-Memory activity uses the dedicated Lucide `BookOpen` icon. Recall is a context row; deliberate `memory.*` calls remain tool rows; successful organic capture adds `Saved to memory`. Failure of optional trace persistence is non-fatal after response/memory durability.
+Memory activity uses the Generation Activity `memory` glyph semantic. Its visible symbol is user-configurable in Appearance and normally renders through monochrome Noto Emoji 300; Lucide remains only the safe font-unavailable fallback. Recall is a context row; deliberate `memory.*` calls remain tool rows; successful organic capture adds `Saved to memory`. Failure of optional trace persistence is non-fatal after response/memory durability.
 
 <a id="memory-bank"></a>
 ### 7.4 Memory Bank

@@ -11,7 +11,7 @@ keywords: [google, oauth, gis, scope, capability, token, account, durable, refre
 
 ## 1. Purpose and boundary
 
-`SYS-GAUTH` owns Google account authorization, capability-to-scope mapping, browser authorization state, short-lived access-token brokerage and the optional durable refresh-token authority in the user's own Worker. Workspace tools request application capabilities; they never receive raw OAuth scopes, refresh tokens or OAuth client secrets.
+`SYS-GAUTH` owns Google account connection, authorization, capability-to-scope mapping, browser authorization state, short-lived access-token brokerage and the optional durable refresh-token authority in the user's own Worker. `google.account` is an identity-only application capability backed by `userinfo.email` plus OIDC; it establishes account/session identity without requesting Calendar, Gmail, Drive, Tasks, Docs, or Sheets data. Workspace tools request their own application capabilities separately; they never receive raw OAuth scopes, refresh tokens or OAuth client secrets.
 
 Elara is self-hosted shareware, not a shared authentication service. Each deployment owns its GitHub Pages origin, Google OAuth project/Web client and optional Cloudflare Worker. `VITE_GOOGLE_CLIENT_ID` is public browser configuration; when durable authorization is enabled, the Worker's `GOOGLE_OAUTH_CLIENT_ID` must identify the same Google Web OAuth client while `GOOGLE_OAUTH_CLIENT_SECRET` and `GOOGLE_OAUTH_VAULT_KEY` remain Worker secrets.
 
@@ -42,7 +42,7 @@ application capability
 
 A configured Worker is authoritative for durable Google authorization. If that Worker is unavailable, Elara surfaces recovery/unavailability; it does not silently downgrade the same installation to browser-only token acquisition. An installation that never pairs a Worker deliberately remains interactive-only.
 
-Authorization remains capability-driven and incremental. A Google provider grant is evidence that an API scope is available; it never silently enables an Elara write/send capability. Local application consent and provider OAuth consent are separate authorities: a paired Worker may report a broader provider scope set from another device, but that does not insert the corresponding capability into this browser's `enabledCapabilities`. A locally-disabled capability still goes through the explicit authorization path before Elara may use it.
+Authorization remains capability-driven and incremental. The Google settings surface starts with a prominent account/session step before exposing Workspace service permissions. This follows Google Identity Services guidance: account connection is user-driven, while non-identity API scopes are requested later in the context of the feature that needs them. A Google provider grant is evidence that an API scope is available; it never silently enables an Elara write/send capability. Local application consent and provider OAuth consent are separate authorities: a paired Worker may report a broader provider scope set from another device, but that does not insert the corresponding capability into this browser's `enabledCapabilities`. A locally-disabled capability still goes through the explicit authorization path before Elara may use it.
 
 ## 3. Source map
 
@@ -68,7 +68,7 @@ Authorization remains capability-driven and incremental. A Google provider grant
 
 The application scope registry maps named Elara capabilities to provider scopes. Calendar/Tasks use dedicated read/write scopes; Gmail capabilities are separated into read/modify/labels/send; Docs/Sheets/app-file Drive operations use `drive.file`; broader Drive library reads remain a distinct optional capability. Google Chat scopes exist but Chat remains deferred from the Workspace model surface.
 
-The browser authorization record remains version 3 under the historical `elara.google.authorization.v2` key. It stores only enabled capabilities, current provider scopes, optional account display metadata, recovery state and timestamps. Browser access tokens remain module-memory-only and are never persisted.
+The browser authorization record remains version 3 under the historical `elara.google.authorization.v2` key. It stores only enabled capabilities, current provider scopes, optional account display metadata, recovery state and timestamps. Browser access tokens remain module-memory-only and are never persisted. `GoogleOAuthStatus.sessionReady` is derived from the live in-memory access-token session and is never persisted as consent evidence.
 
 In durable mode, the refresh token exists only inside the user's Worker Durable Object. It is encrypted with AES-GCM using dedicated `GOOGLE_OAUTH_VAULT_KEY` material before persistence. Refresh tokens are never returned by the Worker, never written to browser localStorage/IndexedDB, never placed in the autonomy database and never exposed to Gemini. The browser receives only a short-lived access token.
 
@@ -80,7 +80,7 @@ The durable vault's `updated_at` field is also the browser-visible grant revisio
 
 The durable vault reuses the self-hosted installation credential for admission. Browser writes are HMAC-signed with timestamp and nonce; the public Worker route verifies them and the Durable Object independently verifies them again while maintaining its own durable nonce replay ledger. Status reads use the installation bearer credential.
 
-GIS popup code flow does not own an arbitrary callback URL. The browser sends `window.location.origin` as the exchange redirect URI, and the vault requires that value to equal the request `Origin`. The user's Google Web OAuth client must therefore authorize the origin of that self-hosted PWA.
+GIS popup code flow does not own an arbitrary callback URL. The browser sends `window.location.origin` as the exchange redirect URI, and the vault requires that value to equal the request `Origin`. The user's Google Web OAuth client must therefore authorize the origin of that self-hosted PWA. Paired installations use Google's recommended popup authorization-code model; unpaired installations retain the interactive GIS token model and therefore require a fresh user-driven session after a browser reload.
 
 Effective authorization remains the intersection of locally enabled Elara capabilities and provider-satisfied scopes. Shared provider scopes may satisfy the provider side of compatible reads, but provider state never creates a locally enabled capability, and writes/sends are never inferred merely because Google granted a technically broader scope.
 
@@ -90,6 +90,9 @@ Effective authorization remains the intersection of locally enabled Elara capabi
 - Every durable deployment uses credentials and infrastructure controlled by that deployment owner.
 - Refresh tokens never cross from the Worker vault into the browser or model/tool surface.
 - Browser access tokens are short-lived and memory-only.
+- First-time `google.account` connection requests identity only; it does not front-load Workspace data scopes.
+- Account-session refresh may re-request only Workspace capabilities already enabled by the user so a fresh token does not silently narrow prior local choices.
+- A known account with no live browser token is not presented as session-ready; the Google screen requires an explicit session refresh before Workspace permission controls unlock.
 - Existing durable refresh credentials are reused only when stable Google subject identity proves account continuity.
 - Provider `invalid_grant` during refresh deletes the unusable durable credential and becomes explicit reauthorization state.
 - Provider scopes never insert a locally disabled Elara capability into `enabledCapabilities`.
@@ -109,7 +112,7 @@ Worker OAuth writes use the existing installation signing protocol plus a dedica
 
 A missing/revoked refresh grant becomes an explicit reauthorization state. When Google's token endpoint returns `invalid_grant`, the provider code is preserved, the stale durable credential is deleted, and the Worker returns `reauthorization_required`. Temporary Worker/network loss may surface `token-recovery`; it does not erase a known local capability record or broaden authority. Disconnect attempts provider revocation and removes the durable local grant; browser-only mode retains its existing best-effort token revocation behavior.
 
-Account-switch ambiguity fails closed. If Google omits a replacement refresh token and stable subject continuity cannot be proven, Elara deletes the local durable credential rather than associating an old refresh token with new account metadata. Cross-device grant replacement also fails closed at the browser-token boundary: a changed Worker grant revision clears the still-unexpired local access token and forces retrieval from the current vault authority before API use. Cross-device provider scope expansion does not broaden the local application's enabled capability set; the user must still take the explicit Elara authorization action for that capability on this installation.
+The Google settings UI separates account/session readiness from stored permission metadata. A reload may preserve account identity and enabled capabilities while `sessionReady` is false; the primary account CTA reacquires a live token before Workspace controls are exposed. Account-switch ambiguity fails closed. If Google omits a replacement refresh token and stable subject continuity cannot be proven, Elara deletes the local durable credential rather than associating an old refresh token with new account metadata. Cross-device grant replacement also fails closed at the browser-token boundary: a changed Worker grant revision clears the still-unexpired local access token and forces retrieval from the current vault authority before API use. Cross-device provider scope expansion does not broaden the local application's enabled capability set; the user must still take the explicit Elara authorization action for that capability on this installation.
 
 Consequential Google mutations still require the separate `SYS-GWS / google-workspace.md` confirmation boundary after OAuth authorization succeeds.
 
@@ -125,7 +128,7 @@ The behavioral mutation verifier currently executes six hostile mutations: remov
 
 Repository security/reliability gates continue to pin the reviewed credential consumers and require durable browser brokerage, signed Worker requests, AES-GCM vaulting, nonce replay protection, the dedicated Durable Object and the isolated Worker composition root.
 
-`e2e/google-oauth-settings.spec.ts` continues to exercise the real browser-only Settings writer by stubbing only Google's external GIS/userinfo boundary. Durable Worker behavior is covered by unit + workerd tests because production credentials must never be required by CI.
+`e2e/google-oauth-settings.spec.ts` exercises the real account-first Settings flow by stubbing only Google's external GIS/userinfo boundary. It pins the prominent account CTA, identity-only first connection, live-session gating, reload-time session refresh, preserved already-enabled scopes, and disconnect cleanup. `src/google/oauth/authority.test.ts` separately pins `google.account` least-privilege scope selection and `sessionReady` semantics. Durable Worker behavior is covered by unit + workerd tests because production credentials must never be required by CI.
 
 ## 8. Current boundary
 

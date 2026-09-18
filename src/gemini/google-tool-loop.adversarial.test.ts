@@ -164,27 +164,23 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     }), undefined);
   });
 
-  it('does not retry a grouped mutation when OAuth approval outlives the original confirmation', async () => {
-    let now = new Date('2026-09-15T12:00:00.000Z');
+  it('never grants missing OAuth after a mutation approval has already been collected', async () => {
+    const now = new Date('2026-09-15T12:00:00.000Z');
     arrangeWriteTurn();
     requestGoogleToolConfirmations.mockResolvedValueOnce([true]);
-    executeGoogleTool
-      .mockResolvedValueOnce({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'tasks.write' })
-      .mockResolvedValueOnce({ ok: true, result: { id: 'task-1' } });
-    requestGoogleCapabilityGrant.mockImplementationOnce(async () => {
-      now = new Date('2026-09-15T12:06:00.000Z');
-      return true;
-    });
+    // Simulate authority disappearing between the loop's pre-admission probe
+    // and executor admission. The loop must not open OAuth and reuse approval.
+    executeGoogleTool.mockResolvedValueOnce({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'tasks.write' });
 
     await consumeWriteTurn(() => now);
 
     expect(requestGoogleToolConfirmations).toHaveBeenCalledOnce();
-    expect(requestGoogleCapabilityGrant).toHaveBeenCalledOnce();
+    expect(requestGoogleCapabilityGrant).not.toHaveBeenCalled();
     expect(executeGoogleTool).toHaveBeenCalledTimes(1);
     expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
       results: [expect.objectContaining({
         callId: 'call-write',
-        result: { ok: false, error: 'USER_DECLINED' },
+        result: { ok: false, error: 'AUTHORIZATION_REQUIRED' },
       })],
     }), undefined);
   });

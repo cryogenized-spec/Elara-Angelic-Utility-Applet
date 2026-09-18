@@ -131,7 +131,7 @@ describe('GoogleGmailSemanticService', () => {
       return json({ id: 'reply-1', threadId: 'thread-1', noise: 'x'.repeat(50_000) });
     }, capabilityCalls));
     const result = await service.replyMessage({ threadId: 'thread-1', to: 'alice@example.com', subject: 'Re: Status', body: 'Thanks', inReplyTo: '<m1@example.com>' });
-    expect(capabilityCalls).toEqual(['gmail.modify']);
+    expect(capabilityCalls).toEqual(['gmail.read', 'gmail.send']);
     expect(result).toEqual({ sent: true, threadId: 'thread-1' });
     expect(JSON.stringify(result)).not.toContain('noise');
     const payload = JSON.parse(requestBody) as { raw: string; threadId: string };

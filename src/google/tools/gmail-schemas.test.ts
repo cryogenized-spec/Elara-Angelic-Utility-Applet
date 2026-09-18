@@ -56,8 +56,16 @@ describe('Gmail semantic mutation schemas', () => {
       subject: 'Original subject',
       body: 'Reply body',
       inReplyTo: '<original@example.com>',
-      references: ['<root@example.com>', '<original@example.com>'],
     })).toMatchObject({ threadId: 'thread-1', to: 'sender@example.com' });
+
+    expect(() => validateGmailToolArguments('gmail.replyMessage', {
+      threadId: 'thread-1',
+      to: 'sender@example.com',
+      subject: 'Original subject',
+      body: 'Reply body',
+      inReplyTo: '<original@example.com>',
+      references: ['<root@example.com>'],
+    })).toThrow();
 
     expect(() => validateGmailToolArguments('gmail.replyMessage', {
       threadId: 'thread-1',

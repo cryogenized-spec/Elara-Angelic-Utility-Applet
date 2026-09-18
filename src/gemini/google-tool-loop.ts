@@ -206,7 +206,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const allowedCalls = pendingCalls.slice(0, allowedCount);
     for (const call of pendingCalls.slice(allowedCalls.length)) results.push(errorToolResult(call, 'Google tool-call limit exceeded for this turn.'));
 
-    const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
+    const admittedMutationCalls: PendingToolCall[] = [];
     const immediateCalls: PendingToolCall[] = [];
     for (const call of allowedCalls) {
       if (!(tools as readonly string[]).includes(call.name)) {
@@ -271,20 +271,22 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       }
       if (admissionFailed) continue;
 
-      // Timestamp the confirmation only after all prerequisite authorization
-      // completes. A long Google consent flow must not consume the confirmation
-      // freshness window before the user can even see the approval request.
-      const confirmation = confirmationRequestForCall(call, executeOptions.now?.() ?? new Date(), {
+      admittedMutationCalls.push(call);
+    }
+
+    // Admission for the entire mutation batch finishes before any confirmation
+    // timestamp is minted. A later OAuth consent flow must not age an earlier
+    // confirmation before the user has even seen the grouped approval UI.
+    const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
+    const confirmationNow = executeOptions.now?.() ?? new Date();
+    for (const call of admittedMutationCalls) {
+      const confirmation = confirmationRequestForCall(call, confirmationNow, {
         conversationId: executeOptions.conversationId,
         messageId: executeOptions.messageId,
         generationId: executeOptions.generationId,
       });
-      if (!confirmation) {
-        immediateCalls.push(call);
-        continue;
-      }
-
-      mutationEntries.push({ call, confirmation });
+      if (confirmation) mutationEntries.push({ call, confirmation });
+      else immediateCalls.push(call);
     }
 
     if (immediateCalls.length > 0) {

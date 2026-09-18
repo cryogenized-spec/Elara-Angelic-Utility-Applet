@@ -182,7 +182,11 @@ function decodeBase64Url(value: unknown): { text?: string; truncated: boolean } 
   }
 }
 function plainTextParts(part: ProviderPart | undefined, sink: string[], state: MimeWalkState, depth = 0): void {
-  if (!part || state.chars >= MAX_BODY_TEXT_CHARS) return;
+  if (!part) return;
+  if (state.chars >= MAX_BODY_TEXT_CHARS) {
+    state.truncated = true;
+    return;
+  }
   if (depth > MAX_MIME_DEPTH || state.parts >= MAX_MIME_PARTS) {
     state.truncated = true;
     return;
@@ -209,11 +213,20 @@ function plainTextParts(part: ProviderPart | undefined, sink: string[], state: M
     }
   }
 
-  if (!Array.isArray(part.parts) || state.chars >= MAX_BODY_TEXT_CHARS) return;
-  for (const child of part.parts.slice(0, 100)) {
+  if (!Array.isArray(part.parts)) return;
+  if (state.chars >= MAX_BODY_TEXT_CHARS) {
+    if (part.parts.length > 0) state.truncated = true;
+    return;
+  }
+  const children = part.parts.slice(0, 100);
+  for (let index = 0; index < children.length; index += 1) {
+    const child = children[index];
     if (child && typeof child === 'object') plainTextParts(child as ProviderPart, sink, state, depth + 1);
     if (state.truncated && (state.parts >= MAX_MIME_PARTS || depth >= MAX_MIME_DEPTH)) break;
-    if (state.chars >= MAX_BODY_TEXT_CHARS) break;
+    if (state.chars >= MAX_BODY_TEXT_CHARS) {
+      if (index + 1 < part.parts.length) state.truncated = true;
+      break;
+    }
   }
   if (part.parts.length > 100) state.truncated = true;
 }

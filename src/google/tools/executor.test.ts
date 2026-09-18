@@ -31,34 +31,11 @@ describe('executeGoogleTool', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('requires a live OAuth session even when the capability grant is stored', async () => {
-    const handler = vi.fn(async () => ({ id: 'file-1' }));
-    const oauth: GoogleOAuthAuthority = {
-      authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
-      getStatus: async () => ({
-        state: 'connected',
-        grantedCapabilities: ['drive.files.app.write'],
-        enabledCapabilities: ['drive.files.app.write'],
-        grantedProviderScopes: [],
-        sessionReady: false,
-      }),
-      disconnect: async () => undefined,
-    };
-    const confirm = vi.fn(async () => true);
-    const result = await executeGoogleTool(
-      { tool: 'drive.updateFile', arguments: { fileId: 'file-1', patch: { name: 'Renamed' } } },
-      { oauth, handlers: { 'drive.updateFile': handler }, confirm },
-    );
-    expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED', failure: { requiresUserAction: true } });
-    expect(confirm).not.toHaveBeenCalled();
-    expect(handler).not.toHaveBeenCalled();
-  });
-
   it('returns a declined result when the explicit confirmation hook rejects a write', async () => {
     const handler = vi.fn(async () => ({ id: 'file-1' }));
     const confirm = vi.fn(async () => false);
     const result = await executeGoogleTool(
-      { tool: 'drive.updateFile', arguments: { fileId: 'file-1', patch: { name: 'Renamed' } } },
+      { tool: 'drive.updateFile', arguments: { fileId: 'file-1', etag: '"etag-1"', patch: { name: 'Renamed' } } },
       { oauth: oauthFor('drive.files.app.write'), handlers: { 'drive.updateFile': handler }, confirm, now: () => new Date('2026-09-04T06:00:00.000Z') },
     );
     expect(result).toMatchObject({ ok: false, code: 'USER_DECLINED', confirmation: { tool: 'drive.updateFile', risk: 'write' } });

@@ -64,7 +64,7 @@ describe('Gmail send replay fence', () => {
   });
 
   it('does not let a stale older turn clear a newer ambiguous-send replay fence', async () => {
-    const activeGeneration = 'generation-2';
+    const activeGeneration: string = 'generation-2';
     const newerContext = {
       ...baseContext,
       generationId: 'generation-2',

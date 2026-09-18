@@ -25,7 +25,7 @@ describe('Gmail Pass 3 tool parity', () => {
       'gmail.modifyMessage', 'gmail.modifyThread', 'gmail.trashMessage', 'gmail.untrashMessage', 'gmail.trashThread', 'gmail.untrashThread',
       'gmail.createLabel', 'gmail.updateLabel', 'gmail.deleteLabel', 'gmail.sendMessage', 'gmail.replyMessage',
     ]));
-    expect(googleToolRegistry.find((entry) => entry.name === 'gmail.replyMessage')).toMatchObject({ risk: 'send', capability: 'gmail.send', exposure: 'gemini' });
+    expect(googleToolRegistry.find((entry) => entry.name === 'gmail.replyMessage')).toMatchObject({ risk: 'send', capability: 'gmail.modify', exposure: 'gemini' });
   });
 
   it('keeps declarations aligned to semantic actions rather than raw provider label arrays/resources', () => {
@@ -42,7 +42,9 @@ describe('Gmail Pass 3 tool parity', () => {
 
     const send = declaration('gmail.sendMessage').parameters;
     expect(send.properties).not.toHaveProperty('threadId');
-    expect(declaration('gmail.replyMessage').parameters.required).toEqual(['threadId', 'to', 'subject', 'body', 'inReplyTo']);
+    const reply = declaration('gmail.replyMessage').parameters;
+    expect(reply.required).toEqual(['threadId', 'to', 'subject', 'body', 'inReplyTo']);
+    expect(reply.properties).not.toHaveProperty('references');
   });
 
   it('rejects raw mutation shapes and malformed reply/send headers before confirmation', () => {

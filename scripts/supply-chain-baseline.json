@@ -55,11 +55,11 @@
   },
   "installScriptIdentities": [
     "@google/genai@2.22.0",
-    "protobufjs@7.6.6",
-    "tesseract.js@7.0.0",
+    "esbuild@0.28.1",
     "fsevents@2.3.2",
     "fsevents@2.3.3",
-    "esbuild@0.28.1",
+    "protobufjs@7.6.6",
+    "tesseract.js@7.0.0",
     "workerd@1.20260815.1",
     "workerd@1.20260903.1"
   ],

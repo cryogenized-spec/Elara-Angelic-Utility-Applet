@@ -166,6 +166,79 @@ describe('GoogleGmailSemanticService', () => {
     await expect(service.sendMessage({ to: ['bob@example.com'], subject: 'Hello\r\nBcc: thief@example.com', body: 'Body' })).rejects.toThrow('subject');
   });
 
+  it('carries turn authority into each Gmail provider-write fetch shape', async () => {
+    const guard = (active: { value: boolean }) => ({ isGenerationActive: () => active.value });
+
+    {
+      const active = { value: true };
+      let providerWrites = 0;
+      const oauth: GoogleOAuthAuthority = {
+        authorize: async (capability) => ({
+          capability,
+          fetch: async (_url, _init, beforeProviderFetch) => {
+            active.value = false;
+            beforeProviderFetch?.();
+            providerWrites += 1;
+            return json({});
+          },
+        }),
+        getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+        disconnect: async () => undefined,
+      };
+      const service = new GoogleGmailSemanticService(oauth);
+      await expect(service.sendMessage(
+        { to: ['bob@example.com'], subject: 'Hello', body: 'Body' },
+        guard(active),
+      )).rejects.toMatchObject({ name: 'AbortError' });
+      expect(providerWrites).toBe(0);
+    }
+
+    {
+      const active = { value: true };
+      let providerWrites = 0;
+      const oauth: GoogleOAuthAuthority = {
+        authorize: async (capability) => ({
+          capability,
+          fetch: async (_url, _init, beforeProviderFetch) => {
+            active.value = false;
+            beforeProviderFetch?.();
+            providerWrites += 1;
+            return json({ id: 'Label_1', name: 'Projects', type: 'USER' });
+          },
+        }),
+        getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+        disconnect: async () => undefined,
+      };
+      const service = new GoogleGmailSemanticService(oauth);
+      await expect(service.createLabel('Projects', guard(active))).rejects.toMatchObject({ name: 'AbortError' });
+      expect(providerWrites).toBe(0);
+    }
+
+    {
+      const active = { value: true };
+      let providerWrites = 0;
+      const oauth: GoogleOAuthAuthority = {
+        authorize: async (capability) => ({
+          capability,
+          fetch: async (_url, init, beforeProviderFetch) => {
+            if (init?.method === 'DELETE') {
+              active.value = false;
+              beforeProviderFetch?.();
+              providerWrites += 1;
+              return new Response(null, { status: 204 });
+            }
+            return json({ id: 'Label_1', name: 'Projects', type: 'USER' });
+          },
+        }),
+        getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+        disconnect: async () => undefined,
+      };
+      const service = new GoogleGmailSemanticService(oauth);
+      await expect(service.deleteLabel('Label_1', guard(active))).rejects.toMatchObject({ name: 'AbortError' });
+      expect(providerWrites).toBe(0);
+    }
+  });
+
   it('verifies the selected Gmail thread before sending a reply and derives References from provider metadata', async () => {
     const capabilityCalls: string[] = [];
     let requestBody = '';

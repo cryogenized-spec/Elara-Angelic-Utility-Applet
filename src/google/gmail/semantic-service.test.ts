@@ -53,6 +53,25 @@ describe('GoogleGmailSemanticService', () => {
     expect(JSON.stringify(result)).not.toContain('<script>');
   });
 
+  it('requires explicit text/plain before base64 decoding provider body data', async () => {
+    const atobSpy = vi.spyOn(globalThis, 'atob');
+    const service = new GoogleGmailSemanticService(authority(async () => json({
+      id: 'm-types',
+      payload: {
+        mimeType: 'multipart/mixed',
+        parts: [
+          { mimeType: 'text/html', body: { data: b64url('<script>html-secret</script>') } },
+          { body: { data: b64url('missing-mime-secret') } },
+        ],
+      },
+    })));
+    const result = await service.getMessage('m-types', 'full');
+    expect(result.bodyText).toBeUndefined();
+    expect(atobSpy).not.toHaveBeenCalled();
+    expect(JSON.stringify(result)).not.toContain('html-secret');
+    expect(JSON.stringify(result)).not.toContain('missing-mime-secret');
+  });
+
   it('excludes text attachments and fails bounded on hostile MIME nesting', async () => {
     let nested: Record<string, unknown> = { mimeType: 'text/plain', body: { data: b64url('too-deep') } };
     for (let index = 0; index < 25; index += 1) nested = { mimeType: 'multipart/mixed', parts: [nested] };
@@ -179,6 +198,36 @@ describe('GoogleGmailSemanticService', () => {
     expect(raw).toContain('In-Reply-To: <m1@example.com>');
     expect(raw).toContain('References: <root@example.com> <m1@example.com>');
     expect(raw).toContain('Subject: Re: Status');
+  });
+
+  it('fails closed if reply turn authority is lost during provider preflight', async () => {
+    let active = true;
+    let sendCalls = 0;
+    const capabilities: string[] = [];
+    const service = new GoogleGmailSemanticService(authority(async (url, init) => {
+      if (String(url).includes('/threads/thread-1')) {
+        active = false;
+        return json({
+          id: 'thread-1',
+          messages: [{
+            id: 'm1',
+            payload: { headers: [
+              { name: 'Subject', value: 'Status' },
+              { name: 'Message-ID', value: '<m1@example.com>' },
+            ] },
+          }],
+        });
+      }
+      if (init?.method === 'POST') sendCalls += 1;
+      return json({});
+    }, capabilities));
+
+    await expect(service.replyMessage(
+      { threadId: 'thread-1', to: 'alice@example.com', subject: 'Re: Status', body: 'Thanks', inReplyTo: '<m1@example.com>' },
+      { isGenerationActive: () => active },
+    )).rejects.toMatchObject({ name: 'AbortError' });
+    expect(capabilities).toEqual(['gmail.read']);
+    expect(sendCalls).toBe(0);
   });
 
   it('rejects mismatched reply identity before messages.send', async () => {

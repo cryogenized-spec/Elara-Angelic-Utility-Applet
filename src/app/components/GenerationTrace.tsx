@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { GenerationActivityRecord, GenerationActivityStep } from '../../domain/chat';
+import { DEFAULT_GENERATION_ACTIVITY_GLYPHS, type GenerationActivityGlyphKey, type GenerationActivityGlyphs } from '../../domain/preferences';
 import {
   isActivePhase,
   stepElapsedMs,
@@ -11,6 +12,7 @@ import {
 } from '../../chat/generation-state';
 import { toolActivityPresentation } from '../../google/tools/contracts';
 import { Icon, type IconName } from '../../ui/icons';
+import { NOTO_EMOJI_FAMILY, getNotoEmojiReady, subscribeNotoEmojiReady } from '../../ui/noto-emoji';
 import { MarkdownText } from './MarkdownText';
 import './generation-activity.css';
 
@@ -26,9 +28,10 @@ const PHASE_LABELS: Record<GenerationPhase, string> = {
 
 type ActivityRow = Omit<GenerationActivityStep, 'state'> & { state: GenerationActivityStep['state'] | 'running' };
 
-type Props =
+type Props = (
   | { generation: GenerationState; record?: never; thoughtSummary?: never }
-  | { generation?: never; record: GenerationActivityRecord; thoughtSummary?: string };
+  | { generation?: never; record: GenerationActivityRecord; thoughtSummary?: string }
+) & { glyphs?: GenerationActivityGlyphs };
 
 export function formatActivityDuration(ms: number): string {
   const value = Math.max(0, ms);
@@ -70,6 +73,60 @@ function rowIcon(row: ActivityRow): IconName {
   if (row.kind === 'generation') return 'bot';
   if (row.kind === 'tool') return toolIcon(row.toolName);
   return 'dots';
+}
+
+function toolGlyphKey(name: string | undefined): GenerationActivityGlyphKey {
+  if (!name) return 'tool';
+  if (name.startsWith('calendar.')) return 'calendar';
+  if (name.startsWith('tasks.')) return 'tasks';
+  if (name.startsWith('gmail.')) return 'gmail';
+  if (name.startsWith('drive.')) return 'drive';
+  if (name.startsWith('docs.') || name.startsWith('document.')) return 'documents';
+  if (name.startsWith('sheets.')) return 'sheets';
+  if (name.startsWith('memory.')) return 'memory';
+  return 'tool';
+}
+
+function rowGlyphKey(row: ActivityRow): GenerationActivityGlyphKey {
+  if (row.contextCategory === 'memory') return 'memory';
+  if (row.kind === 'thinking') return 'reasoning';
+  if (row.kind === 'generation') return 'generation';
+  if (row.kind === 'tool') return toolGlyphKey(row.toolName);
+  return 'tool';
+}
+
+function statusGlyphKey(status: string | undefined): GenerationActivityGlyphKey | undefined {
+  if (status === 'awaiting_authorization') return 'authorization';
+  if (status === 'awaiting_tool_confirmation') return 'confirmation';
+  return undefined;
+}
+
+function statusFallbackIcon(status: string | undefined): IconName {
+  if (status === 'awaiting_authorization') return 'lock-keyhole';
+  if (status === 'awaiting_tool_confirmation') return 'shield';
+  return 'dots';
+}
+
+function ActivityGlyph({
+  glyphKey,
+  glyphs,
+  fallback,
+}: {
+  glyphKey: GenerationActivityGlyphKey;
+  glyphs: GenerationActivityGlyphs;
+  fallback: IconName;
+}) {
+  const ready = useSyncExternalStore(subscribeNotoEmojiReady, getNotoEmojiReady, () => false);
+  if (!ready) return <Icon name={fallback} size={14} />;
+  return (
+    <span
+      className="generation-activity__noto-glyph"
+      data-activity-glyph={glyphKey}
+      style={{ fontFamily: `'${NOTO_EMOJI_FAMILY}'` }}
+    >
+      {glyphs[glyphKey]}
+    </span>
+  );
 }
 
 function toolDescriptor(name: string): string {
@@ -119,6 +176,7 @@ function statusLabel(status: string | undefined): string | undefined {
 }
 
 export function GenerationActivity(props: Props) {
+  const glyphs = props.glyphs ?? DEFAULT_GENERATION_ACTIVITY_GLYPHS;
   const live = props.generation;
   const record = props.record;
   const isLive = live !== undefined;
@@ -147,6 +205,7 @@ export function GenerationActivity(props: Props) {
   const controlLabel = live && live.phase !== 'completed'
     ? `Generation activity details: ${liveLabel}`
     : `Generation activity details: ${headerText}`;
+  const liveStatusGlyph = live ? statusGlyphKey(live.statusMessage) : undefined;
 
   return (
     <section className={`generation-activity${live ? ` is-${live.phase}` : ' is-complete'}`} aria-label="Generation activity">
@@ -159,6 +218,11 @@ export function GenerationActivity(props: Props) {
         onClick={() => setExpanded((current) => !current)}
       >
         <span className="generation-activity__dot" aria-hidden="true" />
+        {liveStatusGlyph && (
+          <span className="generation-activity__header-glyph" aria-hidden="true">
+            <ActivityGlyph glyphKey={liveStatusGlyph} glyphs={glyphs} fallback={statusFallbackIcon(live?.statusMessage)} />
+          </span>
+        )}
         <span className="generation-activity__headline">{headerText}</span>
         <Icon name="chevron" size={14} />
       </button>
@@ -171,7 +235,7 @@ export function GenerationActivity(props: Props) {
                 const duration = formatActivityDuration(row.durationMs);
                 return (
                   <li key={row.id} className={`generation-activity__step is-${row.state}`}>
-                    <span className="generation-activity__step-icon" aria-hidden="true"><Icon name={rowIcon(row)} size={14} /></span>
+                    <span className="generation-activity__step-icon" aria-hidden="true"><ActivityGlyph glyphKey={rowGlyphKey(row)} glyphs={glyphs} fallback={rowIcon(row)} /></span>
                     <span className="generation-activity__step-copy">
                       <span className="generation-activity__step-mainline">
                         <span className="generation-activity__step-primary">{copy.primary}</span>

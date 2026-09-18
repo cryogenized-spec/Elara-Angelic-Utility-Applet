@@ -1,6 +1,7 @@
 import { googleToolRegistry, googleToolsForPlane } from './registry';
 import type { GoogleToolDescriptor, GoogleToolExecutionPlane } from './contracts';
 import { MAX_MEDIA_QUERIES_PER_CALL } from '../../domain/media';
+import { DRIVE_LIMITS } from '../drive/limits';
 
 export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly name: string; readonly description: string; readonly parameters: { readonly type: 'object'; readonly properties: Record<string, unknown>; readonly additionalProperties: boolean; readonly required?: readonly string[]; }; }
 
@@ -98,13 +99,39 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'gmail.sendMessage': { to: { type: 'array', items: { type: 'string', maxLength: 320 }, minItems: 1, maxItems: 25, description: 'Recipient email addresses.' }, cc: { type: 'array', items: { type: 'string', maxLength: 320 }, maxItems: 25, description: 'Optional CC email addresses.' }, subject: { type: 'string', minLength: 1, maxLength: 500, description: 'Email subject. CR/LF header injection is rejected.' }, body: { type: 'string', minLength: 1, maxLength: 200000, description: 'Plain-text email body.' } },
   'gmail.replyMessage': { threadId: stringProperty('Target Gmail thread id from a prior read.'), to: { type: 'string', maxLength: 320, description: 'Reply recipient address.' }, subject: { type: 'string', minLength: 1, maxLength: 500, description: 'Reply subject matching the target thread subject, usually with Re: as appropriate.' }, body: { type: 'string', minLength: 1, maxLength: 200000, description: 'Plain-text reply body.' }, inReplyTo: { type: 'string', minLength: 3, maxLength: 1000, description: 'RFC-style Message-ID of the message being replied to, including angle brackets, from a prior Gmail read. Elara verifies this Message-ID exists in the target thread and derives References from Gmail.' } },
 
-  'drive.searchFiles': { query: stringProperty('Optional Drive query expression.'), pageToken: stringProperty('Optional pagination token.'), pageSize: { type: 'integer', minimum: 1, maximum: 100 } },
-  'drive.searchLibrary': { query: stringProperty('Optional Drive query expression for the broader library.'), pageToken: stringProperty('Optional pagination token.'), pageSize: { type: 'integer', minimum: 1, maximum: 100 } },
+  'drive.searchFiles': {
+    query: { type: 'string', maxLength: DRIVE_LIMITS.maxQueryLength, description: "Optional Drive query expression, for example \"name contains 'quarterly report'\", \"mimeType = 'application/pdf'\", or \"'<folder id>' in parents\" to list one folder's children." },
+    pageToken: stringProperty('Optional pagination token.'),
+    pageSize: { type: 'integer', minimum: 1, maximum: DRIVE_LIMITS.maxPageSize },
+    showTrashed: { type: 'boolean', description: 'Include trashed files. Trashed files are excluded by default.' },
+  },
+  'drive.searchLibrary': {
+    query: { type: 'string', maxLength: DRIVE_LIMITS.maxQueryLength, description: "Optional Drive query expression for the broader library, using the same syntax as drive.searchFiles, for example \"fullText contains 'invoice'\"." },
+    pageToken: stringProperty('Optional pagination token.'),
+    pageSize: { type: 'integer', minimum: 1, maximum: DRIVE_LIMITS.maxPageSize },
+    showTrashed: { type: 'boolean', description: 'Include trashed files. Trashed files are excluded by default.' },
+  },
   'drive.getFile': { fileId: stringProperty('Drive file id.') },
-  'drive.downloadFile': { fileId: stringProperty('Drive file id.') },
+  'drive.downloadFile': {
+    fileId: stringProperty('Drive file id.'),
+    maxBytes: { type: 'integer', minimum: 1, maximum: DRIVE_LIMITS.maxTransferBytes, description: 'Optional transfer ceiling in bytes for this download. Defaults to the 10 MiB application limit, which cannot be exceeded.' },
+  },
   'drive.createFile': { name: stringProperty('New file name.'), mimeType: stringProperty('Optional MIME type.'), parents: arrayProperty('Optional parent folder ids.') },
-  'drive.updateFile': { fileId: stringProperty('Drive file id.'), patch: objectProperty('Explicit Drive metadata fields to update.') },
-  'drive.moveFile': { fileId: stringProperty('Drive file id.'), parentId: stringProperty('Destination parent folder id.'), previousParentId: stringProperty('Optional previous parent folder id to remove.') },
+  'drive.updateFile': {
+    fileId: stringProperty('Drive file id.'),
+    etag: stringProperty('Strong ETag read with drive.getFile or drive.searchFiles. The update only applies while the file still matches it.'),
+    patch: objectProperty('Explicit Drive metadata fields to update.'),
+  },
+  'drive.moveFile': {
+    fileId: stringProperty('Drive file id.'),
+    etag: stringProperty('Strong ETag read with drive.getFile or drive.searchFiles. The move only applies while the file still matches it.'),
+    parentId: stringProperty('Destination parent folder id.'),
+    previousParentId: stringProperty('Optional previous parent folder id to remove. When omitted the file keeps its current parent as well.'),
+  },
+  'drive.trashFile': {
+    fileId: stringProperty('Drive file id.'),
+    etag: stringProperty('Strong ETag read with drive.getFile or drive.searchFiles. The trash only applies while the file still matches it.'),
+  },
   'sheets.getSpreadsheet': { spreadsheetId: stringProperty('Spreadsheet id.') },
   'sheets.readRange': { spreadsheetId: stringProperty('Spreadsheet id.'), range: stringProperty('A1 range to read.') },
   'sheets.writeRange': { spreadsheetId: stringProperty('Spreadsheet id.'), range: stringProperty('A1 range to write.'), values: arrayProperty('Rows of cell values.', { type: 'array' }) },
@@ -171,7 +198,7 @@ const requiredByTool: Record<string, readonly string[]> = {
   'document.create_pdf': ['source'],
   'chat.listMessages': ['spaceName'], 'chat.getMessage': ['messageName'], 'chat.createMessage': ['spaceName', 'message'], 'chat.updateMessage': ['messageName', 'message', 'updateMask'], 'chat.deleteMessage': ['messageName'],
   'gmail.getMessage': ['messageId'], 'gmail.getThread': ['threadId'], 'gmail.getLabel': ['labelId'], 'gmail.modifyMessage': ['messageId', 'action'], 'gmail.modifyThread': ['threadId', 'action'], 'gmail.trashMessage': ['messageId'], 'gmail.untrashMessage': ['messageId'], 'gmail.trashThread': ['threadId'], 'gmail.untrashThread': ['threadId'], 'gmail.createLabel': ['name'], 'gmail.updateLabel': ['labelId', 'name'], 'gmail.deleteLabel': ['labelId'], 'gmail.sendMessage': ['to', 'subject', 'body'], 'gmail.replyMessage': ['threadId', 'to', 'subject', 'body', 'inReplyTo'],
-  'drive.getFile': ['fileId'], 'drive.downloadFile': ['fileId'], 'drive.createFile': ['name'], 'drive.updateFile': ['fileId', 'patch'], 'drive.moveFile': ['fileId', 'parentId'],
+  'drive.getFile': ['fileId'], 'drive.downloadFile': ['fileId'], 'drive.createFile': ['name'], 'drive.updateFile': ['fileId', 'etag', 'patch'], 'drive.moveFile': ['fileId', 'etag', 'parentId'], 'drive.trashFile': ['fileId', 'etag'],
   'sheets.getSpreadsheet': ['spreadsheetId'], 'sheets.readRange': ['spreadsheetId', 'range'], 'sheets.writeRange': ['spreadsheetId', 'range', 'values'], 'sheets.appendRows': ['spreadsheetId', 'range', 'values'], 'sheets.updateCell': ['spreadsheetId', 'range', 'value'], 'sheets.insertRows': ['spreadsheetId', 'sheetId', 'startIndex', 'count'], 'sheets.batchUpdate': ['spreadsheetId', 'requests'],
   'roleplay_setting.create': ['type', 'name'],
   'memory.lookup': ['query'],

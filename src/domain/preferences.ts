@@ -12,6 +12,38 @@ export interface AppUiPreferences {
 export const MEDIA_PLAYER_SURFACE_PRESETS = ['minimal', 'glass', 'cinema'] as const;
 export type MediaPlayerSurfacePreset = (typeof MEDIA_PLAYER_SURFACE_PRESETS)[number];
 
+export const GENERATION_ACTIVITY_GLYPH_KEYS = [
+  'reasoning',
+  'tool',
+  'memory',
+  'authorization',
+  'confirmation',
+  'calendar',
+  'tasks',
+  'gmail',
+  'drive',
+  'documents',
+  'sheets',
+  'generation',
+] as const;
+export type GenerationActivityGlyphKey = (typeof GENERATION_ACTIVITY_GLYPH_KEYS)[number];
+export type GenerationActivityGlyphs = Readonly<Record<GenerationActivityGlyphKey, string>>;
+
+export const DEFAULT_GENERATION_ACTIVITY_GLYPHS: GenerationActivityGlyphs = {
+  reasoning: '🧠',
+  tool: '⚙',
+  memory: '📕',
+  authorization: '🔐',
+  confirmation: '✅',
+  calendar: '📅',
+  tasks: '☑',
+  gmail: '✉',
+  drive: '🗂',
+  documents: '📄',
+  sheets: '📊',
+  generation: '✍',
+};
+
 export interface ChatAppearancePreferences {
   chatBackgroundMode: 'solid' | 'gradient' | 'image';
   chatBackgroundValue: string;
@@ -25,6 +57,7 @@ export interface ChatAppearancePreferences {
   userSurfaceOpacity: number;
   userSurfaceStyle: 'solid' | 'frosted' | 'gradient';
   generationActivityAccent: string;
+  generationActivityGlyphs: GenerationActivityGlyphs;
   mediaPlayerSurfacePreset: MediaPlayerSurfacePreset;
 }
 
@@ -59,6 +92,7 @@ export const DEFAULT_CHAT_APPEARANCE: ChatAppearancePreferences = {
   userSurfaceOpacity: 0.78,
   userSurfaceStyle: 'frosted',
   generationActivityAccent: '#6EA8FF',
+  generationActivityGlyphs: DEFAULT_GENERATION_ACTIVITY_GLYPHS,
   mediaPlayerSurfacePreset: 'glass',
 };
 

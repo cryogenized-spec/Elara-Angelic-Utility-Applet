@@ -90,6 +90,11 @@ export interface GoogleDriveTransferOptions {
   signal?: AbortSignal;
 }
 
+export interface GoogleDriveMutationOptions {
+  signal?: AbortSignal;
+  isGenerationActive?: () => boolean;
+}
+
 function requireText(value: string, field: string, maxLength: number = DRIVE_LIMITS.maxNameLength): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`Google Drive ${field} is required.`);
@@ -231,6 +236,12 @@ function requireCurrent(signal: AbortSignal | undefined, operation: string): voi
   if (signal?.aborted) throw new DOMException(`${operation} was cancelled.`, 'AbortError');
 }
 
+function requireMutationCurrent(options: GoogleDriveMutationOptions, operation: string): void {
+  if (options.signal?.aborted || options.isGenerationActive?.() === false) {
+    throw new DOMException(`${operation} lost turn authority.`, 'AbortError');
+  }
+}
+
 /**
  * Optional free-form Drive parameters are bounded at the service boundary, not
  * only in the model schema, so a direct caller cannot widen the contract the
@@ -353,8 +364,10 @@ export class GoogleDriveService {
     return readBinaryResponse(response, 'Google Drive export', limit, options.signal);
   }
 
-  async createFile(input: GoogleDriveCreateInput): Promise<GoogleDriveFileSummary> {
+  async createFile(input: GoogleDriveCreateInput, options: GoogleDriveMutationOptions = {}): Promise<GoogleDriveFileSummary> {
+    requireMutationCurrent(options, 'Google Drive create');
     const access = await this.oauth.authorize('drive.files.app.write');
+    requireMutationCurrent(options, 'Google Drive create');
     const body: Record<string, unknown> = { name: requireText(input.name, 'file name') };
     if (input.mimeType?.trim()) body.mimeType = requireText(input.mimeType, 'MIME type', DRIVE_LIMITS.maxExportMimeTypeLength);
     if (input.parents?.length) {
@@ -366,7 +379,8 @@ export class GoogleDriveService {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Drive create'));
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
 
@@ -376,9 +390,11 @@ export class GoogleDriveService {
    * deliberately absent from this ordinary-write patch; {@link trashFile} is the
    * one explicit path that moves a file to trash.
    */
-  async updateFile(fileId: string, etag: string, patch: { name?: string; description?: string; starred?: boolean }): Promise<GoogleDriveFileSummary> {
+  async updateFile(fileId: string, etag: string, patch: { name?: string; description?: string; starred?: boolean }, options: GoogleDriveMutationOptions = {}): Promise<GoogleDriveFileSummary> {
     const headers = { 'content-type': 'application/json', ...conditionalHeaders(etag) };
+    requireMutationCurrent(options, 'Google Drive update');
     const access = await this.oauth.authorize('drive.files.app.write');
+    requireMutationCurrent(options, 'Google Drive update');
     const body: Record<string, unknown> = {};
     if (patch.name !== undefined) body.name = requireText(patch.name, 'file name');
     if (patch.description !== undefined) body.description = patch.description.slice(0, DRIVE_LIMITS.maxDescriptionLength);
@@ -389,7 +405,8 @@ export class GoogleDriveService {
       method: 'PATCH',
       headers,
       body: JSON.stringify(body),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Drive update'));
     if (!response.ok) throwMutationFailure(response, 'update');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
@@ -399,14 +416,16 @@ export class GoogleDriveService {
    * files may have several parents: when `previousParentId` is omitted the file
    * stays in its current folder as well as appearing in the destination.
    */
-  async moveFile(fileId: string, etag: string, parentId: string, previousParentId?: string): Promise<GoogleDriveFileSummary> {
+  async moveFile(fileId: string, etag: string, parentId: string, previousParentId?: string, options: GoogleDriveMutationOptions = {}): Promise<GoogleDriveFileSummary> {
     const destination = requireFileId(parentId);
     const previous = previousParentId?.trim() ? requireFileId(previousParentId) : undefined;
     if (previous && previous === destination) {
       throw new Error('Google Drive move cannot remove and add the same parent.');
     }
     const headers = conditionalHeaders(etag);
+    requireMutationCurrent(options, 'Google Drive move');
     const access = await this.oauth.authorize('drive.files.app.write');
+    requireMutationCurrent(options, 'Google Drive move');
     const params = new URLSearchParams({
       addParents: destination,
       fields: DRIVE_FILE_FIELDS,
@@ -416,7 +435,8 @@ export class GoogleDriveService {
     const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?${params.toString()}`, {
       method: 'PATCH',
       headers,
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Drive move'));
     if (!response.ok) throwMutationFailure(response, 'move');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
@@ -426,16 +446,19 @@ export class GoogleDriveService {
    * deletes a Drive file: trash is the model-visible end state, and the provider
    * keeps the file recoverable.
    */
-  async trashFile(fileId: string, etag: string): Promise<GoogleDriveFileSummary> {
+  async trashFile(fileId: string, etag: string, options: GoogleDriveMutationOptions = {}): Promise<GoogleDriveFileSummary> {
     // The validator is checked before any authorization or request, exactly like
     // the other conditional writes.
     const headers = { 'content-type': 'application/json', ...conditionalHeaders(etag) };
+    requireMutationCurrent(options, 'Google Drive trash');
     const access = await this.oauth.authorize('drive.files.app.write');
+    requireMutationCurrent(options, 'Google Drive trash');
     const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?fields=${encodeURIComponent(DRIVE_FILE_FIELDS)}`, {
       method: 'PATCH',
       headers,
       body: JSON.stringify({ trashed: true }),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Drive trash'));
     if (!response.ok) throwMutationFailure(response, 'trash');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }

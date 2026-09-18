@@ -246,7 +246,7 @@ describe('direct Google OAuth authority', () => {
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     let active = true;
     let apiCalls = 0;
-    const fetchMock = vi.fn().mockImplementation(async (input) => {
+    const fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
       const url = requestUrl(input);
       if (url.includes('userinfo') || url.includes('openidconnect')) return userinfoResponse();
       apiCalls += 1;

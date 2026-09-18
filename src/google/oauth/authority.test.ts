@@ -190,6 +190,43 @@ describe('direct Google OAuth authority', () => {
     });
   });
 
+  it('rechecks caller authority immediately before a post-401 provider retry', async () => {
+    tokenMock
+      .mockResolvedValueOnce(token('access-old', CALENDAR_READ_SCOPE))
+      .mockResolvedValueOnce(token('access-new', CALENDAR_READ_SCOPE));
+    const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
+    let active = true;
+    let apiCalls = 0;
+    const fetchMock = vi.fn().mockImplementation(async (input) => {
+      const url = requestUrl(input);
+      if (url.includes('userinfo') || url.includes('openidconnect')) return userinfoResponse();
+      apiCalls += 1;
+      if (apiCalls === 1) {
+        active = false;
+        return new Response('expired', { status: 401 });
+      }
+      return new Response('should-not-run', { status: 200 });
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const assertActive = () => {
+      if (!active) throw new DOMException('stale turn', 'AbortError');
+    };
+
+    await expect(authorized.fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ summary: 'guarded' }) },
+      assertActive,
+    )).rejects.toMatchObject({ name: 'AbortError' });
+
+    expect(apiCalls).toBe(1);
+    expect(tokenMock).toHaveBeenLastCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
+      prompt: 'none',
+    });
+  });
+
   it('uses the paired self-hosted Worker code flow and never stores durable credentials in browser storage', async () => {
     pairingMock.mockReturnValue(TEST_PAIRING);
     pairingTokenMock.mockResolvedValue('test-installation-secret');

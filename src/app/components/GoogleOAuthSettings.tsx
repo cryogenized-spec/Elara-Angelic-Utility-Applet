@@ -38,7 +38,7 @@ const stateLabels: Record<GoogleOAuthStatus['state'], string> = {
   'needs-consent': 'Needs authorization',
   'token-recovery': 'Authorization worker unavailable',
   'reauthorization-required': 'Reauthorization required',
-  'partially-authorized': 'Some Workspace permissions enabled',
+  'partially-authorized': 'Partially authorized',
   revoked: 'Access revoked',
 };
 
@@ -129,8 +129,12 @@ export function GoogleOAuthSettings() {
 
   const summary = useMemo(() => {
     if (loading) return 'Checking Workspace permissions…';
-    if (status.account?.email) return `${stateLabels[status.state]} · ${status.account.email}`;
-    return stateLabels[status.state];
+    const hasWorkspaceGrant = status.grantedCapabilities.some((capability) => capability !== 'google.account' && capability !== 'roleplay.world.local');
+    const label = status.state === 'partially-authorized' && !hasWorkspaceGrant
+      ? 'No Workspace permissions enabled yet'
+      : stateLabels[status.state];
+    if (status.account?.email) return `${label} · ${status.account.email}`;
+    return label;
   }, [loading, status]);
 
   return (

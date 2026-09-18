@@ -298,7 +298,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     };
     const guard = gmailTurnGuard(signal, isGenerationActive);
     return runGmailSendOnce(
-      { tool: 'gmail.sendMessage', callId, conversationId, messageId, generationId, signal, isGenerationActive },
+      { tool: 'gmail.sendMessage', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
       payload,
       () => gmail.sendMessage(payload, guard),
     );
@@ -314,7 +314,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     };
     const guard = gmailTurnGuard(signal, isGenerationActive);
     return runGmailSendOnce(
-      { tool: 'gmail.replyMessage', callId, conversationId, messageId, generationId, signal, isGenerationActive },
+      { tool: 'gmail.replyMessage', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
       payload,
       () => gmail.replyMessage(payload, guard),
     );

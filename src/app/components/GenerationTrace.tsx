@@ -121,7 +121,6 @@ function ActivityGlyph({
   return (
     <span
       className="generation-activity__noto-glyph"
-      data-activity-glyph={glyphKey}
       style={{ fontFamily: `'${NOTO_EMOJI_FAMILY}'` }}
     >
       {glyphs[glyphKey]}

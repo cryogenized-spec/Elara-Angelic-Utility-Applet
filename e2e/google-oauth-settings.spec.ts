@@ -46,53 +46,65 @@ async function readStoredAuthorization(page: Page): Promise<Record<string, unkno
   }, GOOGLE_STORAGE_KEY);
 }
 
-async function connectCalendarRead(page: Page): Promise<void> {
-  await page.locator('.google-oauth-service').filter({ hasText: 'Google Calendar' }).getByRole('button', { name: 'Connect' }).click();
+async function connectGoogleAccount(page: Page): Promise<void> {
+  await page.getByRole('button', { name: 'Connect Google account' }).click();
 }
 
-test('a real Connect flow produces the v3 record, including account identity', async ({ page }) => {
+async function connectCalendarRead(page: Page): Promise<void> {
+  await page.locator('.google-oauth-service').filter({ hasText: 'Google Calendar' }).getByRole('button', { name: 'Enable read access' }).click();
+}
+
+test('account connection is prominent, establishes a live session, and then unlocks Workspace permissions', async ({ page }) => {
   await stubGoogleProvider(page);
   await page.goto('/');
   await openSettings(page);
-  await expect(page.getByText('Not connected')).toBeVisible();
+
+  await expect(page.getByRole('button', { name: 'Connect Google account' })).toBeVisible();
+  await expect(page.getByText('Workspace permissions unlock after account connection')).toBeVisible();
+  await expect(page.locator('.google-oauth-service')).toHaveCount(0);
+
+  await connectGoogleAccount(page);
+
+  await expect(page.getByText('Google account connected')).toBeVisible();
+  await expect(page.getByText(STUB_EMAIL)).toBeVisible();
+  await expect(page.getByText('Session ready')).toBeVisible();
+  await expect(page.locator('.google-oauth-service')).toHaveCount(6);
 
   await connectCalendarRead(page);
-
-  // The status line shows the identity the writer persisted from the
-  // (stubbed) userinfo response.
-  await expect(page.getByText(`Partially authorized · ${STUB_EMAIL}`)).toBeVisible();
-  // Calendar read is ready; its write capability is not, so the row offers
-  // the write upgrade, not a reconnect.
   await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Calendar' }).getByRole('button', { name: 'Enable writes' })).toHaveCount(1);
 
-  // The app's OWN stored record — written by the canonical writer, not by
-  // this test — carries the v3 shape with the fetched identity.
   await expect.poll(() => readStoredAuthorization(page), { timeout: 10_000 }).toEqual(expect.objectContaining({
     version: 3,
     account: { email: STUB_EMAIL, displayName: STUB_NAME },
   }));
   const stored = await readStoredAuthorization(page);
-  expect(stored?.enabledCapabilities).toContain('calendar.events.read');
+  expect(stored?.enabledCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
   expect(stored?.grantedProviderScopes).toContain(CALENDAR_READ_SCOPE);
 
-  // Reader roundtrip: the record the writer produced survives a reload and
-  // renders the same signed-in state.
+  // Access tokens are memory-only. Reload keeps account/scope metadata but
+  // makes the primary account CTA responsible for acquiring a fresh token.
   await page.reload();
   await openSettings(page);
-  await expect(page.getByText(`Partially authorized · ${STUB_EMAIL}`)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh Google session' })).toBeVisible();
+  await expect(page.locator('.google-oauth-service')).toHaveCount(0);
+
+  await page.getByRole('button', { name: 'Refresh Google session' }).click();
+  await expect(page.getByText('Session ready')).toBeVisible();
+  await expect(page.locator('.google-oauth-service')).toHaveCount(6);
+  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Calendar' }).getByText('Read ready')).toBeVisible();
 });
 
 test('disconnect removes the record the writer created', async ({ page }) => {
   await stubGoogleProvider(page);
   await page.goto('/');
   await openSettings(page);
-  await connectCalendarRead(page);
-  await expect(page.getByText(`Partially authorized · ${STUB_EMAIL}`)).toBeVisible();
+  await connectGoogleAccount(page);
+  await expect(page.getByText('Session ready')).toBeVisible();
 
   await page.getByRole('button', { name: 'Disconnect Google' }).click();
-  await expect(page.getByText('Not connected')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Connect Google account' })).toBeVisible();
   await expect.poll(() => readStoredAuthorization(page)).toBeNull();
-  await expect(page.locator('.google-oauth-service').filter({ hasText: 'Google Calendar' }).getByRole('button', { name: 'Connect' })).toHaveCount(1);
+  await expect(page.locator('.google-oauth-service')).toHaveCount(0);
 });
 
 test('a genuine v2 record migrates, then a real acquisition supersedes it with scope truth', async ({ page }) => {
@@ -114,23 +126,24 @@ test('a genuine v2 record migrates, then a real acquisition supersedes it with s
 
   await page.goto('/');
   await openSettings(page);
-  // The migrated consent evidence is honored (no scope manifest, so no
-  // sibling inference), and the migrated identity renders.
-  await expect(page.getByText('Partially authorized · legacy@example.com')).toBeVisible();
+  // Legacy consent/account metadata remains visible, but there is no live
+  // memory token after startup, so the account screen requires refresh first.
+  await expect(page.getByText('legacy@example.com')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh Google session' })).toBeVisible();
+  await expect(page.locator('.google-oauth-service')).toHaveCount(0);
 
-  // A real acquisition replaces legacy evidence with current provider truth.
-  await page.locator('.google-oauth-service').filter({ hasText: 'Gmail' }).getByRole('button', { name: 'Connect' }).click();
-  await expect(page.getByText(`Partially authorized · ${STUB_EMAIL}`)).toBeVisible();
+  await page.getByRole('button', { name: 'Refresh Google session' }).click();
+  await expect(page.getByText('Session ready')).toBeVisible();
+
+  // A real Gmail acquisition supersedes legacy provider evidence with current
+  // token truth while preserving locally enabled user intent.
+  await page.locator('.google-oauth-service').filter({ hasText: 'Gmail' }).getByRole('button', { name: 'Enable read access' }).click();
 
   await expect.poll(() => readStoredAuthorization(page), { timeout: 10_000 }).toEqual(expect.objectContaining({
     version: 3,
     account: { email: STUB_EMAIL, displayName: STUB_NAME },
   }));
   const stored = await readStoredAuthorization(page);
-  // Enabled capabilities are the legacy union plus the newly granted one.
-  expect(stored?.enabledCapabilities).toEqual(expect.arrayContaining(['calendar.events.read', 'tasks.read', 'gmail.read']));
-  // Stored scopes describe the CURRENT token only: the fresh Gmail grant is
-  // present and the legacy-era calendar scope is gone.
+  expect(stored?.enabledCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read', 'tasks.read', 'gmail.read']));
   expect(stored?.grantedProviderScopes).toContain(GMAIL_READ_SCOPE);
-  expect(stored?.grantedProviderScopes).not.toContain(CALENDAR_READ_SCOPE);
 });

@@ -177,6 +177,7 @@ function currentStatus(): GoogleOAuthStatusContract {
     grantedCapabilities,
     enabledCapabilities: [...current.enabledCapabilities],
     grantedProviderScopes: [...current.grantedProviderScopes],
+    sessionReady: tokenStillValid(),
     ...(current.account ? { account: current.account } : {}),
   };
 }
@@ -329,11 +330,15 @@ async function fetchGoogleAccount(accessToken: string): Promise<{ email: string;
   return null;
 }
 
+function requestedGoogleScopes(requiredScope: string): string {
+  return [...new Set([requiredScope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE])].join(' ');
+}
+
 async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' | 'none'): Promise<void> {
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   try {
-    const requestedScope = [descriptor.scope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].join(' ');
+    const requestedScope = requestedGoogleScopes(descriptor.scope);
     const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: requestedScope, prompt });
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
     const current = loadStored();
@@ -376,7 +381,7 @@ async function acquireDurableToken(capability: GoogleCapabilityKey, pairing: Aut
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   const current = loadStored();
-  const requestedScope = [descriptor.scope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].join(' ');
+  const requestedScope = requestedGoogleScopes(descriptor.scope);
   const code = await requestGoogleAuthorizationCode({
     clientId: ensureClientId(),
     scope: requestedScope,

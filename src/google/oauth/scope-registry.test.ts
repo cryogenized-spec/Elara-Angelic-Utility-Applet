@@ -3,6 +3,7 @@ import { getGoogleScope, googleScopeRegistry } from './scope-registry';
 import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE } from './capability-policy';
 
 const REQUIRED_CAPABILITIES = [
+  'google.account',
   'calendar.events.read',
   'calendar.events.write',
   'calendar.list.read',
@@ -25,6 +26,7 @@ const REQUIRED_CAPABILITIES = [
 ] as const;
 
 const EXPECTED_SCOPES: Record<(typeof REQUIRED_CAPABILITIES)[number], string> = {
+  'google.account': 'https://www.googleapis.com/auth/userinfo.email',
   'calendar.events.read': 'https://www.googleapis.com/auth/calendar.events.readonly',
   'calendar.events.write': 'https://www.googleapis.com/auth/calendar.events',
   'calendar.list.read': 'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
@@ -47,12 +49,19 @@ const EXPECTED_SCOPES: Record<(typeof REQUIRED_CAPABILITIES)[number], string> = 
 };
 
 describe('Google OAuth scope registry', () => {
-  it('contains every first-class Workspace capability', () => {
+  it('contains every first-class Google capability', () => {
     for (const capability of REQUIRED_CAPABILITIES) expect(() => getGoogleScope(capability)).not.toThrow();
   });
 
-  it('maps first-class capabilities to the audited least-privilege scopes', () => {
+  it('maps first-class capabilities to audited least-privilege scopes', () => {
     for (const capability of REQUIRED_CAPABILITIES) expect(getGoogleScope(capability).scope).toBe(EXPECTED_SCOPES[capability]);
+  });
+
+  it('keeps account connection identity-only and outside Workspace data scopes', () => {
+    const account = getGoogleScope('google.account');
+    expect(account.scope).toBe('https://www.googleapis.com/auth/userinfo.email');
+    expect(account.sensitivity).toBe('non-sensitive');
+    expect(account.access).toBe('read');
   });
 
   it('keeps provider scope strings out of model-facing tool contracts', async () => {

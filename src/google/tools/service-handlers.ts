@@ -277,7 +277,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       isGenerationActive,
     });
   },
-  'drive.createFile': async ({ arguments: raw, callId, conversationId, messageId, generationId }) => {
+  'drive.createFile': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     const parents = stringArrayArg(args, 'parents');
     const mimeType = stringArg(args, 'mimeType', false);
@@ -286,12 +286,12 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     // the first result instead of creating a second file, and a replayed call
     // id with different arguments fails closed.
     return runDriveCreateOnce(
-      { tool: 'drive.createFile', callId, conversationId, messageId, generationId },
+      { tool: 'drive.createFile', callId, conversationId, messageId, generationId, signal, isGenerationActive },
       input,
-      () => drive.createFile(input),
+      () => drive.createFile(input, { signal, isGenerationActive }),
     );
   },
-  'drive.updateFile': async ({ arguments: raw }) => {
+  'drive.updateFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     const patch = recordArg(args, 'patch')!;
     const name = stringArg(patch, 'name', false);
@@ -301,15 +301,21 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(starred !== undefined ? { starred } : {}),
-    });
+    }, { signal, isGenerationActive });
   },
-  'drive.moveFile': async ({ arguments: raw }) => {
+  'drive.moveFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return drive.moveFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, stringArg(args, 'parentId')!, stringArg(args, 'previousParentId', false));
+    return drive.moveFile(
+      stringArg(args, 'fileId')!,
+      stringArg(args, 'etag')!,
+      stringArg(args, 'parentId')!,
+      stringArg(args, 'previousParentId', false),
+      { signal, isGenerationActive },
+    );
   },
-  'drive.trashFile': async ({ arguments: raw }) => {
+  'drive.trashFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!);
+    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, { signal, isGenerationActive });
   },
 
   'sheets.getSpreadsheet': async ({ arguments: raw }) => sheets.getSpreadsheet(stringArg(objectArgs(raw), 'spreadsheetId')!),

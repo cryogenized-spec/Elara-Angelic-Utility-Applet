@@ -39,12 +39,13 @@ describe('VTT transcription client', () => {
     await expect(transcribeVttCapture(capture)).resolves.toBe('hello there');
     expect(createInteraction).toHaveBeenCalledWith({
       model: 'gemini-3.5-transcribe',
-      input: [{ type: 'audio', data: expect.any(String), mime_type: 'audio/webm' }],
+      // vitest types expect.any as any; the cast pins the asserted type.
+      input: [{ type: 'audio', data: expect.any(String) as string, mime_type: 'audio/webm' }],
       generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
       store: false,
     });
 
-    const audioData = createInteraction.mock.calls[0][0].input[0].data as string;
+    const audioData = (createInteraction.mock.calls[0][0] as { input: Array<{ data: string }> }).input[0].data;
     expect(globalThis.atob(audioData)).toBe('audio');
   });
 

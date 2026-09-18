@@ -6,8 +6,11 @@ on:
   pull_request:
     branches: [main]
 
-permissions:
-  contents: read
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   PAGES_ORIGIN: https://cryogenized-spec.github.io
@@ -16,15 +19,20 @@ jobs:
   runtime:
     name: Runtime verification
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+      - name: Checkout exact event commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
 
-      - name: Set up Node.js LTS
-        uses: actions/setup-node@v7
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version-file: .nvmrc
-          check-latest: true
           package-manager-cache: false
 
       - name: Verify runtime baseline
@@ -33,44 +41,97 @@ jobs:
           set -euo pipefail
           node --version
           npm --version
-          test "$(node -p 'process.versions.node.split(".")[0]')" = "24"
+          test "$(node --version)" = "v24.21.0"
+          test "$(npm --version)" = "11.19.0"
 
-      - name: Verify required foundation documents
-        shell: bash
-        run: |
-          set -euo pipefail
-          test -f README.md
-          test -f docs/REPOSITORY_FORENSICS.md
-          test -f docs/PRODUCT_BOUNDARY.md
-          test -f docs/ARCHITECTURE_DECISION.md
-          test -f docs/SYSTEM_BOUNDARIES.md
-          test -f .nvmrc
-          test -f package.json
-          grep -q "One canonical Gemini execution path" README.md
-          grep -q "Android portrait" docs/PRODUCT_BOUNDARY.md
-          grep -q "One canonical Gemini provider implementation" docs/PRODUCT_BOUNDARY.md
-          grep -q "Node.js 24 LTS" docs/ARCHITECTURE_DECISION.md
+      - name: Documentation integrity
+        run: npm run docs:check
 
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
+      - name: Verification integrity
+        run: npm run verify:gates
+
+      - name: Security & architecture boundary
+        run: npm run security:check
+
+      - name: Secret boundary
+        run: npm run secrets:check
+
+      - name: Supply-chain boundary
+        run: npm run supply-chain:check
+
+      - name: Test quality boundary
+        run: npm run test:quality
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Verify registry signatures
+        run: npm audit signatures
+
+      - name: Dependency vulnerability audit
+        run: npm audit --audit-level=high
 
       - name: Lint
         run: npm run lint
 
-      - name: Typecheck
+      - name: Typecheck (TS6 primary)
         run: npm run typecheck
 
-      - name: Unit tests
-        run: npm test
+      - name: Typecheck (TS7 compatibility)
+        run: npm run typecheck:ts7
+
+      - name: Google OAuth lifecycle regression
+        run: npm run test:google-oauth-lifecycle
+
+      - name: Unit tests + coverage ratchet
+        run: npm run test:coverage
+
+      - name: Worker & Durable Object tests
+        run: npm run test:workers
 
       - name: Build
         run: npm run build
 
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: ./node_modules/.bin/playwright install --with-deps chromium
 
       - name: End-to-end tests
         run: npm run e2e -- --project=chromium --project=android-portrait --project=onboarding
 
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
       - name: Final reliability gate
         run: npm run reliability:check
+
+      - name: Upload certified Pages artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
+        with:
+          path: ./dist
+
+  deploy:
+    name: Deploy certified Pages artifact
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: runtime
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5

@@ -1,5 +1,7 @@
+import type { MediaItem } from './media';
+
 export type ChatRole = 'user' | 'assistant' | 'system';
-export type ProviderStatus = 'idle' | 'streaming' | 'failed';
+export type ProviderStatus = 'idle' | 'streaming' | 'saving' | 'failed';
 
 export interface ProviderUsage {
   inputTokens?: number;
@@ -18,13 +20,38 @@ export interface ProviderTurnMetadata {
   completedAt: number;
   durationMs?: number;
   usage?: ProviderUsage;
+  /** Chat-layer turn identity; one generation may span many interactions. */
+  generationId?: string;
+  /** Previous generation this turn supersedes (regeneration / retry). */
+  supersedesGenerationId?: string;
 }
 
-export interface ExecutionSummary {
+export type GenerationActivityKind = 'thinking' | 'tool' | 'generation' | 'context' | 'status';
+export type GenerationActivityState = 'done' | 'failed' | 'cancelled';
+export type GenerationContextCategory = 'memory' | 'artifacts' | 'other';
+
+/**
+ * Durable, provider-agnostic record of one observable generation activity.
+ * Raw hidden chain-of-thought is never stored here; `detail` is limited to
+ * provider-supplied thought summaries or application-owned status text.
+ */
+export interface GenerationActivityStep {
   id: string;
-  steps: string[];
+  kind: GenerationActivityKind;
+  state: GenerationActivityState;
   durationMs: number;
-  thoughtSummary?: string;
+  label: string;
+  detail?: string;
+  toolName?: string;
+  contextCategory?: GenerationContextCategory;
+  errorCode?: string;
+}
+
+/** Terminal snapshot used by the same UI that renders the live generation. */
+export interface GenerationActivityRecord {
+  id: string;
+  durationMs: number;
+  steps: GenerationActivityStep[];
 }
 
 export interface ChatMessage {
@@ -35,7 +62,16 @@ export interface ChatMessage {
   conversationId?: string;
   responseGroupId?: string;
   responseVariant?: number;
-  executionSummary?: ExecutionSummary;
+  /** Stable artifact IDs; binary payloads live in the artifact repository. */
+  attachments?: string[];
+  artifacts?: string[];
+  /**
+   * Resolved media from a media tool call, kept with the message so a media card
+   * survives a reload. Optional and unindexed, so adding it needs no Dexie
+   * version bump. Never contains credential material.
+   */
+  media?: MediaItem[];
+  generationActivity?: GenerationActivityRecord;
   providerTurn?: ProviderTurnMetadata;
 }
 

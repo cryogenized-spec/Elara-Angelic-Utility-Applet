@@ -3,24 +3,37 @@ import { join } from 'node:path';
 
 const root = process.cwd();
 const requiredFiles = [
-  'README.md', '.nvmrc', 'package.json',
-  'docs/ARCHITECTURE_DECISION.md', 'docs/SYSTEM_BOUNDARIES.md', 'docs/GEMINI_INTEGRATION_STRATEGY.md', 'docs/GEMINI_REQUEST_CONTRACT.md', 'docs/PROVIDER_ERROR_NORMALIZATION.md',
-  'docs/GOOGLE_OAUTH_ARCHITECTURE.md', 'docs/GOOGLE_SCOPE_REGISTRY.md', 'docs/GOOGLE_CALENDAR_SERVICE.md', 'docs/GOOGLE_TASKS_SERVICE.md', 'docs/GOOGLE_GMAIL_SERVICE.md', 'docs/GOOGLE_TOOL_BOUNDARY.md', 'docs/GOOGLE_WRITE_CONFIRMATION.md', 'docs/GOOGLE_OAUTH_FAILURE_DIAGNOSTICS.md', 'docs/GEMINI_BACKGROUND_EXECUTION.md',
-  'docs/NEXT_FEATURE_PHASE_PLAN.md', 'docs/MARKDOWN_FORMAT.md', 'docs/ROLEPLAY_WORLD_CANVAS_PLAN.md',
+  'README.md', 'AGENTS.md', '.nvmrc', 'package.json',
+  'documents/INDEX.md', 'documents/manifest.json', 'documents/architecture.md',
+  'documents/ui.md', 'documents/chat.md', 'documents/gemini.md', 'documents/vtt.md', 'documents/memory.md',
+  'documents/artifacts.md', 'documents/documents.md', 'documents/character.md', 'documents/google-auth.md', 'documents/google-workspace.md',
+  'documents/media.md', 'documents/autonomy.md', 'documents/security.md', 'documents/persistence.md', 'documents/pwa.md', 'documents/worker.md',
+  'documents/reliability.md', 'documents/third-party-notices.md', 'public/core/README.md',
+  'src/artifacts/repository.ts', 'src/artifacts/validation.ts', 'src/artifacts/image-preprocessing.ts', 'src/artifacts/intake.ts', 'src/artifacts/transformations.ts', 'src/artifacts/repository.test.ts', 'src/gemini/multimodal.test.ts', 'src/app/components/artifacts/GeneratedTextCard.tsx', 'src/app/components/artifacts/GeneratedTextCard.test.tsx', 'src/ocr/service.ts', 'src/ocr/worker.ts', 'src/documents/compiler.ts', 'src/documents/compiler.worker.ts', 'scripts/verify-artifact-assets.mjs',
   'src/app/components/MarkdownText.tsx', 'src/app/components/MarkdownText.test.tsx', 'src/app/components/RoleplaySettings.tsx',
   'src/character/system-instruction.ts', 'src/persistence/character.ts', 'src/persistence/character.test.ts', 'src/persistence/gemini-api-key.ts', 'src/persistence/gemini-api-key.test.ts', 'src/persistence/preferences.ts', 'src/persistence/roleplay-world.ts',
   'src/domain/roleplay-world.ts', 'src/domain/roleplay-world.test.ts',
   'src/gemini/runtime-context.ts', 'src/google/confirmation/broker.ts', 'src/google/confirmation/roleplay-broker.ts', 'src/google/tools/roleplay-world-schemas.ts', 'src/google/tools/roleplay-world-handlers.ts', 'src/google/tools/gemini-declarations.test.ts',
-  'e2e/roleplay-world.spec.ts',
+  'src/autonomy/contracts.ts', 'src/autonomy/schedule.ts', 'src/autonomy/policy.ts', 'src/autonomy/outcome.ts', 'src/autonomy/authority.ts', 'src/autonomy/instruction.ts', 'src/autonomy/runner.ts', 'src/autonomy/runner.test.ts', 'src/autonomy/tool-surface.test.ts', 'src/persistence/autonomy.ts', 'src/persistence/autonomy.test.ts', 'src/app/components/AutonomySettings.tsx', 'src/gemini/google-tool-loop.readonly.test.ts',
+  'src/autonomy/scheduler.ts', 'src/autonomy/scheduler.test.ts', 'src/autonomy/context.ts', 'src/autonomy/context.test.ts', 'src/autonomy/protocol.ts', 'src/autonomy/protocol.test.ts',
+  'src/autonomy/cloud/pairing.ts', 'src/autonomy/cloud/pairing.test.ts', 'src/autonomy/cloud/client.ts', 'src/autonomy/cloud/sync.ts', 'src/autonomy/cloud/sync.test.tsx', 'src/app/components/AutonomyCloud.tsx',
+  'worker/src/entry.ts', 'worker/src/google/oauth-provider.ts', 'worker/src/google/oauth-routes.ts', 'worker/src/google/oauth-vault.ts',
+  'worker/src/autonomy/ports.ts', 'worker/src/autonomy/store.ts', 'worker/src/autonomy/engine.ts', 'worker/src/autonomy/routes.ts', 'worker/src/autonomy/workflow.ts', 'worker/src/autonomy/cloud-execute.ts', 'src/autonomy/history-page.ts', 'src/autonomy/history-page.test.ts', 'src/autonomy/config-identity.ts', 'src/autonomy/config-identity.test.ts', 'src/autonomy/cloud-result.ts', 'src/autonomy/workflow-identity.ts', 'src/autonomy/envelope.ts', 'worker/test/autonomy-engine.test.ts', 'worker/test/autonomy-http.test.ts', 'worker/test/google-oauth-vault.test.ts', 'worker/test/google-oauth-routes.test.ts', 'worker/test/helpers.ts', 'vitest.workers.config.ts',
+  'scripts/verify-autonomy-worker.mjs', 'e2e/autonomy-cloud.spec.ts',
+  'e2e/roleplay-world.spec.ts', 'e2e/autonomy.spec.ts',
 ];
 
 for (const relative of requiredFiles) if (!existsSync(join(root, relative))) throw new Error(`Reliability gate: missing ${relative}`);
 
 const packageSource = readFileSync(join(root, 'package.json'), 'utf8');
 const packageJson = JSON.parse(packageSource);
-for (const script of ['lint', 'typecheck', 'test', 'build', 'e2e', 'reliability:check']) if (typeof packageJson.scripts?.[script] !== 'string') throw new Error(`Reliability gate: missing npm script ${script}`);
-if ((packageSource.match(/\"dexie\"\s*:/g) ?? []).length !== 1) throw new Error('Reliability gate: package.json must contain exactly one dexie dependency entry.');
+for (const script of ['lint', 'typecheck', 'test', 'test:workers', 'build', 'e2e', 'reliability:check', 'verify:artifact-assets']) if (typeof packageJson.scripts?.[script] !== 'string') throw new Error(`Reliability gate: missing npm script ${script}`);
+if ((packageSource.match(/"dexie"\s*:/g) ?? []).length !== 1) throw new Error('Reliability gate: package.json must contain exactly one dexie dependency entry.');
 if (packageSource.includes('BLOCK_NONE')) throw new Error('Reliability gate: provider safety override marker BLOCK_NONE must not be present.');
+for (const font of ['Inter-latin.woff2', 'Manrope-latin.woff2', 'Outfit-latin.woff2']) {
+  if (!existsSync(join(root, 'src', 'ui', 'generated-fonts', font))) throw new Error(`Reliability gate: missing bundled font asset ${font}.`);
+}
+if (!packageJson.dependencies?.['tesseract.js'] || !packageJson.dependencies?.['texlyre-busytex']) throw new Error('Reliability gate: local OCR and document compiler dependencies must remain explicit.');
 
 const forbiddenProviderApis = /generateContent\s*\(/g;
 const stack = [join(root, 'src')];
@@ -36,6 +49,19 @@ while (stack.length) {
   }
 }
 
+const domainRoot = join(root, 'src', 'domain');
+const forbiddenDomainDependencies = /@google\/genai|gemini|tesseract|busytex|lualatex|ocr|google\/oauth|drive/i;
+for (const entry of readdirSync(domainRoot, { withFileTypes: true })) {
+  if (!entry.isFile() || !/\.(ts|tsx)$/.test(entry.name)) continue;
+  const source = readFileSync(join(domainRoot, entry.name), 'utf8');
+  const imports = source.split('\n').filter((line) => /^\s*(?:import|export).*from\s+['"]/.test(line)).join('\n');
+  if (forbiddenDomainDependencies.test(imports)) throw new Error(`Reliability gate: domain module imports provider/compiler/OCR concerns in ${entry.name}.`);
+}
+const artifactRepositorySource = readFileSync(join(root, 'src/artifacts/repository.ts'), 'utf8');
+if (!artifactRepositorySource.includes('ArrayBuffer') || !artifactRepositorySource.includes('canonicalBlob')) throw new Error('Reliability gate: artifact persistence must hydrate binary storage at the repository boundary.');
+if (artifactRepositorySource.includes('artifactFromStored(item, new Blob())') || !artifactRepositorySource.includes('ARTIFACT_STORAGE_FAILED')) throw new Error('Reliability gate: artifact reads must report missing/corrupt payloads instead of silently repairing them.');
+const compilerWorkerSource = readFileSync(join(root, 'src/documents/compiler.worker.ts'), 'utf8');
+if (!compilerWorkerSource.includes('shellEscape: false')) throw new Error('Reliability gate: browser document compilation must disable shell escape.');
 const providerSource = readFileSync(join(root, 'src/gemini/provider.ts'), 'utf8');
 if (!providerSource.includes("from '@google/genai'")) throw new Error('Reliability gate: Gemini must execute directly from the application provider.');
 if (providerSource.includes('GEMINI_WORKER_URL') || providerSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: Gemini provider must not use the Cloudflare Worker.');
@@ -65,7 +91,8 @@ if (promptWarningSource.includes('setInterval') || promptWarningSource.includes(
 const geminiDeclarationSource = readFileSync(join(root, 'src/google/tools/gemini-declarations.ts'), 'utf8');
 if (geminiDeclarationSource.includes('Application tool risk:')) throw new Error('Reliability gate: tool risk policy must not be presented as competing model persona guidance.');
 if (!geminiDeclarationSource.includes('description: descriptor.description')) throw new Error('Reliability gate: Gemini tool descriptions must come directly from the registered capability descriptions.');
-if (!geminiDeclarationSource.includes('googleToolRegistry.map')) throw new Error('Reliability gate: Gemini declarations must derive from the canonical executable tool registry.');
+if (!geminiDeclarationSource.includes('googleToolRegistry')) throw new Error('Reliability gate: Gemini declarations must derive from the canonical executable tool registry.');
+if (!geminiDeclarationSource.includes("exposure === 'gemini'")) throw new Error('Reliability gate: Gemini declarations must exclude internal adapter primitives.');
 if (!geminiDeclarationSource.includes("additionalProperties: false")) throw new Error('Reliability gate: Gemini tool arguments must reject undeclared properties.');
 if (!geminiDeclarationSource.includes("'calendar.createEvent'")) throw new Error('Reliability gate: Calendar write capability must remain model-executable.');
 
@@ -76,7 +103,8 @@ const roleplayBrokerSource = readFileSync(join(root, 'src/google/confirmation/ro
 if (!roleplayBrokerSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Roleplay mutations must use the shared Google confirmation broker.');
 const googleBrokerSource = readFileSync(join(root, 'src/google/confirmation/broker.ts'), 'utf8');
 if (!googleBrokerSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google mutations must support grouped confirmation requests.');
-if (!googleBrokerSource.includes('data-decision="decline"') || (!googleBrokerSource.includes('data-decision="selected"') && !googleBrokerSource.includes('data-decision="all"'))) throw new Error('Reliability gate: Google mutations must expose explicit decline and approval controls.');
+if (!googleBrokerSource.includes("decline.dataset.decision = 'decline';") || !googleBrokerSource.includes("selected.dataset.decision = 'selected';") || !googleBrokerSource.includes("all.dataset.decision = 'all';")) throw new Error('Reliability gate: Google mutations must expose explicit decline, selected-approval, and approve-all controls through DOM-safe decision assignments.');
+if (googleBrokerSource.includes('innerHTML')) throw new Error('Reliability gate: Google confirmation UI must not regain raw HTML parsing authority.');
 if (!googleBrokerSource.includes('aria-label')) throw new Error('Reliability gate: Google confirmation controls must be accessible.');
 const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
 if (!toolLoopSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google tool loop must route mutation batches through the shared confirmation broker.');
@@ -110,7 +138,8 @@ if (!lockboxSource.includes("name: 'AES-GCM'")) throw new Error('Reliability gat
 if (!lockboxSource.includes('crypto.getRandomValues')) throw new Error('Reliability gate: Lockbox encryption must use random salt and IV material.');
 if (lockboxSource.includes('localStorage.setItem')) throw new Error('Reliability gate: Gemini API credential must never be written to localStorage.');
 if (!lockboxSource.includes('removeLegacyPlaintextKey')) throw new Error('Reliability gate: legacy plaintext Gemini API storage must be explicitly removed.');
-if (!lockboxSource.includes('let unlockedApiKey: string | null = null;')) throw new Error('Reliability gate: decrypted Gemini API key must remain session-memory-only.');
+if (!lockboxSource.includes('const unlockedSecrets = new Map<LockboxSecretId, string>();')) throw new Error('Reliability gate: decrypted credentials must remain session-memory-only.');
+if (lockboxSource.split('unlockedSecrets.clear();').length - 1 < 2) throw new Error('Reliability gate: locking and clearing the Lockbox must both clear decrypted credentials from session memory.');
 
 const lockboxTestSource = readFileSync(join(root, 'src/persistence/gemini-api-key.test.ts'), 'utf8');
 if (!lockboxTestSource.includes('Invalid Lockbox password.')) throw new Error('Reliability gate: Lockbox tests must cover wrong-password rejection.');
@@ -123,6 +152,107 @@ if (!characterPersistence.includes('return value.slice(0, MAX_INSTRUCTION_LENGTH
 if (!characterPersistence.includes('this.version(6)')) throw new Error('Reliability gate: character persistence must retain a current schema version after clearing the default prompt.');
 if (!characterPersistence.includes("record.systemInstruction = '';")) throw new Error('Reliability gate: persisted Character Master must be clear after the default-removal migration.');
 
-if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24') throw new Error('Reliability gate: Node baseline must remain 24.');
+// ---------------------------------------------------------------------------
+// Phase B invariants (Autonomous Elara design §4.4, §7, §8, §10): the cloud
+// scheduler architecture is enforced automatically, not by convention.
+// ---------------------------------------------------------------------------
 
-console.log(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, and encrypted credential persistence contract.`);
+const workerSourceFiles = [];
+const workerStack = [join(root, 'worker', 'src')];
+while (workerStack.length) {
+  const current = workerStack.pop();
+  for (const entry of readdirSync(current, { withFileTypes: true })) {
+    const path = join(current, entry.name);
+    if (entry.isDirectory()) workerStack.push(path);
+    if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) workerSourceFiles.push(path);
+  }
+}
+
+// Worker runtime must never import the browser memory store, browser
+// persistence, or browser Google OAuth authority. Server-side Google OAuth is
+// allowed only in worker/src/google/oauth-* and is pinned below as a reviewed
+// credential authority.
+const forbiddenWorkerImports = /memory\/store|persistence\/|(?:\.\.\/)+src\/google\/oauth|retrieveMemories|dexie/i;
+const serverGoogleOauthMarker = /accounts\.google\.com|googleapis\.com\/oauth|refresh_token|authorization.?code/i;
+for (const path of workerSourceFiles) {
+  const source = readFileSync(path, 'utf8');
+  const importLines = source.split('\n').filter((line) => /^\s*(?:import|export)\s.*from\s+['"]/.test(line) || /^\s*import\s+['"]/.test(line)).join('\n');
+  if (forbiddenWorkerImports.test(importLines)) throw new Error(`Reliability gate: worker module must not import browser-only concerns (memory store / persistence / browser OAuth / Dexie): ${path}`);
+  const reviewedServerOauthFile = path.includes(join('worker', 'src', 'google', 'oauth-'));
+  if (!reviewedServerOauthFile && serverGoogleOauthMarker.test(source)) throw new Error(`Reliability gate: server-side Google OAuth markers are allowed only in the reviewed worker/src/google/oauth-* authority: ${path}`);
+  if (/from ['"]agents['"]|@cloudflare\/agents/.test(source)) throw new Error(`Reliability gate: Agents SDK must not appear: ${path}`);
+  if (/cloudflare:workflows/.test(source)) throw new Error(`Reliability gate: do not import cloudflare:workflows (${path}); bind Workflows via wrangler.`);
+  if (/vapid|web-push|pushManager|PushSubscription/i.test(source)) throw new Error(`Reliability gate: Web Push must not appear before Phase D: ${path}`);
+}
+if (packageSource.includes('"agents"') || packageJson.dependencies?.agents || packageJson.devDependencies?.agents) throw new Error('Reliability gate: the Agents SDK dependency is deliberately not adopted (design §7.4).');
+
+const googleOauthProviderSource = readFileSync(join(root, 'worker', 'src', 'google', 'oauth-provider.ts'), 'utf8');
+const googleOauthVaultSource = readFileSync(join(root, 'worker', 'src', 'google', 'oauth-vault.ts'), 'utf8');
+const googleOauthRoutesSource = readFileSync(join(root, 'worker', 'src', 'google', 'oauth-routes.ts'), 'utf8');
+const workerCompositionSource = readFileSync(join(root, 'worker', 'src', 'entry.ts'), 'utf8');
+if (!googleOauthProviderSource.includes('https://oauth2.googleapis.com/token') || !googleOauthProviderSource.includes("grant_type: 'refresh_token'")) throw new Error('Reliability gate: durable Google OAuth must exchange and refresh only through the reviewed token provider.');
+if (!googleOauthVaultSource.includes("name: 'AES-GCM'") || !googleOauthVaultSource.includes('GOOGLE_OAUTH_VAULT_KEY')) throw new Error('Reliability gate: Google refresh tokens must be AES-GCM encrypted with the dedicated vault key.');
+if (!googleOauthVaultSource.includes('google_oauth_nonces') || !googleOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: Google OAuth vault writes must be independently signed and replay-protected durably.');
+if (!googleOauthRoutesSource.includes('verifySignedWrite') || !googleOauthRoutesSource.includes('X-Requested-With')) throw new Error('Reliability gate: public Google OAuth writes must retain signed admission and popup CSRF protection.');
+if (!workerCompositionSource.includes('handleGoogleOAuthRoute') || !workerCompositionSource.includes('return coreWorker.fetch(request, env)')) throw new Error('Reliability gate: Worker composition must isolate Google OAuth routing and delegate all existing runtime traffic unchanged.');
+
+// The scheduler seam exists and names its contracts.
+const portsSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'ports.ts'), 'utf8');
+if (!portsSource.includes('interface WakeSource') || !portsSource.includes('interface SchedulerPort')) throw new Error('Reliability gate: the WakeSource/SchedulerPort seam must be declared in worker/src/autonomy/ports.ts.');
+if (!portsSource.includes("kind: 'cron-trigger'")) throw new Error('Reliability gate: the production wake source must be the cron trigger.');
+const engineSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'engine.ts'), 'utf8');
+for (const portOperation of ['ensureScheduled', 'cancel(', 'dueWithin']) {
+  if (!engineSource.includes(portOperation)) throw new Error(`Reliability gate: the AutonomyEngine Durable Object must implement the SchedulerPort surface (${portOperation}).`);
+}
+if (!engineSource.includes('decideRunClaim')) throw new Error('Reliability gate: the DO claim path must use the shared pure decideRunClaim decision.');
+
+// The cron handler remains in the existing Worker core and is a heartbeat only.
+const workerEntrySource = readFileSync(join(root, 'worker', 'src', 'index.ts'), 'utf8');
+const scheduledMatch = workerEntrySource.match(/async scheduled\([\s\S]*?\n {2}\},/);
+if (!scheduledMatch) throw new Error('Reliability gate: the worker must export a scheduled() cron handler.');
+const scheduledBody = scheduledMatch[0];
+for (const forbidden of ['gemini', 'Gemini', 'streamGoogleToolLoop', 'GoogleGenAI', 'routine', 'engine.fetch']) {
+  if (scheduledBody.includes(forbidden)) throw new Error(`Reliability gate: the cron handler must remain a heartbeat (found "${forbidden}" in scheduled()).`);
+}
+if (!scheduledBody.includes('heartbeat')) throw new Error('Reliability gate: the cron handler must invoke the scheduler heartbeat.');
+
+for (const wakeRoute of ["'/autonomy/wake'", '"/autonomy/wake"', "'/autonomy/heartbeat'", '"/autonomy/heartbeat"']) {
+  if (workerEntrySource.includes(wakeRoute) || workerCompositionSource.includes(wakeRoute)) throw new Error('Reliability gate: no public wake endpoint may exist.');
+}
+
+const wranglerSource = readFileSync(join(root, 'worker', 'wrangler.toml'), 'utf8');
+const crons = wranglerSource.match(/crons\s*=\s*\[([^\]]*)\]/);
+if (!crons || crons[1].split(',').filter((entry) => entry.trim()).length !== 1 || !crons[1].includes('0 * * * *')) throw new Error('Reliability gate: the worker must carry exactly one hourly cron trigger.');
+if (!wranglerSource.includes('main = "src/entry.ts"')) throw new Error('Reliability gate: production Worker HTTP composition must use worker/src/entry.ts.');
+if (!wranglerSource.includes('new_sqlite_classes') || !wranglerSource.includes('AutonomyEngine')) throw new Error('Reliability gate: the AutonomyEngine Durable Object must be declared with SQLite storage.');
+if (!wranglerSource.includes('name = "GOOGLE_OAUTH"') || !wranglerSource.includes('class_name = "GoogleOAuthVault"')) throw new Error('Reliability gate: wrangler must bind the dedicated GoogleOAuthVault Durable Object.');
+if (!wranglerSource.includes('class_name = "RoutineRunWorkflow"') || !wranglerSource.includes('binding = "ROUTINE_RUN"')) throw new Error('Reliability gate: wrangler must declare the RoutineRun Workflow binding.');
+const workflowSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'workflow.ts'), 'utf8');
+if (!workflowSource.includes('class RoutineRunWorkflow') || !workflowSource.includes('WorkflowEntrypoint')) throw new Error('Reliability gate: RoutineRunWorkflow must be a WorkflowEntrypoint.');
+if (!engineSource.includes('completeClaim') || !engineSource.includes('dispatchWorkflow')) throw new Error('Reliability gate: the DO must claim then dispatch a Workflow.');
+if (engineSource.includes("path === '/c0/fixture'")) throw new Error('Reliability gate: production DO fetch must not expose /c0/fixture.');
+if (engineSource.includes('claimWithoutDispatch') || engineSource.includes('markDispatchedWithoutAdvance')) throw new Error('Reliability gate: crash fixtures must not be public methods on AutonomyEngine.');
+if (workerEntrySource.includes('TestAutonomyEngine') || workerCompositionSource.includes('TestAutonomyEngine')) throw new Error('Reliability gate: production worker entry must not export TestAutonomyEngine.');
+if (wranglerSource.includes('TestAutonomyEngine') || wranglerSource.includes('TestGoogleOAuthVault')) throw new Error('Reliability gate: production wrangler must not bind test Durable Object classes.');
+if (!engineSource.includes('nextOccurrenceAfterProcessed')) throw new Error('Reliability gate: schedule advance must be occurrence-anchored.');
+if (!engineSource.includes('schedulerLive') || !engineSource.includes('agentExecution')) throw new Error('Reliability gate: scheduler liveness and agent execution must not share one dryRun flag.');
+if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('pruneEnvelopes')) throw new Error('Reliability gate: envelopes must be pruned with runs.');
+if (wranglerSource.includes('C1_MODEL_STUB')) throw new Error('Reliability gate: C1_MODEL_STUB must not be declared in production wrangler.');
+if (workflowSource.includes('C0_SHELL') || engineSource.includes('C0_SHELL')) throw new Error('Reliability gate: C0 shell completion must not remain after C1.');
+if (!workflowSource.includes('executeCloudRoutine')) throw new Error('Reliability gate: the Workflow must execute the C1 model step.');
+if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('admitProposedEvent')) throw new Error('Reliability gate: event admission policy must run inside the DO transaction.');
+if (!readFileSync(join(root, 'worker/src/autonomy/store.ts'), 'utf8').includes('CREATE TABLE IF NOT EXISTS events')) throw new Error('Reliability gate: cloud events must be durable.');
+
+const allowedSchedulerImports = /^\s*(?:import|export)\s.*from\s+['"](?:zod|\.\/contracts|\.\/schedule|\.\.\/memory\/retrieval|\.\.\/memory\/types)['"];?\s*$/;
+for (const shared of ['src/autonomy/scheduler.ts', 'src/autonomy/context.ts']) {
+  const source = readFileSync(join(root, shared), 'utf8');
+  for (const line of source.split('\n')) {
+    if (/^\s*(?:import|export)\s.*from\s+['"]/.test(line) && !allowedSchedulerImports.test(line)) {
+      throw new Error(`Reliability gate: shared scheduler module ${shared} must stay pure (unexpected import: ${line.trim()}).`);
+    }
+  }
+}
+
+if (readFileSync(join(root, '.nvmrc'), 'utf8').trim() !== '24.21.0') throw new Error('Reliability gate: Node baseline must remain 24.21.0.');
+
+process.stdout.write(`Reliability gate passed: ${requiredFiles.length} required files, runtime scripts present, Node 24.21.0 baseline, single dexie dependency, no safety override marker, no legacy generateContent() calls, direct Gemini browser transport through the encrypted Dexie Lockbox, restricted Markdown safety boundary, no built-in Character Master prompt, canonical executable tool capability exposure including Roleplay World, single VTT system instruction, opaque Roleplay refs, shared Google mutation watchdog with grouped confirmation and grouped Gemini tool results, Calendar event creation, deterministic YAML view, encrypted browser credential persistence, and the reviewed durable Google OAuth server authority with encrypted refresh-token vaulting plus signed replay-protected admission; Phase B scheduler invariants remain intact: SchedulerPort/WakeSource seam, DO single-alarm scheduler with shared pure due-time truth, heartbeat-only cron, no public wake endpoint, worker isolation from browser memory/persistence/OAuth, no Agents SDK, Workflows bound via wrangler, no Web Push, single hourly cron trigger, and pure shared scheduler/context modules.\n`);

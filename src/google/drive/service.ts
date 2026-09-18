@@ -84,7 +84,7 @@ export class GoogleDriveService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
   async listFiles(options: { query?: string; pageToken?: string; pageSize?: number } = {}): Promise<GoogleDriveListResult> {
-    const access = await this.oauth.authorize('drive.files.read');
+    const access = await this.oauth.authorize('drive.files.app.read');
     const params = new URLSearchParams({
       pageSize: String(Math.max(1, Math.min(100, Math.trunc(options.pageSize ?? 25)))),
       fields: 'nextPageToken,files(id,name,mimeType,modifiedTime,webViewLink,parents,capabilities(canDownload))',
@@ -99,8 +99,25 @@ export class GoogleDriveService {
     return { files, ...(typeof payload.nextPageToken === 'string' ? { nextPageToken: payload.nextPageToken } : {}) };
   }
 
+  async searchLibrary(options: { query?: string; pageToken?: string; pageSize?: number } = {}): Promise<GoogleDriveListResult> {
+    const access = await this.oauth.authorize('drive.library.read');
+    const params = new URLSearchParams({
+      pageSize: String(Math.max(1, Math.min(100, Math.trunc(options.pageSize ?? 25)))),
+      fields: 'nextPageToken,files(id,name,mimeType,modifiedTime,webViewLink,parents,capabilities(canDownload))',
+      spaces: 'drive',
+      corpora: 'user',
+    });
+    if (options.query?.trim()) params.set('q', options.query.trim());
+    if (options.pageToken?.trim()) params.set('pageToken', options.pageToken.trim());
+
+    const response = await access.fetch(`${DRIVE_API}/files?${params.toString()}`);
+    const payload = await this.readJson<DriveListResponse>(response);
+    const files = Array.isArray(payload.files) ? payload.files.map(asFileSummary) : [];
+    return { files, ...(typeof payload.nextPageToken === 'string' ? { nextPageToken: payload.nextPageToken } : {}) };
+  }
+
   async getFile(fileId: string): Promise<GoogleDriveFileSummary> {
-    const access = await this.oauth.authorize('drive.files.read');
+    const access = await this.oauth.authorize('drive.files.app.read');
     const id = encodeURIComponent(requireFileId(fileId));
     const fields = encodeURIComponent('id,name,mimeType,modifiedTime,webViewLink,parents,capabilities(canDownload)');
     const response = await access.fetch(`${DRIVE_API}/files/${id}?fields=${fields}`);
@@ -109,7 +126,7 @@ export class GoogleDriveService {
 
   async downloadFile(fileId: string, maxBytes = MAX_TRANSFER_BYTES): Promise<GoogleDriveContent> {
     const limit = Math.max(1, Math.min(MAX_TRANSFER_BYTES, Math.trunc(maxBytes)));
-    const access = await this.oauth.authorize('drive.files.read');
+    const access = await this.oauth.authorize('drive.files.app.read');
     const id = encodeURIComponent(requireFileId(fileId));
     const metadata = await this.getFile(fileId);
     if (metadata.canDownload === false) throw new Error('Google Drive reports that this file cannot be downloaded.');
@@ -118,7 +135,7 @@ export class GoogleDriveService {
   }
 
   async exportFile(fileId: string, mimeType: string): Promise<GoogleDriveContent> {
-    const access = await this.oauth.authorize('drive.files.read');
+    const access = await this.oauth.authorize('drive.files.app.read');
     const id = encodeURIComponent(requireFileId(fileId));
     const type = requireText(mimeType, 'export MIME type', 200);
     const response = await access.fetch(`${DRIVE_API}/files/${id}/export?mimeType=${encodeURIComponent(type)}`);
@@ -126,7 +143,7 @@ export class GoogleDriveService {
   }
 
   async createFile(input: GoogleDriveCreateInput): Promise<GoogleDriveFileSummary> {
-    const access = await this.oauth.authorize('drive.files.write');
+    const access = await this.oauth.authorize('drive.files.app.write');
     const body: Record<string, unknown> = { name: requireText(input.name, 'file name') };
     if (input.mimeType?.trim()) body.mimeType = requireText(input.mimeType, 'MIME type', 200);
     if (input.parents?.length) body.parents = input.parents.map((parent) => requireFileId(parent));
@@ -140,7 +157,7 @@ export class GoogleDriveService {
   }
 
   async updateFile(fileId: string, patch: { name?: string; description?: string; starred?: boolean; trashed?: boolean }): Promise<GoogleDriveFileSummary> {
-    const access = await this.oauth.authorize('drive.files.write');
+    const access = await this.oauth.authorize('drive.files.app.write');
     const body: Record<string, unknown> = {};
     if (patch.name !== undefined) body.name = requireText(patch.name, 'file name');
     if (patch.description !== undefined) body.description = patch.description.slice(0, 2000);
@@ -157,7 +174,7 @@ export class GoogleDriveService {
   }
 
   async moveFile(fileId: string, parentId: string, previousParentId?: string): Promise<GoogleDriveFileSummary> {
-    const access = await this.oauth.authorize('drive.files.write');
+    const access = await this.oauth.authorize('drive.files.app.write');
     const params = new URLSearchParams({
       addParents: requireFileId(parentId),
       fields: 'id,name,mimeType,modifiedTime,webViewLink,parents,capabilities(canDownload)',

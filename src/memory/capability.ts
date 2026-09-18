@@ -1,5 +1,5 @@
 import type { DurableMemory, MemoryInput, MemoryKind, MemoryProvenance } from './types';
-import { archiveMemory, deleteMemory, saveMemory } from './store';
+import { archiveMemory, deleteMemory, saveMemory, saveMemoryOnce } from './store';
 import { authorizeMemoryMutation, type MemoryActor } from './permissions';
 
 export interface MemorySaveRequest {
@@ -17,6 +17,10 @@ export interface MemoryCapabilityContext {
   messageId?: string;
   folderId?: string | null;
   provenanceNote?: string;
+  /** Application-owned replay key. Never model supplied. */
+  idempotencyKey?: string;
+  /** Application-owned turn authority guard for async durable mutations. */
+  isMutationAllowed?: () => boolean;
 }
 
 export interface MemoryCapability {
@@ -25,19 +29,37 @@ export interface MemoryCapability {
   delete(id: string, context?: MemoryCapabilityContext): Promise<void>;
 }
 
-function elaraProvenance(context: MemoryCapabilityContext = {}): MemoryProvenance {
+const MAX_READABLE_IDEMPOTENCY_KEY_LENGTH = 470;
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function effectiveProvenanceNote(context: MemoryCapabilityContext): Promise<string | undefined> {
+  const key = context.idempotencyKey?.trim();
+  if (key) {
+    if (key.length <= MAX_READABLE_IDEMPOTENCY_KEY_LENGTH) return `idempotency:${key}`;
+    return `idempotency:sha256:${await sha256Hex(key)}`;
+  }
+  return context.provenanceNote?.trim() || undefined;
+}
+
+async function elaraProvenance(context: MemoryCapabilityContext = {}): Promise<MemoryProvenance> {
+  const note = await effectiveProvenanceNote(context);
   return {
     source: 'elara',
     createdAt: Date.now(),
     ...(context.conversationId ? { conversationId: context.conversationId } : {}),
     ...(context.messageId ? { messageId: context.messageId } : {}),
-    ...(context.provenanceNote ? { note: context.provenanceNote } : {}),
+    ...(note ? { note } : {}),
   };
 }
 
 export const memory: MemoryCapability = {
   async save(request, context = {}) {
     authorizeMemoryMutation('save', context);
+    const source = await elaraProvenance(context);
     const input: MemoryInput = {
       title: request.title,
       body: request.body,
@@ -46,9 +68,9 @@ export const memory: MemoryCapability = {
       importance: request.importance,
       tags: request.tags,
       folderId: context.folderId,
-      source: elaraProvenance(context),
+      source,
     };
-    return saveMemory(input);
+    return context.idempotencyKey ? saveMemoryOnce(input, source.note!, context.isMutationAllowed) : saveMemory(input);
   },
   async forget(id, context = {}) {
     authorizeMemoryMutation('forget', context);

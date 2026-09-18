@@ -1,10 +1,16 @@
 import type { CSSProperties } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
+  BookOpen,
   Bot,
   CalendarDays,
+  Camera,
   ChevronDown,
+  ChevronRight,
   FileCode2,
+  FileText,
+  Folder,
+  Image as ImageIcon,
   ListTodo,
   Loader2,
   LockKeyhole,
@@ -26,9 +32,11 @@ import {
   ShieldCheck,
   Sparkles,
   Square,
+  Table,
   Trash2,
   Type,
   WandSparkles,
+  Wrench,
   X,
 } from 'lucide-react';
 
@@ -40,9 +48,12 @@ export type IconName =
   | 'mail'
   | 'plus'
   | 'paperclip'
+  | 'camera'
+  | 'image'
   | 'mic'
   | 'send'
   | 'chevron'
+  | 'chevron-right'
   | 'shield'
   | 'type'
   | 'palette'
@@ -51,6 +62,7 @@ export type IconName =
   | 'message-circle'
   | 'sparkles'
   | 'wand-sparkles'
+  | 'memory'
   | 'lock-keyhole'
   | 'close'
   | 'search'
@@ -61,6 +73,10 @@ export type IconName =
   | 'stop'
   | 'refresh'
   | 'trash'
+  | 'drive'
+  | 'docs'
+  | 'sheets'
+  | 'tool'
   | 'loader';
 
 const icons: Record<IconName, LucideIcon> = {
@@ -71,9 +87,12 @@ const icons: Record<IconName, LucideIcon> = {
   mail: Mail,
   plus: Plus,
   paperclip: Paperclip,
+  camera: Camera,
+  image: ImageIcon,
   mic: Mic,
   send: Send,
   chevron: ChevronDown,
+  'chevron-right': ChevronRight,
   shield: ShieldCheck,
   type: Type,
   palette: Palette,
@@ -82,6 +101,7 @@ const icons: Record<IconName, LucideIcon> = {
   'message-circle': MessageCircle,
   sparkles: Sparkles,
   'wand-sparkles': WandSparkles,
+  memory: BookOpen,
   'lock-keyhole': LockKeyhole,
   close: X,
   search: Search,
@@ -92,6 +112,10 @@ const icons: Record<IconName, LucideIcon> = {
   stop: Square,
   refresh: RefreshCw,
   trash: Trash2,
+  drive: Folder,
+  docs: FileText,
+  sheets: Table,
+  tool: Wrench,
   loader: Loader2,
 };
 

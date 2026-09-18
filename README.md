@@ -1,276 +1,101 @@
 # Elara Angelic Utility Applet
 
-This README is the durable continuity record for the clean-room rebuild of Elara. It preserves project history, constraints, roadmap, verified implementation decisions, deployment expectations, and handoff notes.
+Elara is a mobile-first React/Vite AI companion and utility application built around Google's Gemini Interactions API. Android portrait is the primary UI target. The application combines persistent conversations, configurable character/roleplay behavior, durable memory retrieval, attachments and local document tools, Google Workspace capabilities, YouTube search/handoff, voice-to-text, and an optional self-hosted cloud autonomy runtime.
 
-## Current project definition
+Elara is free self-hosted shareware. A user may fork/deploy their own static PWA, bring their own provider credentials and optionally deploy their own Cloudflare Worker. There is no shared Elara account, central OAuth broker or centrally held user credential.
 
-Elara is a mobile-first AI companion/chat application centered on Google's Gemini Interactions API.
+This README is intentionally an entry point, not a project diary. Current technical truth lives in the system documentation under [`/documents`](./documents/INDEX.md); implementation history lives in Git.
 
-The repository is a clean-room rebuild. The archived `Elara-Companion-current` repository is reference material only: use it for lessons, feature history, and proven UX ideas, but do not migrate its architecture, source layout, compatibility layers, or legacy execution paths.
+## Architecture at a glance
 
-Primary runtime target: Android portrait. Desktop is secondary.
-
-**Canonical UI body: 9:16 Android portrait.** Other viewports adapt from this reference geometry.
-
-Canonical spine:
-
-Android portrait UI → conversation state → one canonical Gemini Interactions provider → normalized streaming events → local persistence.
-
-## Non-negotiable rules
-
-1. One canonical Gemini execution path. Never add a legacy `generateContent` fallback or a second Gemini client/provider.
-2. Use Google's current Gemini Interactions API through `@google/genai`.
-3. Model settings are capability-driven. Never expose or send unsupported controls or fields.
-4. UI must not construct raw Gemini requests, own persistence, manage OAuth internals, or handle secrets.
-5. Keep modules small and responsibility-focused; no monolithic managers/services.
-6. Android portrait comes first.
-7. External data crossing trust boundaries must be validated.
-8. Provider/network failures must become explicit diagnosable states; no endless spinner.
-9. One authoritative persistence store per domain.
-10. Build vertically; later capabilities must not block proof of core chat.
-11. Direct commits to `main` are normal. Do not leave pull requests open.
-12. CI must be green before a milestone is called complete.
-13. Revalidate live Node/npm/package/SDK/CLI/GitHub Action choices before use.
-14. Use `npx` for one-shot upstream CLIs with current documented `@latest` entry points.
-15. Never invent a lockfile; generate it with npm from the actual dependency graph.
-16. Interface vectors should be repository-owned SVG assets or clean open-source paths; core UI chrome must not depend on remote raster images.
-17. Remote Google Fonts are a progressive enhancement; the UI must retain a usable system fallback when the network is unavailable.
+Normal interactive chat runs in the browser through `src/gemini/provider.ts` using `@google/genai`. The Gemini API credential is recovered from the application's local Lockbox.
 
-## Future architecture requirements
+Google Workspace authorization has two supported self-hosted modes. Without a paired Worker, authorization uses browser-side Google Identity Services and is interactive-only. With the user's own paired Worker, GIS popup authorization-code flow exchanges through that Worker into an encrypted `GoogleOAuthVault`; refresh tokens stay in the Worker and the browser receives only short-lived access tokens. The Worker remains a separate execution plane and is not the normal interactive-chat provider.
 
-Tool calling is a curated application capability surface. Model-visible schemas are explicit allow-listed declarations; actual execution occurs in validated application services. Tool schemas never contain secrets. Google Workspace capabilities use the single OAuth authority, centralized scope checks, diagnostics, and future write confirmation.
+The React application is composed from `src/main.tsx` and `src/app/App.tsx`. Domain systems own their contracts, and persistence is authoritative per domain rather than duplicated across UI/provider layers.
 
-The character has a dedicated master system-instruction source containing durable identity, personality, roleplay behavior, style, and rules. It is separate from user messages, ordinary conversation history, and tool schemas. Prompt 27 now provides the production creative-context instruction.
+For the code-verified map, read [`documents/architecture.md`](./documents/architecture.md).
 
-Long-term notes/memory are a separate retrievable domain for notable events and past experiences. Ordinary conversation history is not automatically permanent memory. This preserves important experiences when model context windows turn over without creating a giant memory manager.
+## Documentation
 
-Never combine provider calls, stream parsing, tool execution, Workspace access, character prompting, memory retrieval, persistence, diagnostics, and presentation into one manager/service/runtime.
+Agents should start with [`documents/manifest.json`](./documents/manifest.json), which routes source paths and keywords to stable system IDs and canonical documents. [`documents/INDEX.md`](./documents/INDEX.md) is the human navigation/index and defines the documentation format and maintenance rules. [`AGENTS.md`](./AGENTS.md) is the short operational contract for coding agents.
 
-## Google Workspace orchestration direction
+Canonical technical documentation lives under `/documents`. Historical pass/status/roadmap material was retired after current facts were consolidated; use Git history when implementation chronology is genuinely needed. Do not create a second documentation root. `npm run docs:check` validates the manifest, canonical tree, routed source paths, local documentation links and legacy-documentation exclusions.
 
-Google Workspace is not being implemented as a collection of generic CRUD adapters. Calendar, Tasks, Gmail, Docs, and Chat are independent service boundaries feeding a future orchestration/Kanban layer.
+## Local development
 
-Calendar and Tasks receive special emphasis because the eventual Kanban system will let Elara manage work conversationally while the user retains a direct visual overview. Task hierarchy/position and Calendar event movement/partial updates therefore remain first-class operations rather than being collapsed into generic update calls.
+Requires Node.js 24 or newer.
 
-Gmail is equally important for orchestration. Message search, thread inspection, labels, label modifications, trash/untrash, drafts, and sending are separate operational concepts. Consequential operations remain subject to OAuth capability checks and the per-action write-confirmation layer.
+```sh
+npm ci
+cp .env.example .env.local
+npm run dev
+```
 
-The future Kanban/orchestration layer must consume normalized, auditable operation records from these services. It must not own Google OAuth, provider endpoint logic, or service-specific credential handling.
+Create your own Google Web OAuth client if Google Workspace integration is required and set its public client ID as `VITE_GOOGLE_CLIENT_ID`. The authorized JavaScript origin must match the origin from which your PWA runs. Google OAuth client IDs are public browser configuration, not secrets.
 
-## Deployment architecture
+Do not put the Gemini API key in a `VITE_*` environment variable. Configure it through the application's Lockbox UI. The normal browser provider reads it from the Lockbox at runtime.
 
-Elara is a Vite application and should be published to GitHub Pages as built static output, not by serving the source repository root.
+Local PDF generation uses BusyTeX assets. Prepare them only when working on that feature:
 
-Canonical deployment path:
+```sh
+npm run busytex:prepare
+```
 
-`main` → GitHub Actions build → `dist/` artifact → GitHub Pages
+The runtime asset policy for that compiler is documented locally in [`public/core/README.md`](./public/core/README.md).
 
-When Pages is enabled, use **Settings → Pages → Source → GitHub Actions**. The deployment workflow should build the application and publish only the generated `dist` directory. Do not create a `gh-pages` source branch merely to hold compiled output.
+## Optional self-hosted Worker
 
-For the project-site URL form `https://<owner>.github.io/<repo>/`, Vite requires the corresponding repository base path in its build configuration. For a user/organization site or custom domain at the domain root, `/` is appropriate.
+The Worker is optional for ordinary browser chat and interactive-only Google authorization. It is required for durable Google refresh authorization, cloud autonomy and later unattended/orchestrated Workspace execution.
 
-## 50-prompt roadmap
+Each deployment owner configures their own Worker. At minimum, replace `ALLOWED_ORIGINS` in `worker/wrangler.toml` with the exact origin of your hosted PWA. For durable Google OAuth, configure the same Web OAuth client ID used by `VITE_GOOGLE_CLIENT_ID`, then provision the secret material on your own Worker:
 
-1. Repository Forensics
-2. Product Boundary
-3. Technical Architecture
-4. System Boundaries
-5. Gemini Integration Strategy
-6. Current Gemini Model Registry
-7. Gemini Settings Engine
-8. Streaming Architecture
-9. Thinking Display
-10. Conversation Data Model
-11. Local Persistence
-12. API Lockbox
-13. Gemini Credential Architecture
-14. Mobile-First Shell
-15. ChatGPT-Style Composer
-16. Voice-to-Text
-17. Attachment System
-18. Image Input
-19. Document Input
-20. Character Portrait
-21. Appearance System
-22. Performance Budget
-23. Modular Code Rules
-24. Testing Strategy
-25. Minimal Vertical Slice
-26. Gemini Safety Policy
-27. Creative-Context System Instruction
-28. Gemini Request Contract
-29. Provider Error Normalization
-30. HTTP Diagnostic Console
-31. Developer Diagnostics UI
-32. Request Timing and Timeout System
-33. Retry Policy
-34. Request Lifecycle State Machine
-35. Analytics Architecture
-36. Analytics Dashboard
-37. Google OAuth Architecture
-38. Google Scope Registry
-39. Incremental Authorization
-40. Stay Connected Semantics
-41. Google OAuth Settings UI
-42. Google Calendar Service
-43. Google Tasks Service
-44. Google Docs Service
-45. Google Chat Service
-46. Google Tool Boundary
-47. Google Write Confirmation
-48. OAuth Failure Diagnostics
-49. Gemini Native Background Execution
-50. End-to-End Reliability Gate
+```text
+GOOGLE_OAUTH_CLIENT_ID     same public client id as VITE_GOOGLE_CLIENT_ID
+GOOGLE_OAUTH_CLIENT_SECRET Google Web OAuth client secret
+GOOGLE_OAUTH_VAULT_KEY     high-entropy private vault key, at least 32 characters
+ELARA_INSTALLATION_TOKEN   private installation credential used for pairing/admission
+```
 
-## Milestones
+Use Wrangler secret management for secret values; do not commit them to the repository. The browser pairing flow stores the installation credential in its protected device-local credential store rather than pairing JSON/localStorage.
 
-Prompts 1–4 complete.
+The Pages origin and Worker configuration are per deployment. A fork must not reuse another person's OAuth client secret, installation token, vault key or Worker origin allowlist.
 
-Prompts 5–7 complete: canonical Gemini strategy, live model registry, capability-driven settings.
+## Verification
 
-Prompts 8–12 complete: canonical streaming architecture, thinking-summary display boundary, minimal conversation data model, Dexie/IndexedDB persistence boundary, and API Lockbox.
+Use focused checks while iterating. Before repository work is called complete, run the broad gate in this order:
 
-Prompts 13–17 complete as foundation contracts: credential architecture, Android-portrait shell, composer behavior, voice capability boundary, and attachment lifecycle.
+```sh
+npm run docs:check
+npm run lint
+npm run typecheck
+npm test
+npm run test:workers
+npm run build
+npx playwright test --project=chromium --project=android-portrait --project=onboarding
+npm run reliability:check
+```
 
-Prompts 18–22 complete as foundation contracts: image input, PDF/document input, character portrait, appearance system, and mobile performance budget.
+CI is the release authority. If the current environment cannot execute Playwright, report that limitation explicitly rather than treating discovery or static inspection as browser execution. Additional focused verification includes `npm run verify:artifact-assets`, `npm run verify:worker` and `npm run typecheck:e2e`.
 
-Prompts 23–24 complete: modular code rules and layered testing strategy.
+## Core invariants
 
-Prompt 25 complete: first executable Vite/React vertical slice with a mobile-first shell, application turn boundary, normalized demo streaming events, Dexie persistence, unit test, and Playwright smoke test. The demo transport is explicitly non-Gemini and temporary; it does not create a second Gemini path.
+One canonical Gemini execution path: interactive chat uses the browser Interactions provider; do not add a legacy `generateContent` fallback or a competing chat provider. Model settings must remain capability-driven. UI components do not own raw provider requests, OAuth mechanics, credentials or database implementation. External data is validated at trust boundaries. Provider/network failures become explicit states rather than endless loading. Each domain has one authoritative state owner even when the application uses more than one physical IndexedDB/Dexie database.
 
-Prompt 26 complete: safety policy and enforcement boundaries. Custom safety settings are not exposed because the current Interactions API does not support custom safety settings.
+Credentials stay behind their owning security boundary. Tool schemas never contain secrets. Google Workspace operations pass through the centralized capability/OAuth boundary and consequential mutations use the shared confirmation policy. A durable Google grant is credential availability, not autonomous permission. Cloud/autonomy execution must not silently redefine the normal browser-chat architecture.
 
-Prompt 27 complete: production creative-context master system instruction for Elara, stored separately from ordinary conversation content, tool schemas, and future memory notes.
+Documentation follows [`AGENTS.md`](./AGENTS.md): durable current facts belong in the owning `/documents/<system>.md`; chronology belongs in Git. Direct `main` writes are allowed when no concurrent workstream depends on a stable base. During concurrent agent/PR work, use a short-lived branch and do not move, close or rewrite another workstream. Stale or superseded pull requests should not be left open.
 
-Prompts 28–32 complete: canonical Gemini request contract, normalized provider-error model, safe HTTP diagnostics contract, developer diagnostics presentation contract, and request timing/timeout contract.
+## Deployment
 
-Prompts 33–37 complete as foundation contracts: bounded retry policy, explicit request lifecycle state machine, privacy-conscious analytics architecture, aggregate analytics dashboard contract, and one-authority Google OAuth architecture.
+The web application is static Vite output deployed to the host chosen by the user; this repository uses GitHub Pages through GitHub Actions:
 
-Prompts 38–42 complete: central Google scope registry, demand-driven incremental authorization, stay-connected state semantics, Google OAuth settings UI contract, and the first concrete Google Calendar service boundary plus contract test.
+```text
+main -> CI/build -> dist/ -> GitHub Pages
+```
 
-Prompts 43–47 complete: granular Google Tasks service, focused Docs service, Google Chat service, orchestration-critical Gmail service, explicit model-visible Google tool registry, and a bounded write-confirmation policy for consequential operations.
+The optional Cloudflare Worker is a separate self-hosted boundary with its own configuration, Durable Objects and secrets. Pairing the PWA to that Worker enables durable Google authorization and cloud features without turning the Worker into the normal browser Gemini provider.
 
-Prompts 48–50 complete: structured Google OAuth failure diagnostics, native Gemini Interactions background-execution contract, and an enforceable final reliability gate covering architecture invariants plus lint/typecheck/unit/build/E2E CI.
+## License and third-party assets
 
-## Runtime status
-
-The first executable vertical slice exists. It proves the application plumbing with a deterministic demo transport:
-
-Android-first UI → application turn boundary → normalized stream events → local persistence.
-
-The demo transport is temporary test/demo infrastructure, not an alternate Gemini implementation. The production provider remains the single canonical Gemini Interactions adapter and will enter through the same application-facing turn boundary.
-
-The repository does not contain a fabricated `package-lock.json`. Until a real lockfile is generated from npm and committed, CI uses `npm install`. Once a genuine lockfile exists, CI should switch to lockfile-aware caching and `npm ci`.
-
-## Google Workspace status
-
-Workspace access is architecturally connected through one OAuth authority. Calendar, Tasks, Docs, Chat, and Gmail each have focused service boundaries. The model-visible Google tool surface is explicitly allow-listed, with OAuth capability mapping and separate write-confirmation classification. Gmail and Tasks are treated as especially important orchestration inputs because the future Kanban layer will need fine-grained task movement/state and email workflow control.
-
-Gemini native background execution is now defined as another lifecycle around the same canonical provider boundary. Long-running work can be represented by a server-side interaction reference and later surfaced to orchestration/Kanban without creating a second model client.
-
-## UI implementation plan
-
-The detailed UI contract lives in [`docs/UI_IMPLEMENTATION_PLAN.md`](docs/UI_IMPLEMENTATION_PLAN.md). The implementation is intentionally split into eight passes so each layer can be tested independently instead of creating one oversized UI component.
-
-### Pass 1 — Foundation and geometry
-
-Build the 9:16 Android reference canvas, black/deep-charcoal visual base, restrained blue/pink piping, white type, safe-area handling, design tokens, glass surfaces, left control spine, Elara landscape banner frame, horizontally scrolling quick-action rail, conversation region, and composer frame. Settings becomes a separate screen with a left-bound vertical navigation carousel and right-side detail surface. The API Lockbox is given its permanent Settings home now.
-
-### Pass 2 — Elara portrait system
-
-Implement the canonical landscape banner, 1×–3× presentation scaling, collapse-to-avatar transition while utility surfaces are open, restoration to the previous scale, and configurable ambient background hooks.
-
-### Pass 3 — Conversation surface
-
-Implement AI-dominant message presentation, empty-chat composition, grouped messages, timestamps, execution/thinking summaries with expansion controls, and reliable conversation scrolling. **Completed.**
-
-### Pass 4 — Android composer and keyboard behavior
-
-Implement multiline text, send, voice-to-text, attachment entry points, focus management, visual-viewport/IME handling, latest-message visibility and stable scrolling while the Android keyboard is open. **Implemented as the current UI milestone:** bounded auto-growing multiline input, Enter/Shift+Enter behavior, explicit cancellation, VisualViewport-driven shell sizing, progressive VirtualKeyboard geometry updates, and latest-message stick-to-bottom behavior. Attachment and voice controls remain capability entry points until their dedicated runtime passes are wired.
-
-### Pass 5 — Sidebar menu and chat threads
-
-Implement persisted threads, first-message theme generation, 3–10 word AI-generated thread titles, thread selection, new chat, and future archive/rename/delete/search semantics.
-
-### Pass 6 — Quick-action rail
-
-Implement configurable Calendar, Tasks, Gmail and future Workspace quick actions. Actions dispatch application capabilities and display results without injecting canned user messages into the visible chat.
-
-### Pass 7 — Visual polish and motion
-
-Tune typography, glass, piping, icon geometry, portrait composition, pressed/focus states, motion, reduced-motion behavior, accessibility contrast and touch targets.
-
-### Pass 8 — Physical-device reliability
-
-Test the deployed PWA on Android portrait hardware and representative viewport sizes. Exercise keyboard open/close, sidebar plus keyboard, long conversations, portrait scaling, Settings navigation, slow/offline font behavior and obscured-control failure modes.
-
-## UI design decisions
-
-### 9:16 is canonical
-
-The UI body is designed against a 9:16 portrait composition. It is not a claim that every Android device has exactly that ratio; it is the design reference used to establish hierarchy and spacing. Responsive rules adapt outward from this portrait body.
-
-### Portrait artwork is not the UI canvas
-
-Elara's artwork is approximately 4:5 portrait-oriented artwork contained inside a wider landscape presentation banner. The artwork must never dominate the text or determine the app's aspect ratio.
-
-### Sidebar menu
-
-The hamburger control opens the **sidebar menu** as a frosted/glass left-side surface. The sidebar hosts conversation threads and a Settings entry. The sidebar is an application surface, not a persistence or provider implementation.
-
-### Settings screen
-
-Settings is a separate screen. Its navigation is a vertically scrolling, left-bound carousel/list. Selecting an item leaves the selector visible on the left and renders the corresponding controls/details on the right for the remaining space. The API Lockbox is a dedicated security category.
-
-### Thread descriptions
-
-After the first meaningful message in a new conversation, Elara will generate a 3–10 word description/title for that thread. That generated metadata is stored as thread metadata; it is not inserted as a user-visible chat prompt.
-
-### Quick tools
-
-The top toolbar is horizontally scrollable rather than compressing all utilities into a cramped row. Calendar, Tasks, Gmail and other shortcuts execute application actions directly. No hidden canned prompt should appear in chat merely because a shortcut was pressed.
-
-## Typography and Google Fonts
-
-The UI intentionally offers a small curated set of Google-hosted font choices: **Inter**, **Manrope**, and **Outfit**. The built-in fonts are shipped locally as Latin-subset WOFF2 assets prepared during the build; custom Google Fonts remain an explicit opt-in external resource. The build path keeps normal chat typography independent of network availability.
-
-The custom-font path uses Google's documented CSS2 API and loads a user-supplied stylesheet only after it passes HTTPS/host/path validation. citeturn765993search1turn765993search2
-
-Local built-in font loading uses `font-display: swap` with system fallbacks so readable text remains available while assets load. citeturn533491search1turn533491search7
-
-The typography surface provides a live pangram preview and a 10–20px text-size control. Google recommends requesting only the styles and weights actually used so delivered font payloads remain small. citeturn765993search1
-
-## Vector policy
-
-Core interface graphics are SVG vectors owned by the repository, with small predictable path sets and consistent stroke geometry. This includes the hamburger, Settings, Calendar, Tasks, Mail, microphone, attachment, send, chevron and related UI symbols. The character portrait remains an independent artwork asset and is not forced into an SVG representation.
-
-## Engineering practices for the UI
-
-Keep feature components small and responsibility-focused. Presentation components receive explicit props and callbacks; they do not reach directly into Gemini, OAuth, IndexedDB, credentials, or diagnostics internals.
-
-Use semantic buttons, labels, focus states, visible keyboard navigation where relevant, sufficient touch targets, contrast-aware text, and `prefers-reduced-motion` support. Avoid fixed keyboard heights and fixed device dimensions.
-
-Keep application decisions outside JSX where possible. Do not hide business rules in CSS, giant event handlers, or sprawling effects. Prefer narrow typed contracts, explicit state machines where interaction is stateful, and validation at trust boundaries.
-
-Do not introduce a giant `UIManager`, `AppManager`, or generic `Utils` module to connect unrelated concerns. Keep provider, persistence, OAuth, security, diagnostics, portrait presentation, appearance, conversation, and Workspace services independently testable.
-
-## External-source revalidation rule
-
-Before changing Gemini, npm, Node, Google OAuth, Cloudflare Workers, GitHub Pages, GitHub Action, or Google Fonts surfaces, re-check current official documentation/release state. The generated `package-lock.json`, once dependencies are scaffolded, is authoritative for installed versions.
-
-Google's current Calendar documentation recommends narrowly focused scopes and distinguishes event read/write permissions; contextual incremental authorization is a current Google recommendation. Sensitive or restricted scopes can also require additional verification.
-
-The current Gemini Interactions documentation supports background execution, polling/reconnection, cancellation, and `previous_interaction_id` chaining after the prior interaction is no longer active.
-
-## Future-self handoff protocol
-
-Only a genuinely later context-loss iteration uses this protocol. It is not a current restart instruction.
-
-A future iteration must inspect README, architecture docs, git history, CI, and the actual source tree; determine the highest completed prompt from evidence; make changes; and leave equivalent evidence for the next iteration.
-
-Every completed prompt must record what changed, why, files, decisions, live facts verified, tests/lint/typecheck/build, CI result, failures/fixes, unresolved risks, exact commit SHA, and recommended next work.
-
-## Current implementation posture
-
-Build directly and incrementally. Do not recreate the archived architecture. Keep tool calling, Workspace integrations, character prompting, memory, persistence, diagnostics, attachments, appearance, background execution, and the canonical Gemini provider modular and independently testable.
-
-**Current UI milestone:** Pass 1 foundation, Pass 2 portrait presentation, Pass 3 conversation surface, and Pass 4 Android composer/IME foundation are implemented. The app now uses VisualViewport-derived metrics for the visible viewport, keeps the composer bounded and keyboard-safe, supports multiline drafts with explicit Enter/Shift+Enter semantics, provides cancellation during the active demo stream, and preserves latest-message visibility while the conversation changes. The attachment and voice controls remain entry points only until their dedicated capability implementations are wired. Physical-device keyboard validation remains part of Pass 8.
+Review [`documents/third-party-notices.md`](./documents/third-party-notices.md), the exact lockfile and bundled upstream notices before redistributing generated bundles or runtime assets.

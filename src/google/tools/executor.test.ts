@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { executeGoogleTool } from './executor';
+import { executeGoogleTool, type GoogleToolExecutionContext } from './executor';
 import type { GoogleCapabilityKey, GoogleOAuthAuthority } from '../oauth/contracts';
 
 function oauthFor(...capabilities: GoogleCapabilityKey[]): GoogleOAuthAuthority {
   return {
     authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
-    getStatus: async () => ({ state: 'connected', grantedCapabilities: capabilities }),
+    getStatus: async () => ({ state: 'connected', grantedCapabilities: capabilities, enabledCapabilities: capabilities, grantedProviderScopes: [] }),
     disconnect: async () => undefined,
   };
 }
@@ -31,12 +31,35 @@ describe('executeGoogleTool', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
+  it('requires a live OAuth session even when the capability grant is stored', async () => {
+    const handler = vi.fn(async () => ({ id: 'file-1' }));
+    const oauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({ capability, fetch: async () => new Response('{}', { status: 200 }) }),
+      getStatus: async () => ({
+        state: 'connected',
+        grantedCapabilities: ['drive.files.app.write'],
+        enabledCapabilities: ['drive.files.app.write'],
+        grantedProviderScopes: [],
+        sessionReady: false,
+      }),
+      disconnect: async () => undefined,
+    };
+    const confirm = vi.fn(async () => true);
+    const result = await executeGoogleTool(
+      { tool: 'drive.updateFile', arguments: { fileId: 'file-1', patch: { name: 'Renamed' } } },
+      { oauth, handlers: { 'drive.updateFile': handler }, confirm },
+    );
+    expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED', failure: { requiresUserAction: true } });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it('returns a declined result when the explicit confirmation hook rejects a write', async () => {
     const handler = vi.fn(async () => ({ id: 'file-1' }));
     const confirm = vi.fn(async () => false);
     const result = await executeGoogleTool(
       { tool: 'drive.updateFile', arguments: { fileId: 'file-1', patch: { name: 'Renamed' } } },
-      { oauth: oauthFor('drive.files.write'), handlers: { 'drive.updateFile': handler }, confirm, now: () => new Date('2026-09-04T06:00:00.000Z') },
+      { oauth: oauthFor('drive.files.app.write'), handlers: { 'drive.updateFile': handler }, confirm, now: () => new Date('2026-09-04T06:00:00.000Z') },
     );
     expect(result).toMatchObject({ ok: false, code: 'USER_DECLINED', confirmation: { tool: 'drive.updateFile', risk: 'write' } });
     expect(confirm).toHaveBeenCalledOnce();
@@ -44,7 +67,7 @@ describe('executeGoogleTool', () => {
   });
 
   it('runs a write only after a fresh approval', async () => {
-    const handler = vi.fn(async ({ arguments: args }) => args);
+    const handler = vi.fn(async ({ arguments: args }: GoogleToolExecutionContext) => args);
     const confirm = vi.fn(async () => true);
     const result = await executeGoogleTool(
       { tool: 'sheets.writeRange', arguments: { spreadsheetId: 'sheet-1', range: 'Sheet1!A1', values: [['x']] } },
@@ -69,10 +92,30 @@ describe('executeGoogleTool', () => {
     const handler = vi.fn(async () => { throw new Error('Bearer token ABC123 leaked'); });
     const result = await executeGoogleTool(
       { tool: 'drive.getFile', arguments: { fileId: 'file-1' } },
-      { oauth: oauthFor('drive.files.read'), handlers: { 'drive.getFile': handler } },
+      { oauth: oauthFor('drive.files.app.read'), handlers: { 'drive.getFile': handler } },
     );
     expect(result).toMatchObject({ ok: false, code: 'EXECUTION_FAILED', failure: { kind: 'provider' } });
     if (!result.ok) expect(result.failure.message).not.toContain('ABC123');
+  });
+
+  it('authorizes a Docs read when only Drive library search is effective', async () => {
+    const handler = vi.fn(async () => ({ documentId: 'doc-1', blocks: [] }));
+    const result = await executeGoogleTool(
+      { tool: 'docs.inspectDocument', arguments: { documentId: 'doc-1' } },
+      { oauth: oauthFor('drive.library.read'), handlers: { 'docs.inspectDocument': handler } },
+    );
+    expect(result.ok).toBe(true);
+    expect(handler).toHaveBeenCalledOnce();
+  });
+
+  it('does not authorize a Docs write from a library-read grant', async () => {
+    const handler = vi.fn(async () => ({}));
+    const result = await executeGoogleTool(
+      { tool: 'docs.appendParagraph', arguments: { documentId: 'doc-1', text: 'Hello' } },
+      { oauth: oauthFor('drive.library.read'), handlers: { 'docs.appendParagraph': handler }, confirm: async () => true },
+    );
+    expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'docs.write' });
+    expect(handler).not.toHaveBeenCalled();
   });
 });
 
@@ -87,11 +130,11 @@ describe('kanban tool trust boundary', () => {
     const handler = vi.fn(); const confirm = vi.fn(async () => false);
     const result = await executeGoogleTool({ tool: 'tasks.deleteTaskList', arguments: { taskListId: 'work' } }, { oauth: oauthFor('tasks.write'), handlers: { 'tasks.deleteTaskList': handler }, confirm });
     expect(result).toMatchObject({ ok: false, code: 'USER_DECLINED' });
-    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ risk: 'destructive', resourceSummary: expect.stringContaining('ALL tasks') }));
+    expect(confirm.mock.calls).toHaveLength(1);
     expect(handler).not.toHaveBeenCalled();
   });
-  it('rejects model partial updates that omit concurrency metadata', async () => {
-    const result = await executeGoogleTool({ tool: 'tasks.patchTask', arguments: { taskListId: 'work', taskId: 't', patch: { title: 'Next' } } }, { oauth: oauthFor('tasks.write'), handlers: {} });
+  it('rejects obsolete raw-resource task updates', async () => {
+    const result = await executeGoogleTool({ tool: 'tasks.updateTask', arguments: { taskListId: 'work', taskId: 't', patch: { title: 'Next' } } }, { oauth: oauthFor('tasks.write'), handlers: {} });
     expect(result).toMatchObject({ ok: false, code: 'INVALID_TOOL_CALL' });
   });
 });

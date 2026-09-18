@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "measuredFrom": "phase3-final-measurement@3efd0085",
+  "global": {
+    "lines": 64.14,
+    "statements": 58.73,
+    "functions": 54.21,
+    "branches": 53.44
+  },
+  "directories": {
+    "autonomy": { "lines": 94.35, "statements": 92.32, "functions": 91.28, "branches": 83.14 },
+    "chat": { "lines": 96.38, "statements": 93.16, "functions": 95.38, "branches": 84.03 },
+    "domain": { "lines": 97.34, "statements": 92.75, "functions": 92.30, "branches": 85.05 },
+    "gemini": { "lines": 87.83, "statements": 81.81, "functions": 80.85, "branches": 75.23 },
+    "media": { "lines": 89.00, "statements": 85.14, "functions": 89.47, "branches": 77.57 },
+    "memory": { "lines": 95.00, "statements": 91.41, "functions": 92.85, "branches": 79.77 },
+    "persistence": { "lines": 74.17, "statements": 69.84, "functions": 68.29, "branches": 61.14 }
+  },
+  "files": {
+    "src/autonomy/cloud/credential.ts": { "lines": 93.93, "statements": 94.59, "functions": 100.00, "branches": 75.00 },
+    "src/autonomy/cloud/pairing.ts": { "lines": 100.00, "statements": 95.77, "functions": 90.47, "branches": 81.63 },
+    "src/persistence/gemini-api-key.ts": { "lines": 91.12, "statements": 86.25, "functions": 85.33, "branches": 78.80 },
+    "src/chat/generation-sync.ts": { "lines": 92.98, "statements": 90.14, "functions": 94.44, "branches": 80.00 },
+    "src/gemini/provider.ts": { "lines": 86.76, "statements": 78.76, "functions": 72.97, "branches": 68.67 },
+    "src/media/playback/PlaybackProvider.tsx": { "lines": 95.61, "statements": 93.18, "functions": 92.30, "branches": 84.31 },
+    "src/memory/store.ts": { "lines": 97.05, "statements": 89.79, "functions": 92.30, "branches": 70.96 }
+  }
+}

@@ -8,6 +8,12 @@ const serviceNames: Record<StoredWorkspaceShortcut['service'], string> = {
   gmail: 'Gmail',
 };
 
+// Time acquisition is an event-side effect, not render data. Keeping it behind
+// this boundary prevents React render purity from accidentally owning the clock.
+function mutationTimestamp(): number {
+  return Date.now();
+}
+
 export function WorkspaceShortcutSettings() {
   const [shortcuts, setShortcuts] = useState<StoredWorkspaceShortcut[]>([]);
 
@@ -19,7 +25,7 @@ export function WorkspaceShortcutSettings() {
 
   async function toggle(shortcut: StoredWorkspaceShortcut, enabled: boolean) {
     const previous = shortcut;
-    const next = { ...shortcut, enabled, updatedAt: Date.now() };
+    const next = { ...shortcut, enabled, updatedAt: mutationTimestamp() };
     setShortcuts((current) => current.map((item) => item.id === next.id ? next : item));
     try {
       await workspaceShortcutStore.save(next);

@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KeyboardEvent } from 'react';
+import type { ChangeEvent, KeyboardEvent } from 'react';
 import { Icon } from '../../ui/icons';
 import type { ProviderStatus } from '../../domain/chat';
+import type { Attachment } from '../../domain/artifact';
+import { ImageAttachmentPreview } from './artifacts/ImageAttachmentPreview';
+import { DocumentAttachmentCard } from './artifacts/DocumentAttachmentCard';
+import './artifacts/artifact-preview.css';
 import { MarkdownReference } from './MarkdownReference';
 import { RecordingBanner } from './RecordingBanner';
 import { VttRecorder, shouldDiscardVttCapture, type VttRecordingState } from '../../vtt/recording';
@@ -9,9 +13,10 @@ import { insertTranscriptAtSelection } from '../../vtt/draft-insertion';
 import { transcribeVttCapture } from '../../vtt/transcription';
 import { transformVttTranscript, type VttTransformMode } from '../../vtt/transformation';
 import { DEFAULT_GEMINI_MODEL } from '../../gemini/contracts';
+import { composerEnterKeyHint, isComposerSendShortcut } from './composer-keys';
+import { useComposerAutosize } from './composer-autosize';
 import './composer.css';
 
-const MAX_HEIGHT = 132;
 const VTT_LONG_PRESS_MS = 300;
 
 type ComposerProps = {
@@ -22,9 +27,14 @@ type ComposerProps = {
   onDraftChange: (value: string) => void;
   onSend: () => void;
   onCancel: () => void;
+  attachments?: Attachment[];
+  onFilesSelected?: (files: FileList | null) => void;
+  onRemoveAttachment?: (id: string) => void;
+  /** Persisted preference; defaults to Enter = Send. */
+  enterToSend?: boolean;
 };
 
-export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, systemInstruction, onDraftChange, onSend, onCancel }: ComposerProps) {
+export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, systemInstruction, onDraftChange, onSend, onCancel, attachments = [], onFilesSelected, onRemoveAttachment, enterToSend = true }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const expandedTextareaRef = useRef<HTMLTextAreaElement>(null);
   const recorderRef = useRef<VttRecorder | null>(null);
@@ -37,7 +47,12 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   const vttLongPressTriggeredRef = useRef(false);
   const vttPressActiveRef = useRef(false);
   const vttModeControlRef = useRef<HTMLDivElement>(null);
+  const attachmentControlRef = useRef<HTMLDivElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
+  const documentInputRef = useRef<HTMLInputElement>(null);
   const [markdownOpen, setMarkdownOpen] = useState(false);
+  const [attachmentMenuOpen, setAttachmentMenuOpen] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const [vttState, setVttState] = useState<VttRecordingState>('idle');
   const [vttRms, setVttRms] = useState(0);
@@ -46,14 +61,10 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   const [vttTransformMode, setVttTransformMode] = useState<VttTransformMode>('raw');
   const [vttModeOpen, setVttModeOpen] = useState(false);
 
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea || expanded) return;
-    textarea.style.height = 'auto';
-    const nextHeight = Math.min(MAX_HEIGHT, Math.max(42, textarea.scrollHeight));
-    textarea.style.height = `${nextHeight}px`;
-    textarea.style.overflowY = textarea.scrollHeight > MAX_HEIGHT ? 'auto' : 'hidden';
-  }, [draft, expanded]);
+  // Autosize: grow to ~COMPOSER_VISIBLE_LINES lines, then scroll internally.
+  // The bound comes from the editor's own line-height, and the measurement is
+  // cached — no per-keystroke style recalculation beyond the text itself.
+  useComposerAutosize(textareaRef, draft, { enabled: !expanded });
 
   useEffect(() => {
     if (!expanded) return;
@@ -92,6 +103,22 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }, [vttModeOpen]);
 
   useEffect(() => {
+    if (!attachmentMenuOpen) return undefined;
+    function handleOutsidePointer(event: PointerEvent) {
+      if (!attachmentControlRef.current?.contains(event.target as Node)) setAttachmentMenuOpen(false);
+    }
+    function handleEscape(event: globalThis.KeyboardEvent) {
+      if (event.key === 'Escape') setAttachmentMenuOpen(false);
+    }
+    window.addEventListener('pointerdown', handleOutsidePointer);
+    window.addEventListener('keydown', handleEscape);
+    return () => {
+      window.removeEventListener('pointerdown', handleOutsidePointer);
+      window.removeEventListener('keydown', handleEscape);
+    };
+  }, [attachmentMenuOpen]);
+
+  useEffect(() => {
     if (!expanded) return;
     function handleEscape(event: globalThis.KeyboardEvent) {
       if (event.key === 'Escape' && !vttBusyForState(vttState)) setExpanded(false);
@@ -116,20 +143,26 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }, []);
 
   const vttBusy = vttState === 'requesting' || vttState === 'recording' || vttState === 'processing';
-  const composerLocked = status === 'streaming' || vttBusy;
+  const isStreaming = status === 'streaming';
+  const isSaving = status === 'saving';
+  const composerLocked = isStreaming || isSaving || vttBusy;
+  // The send button doubles as the stop button only while the provider is
+  // actively streaming. During terminal persistence the whole composer stays
+  // locked until the completed response is durably committed.
+  const sendDisabled = vttBusy || isSaving || (!isStreaming && !draft.trim() && attachments.length === 0);
+  const sendAriaLabel = isStreaming ? 'Cancel response' : isSaving ? 'Saving response' : 'Send message';
 
+  const canSend = !isStreaming && !isSaving && !vttBusy && (Boolean(draft.trim()) || attachments.length > 0);
+  const enterKeyHint = composerEnterKeyHint(enterToSend);
+
+  // Both composers share one Enter rule (see composer-keys.ts). Only the
+  // configured send shortcut is intercepted; every other Enter reaches the
+  // textarea so newlines behave natively.
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing) return;
-    if (status === 'streaming' || vttBusy || !draft.trim()) return;
+    if (!isComposerSendShortcut({ key: event.key, shiftKey: event.shiftKey, ctrlKey: event.ctrlKey, metaKey: event.metaKey, altKey: event.altKey, isComposing: event.nativeEvent.isComposing }, enterToSend)) return;
+    if (!canSend) return;
     event.preventDefault();
     onSend();
-  }
-
-  function handleExpandedKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
-    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey) && status !== 'streaming' && !vttBusy && draft.trim()) {
-      event.preventDefault();
-      onSend();
-    }
   }
 
   function transformModeLabel(): string {
@@ -143,7 +176,7 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
   }
 
   async function handleVtt(target: HTMLTextAreaElement | null): Promise<void> {
-    if (status === 'streaming') return;
+    if (isStreaming || isSaving) return;
     if (vttState === 'recording') {
       recorderRef.current?.stop();
       return;
@@ -232,17 +265,18 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
         if (mountedRef.current && vttSessionIdRef.current === sessionId) setVttState('idle');
       }, 1200);
     } finally {
-      if (vttSessionIdRef.current !== sessionId) return;
-      transcriptionAbortRef.current = null;
-      recorderRef.current = null;
-      vttTargetRef.current = null;
-      setVttRms(0);
-      setVttElapsed(0);
+      if (vttSessionIdRef.current === sessionId) {
+        transcriptionAbortRef.current = null;
+        recorderRef.current = null;
+        vttTargetRef.current = null;
+        setVttRms(0);
+        setVttElapsed(0);
+      }
     }
   }
 
   function beginVttPress(): void {
-    if (status === 'streaming') return;
+    if (isStreaming || isSaving) return;
     const target = currentVttTarget();
     if (!target) return;
     vttTargetRef.current = target;
@@ -350,6 +384,57 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
     return 'VTT voice input';
   }
 
+  function handleFileInput(event: ChangeEvent<HTMLInputElement>): void {
+    onFilesSelected?.(event.currentTarget.files);
+    event.currentTarget.value = '';
+    setAttachmentMenuOpen(false);
+  }
+
+  // The paperclip is the single home for the composer's secondary tools:
+  // attachment sources first, then the Markdown reference. Every action is
+  // represented by a Lucide icon plus its text label, so the menu stays legible
+  // at phone widths without a separate control stealing editor width.
+  function attachmentPicker() {
+    return <div className="composer__attachment-control" ref={attachmentControlRef}>
+      <button className="composer__icon" type="button" aria-label="Composer tools" aria-expanded={attachmentMenuOpen} aria-haspopup="menu" disabled={composerLocked} onClick={() => setAttachmentMenuOpen((open) => !open)}>
+        <Icon name="paperclip" size={19} />
+      </button>
+      {attachmentMenuOpen && <div className="composer__attachment-menu" role="menu" aria-label="Composer tools">
+        <p className="composer__attachment-menu-title" role="presentation">ATTACH</p>
+        <button type="button" role="menuitem" aria-label="Camera: take a photo" title="Take a photo" onClick={() => cameraInputRef.current?.click()}>
+          <Icon name="camera" size={18} />
+          <span className="composer__attachment-menu-text"><span>Camera</span><small>Take a photo</small></span>
+        </button>
+        <button type="button" role="menuitem" aria-label="Photos / Gallery: choose an image" title="Choose an image" onClick={() => galleryInputRef.current?.click()}>
+          <Icon name="image" size={18} />
+          <span className="composer__attachment-menu-text"><span>Photos / Gallery</span><small>Choose an image</small></span>
+        </button>
+        <button type="button" role="menuitem" aria-label="File / Document: choose a document" title="Choose a document" onClick={() => documentInputRef.current?.click()}>
+          <Icon name="docs" size={18} />
+          <span className="composer__attachment-menu-text"><span>File / Document</span><small>Choose a document</small></span>
+        </button>
+        <p className="composer__attachment-menu-title" role="presentation">COMPOSE</p>
+        <button type="button" role="menuitem" aria-label="Markdown reference" title="Open the Markdown formatting reference" onClick={() => { setAttachmentMenuOpen(false); setMarkdownOpen((open) => !open); }}>
+          <Icon name="markdown" size={18} />
+          <span className="composer__attachment-menu-text"><span>Markdown</span><small>Formatting reference</small></span>
+        </button>
+      </div>}
+      <input ref={cameraInputRef} className="composer__file-input" type="file" accept="image/*" capture="environment" aria-label="Take a photo" onChange={handleFileInput} />
+      <input ref={galleryInputRef} className="composer__file-input" type="file" accept="image/*" multiple aria-label="Choose photos" onChange={handleFileInput} />
+      <input ref={documentInputRef} className="composer__file-input" type="file" accept="application/pdf,text/plain,text/markdown,application/json,text/csv,application/javascript,text/javascript,text/css,text/html,application/xml,text/xml" multiple aria-label="Choose a file or document" onChange={handleFileInput} />
+    </div>;
+  }
+
+  function attachmentPreviews() {
+    if (!attachments.length) return null;
+    return <div className="composer__attachments artifact-list" aria-label="Selected attachments">
+      {attachments.map((attachment) => attachment.kind === 'image'
+        ? <ImageAttachmentPreview key={attachment.id} attachment={attachment} compact onRemove={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined} />
+        : <DocumentAttachmentCard key={attachment.id} attachment={attachment} onRemove={onRemoveAttachment ? () => onRemoveAttachment(attachment.id) : undefined} />)}
+      {attachments.some((attachment) => attachment.kind === 'image') && <p className="composer__attachment-hint">Send the image first, then choose <strong>Extract text</strong> on its message artifact.</p>}
+    </div>;
+  }
+
   if (expanded) {
     return <>
       <section className="composer-expanded" role="dialog" aria-modal="true" aria-label="Expanded message editor">
@@ -363,29 +448,26 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
           </button>
         </header>
         {banner}
+        {attachmentPreviews()}
         <textarea
           ref={expandedTextareaRef}
           className="composer-expanded__textarea"
           aria-label="Expanded message"
           value={draft}
           onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={handleExpandedKeyDown}
+          onKeyDown={handleKeyDown}
           placeholder="Write your message…"
           disabled={composerLocked}
+          enterKeyHint={enterKeyHint}
           autoFocus
         />
         {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}
         <footer className="composer-expanded__footer">
-          <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
-            <Icon name="markdown" size={20} />
-          </button>
-          <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
-            <Icon name="paperclip" size={19} />
-          </button>
+          {attachmentPicker()}
           <div className="composer-expanded__spacer" />
           {vttControl(expandedTextareaRef)}
-          <button className="composer__send" type="button" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()} onClick={() => { if (status === 'streaming') onCancel(); else onSend(); }}>
-            <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
+          <button className={`composer__send${isStreaming ? ' is-cancel' : ''}`} type="button" aria-label={sendAriaLabel} disabled={sendDisabled} onClick={() => { if (isStreaming) onCancel(); else if (!isSaving) onSend(); }}>
+            <Icon name={isStreaming ? 'close' : 'send'} size={19} />
           </button>
         </footer>
       </section>
@@ -395,22 +477,18 @@ export function Composer({ draft, status, geminiModel = DEFAULT_GEMINI_MODEL, sy
 
   return <>
     {banner}
-    <form className="composer" onSubmit={(event) => { event.preventDefault(); if (status === 'streaming') onCancel(); else onSend(); }}>
-      <button className="composer__icon composer__markdown" type="button" aria-label="Markdown reference" aria-expanded={markdownOpen} disabled={composerLocked} onClick={() => setMarkdownOpen((open) => !open)}>
-        <Icon name="markdown" size={20} />
-      </button>
-      <button className="composer__icon" type="button" aria-label="Attach image or document" disabled={composerLocked}>
-        <Icon name="paperclip" size={19} />
-      </button>
+    {attachmentPreviews()}
+    <form className="composer" onSubmit={(event) => { event.preventDefault(); if (isStreaming) onCancel(); else if (!isSaving) onSend(); }}>
+      {attachmentPicker()}
       <div className="composer__input-wrap">
-        <textarea ref={textareaRef} aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint="send" />
+        <textarea ref={textareaRef} className="composer__input" aria-label="Message Elara" value={draft} onChange={(event) => onDraftChange(event.target.value)} onKeyDown={handleKeyDown} placeholder="Message Elara…" rows={1} disabled={composerLocked} enterKeyHint={enterKeyHint} />
         <button className="composer__expand" type="button" aria-label="Expand message editor" onClick={() => setExpanded(true)} disabled={composerLocked}>
           <Icon name="expand" size={15} />
         </button>
       </div>
       {vttControl(textareaRef)}
-      <button className="composer__send" type="submit" aria-label={status === 'streaming' ? 'Cancel response' : 'Send message'} disabled={composerLocked || !draft.trim()}>
-        <Icon name={status === 'streaming' ? 'close' : 'send'} size={19} />
+      <button className={`composer__send${isStreaming ? ' is-cancel' : ''}`} type="submit" aria-label={sendAriaLabel} disabled={sendDisabled}>
+        <Icon name={isStreaming ? 'close' : 'send'} size={19} />
       </button>
     </form>
     {vttMessage && <div className="composer__vtt-status" role="status" aria-live="polite">{vttMessage}</div>}

@@ -1,5 +1,6 @@
 import type { NormalizedProviderError } from './errors';
 import type { EffectiveGeminiSettings } from './settings-engine';
+import type { MediaItem, MediaProviderId } from '../domain/media';
 
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
@@ -12,6 +13,14 @@ export type GeminiStreamEvent =
   | { type: 'thought-summary-delta'; index: number; text: string }
   | { type: 'thought-signature'; index: number; signature: string }
   | { type: 'step-stop'; index: number }
+  /** Application-owned activity outside the provider's reasoning/tool steps. */
+  | { type: 'context-activity'; category: 'memory' | 'artifacts' | 'other'; label: string; detail?: string; durationMs: number; outcome: 'used' | 'empty' | 'unavailable' | 'completed' }
+  | { type: 'artifact-created'; artifactId: string; status: string; mimeType: string; toolName?: string; operationId?: string }
+  /**
+   * Resolved media from a media tool call. Carries the structured items directly
+   * so the card is driven by data, never by parsing the assistant's prose.
+   */
+  | { type: 'media-resolved'; provider: MediaProviderId; queries: readonly string[]; items: readonly MediaItem[] }
   | { type: 'completed'; interactionId: string; status: string; durationMs: number; usage?: GeminiUsage }
   | { type: 'cancelled'; interactionId?: string }
   | { type: 'failed'; error: NormalizedProviderError }
@@ -28,10 +37,30 @@ export interface GeminiToolResult {
 export interface GeminiTurnRequest {
   model: string;
   input: string;
+  /** Stable local artifact IDs; provider adapters resolve binary data. */
+  attachments?: readonly string[];
   previousInteractionId?: string;
   generationConfig?: EffectiveGeminiSettings;
   systemInstruction?: string;
   tools?: readonly string[];
+  /**
+   * Application-owned turn provenance. These identifiers are never provider
+   * arguments; local mutation handlers use them to bind durable effects to the
+   * exact conversation and originating user message that elected this turn.
+   */
+  conversationId?: string;
+  inputMessageId?: string;
+  /**
+   * Memory context composition mode. `'thread'` (default, interactive chat)
+   * appends the active thread's durable-memory projection inside the provider
+   * boundary. `'none'` passes the caller's system instruction through
+   * verbatim — used by non-chat callers (autonomous routine runs) that own
+   * their own memory scoping.
+   */
+  memoryContext?: 'thread' | 'none';
+  /** Existing app generation arbiter context for artifact-producing work. */
+  generationId?: string;
+  isGenerationActive?: () => boolean;
 }
 
 export interface GeminiToolContinuationRequest {

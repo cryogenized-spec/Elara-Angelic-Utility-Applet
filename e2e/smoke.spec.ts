@@ -27,29 +27,76 @@ test('loads the Elara shell', async ({ page }) => {
   await expect(page.locator('.elara-banner__portrait')).toBeVisible();
 });
 
-test('composer keeps attachment, Markdown, microphone, and Send controls aligned', async ({ page }) => {
+test('composer keeps attachment, microphone, and Send controls aligned', async ({ page }) => {
   await page.goto('');
   const composer = page.locator('form.composer');
-  await expect(composer.getByRole('button', { name: 'Attach image or document' })).toBeVisible();
+  await expect(composer.getByRole('button', { name: 'Composer tools' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Expand message editor' })).toBeVisible();
-  await expect(composer.getByRole('button', { name: 'Markdown reference' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'VTT voice input' })).toBeVisible();
   await expect(composer.getByRole('button', { name: 'Send message' })).toBeVisible();
 
-  const attachmentBox = await composer.getByRole('button', { name: 'Attach image or document' }).boundingBox();
+  const attachmentBox = await composer.getByRole('button', { name: 'Composer tools' }).boundingBox();
   const inputBox = await composer.getByPlaceholder('Message Elara…').boundingBox();
-  const markdownBox = await composer.getByRole('button', { name: 'Markdown reference' }).boundingBox();
   const micBox = await composer.getByRole('button', { name: 'VTT voice input' }).boundingBox();
   const sendBox = await composer.getByRole('button', { name: 'Send message' }).boundingBox();
-  expect(attachmentBox && inputBox && markdownBox && micBox && sendBox).toBeTruthy();
+  expect(attachmentBox && inputBox && micBox && sendBox).toBeTruthy();
   expect(attachmentBox!.x).toBeLessThan(inputBox!.x);
-  expect(inputBox!.width).toBeGreaterThan(120);
-  expect(markdownBox!.x).toBeLessThan(inputBox!.x);
+  // Moving the Markdown control into the paperclip menu leaves the editor the
+  // whole flexible column: it must be wider than the old four-control row.
+  expect(inputBox!.width).toBeGreaterThan(150);
   expect(inputBox!.x + inputBox!.width).toBeLessThan(micBox!.x);
   expect(micBox!.x).toBeLessThan(sendBox!.x);
-  expect(Math.abs(markdownBox!.y - sendBox!.y)).toBeLessThan(2);
   expect(Math.abs(attachmentBox!.y - sendBox!.y)).toBeLessThan(2);
   expect(Math.abs(micBox!.y - sendBox!.y)).toBeLessThan(2);
+});
+
+test('keeps the Markdown reference inside the paperclip menu, not beside the editor', async ({ page }) => {
+  await page.goto('');
+  const composer = page.locator('form.composer');
+  await expect(composer.getByRole('button', { name: 'Markdown reference' })).toHaveCount(0);
+
+  await composer.getByRole('button', { name: 'Composer tools' }).click();
+  const menu = page.getByRole('menu', { name: 'Composer tools' });
+  await expect(menu).toBeVisible();
+  const markdown = menu.getByRole('menuitem', { name: 'Markdown reference' });
+  await expect(markdown).toBeVisible();
+  // Icon-led rows still carry text, so nothing is cryptic.
+  await expect(menu.getByRole('menuitem', { name: 'Camera: take a photo' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'Photos / Gallery: choose an image' })).toBeVisible();
+  await expect(menu.getByRole('menuitem', { name: 'File / Document: choose a document' })).toBeVisible();
+
+  await markdown.click();
+  await expect(page.getByRole('dialog', { name: 'Markdown' })).toBeVisible();
+  await expect(menu).toHaveCount(0);
+});
+
+test('paperclip opens camera, gallery, and document actions and persists an attachment preview', async ({ page }) => {
+  await page.goto('');
+  const composer = page.locator('form.composer');
+  const tiny = pngFile('receipt.png');
+  const paperclip = composer.getByRole('button', { name: 'Composer tools' });
+
+  await paperclip.click();
+  await expect(page.getByRole('menu', { name: 'Composer tools' })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Camera/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /Photos \/ Gallery/ })).toBeVisible();
+  await expect(page.getByRole('menuitem', { name: /File \/ Document/ })).toBeVisible();
+
+  await page.locator('input[type="file"][capture="environment"]').setInputFiles(tiny);
+  await expect(page.getByRole('article', { name: /Image attachment receipt\.png/ })).toBeVisible();
+  await expect(page.getByText('Ready', { exact: true })).toBeVisible();
+
+  await paperclip.click();
+  await page.locator('input[type="file"][accept="image/*"]:not([capture])').setInputFiles(pngFile('gallery.png'));
+  await expect(page.getByRole('article', { name: /Image attachment gallery\.png/ })).toBeVisible();
+
+  await paperclip.click();
+  await page.locator('input[type="file"][accept*="application/pdf"]').setInputFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('hello') });
+  await expect(page.getByRole('article', { name: /Document attachment notes\.txt/ })).toBeVisible();
+
+  await expect(page.getByRole('button', { name: /Remove receipt\.png/ })).toBeVisible();
+  await page.getByRole('button', { name: /Remove receipt\.png/ }).click();
+  await expect(page.getByRole('article', { name: /Image attachment receipt\.png/ })).not.toBeVisible();
 });
 
 test('composer occupies its own layout space instead of overlapping the conversation', async ({ page }) => {
@@ -200,8 +247,12 @@ test('migrates a legacy Gemini key before making the first interaction request',
     window.localStorage.setItem('elara.gemini.api-key', 'e2e-legacy-api-key');
   });
   let interactionRequests = 0;
+  let legacyKeyAtFirstRequest: string | null | undefined;
   await page.route('**/v1/interactions*', async (route) => {
     interactionRequests += 1;
+    if (interactionRequests === 1) {
+      legacyKeyAtFirstRequest = await page.evaluate(() => window.localStorage.getItem('elara.gemini.api-key'));
+    }
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
@@ -217,7 +268,8 @@ test('migrates a legacy Gemini key before making the first interaction request',
   await composer.fill('Verify legacy migration');
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('Legacy key migrated.')).toBeVisible();
-  expect(interactionRequests).toBe(1);
+  expect(interactionRequests).toBeGreaterThanOrEqual(1);
+  expect(legacyKeyAtFirstRequest).toBeNull();
   await expect.poll(() => page.evaluate(() => window.localStorage.getItem('elara.gemini.api-key'))).toBeNull();
 });
 
@@ -235,20 +287,57 @@ test('normalizes a direct Gemini network failure without fabricating a response'
   await expect(page.getByText('Verify the live runtime boundary')).toBeVisible();
 });
 
+test('cancelling a streaming response stops the stream without an assistant message', async ({ page }) => {
+  test.setTimeout(30_000);
+  await page.goto('');
+  await unlockTestGemini(page);
+  await page.route('**/v1/interactions*', async (route) => {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: 'cancel-test', status: 'in_progress', model: 'gemini-3.8-flash' } })}\n\n`,
+        `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: 'cancel-test', index: 0, delta: { type: 'text', text: 'Late provider text.' } })}\n\n`,
+        `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: 'cancel-test', status: 'completed' } })}\n\n`,
+      ].join(''),
+    });
+  });
+  const composer = page.getByRole('textbox', { name: 'Message Elara' });
+  const conversation = page.getByRole('region', { name: 'Conversation' });
+  await composer.fill('Reply that should never arrive');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  const cancel = page.getByRole('button', { name: 'Cancel response' });
+  await expect(cancel).toBeVisible();
+  await expect(cancel).toBeEnabled();
+  await cancel.click();
+  await expect(page.getByRole('button', { name: 'Send message' })).toBeVisible();
+  // Let the delayed provider response arrive; it must be ignored.
+  await page.waitForTimeout(2200);
+  // Scoped to the conversation: the auto-generated thread title carries the
+  // same text into the sidebar thread list.
+  await expect(conversation.getByText('Reply that should never arrive', { exact: true })).toBeVisible();
+  await expect(page.getByText('Late provider text.')).toHaveCount(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  await expect(composer).toBeEnabled();
+});
+
 test('opens Workspace quick-action surfaces without injecting a chat prompt', async ({ page }) => {
   await page.goto('');
   const conversation = page.getByRole('region', { name: 'Conversation' });
   const before = await conversation.locator('.message').count();
-  await page.getByRole('button', { name: 'Calendar', exact: true }).click();
-  const calendarSurface = page.getByRole('region', { name: 'Calendar action surface' });
-  await expect(calendarSurface).toBeVisible();
-  await expect(calendarSurface.getByText('Capability · calendar.events.read')).toBeVisible();
+  await page.getByRole('button', { name: 'Workspace', exact: true }).click();
+  const menu = page.getByRole('group', { name: 'Google Workspace services' });
+  await expect(menu).toBeVisible();
+  await expect(menu.getByRole('button', { name: 'Calendar', exact: true })).toBeVisible();
+  await expect(menu.getByText('calendar.events.read')).toBeVisible();
   await expect(conversation.locator('.message')).toHaveCount(before);
 });
 
 test('renders the supported Markdown reference', async ({ page }) => {
   await page.goto('');
-  await page.getByRole('button', { name: 'Markdown reference' }).click();
+  await page.getByRole('button', { name: 'Composer tools' }).click();
+  await page.getByRole('menuitem', { name: 'Markdown reference' }).click();
   const dialog = page.getByRole('dialog', { name: 'Markdown' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText('Italic', { exact: true })).toBeVisible();

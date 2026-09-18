@@ -38,16 +38,23 @@ interface GoogleIdentityServicesWithCode {
   };
 }
 
+/**
+ * Request a one-time Google authorization code through GIS popup UX.
+ *
+ * Popup mode deliberately does not accept or pass redirect_uri. Google defines
+ * the effective redirect URI as the calling page origin; the Worker exchange
+ * must use that same window.location.origin value. Keeping redirect selection
+ * out of this helper prevents a self-hosted Pages deployment from accidentally
+ * exchanging a code against another installation's origin.
+ */
 export async function requestGoogleAuthorizationCode(config: {
   clientId: string;
   scope: string;
-  redirectUri: string;
   state?: string;
   loginHint?: string;
   hostedDomain?: string;
 }): Promise<GoogleAuthorizationCodeResponse> {
   if (typeof window === 'undefined') throw new Error('Google authorization-code flow is unavailable outside a browser.');
-  if (!config.redirectUri.trim()) throw new Error('Google authorization-code redirect URI is required.');
 
   const google = await loadGoogleIdentityServices() as unknown as GoogleIdentityServicesWithCode;
   return new Promise<GoogleAuthorizationCodeResponse>((resolve, reject) => {
@@ -56,7 +63,6 @@ export async function requestGoogleAuthorizationCode(config: {
       scope: config.scope,
       include_granted_scopes: true,
       ux_mode: 'popup',
-      redirect_uri: config.redirectUri,
       ...(config.state ? { state: config.state } : {}),
       ...(config.loginHint ? { login_hint: config.loginHint } : {}),
       ...(config.hostedDomain ? { hd: config.hostedDomain } : {}),

@@ -1,10 +1,12 @@
 import { z } from 'zod';
 
 export const googleCapabilityKeySchema = z.enum([
+  'google.account',
   'calendar.events.read',
   'calendar.events.write',
   'calendar.list.read',
   'calendar.settings.read',
+  'calendar.freebusy.read',
   'tasks.read',
   'tasks.write',
   'docs.read',
@@ -15,8 +17,9 @@ export const googleCapabilityKeySchema = z.enum([
   'gmail.modify',
   'gmail.labels',
   'gmail.send',
-  'drive.files.read',
-  'drive.files.write',
+  'drive.files.app.read',
+  'drive.files.app.write',
+  'drive.library.read',
   'sheets.read',
   'sheets.write',
   'roleplay.world.local',
@@ -26,9 +29,21 @@ export type GoogleCapabilityKey = z.infer<typeof googleCapabilityKeySchema>;
 
 export interface AuthorizedGoogleRequest {
   readonly capability: GoogleCapabilityKey;
-  readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * Optional guard runs immediately before each real provider fetch, including
+   * a retry after token refresh. It must throw when the caller has lost the
+   * authority to perform the request.
+   */
+  readonly fetch: (input: RequestInfo | URL, init?: RequestInit, beforeProviderFetch?: () => void) => Promise<Response>;
 }
 
+/**
+ * The interactive browser-only authority uses disconnected/connected,
+ * partially-authorized and reauthorization-required. A paired self-hosted
+ * Worker may additionally surface token-recovery while its durable vault is
+ * temporarily unreachable. needs-consent/revoked remain available as explicit
+ * recovery states for future provider-state refinement.
+ */
 export type GoogleOAuthState =
   | 'disconnected'
   | 'connected'
@@ -40,7 +55,14 @@ export type GoogleOAuthState =
 
 export interface GoogleOAuthStatus {
   readonly state: GoogleOAuthState;
+  /** Effective capabilities: user-enabled (plus inferred reads) that the provider grant currently satisfies. */
   readonly grantedCapabilities: readonly GoogleCapabilityKey[];
+  /** Capabilities the user explicitly enabled in Elara. Writes are never inferred into this set. */
+  readonly enabledCapabilities: readonly GoogleCapabilityKey[];
+  /** Provider scopes actually returned by Google (GIS `scope` or durable code exchange equivalent). */
+  readonly grantedProviderScopes: readonly string[];
+  /** True only while a usable short-lived Google access token is live in browser memory. */
+  readonly sessionReady?: boolean;
   readonly account?: {
     readonly email: string;
     readonly displayName?: string;

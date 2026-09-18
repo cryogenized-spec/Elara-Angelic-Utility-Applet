@@ -8,7 +8,7 @@ async function request(url, init = {}) {
     return await fetch(url, { ...init, signal: controller.signal });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
-    throw new Error(`Worker request failed: ${detail}`);
+    throw new Error(`Worker request failed: ${detail}`, { cause: error });
   } finally {
     clearTimeout(timeout);
   }
@@ -32,10 +32,10 @@ async function main() {
   const headers = options.headers.get('access-control-allow-headers') || '';
   if (!headers.toLowerCase().includes('content-type')) throw new Error(`Worker preflight does not allow Content-Type: ${headers || '(missing)'}`);
 
-  console.log('Live Worker health and browser transport verification passed.');
+  process.stdout.write('Live Worker health and browser transport verification passed.\n');
 }
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
+  process.stderr.write(`${error instanceof Error ? error.message : error}\n`);
   process.exit(1);
 });

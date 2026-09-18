@@ -22,12 +22,27 @@ async function unlockTestGemini(page: import('@playwright/test').Page): Promise<
 
 test('regeneration creates navigable response variants for the same prompt', async ({ page }) => {
   const requests: Array<Record<string, unknown>> = [];
-  let generation = 0;
+  let assistantGeneration = 0;
+  let observerGeneration = 0;
   await page.route('**/v1/interactions*', async (route) => {
     const payload = JSON.parse(route.request().postData() ?? '{}') as Record<string, unknown>;
     requests.push(payload);
-    generation += 1;
-    await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse(`interaction-${generation}`, generation === 1 ? 'First generated answer.' : 'Second generated answer.') });
+    const input = typeof payload.input === 'string' ? payload.input : '';
+    if (input.startsWith('USER_MESSAGE:\n')) {
+      observerGeneration += 1;
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: sse(`observer-${observerGeneration}`, '{"candidates":[]}'),
+      });
+      return;
+    }
+    assistantGeneration += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: sse(`interaction-${assistantGeneration}`, assistantGeneration === 1 ? 'First generated answer.' : 'Second generated answer.'),
+    });
   });
 
   await page.goto('');
@@ -37,15 +52,19 @@ test('regeneration creates navigable response variants for the same prompt', asy
   await page.getByRole('button', { name: 'Send message' }).click();
   await expect(page.getByText('First generated answer.')).toBeVisible();
 
-  expect(requests[0]?.system_instruction).toEqual(expect.any(String));
-  expect(requests[0]?.input).toBe('Give me two concise ideas.');
+  const firstTurn = requests.find((request) => request.input === 'Give me two concise ideas.' && request.previous_interaction_id === undefined);
+  expect(firstTurn?.system_instruction).toEqual(expect.any(String));
+  expect(firstTurn?.input).toBe('Give me two concise ideas.');
 
   await page.getByRole('button', { name: 'Regenerate response' }).click();
-  await expect.poll(() => requests.length).toBeGreaterThanOrEqual(2);
+  await expect.poll(() => requests.filter((request) => request.input === 'Give me two concise ideas.').length).toBe(2);
   await expect(page.getByText('2/2')).toBeVisible();
-  expect(requests[1]?.system_instruction).toEqual(expect.any(String));
-  expect(requests[1]?.input).toBe('Give me two concise ideas.');
-  expect(requests[1]?.previous_interaction_id).toBe('interaction-1');
+
+  const regeneration = requests.find((request) => request.input === 'Give me two concise ideas.' && request.previous_interaction_id === 'interaction-1');
+  expect(regeneration?.system_instruction).toEqual(expect.any(String));
+  expect(regeneration?.input).toBe('Give me two concise ideas.');
+  expect(regeneration?.previous_interaction_id).toBe('interaction-1');
+  expect(requests.some((request) => typeof request.input === 'string' && request.input.startsWith('USER_MESSAGE:\n'))).toBe(true);
   await expect(page.getByRole('region', { name: 'Conversation' }).locator('.message-user')).toHaveCount(1);
   await expect(page.getByRole('button', { name: 'Next response' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Previous response' })).toBeEnabled();

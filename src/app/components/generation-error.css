@@ -1,0 +1,9 @@
+.generation-error { display: grid; gap: 7px; }
+.generation-error__message { overflow-wrap: anywhere; }
+.generation-error__meta { display: flex; flex-wrap: wrap; gap: 4px 10px; color: rgba(255,223,233,.72); font-size: 11px; }
+.generation-error__detail { font-variant-numeric: tabular-nums; }
+.generation-error__actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 1px; }
+.generation-error__button { padding: 6px 14px; border-radius: 10px; border: 1px solid rgba(240,123,220,.35); background: rgba(240,123,220,.08); color: #ffdfe9; font-size: 12px; cursor: pointer; }
+.generation-error__button:hover { background: rgba(240,123,220,.16); }
+.generation-error__button--primary { border-color: rgba(110,168,255,.45); background: rgba(110,168,255,.12); color: #e7f0ff; }
+.generation-error__button--primary:hover { background: rgba(110,168,255,.2); }

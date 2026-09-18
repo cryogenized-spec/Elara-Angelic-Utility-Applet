@@ -1,5 +1,6 @@
+import { patchBoardTask, createBoardTask } from "../../kanban/task-writes";
 import { moveBefore, moveOne, type TaskMove } from "../../kanban/reordering";
-import type { TaskListSummary } from "../../google/tasks/service";
+import type { TaskListSummary } from "../../kanban/google-port";
 import {
   useEffect,
   useRef,
@@ -85,7 +86,7 @@ function Modal({
   );
 }
 
-export function KanbanScreen({
+function KanbanWorkspace({
   onBack,
   onSettings,
 }: {
@@ -108,17 +109,6 @@ export function KanbanScreen({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const canReorder = !saving && !busy && filter === "all" && !query;
-  const accountRef = useRef(board?.account);
-  useEffect(() => {
-    if (accountRef.current !== board?.account) {
-      setEditor(null);
-      setRemoval(null);
-      setDragged(null);
-      setPalette(false);
-      setActionError(null);
-      accountRef.current = board?.account;
-    }
-  }, [board?.account]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [, tick] = useState(0);
   useEffect(() => {
@@ -211,7 +201,7 @@ export function KanbanScreen({
         (filter === "done" && task.status === "completed") ||
         (filter === "overdue" &&
           task.status !== "completed" &&
-          overdueDays(task.due) > 0))
+          overdueDays(task.scheduledDate) > 0))
     );
   }
   return (
@@ -348,7 +338,7 @@ export function KanbanScreen({
                     {matches.map((task) => {
                       const late =
                         task.status !== "completed" &&
-                        overdueDays(task.due) > 0;
+                        overdueDays(task.scheduledDate) > 0;
                       return (
                         <article
                           key={task.id}
@@ -410,7 +400,7 @@ export function KanbanScreen({
                               aria-pressed={task.status === "completed"}
                               onClick={() =>
                                 void run(() =>
-                                  taskService.patchTask(
+                                  patchBoardTask(
                                     list.id,
                                     task.id,
                                     {
@@ -445,12 +435,12 @@ export function KanbanScreen({
                           </div>
                           {task.notes && <p>{task.notes}</p>}
                           <footer>
-                            {task.due ? (
+                            {task.scheduledDate ? (
                               <span
                                 className={late ? "kb-due is-late" : "kb-due"}
                               >
                                 <Clock3 size={12} />
-                                {task.due.slice(0, 10)}
+                                {task.scheduledDate.slice(0, 10)}
                                 {late ? " · Overdue" : ""}
                               </span>
                             ) : (
@@ -559,7 +549,7 @@ export function KanbanScreen({
                 }
               >
                 {task.title}
-                <small>{overdueDays(task.due)} days overdue</small>
+                <small>{overdueDays(task.scheduledDate)} days overdue</small>
               </button>
             ))}
             {!memo.length && (
@@ -716,7 +706,7 @@ export function KanbanScreen({
                 void run(
                   () =>
                     editor.list
-                      ? taskService.renameTaskList(
+                      ? taskService.updateTaskList(
                           editor.list.id,
                           title,
                           editor.list.etag,
@@ -748,22 +738,22 @@ export function KanbanScreen({
                 const patch = {
                   title,
                   notes: String(data.get("notes") ?? ""),
-                  due: due ? `${due}T00:00:00.000Z` : null,
+                  scheduledDate: due || null,
                 };
                 const listId =
                   editor.task?.listId ?? String(data.get("listId"));
                 void run(
                   () =>
                     editor.task
-                      ? taskService.patchTask(
+                      ? patchBoardTask(
                           listId,
                           editor.task.id,
                           patch,
                           editor.task.etag,
                         )
-                      : taskService.createTask(listId, {
+                      : createBoardTask(listId, {
                           ...patch,
-                          ...(due ? {} : { due: undefined }),
+                          scheduledDate: due || undefined,
                         }),
                   true,
                 );
@@ -832,7 +822,7 @@ export function KanbanScreen({
                   <input
                     type="date"
                     name="due"
-                    defaultValue={editor.task?.due?.slice(0, 10)}
+                    defaultValue={editor.task?.scheduledDate?.slice(0, 10)}
                   />
                 </label>
                 <p className="kb-dialog-copy">
@@ -998,4 +988,9 @@ export function KanbanScreen({
       )}
     </section>
   );
+}
+
+export function KanbanScreen(props: { onBack: () => void; onSettings: () => void }) {
+  const { board } = useSyncExternalStore(boardStore.subscribe, boardStore.getSnapshot);
+  return <KanbanWorkspace key={board?.account ?? 'disconnected'} {...props} />;
 }

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { GoogleCalendarService } from '../calendar/service';
 import { GoogleTasksService } from '../tasks/service';
-import { GoogleGmailService } from '../gmail/service';
+import { GoogleGmailSemanticService } from '../gmail/semantic-service';
 import { googleOAuthAuthority } from '../oauth/authority';
 import type { GoogleToolHandlers } from './executor';
 import { googleToolNameSchema, type GoogleToolName } from './contracts';
@@ -9,7 +9,7 @@ import { googleReadToolArgumentSchemas, validateGoogleReadToolArguments } from '
 
 const calendar = new GoogleCalendarService(googleOAuthAuthority);
 const tasks = new GoogleTasksService(googleOAuthAuthority);
-const gmail = new GoogleGmailService(googleOAuthAuthority);
+const gmail = new GoogleGmailSemanticService(googleOAuthAuthority);
 
 const readToolNames = Object.keys(googleReadToolArgumentSchemas).filter((name): name is GoogleToolName => googleToolNameSchema.safeParse(name).success);
 
@@ -18,13 +18,33 @@ function readArgs<T extends keyof typeof googleReadToolArgumentSchemas>(tool: T,
 }
 
 export const googleReadToolHandlers: GoogleToolHandlers = {
+  'calendar.listCalendars': async ({ arguments: args }) => {
+    const parsed = readArgs('calendar.listCalendars', args);
+    return calendar.listCalendars(parsed);
+  },
   'calendar.listEvents': async ({ arguments: args }) => {
     const parsed = readArgs('calendar.listEvents', args);
-    return calendar.listEvents(parsed.calendarId, parsed.timeMin, parsed.timeMax);
+    return calendar.listEventPage(parsed);
+  },
+  'calendar.getEvent': async ({ arguments: args }) => {
+    const parsed = readArgs('calendar.getEvent', args);
+    return calendar.getEvent(parsed.calendarId, parsed.eventId, parsed.timeZone);
+  },
+  'calendar.getSettings': async ({ arguments: args }) => {
+    readArgs('calendar.getSettings', args);
+    return calendar.getSettings();
+  },
+  'calendar.queryFreeBusy': async ({ arguments: args }) => {
+    const parsed = readArgs('calendar.queryFreeBusy', args);
+    return calendar.queryFreeBusy(parsed.timeMin, parsed.timeMax, parsed.calendarIds, parsed.timeZone);
   },
   'tasks.listTaskLists': async ({ arguments: args }) => {
     const parsed = readArgs('tasks.listTaskLists', args);
-    return tasks.listTaskLists(parsed.pageToken);
+    return tasks.listTaskLists(parsed.pageToken, parsed.maxResults);
+  },
+  'tasks.getTaskList': async ({ arguments: args }) => {
+    const parsed = readArgs('tasks.getTaskList', args);
+    return tasks.getTaskList(parsed.taskListId);
   },
   'tasks.listTasks': async ({ arguments: args }) => {
     const parsed = readArgs('tasks.listTasks', args);
@@ -33,6 +53,7 @@ export const googleReadToolHandlers: GoogleToolHandlers = {
       showCompleted: parsed.showCompleted,
       showDeleted: parsed.showDeleted,
       showHidden: parsed.showHidden,
+      showAssigned: parsed.showAssigned,
       dueMin: parsed.dueMin,
       dueMax: parsed.dueMax,
       updatedMin: parsed.updatedMin,

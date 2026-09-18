@@ -3,11 +3,20 @@ import { DEFAULT_GEMINI_MODEL, type GeminiStreamEvent, type GeminiToolContinuati
 import { normalizeGeminiError } from './errors';
 import { getGeminiApiKey, getGeminiLockboxStatus } from '../persistence/gemini-api-key';
 import { googleGeminiFunctionDeclarations } from '../google/tools/gemini-declarations';
-import { composeSystemInstruction } from './memory-context';
+import { composeSystemInstructionWithStatus } from './memory-context';
+import { artifactRepository } from '../artifacts/repository';
+import { ArtifactError } from '../artifacts/errors';
+import { isAttachment } from '../domain/artifact';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
 function readNumber(record: Record<string, unknown>, key: string): number | undefined { const value = record[key]; return typeof value === 'number' && Number.isFinite(value) ? value : undefined; }
+function readStatus(record: Record<string, unknown>, key: string): number | undefined {
+  const value = record[key];
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && /^\d{3}$/.test(value.trim())) return Number(value.trim());
+  return undefined;
+}
 function readUsage(raw: unknown): GeminiUsage | undefined {
   const usage = asRecord(raw);
   const inputTokens = readNumber(usage, 'input_tokens') ?? readNumber(usage, 'prompt_tokens') ?? readNumber(usage, 'prompt_token_count') ?? readNumber(usage, 'total_input_tokens');
@@ -27,8 +36,89 @@ function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
   return summary || undefined;
 }
 
-type PendingFunctionCall = { callId: string; name: string; arguments: string };
-type InteractionRequest = { model: string; input: unknown; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[] };
+type PendingFunctionCall = { callId: string; name: string; arguments: string; initialArguments?: unknown };
+type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; memoryContext?: 'thread' | 'none'; conversationId?: string; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
+
+function pendingFunctionCall(callId: string, name: string, step: Record<string, unknown>): PendingFunctionCall {
+  const initial = step.arguments;
+  if (typeof initial === 'string') return { callId, name, arguments: initial };
+  if (initial === undefined || initial === null) return { callId, name, arguments: '' };
+  return { callId, name, arguments: '', initialArguments: initial };
+}
+
+function resolveFunctionArguments(pending: PendingFunctionCall): Record<string, unknown> {
+  const source: unknown = pending.arguments.length > 0 ? JSON.parse(pending.arguments) : pending.initialArguments === undefined ? {} : pending.initialArguments;
+  if (!source || typeof source !== 'object' || Array.isArray(source)) throw new Error('Function arguments must be an object.');
+  return source as Record<string, unknown>;
+}
+
+type GeminiInputPart = Record<string, unknown>;
+const INLINE_ATTACHMENT_LIMIT = 4 * 1024 * 1024;
+
+function bytesToBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) binary += String.fromCharCode(...bytes.subarray(offset, Math.min(bytes.length, offset + chunkSize)));
+  return btoa(binary);
+}
+
+async function blobAsBase64(blob: Blob): Promise<string> {
+  let bytes: ArrayBuffer;
+  if (typeof blob.arrayBuffer === 'function') bytes = await blob.arrayBuffer();
+  else if (typeof FileReader !== 'undefined') {
+    bytes = await new Promise<ArrayBuffer>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as ArrayBuffer);
+      reader.onerror = () => reject(reader.error ?? new Error('The attachment could not be read.'));
+      reader.readAsArrayBuffer(blob);
+    });
+  } else bytes = await new Response(blob).arrayBuffer();
+  return bytesToBase64(new Uint8Array(bytes));
+}
+
+function providerPartType(mimeType: string): 'image' | 'document' { return mimeType.startsWith('image/') ? 'image' : 'document'; }
+
+async function resolveGeminiInput(request: InteractionRequest, client: GoogleGenAI): Promise<unknown> {
+  if (!request.attachments?.length) return request.input;
+  const parts: GeminiInputPart[] = [];
+  if (typeof request.input === 'string' && request.input.trim()) parts.push({ type: 'text', text: request.input });
+  const active = () => !request.isGenerationActive || request.isGenerationActive();
+  for (const artifactId of request.attachments) {
+    if (!active()) throw new DOMException('The generation was superseded.', 'AbortError');
+    const artifact = await artifactRepository.get(artifactId);
+    if (!isAttachment(artifact) || artifact.status !== 'ready') throw new ArtifactError('PROVIDER_ATTACHMENT_FAILED', 'An attachment is not ready for Gemini.');
+    const type = providerPartType(artifact.mimeType);
+    const validRemoteRef = artifact.remoteRef?.provider === 'gemini' && artifact.remoteRef.expiresAt > Date.now() + 60_000;
+    if (validRemoteRef) { parts.push({ type, uri: artifact.remoteRef!.fileUri, mime_type: artifact.mimeType }); continue; }
+    const operationId = `${request.generationId ?? crypto.randomUUID()}:${artifact.id}`;
+    await artifactRepository.beginOperation(artifact.id, operationId, 'ready');
+    const guard = { operationId, expectedStatus: 'ready' as const, isValid: () => !request.signal?.aborted && active() };
+    if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+    if (artifact.remoteRef) await artifactRepository.updateMetadata(artifact.id, { remoteRef: null }, guard);
+    if (artifact.data.size <= INLINE_ATTACHMENT_LIMIT) {
+      const data = await blobAsBase64(artifact.data);
+      if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+      parts.push({ type, data, mime_type: artifact.mimeType });
+      continue;
+    }
+    try {
+      const uploaded = await client.files.upload({ file: artifact.data, config: { mimeType: artifact.mimeType } } as never) as unknown as Record<string, unknown>;
+      if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+      const fileUri = typeof uploaded.uri === 'string' ? uploaded.uri : undefined;
+      if (!fileUri) throw new Error('Gemini did not return a file URI.');
+      const expiresAt = typeof uploaded.expirationTime === 'string' ? Date.parse(uploaded.expirationTime) : Date.now() + 48 * 60 * 60 * 1000;
+      await artifactRepository.updateMetadata(artifact.id, { remoteRef: { provider: 'gemini', fileUri, expiresAt: Number.isFinite(expiresAt) ? expiresAt : Date.now() + 48 * 60 * 60 * 1000 } }, guard);
+      if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+      parts.push({ type, uri: fileUri, mime_type: artifact.mimeType });
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'AbortError') throw cause;
+      if (cause instanceof ArtifactError) throw cause;
+      throw new ArtifactError('PROVIDER_ATTACHMENT_FAILED', 'Gemini could not prepare this attachment.', cause);
+    }
+  }
+  if (request.signal?.aborted || !active()) throw new DOMException('The provider preparation was cancelled.', 'AbortError');
+  return parts;
+}
 
 export function toGeminiGenerationConfig(value: unknown): Record<string, unknown> | undefined {
   const source = asRecord(value);
@@ -59,6 +149,17 @@ function buildInteractionPayload(request: InteractionRequest) {
   return payload;
 }
 
+async function nextStreamItem(iterator: AsyncIterator<unknown>, signal?: AbortSignal): Promise<IteratorResult<unknown> | 'aborted'> {
+  if (!signal || signal.aborted) return signal?.aborted ? 'aborted' : iterator.next();
+  let onAbort: (() => void) | undefined;
+  const abortPromise = new Promise<'aborted'>((resolve) => {
+    onAbort = () => resolve('aborted');
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+  try { return await Promise.race([iterator.next(), abortPromise]); }
+  finally { if (onAbort) signal.removeEventListener('abort', onAbort); }
+}
+
 async function* streamDirectRequest(request: InteractionRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const startedAt = performance.now();
   const requestId = crypto.randomUUID();
@@ -70,82 +171,125 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
   try {
     const lockboxStatus = await getGeminiLockboxStatus();
-    if (lockboxStatus === 'empty') {
-      yield {
-        type: 'failed',
-        error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }),
-      };
-      return;
-    }
+    if (lockboxStatus === 'empty') { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }) }; return; }
     if (lockboxStatus === 'locked') {
       const error = normalizeGeminiError(new Error('Gemini API key is locked in the app Lockbox. Unlock the Lockbox before sending.'), { requestId, category: 'configuration' });
       yield { type: 'failed', error: { ...error, code: 'GEMINI_LOCKBOX_LOCKED' } };
       return;
     }
     const apiKey = await getGeminiApiKey();
-    if (!apiKey) {
-      yield {
-        type: 'failed',
-        error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }),
-      };
-      return;
-    }
+    if (!apiKey) { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini API key is not configured in the app Lockbox.'), { requestId, category: 'configuration' }) }; return; }
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const client = new GoogleGenAI({ apiKey, httpOptions: { apiVersion: 'v1', retryOptions: { attempts: 1 } } });
     const query = typeof request.input === 'string' ? request.input : JSON.stringify(request.input);
-    const contextualInstruction = await composeSystemInstruction(request.systemInstruction, query);
-    const stream = await client.interactions.create(buildInteractionPayload({ ...request, systemInstruction: contextualInstruction }) as never);
-    for await (const rawEvent of stream as unknown as AsyncIterable<unknown>) {
-      if (signal?.aborted) { yield { type: 'cancelled', interactionId }; return; }
-      const raw = asRecord(rawEvent);
-      const eventType = readString(raw, 'event_type') ?? readString(raw, 'type') ?? '';
-      const eventInteractionId = interactionIdFrom(raw);
-      if (eventInteractionId) interactionId = eventInteractionId;
-      if (eventType === 'interaction.created') { const interaction = asRecord(raw.interaction); const id = readString(interaction, 'id') ?? interactionId ?? 'unknown'; interactionId = id; const model = readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL); yield { type: 'interaction-created', interactionId: id, model }; continue; }
-      if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') { const status = readString(raw, 'status') ?? readString(asRecord(raw.interaction), 'status') ?? eventType.replace('interaction.', ''); if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
-      if (eventType === 'step.start') {
-        const index = stepIndex(raw);
-        const step = asRecord(raw.step);
-        const type = stepType(raw);
-        yield { type: 'step-start', index, stepType: type };
-        if (type === 'thought') {
-          const summaryBlocks = Array.isArray(step.summary) ? step.summary : [];
-          for (const summaryBlock of summaryBlocks) {
-            const text = readString(asRecord(summaryBlock), 'text');
-            if (text) { appendThoughtSummary(thoughtSummaryParts, index, text); yield { type: 'thought-summary-delta', index, text }; }
-          }
-        }
-        const signature = readString(step, 'signature');
-        if (signature) yield { type: 'thought-signature', index, signature };
-        if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, { callId, name, arguments: '' }); }
-        continue;
+
+    let contextualInstruction = request.systemInstruction?.trim() || undefined;
+    const shouldComposeThreadMemory = request.memoryContext !== 'none' && !request.previousInteractionId;
+    if (shouldComposeThreadMemory) {
+      const memoryStartedAt = performance.now();
+      const composed = await composeSystemInstructionWithStatus(request.systemInstruction, query, request.conversationId);
+      contextualInstruction = composed.instruction;
+      const memoryDurationMs = Math.max(0, performance.now() - memoryStartedAt);
+      if (composed.memoryStatus !== 'empty') {
+        yield {
+          type: 'context-activity',
+          category: 'memory',
+          label: 'Memory',
+          detail: composed.memoryStatus === 'used' ? 'Recalled relevant durable memory.' : 'Memory retrieval was unavailable; continued without it.',
+          durationMs: memoryDurationMs,
+          outcome: composed.memoryStatus,
+        };
       }
-      if (eventType === 'step.delta') {
-        const delta = asRecord(raw.delta); const index = stepIndex(raw); const deltaType = readString(delta, 'type'); const content = asRecord(delta.content); const deltaText = readString(delta, 'text') ?? readString(content, 'text');
-        if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
-        else if (deltaType === 'thought_summary') { if (deltaText) { appendThoughtSummary(thoughtSummaryParts, index, deltaText); yield { type: 'thought-summary-delta', index, text: deltaText }; } }
-        else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; }
-        else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
-        continue;
-      }
-      if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && pending.arguments && interactionId) { try { const args = JSON.parse(pending.arguments) as unknown; if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.'); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args as Record<string, unknown> }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
-      if (eventType === 'interaction.completed') {
-        const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed'; sawTerminalEvent = true;
-        const usage = readUsage(interaction.usage) ?? readUsage(raw.usage); const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts); const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined); if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
-        yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage }; return;
-      }
-      if (eventType === 'error') { const providerError = asRecord(raw.error); const message = readString(providerError, 'message') ?? 'Gemini returned a streaming error.'; sawTerminalEvent = true; yield { type: 'failed', error: normalizeGeminiError(new Error(message), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) }; return; }
     }
-    if (sawRequiresAction || sawTerminalEvent) return;
-    yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
-  } catch (cause) { const error = normalizeGeminiError(cause, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }); if (error.cancelled || signal?.aborted) { yield { type: 'cancelled', interactionId }; return; } yield { type: 'failed', error }; }
+
+    if (signal?.aborted) { yield { type: 'cancelled' }; return; }
+    const providerInput = await resolveGeminiInput({ ...request, signal }, client);
+    const stream = await client.interactions.create(buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction }) as never);
+    const iterator = (stream as unknown as AsyncIterable<unknown>)[Symbol.asyncIterator]();
+    try {
+      for (;;) {
+        const next = await nextStreamItem(iterator, signal);
+        if (next === 'aborted' || signal?.aborted) {
+          void iterator.return?.()?.catch(() => undefined);
+          yield { type: 'cancelled', interactionId };
+          return;
+        }
+        if (next.done) break;
+        const raw = asRecord(next.value);
+        const eventType = readString(raw, 'event_type') ?? readString(raw, 'type') ?? '';
+        const eventInteractionId = interactionIdFrom(raw);
+        if (eventInteractionId) interactionId = eventInteractionId;
+        if (eventType === 'interaction.created') { const interaction = asRecord(raw.interaction); const id = readString(interaction, 'id') ?? interactionId ?? 'unknown'; interactionId = id; const model = readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL); yield { type: 'interaction-created', interactionId: id, model }; continue; }
+        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') { const status = readString(raw, 'status') ?? readString(asRecord(raw.interaction), 'status') ?? eventType.replace('interaction.', ''); if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
+        if (eventType === 'step.start') {
+          const index = stepIndex(raw);
+          const step = asRecord(raw.step);
+          const type = stepType(raw);
+          yield { type: 'step-start', index, stepType: type };
+          if (type === 'thought') {
+            const summaryBlocks = Array.isArray(step.summary) ? step.summary : [];
+            for (const summaryBlock of summaryBlocks) {
+              const text = readString(asRecord(summaryBlock), 'text');
+              if (text) { appendThoughtSummary(thoughtSummaryParts, index, text); yield { type: 'thought-summary-delta', index, text }; }
+            }
+          }
+          const signature = readString(step, 'signature');
+          if (signature) yield { type: 'thought-signature', index, signature };
+          if (type === 'function_call') { const callId = readString(step, 'id'); const name = readString(step, 'name'); if (callId && name) pendingFunctions.set(index, pendingFunctionCall(callId, name, step)); }
+          continue;
+        }
+        if (eventType === 'step.delta') {
+          const delta = asRecord(raw.delta); const index = stepIndex(raw); const deltaType = readString(delta, 'type'); const content = asRecord(delta.content); const deltaText = readString(delta, 'text') ?? readString(content, 'text');
+          if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
+          else if (deltaType === 'thought_summary') { if (deltaText) { appendThoughtSummary(thoughtSummaryParts, index, deltaText); yield { type: 'thought-summary-delta', index, text: deltaText }; } }
+          else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; }
+          else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
+          continue;
+        }
+        if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
+        if (eventType === 'interaction.completed') {
+          const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed';
+          if (status === 'requires_action') { sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
+          sawTerminalEvent = true;
+          const usage = readUsage(interaction.usage) ?? readUsage(raw.usage); const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts); const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined); if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
+          yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage }; return;
+        }
+        if (eventType === 'error') {
+          const providerError = asRecord(raw.error);
+          const nestedError = asRecord(providerError.error);
+          const message = readString(providerError, 'message') ?? 'Gemini returned a streaming error.';
+          const failure = new Error(message) as Error & { status?: number; code?: string | number };
+          const providerStatus = readStatus(providerError, 'status') ?? readStatus(providerError, 'code') ?? readStatus(nestedError, 'status') ?? readStatus(nestedError, 'code');
+          if (providerStatus !== undefined) failure.status = providerStatus;
+          const providerCode = readString(providerError, 'code') ?? readString(providerError, 'type') ?? readString(nestedError, 'code');
+          if (providerCode !== undefined) failure.code = providerCode;
+          sawTerminalEvent = true;
+          yield { type: 'failed', error: normalizeGeminiError(failure, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
+          return;
+        }
+      }
+      if (sawRequiresAction || sawTerminalEvent) return;
+      yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
+    } finally {
+      void iterator.return?.()?.catch(() => undefined);
+    }
+  } catch (cause) {
+    const normalized = normalizeGeminiError(cause, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) });
+    const error = cause instanceof ArtifactError
+      ? { ...normalized, code: cause.code, message: cause.userMessage, retryable: false, debug: { ...normalized.debug, artifactError: cause.code } }
+      : normalized;
+    if (error.cancelled || signal?.aborted || request.isGenerationActive?.() === false) { yield { type: 'cancelled', interactionId }; return; }
+    yield { type: 'failed', error };
+  }
 }
 
 export const geminiTurnPort: GeminiTurnPort = {
-  streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> { return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools }, signal); },
+  streamReply(request: GeminiTurnRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
+    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, attachments: request.attachments, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: request.memoryContext, conversationId: request.conversationId, generationId: request.generationId, isGenerationActive: request.isGenerationActive }, signal);
+  },
   streamToolResult(request: GeminiToolContinuationRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
     const results = request.results ?? (request.result ? [request.result] : []);
     const input = results.map((result) => ({ type: 'function_result', name: result.name, call_id: result.callId, result: [{ type: 'text', text: JSON.stringify(result.result) }] }));
-    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools }, signal);
+    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: 'none' }, signal);
   },
 };

@@ -1,0 +1,54 @@
+/* The media rail is eager because it owns the Suspense geometry. The real card
+   remains lazy. A pending card module therefore reserves roughly the same space
+   the settled card will occupy instead of collapsing the conversation to zero. */
+
+.media-rail {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.media-card__skeleton {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+}
+
+.media-card__skeleton-thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: rgba(10,11,16,.62);
+}
+
+.media-card__skeleton-meta {
+  display: grid;
+  gap: 7px;
+  min-height: 54px;
+  padding: 10px;
+  align-content: center;
+}
+
+.media-card__skeleton-line {
+  display: block;
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+}
+
+.media-card__skeleton-line--title { width: 76%; }
+.media-card__skeleton-line--channel { width: 42%; }
+
+.media-card__skeleton-cta {
+  display: block;
+  min-height: 44px;
+  border-top: 1px solid var(--line);
+  background: rgba(255,255,255,.018);
+}
+
+@media (max-width: 560px) {
+  .media-rail { grid-template-columns: 1fr; }
+}

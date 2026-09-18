@@ -9,7 +9,10 @@ function sse(interactionId: string): string {
 }
 
 test('starting a new thread isolates it from a still-running previous response', async ({ page }) => {
-  await page.route('**/api/gemini', async (route) => {
+  // Browser turns now go directly through the Interactions transport. Keep the
+  // delayed response on that real route so this test continues to prove that
+  // late events from an abandoned conversation cannot leak into the new one.
+  await page.route('**/v1/interactions*', async (route) => {
     await new Promise((resolve) => setTimeout(resolve, 1500));
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body: sse('old-thread-interaction') });
   });

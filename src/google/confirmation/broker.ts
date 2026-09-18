@@ -1,57 +1,111 @@
 import type { WriteConfirmationRequest } from './policy';
 
 const HOST_ID = 'elara-google-confirmation';
-let pendingResolve: ((approved: boolean[]) => void) | null = null;
-let pendingHost: HTMLElement | null = null;
-let pendingCount = 0;
+let pendingFinish: ((approved: boolean[]) => void) | null = null;
 
 export function requestGoogleToolConfirmation(request: WriteConfirmationRequest, signal?: AbortSignal): Promise<boolean> {
   return requestGoogleToolConfirmations([request], signal).then((decisions) => decisions[0] ?? false);
 }
 
 export function requestGoogleToolConfirmations(requests: readonly WriteConfirmationRequest[], signal?: AbortSignal): Promise<boolean[]> {
-  if (typeof document === 'undefined' || pendingResolve || requests.length === 0) return Promise.resolve(requests.map(() => false));
+  if (typeof document === 'undefined' || pendingFinish || requests.length === 0 || signal?.aborted) return Promise.resolve(requests.map(() => false));
 
   return new Promise((resolve) => {
-    pendingResolve = resolve;
-    pendingCount = requests.length;
     const host = document.createElement('section');
-    pendingHost = host;
     host.id = HOST_ID;
     host.className = 'roleplay-confirmation roleplay-confirmation--broker roleplay-confirmation--batch';
     host.setAttribute('role', 'dialog');
     host.setAttribute('aria-modal', 'true');
     host.setAttribute('aria-label', requests.length === 1 ? 'Google action confirmation' : 'Google action confirmations');
 
-    const cards = requests.map((request, index) => {
+    const heading = document.createElement('div');
+    heading.className = 'roleplay-confirmation__heading';
+    const mark = document.createElement('span');
+    mark.textContent = '✦';
+    const title = document.createElement('strong');
+    title.textContent = requests.length === 1 ? 'Elara proposes a change' : `Elara proposes ${requests.length} changes`;
+    heading.append(mark, title);
+
+    const list = document.createElement('div');
+    list.className = 'google-confirmation-list';
+    requests.forEach((request, index) => {
       const riskLabel = request.risk === 'send' ? 'Send' : request.risk === 'destructive' ? 'Destructive change' : 'Change';
-      return `<label class="google-confirmation-item">
-        <input type="checkbox" data-confirm-index="${index}" checked aria-label="Approve ${escapeHtml(request.tool)}" />
-        <span class="google-confirmation-item__body">
-          <strong>${escapeHtml(riskLabel)} · ${escapeHtml(request.tool)}</strong>
-          <span>${escapeHtml(request.resourceSummary)}</span>
-        </span>
-      </label>`;
-    }).join('');
+      const card = document.createElement('label');
+      card.className = 'google-confirmation-item';
 
-    host.innerHTML = `
-      <div class="roleplay-confirmation__heading"><span>✦</span><strong>${requests.length === 1 ? 'Elara proposes a change' : `Elara proposes ${requests.length} changes`}</strong></div>
-      <div class="google-confirmation-list">${cards}</div>
-      <div class="roleplay-confirmation__actions">
-        <button type="button" data-decision="decline" class="roleplay-confirmation__decline">✕ Decline</button>
-        ${requests.length > 1 ? '<button type="button" data-decision="selected" class="roleplay-confirmation__accept">✓ Approve selected</button><button type="button" data-decision="all" class="roleplay-confirmation__accept">✓ Approve all</button>' : '<button type="button" data-decision="selected" class="roleplay-confirmation__accept">✓ Approve</button>'}
-      </div>`;
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.confirmIndex = String(index);
+      checkbox.checked = true;
+      checkbox.setAttribute('aria-label', `Approve ${request.tool}`);
 
+      const body = document.createElement('span');
+      body.className = 'google-confirmation-item__body';
+      const strong = document.createElement('strong');
+      strong.textContent = `${riskLabel} · ${request.tool}`;
+      const summary = document.createElement('span');
+      summary.textContent = request.resourceSummary;
+      body.append(strong, summary);
+
+      if (request.reviewText) {
+        const review = document.createElement('span');
+        review.className = 'google-confirmation-item__review';
+        const reviewLabel = document.createElement('strong');
+        reviewLabel.textContent = 'Full content to review before approval';
+        const reviewText = document.createElement('span');
+        reviewText.className = 'google-confirmation-item__review-text';
+        reviewText.textContent = request.reviewText;
+        reviewText.style.display = 'block';
+        reviewText.style.whiteSpace = 'pre-wrap';
+        reviewText.style.overflowWrap = 'anywhere';
+        reviewText.style.maxHeight = '12rem';
+        reviewText.style.overflow = 'auto';
+        review.append(reviewLabel, reviewText);
+        body.append(review);
+      }
+
+      card.append(checkbox, body);
+      list.appendChild(card);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'roleplay-confirmation__actions';
+    const decline = document.createElement('button');
+    decline.type = 'button';
+    decline.dataset.decision = 'decline';
+    decline.className = 'roleplay-confirmation__decline';
+    decline.textContent = '✕ Decline';
+    actions.appendChild(decline);
+
+    const selected = document.createElement('button');
+    selected.type = 'button';
+    selected.dataset.decision = 'selected';
+    selected.className = 'roleplay-confirmation__accept';
+    selected.textContent = requests.length > 1 ? '✓ Approve selected' : '✓ Approve';
+    actions.appendChild(selected);
+
+    if (requests.length > 1) {
+      const all = document.createElement('button');
+      all.type = 'button';
+      all.dataset.decision = 'all';
+      all.className = 'roleplay-confirmation__accept';
+      all.textContent = '✓ Approve all';
+      actions.appendChild(all);
+    }
+
+    host.append(heading, list, actions);
+
+    let settled = false;
     const finish = (decisions: boolean[]) => {
-      const currentResolve = pendingResolve;
-      pendingResolve = null;
-      pendingCount = 0;
-      pendingHost = null;
+      if (settled) return;
+      settled = true;
+      if (pendingFinish === finish) pendingFinish = null;
       signal?.removeEventListener('abort', onAbort);
       host.remove();
-      currentResolve?.(decisions);
+      resolve(decisions);
     };
     const onAbort = () => finish(requests.map(() => false));
+    pendingFinish = finish;
     const decisionButtons = host.querySelectorAll<HTMLButtonElement>('[data-decision]');
     decisionButtons.forEach((button) => button.addEventListener('click', () => {
       const decision = button.dataset.decision;
@@ -63,22 +117,15 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
       }
     }, { once: true }));
     signal?.addEventListener('abort', onAbort, { once: true });
+    if (signal?.aborted) { finish(requests.map(() => false)); return; }
     document.body.appendChild(host);
-    (host.querySelector('[data-decision="selected"]') as HTMLButtonElement | null)?.focus();
+    selected.focus();
   });
 }
 
 export function dismissGoogleToolConfirmation(): void {
-  if (!pendingResolve) return;
-  const currentResolve = pendingResolve;
-  const count = pendingCount;
-  pendingResolve = null;
-  pendingCount = 0;
-  pendingHost?.remove();
-  pendingHost = null;
-  currentResolve(Array.from({ length: count }, () => false));
-}
-
-function escapeHtml(value: string): string {
-  return value.replace(/[&<>\"']/g, (character) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '\"': '&quot;', "'": '&#39;' }[character] ?? character));
+  if (!pendingFinish) return;
+  const host = document.getElementById(HOST_ID);
+  const count = host?.querySelectorAll('[data-confirm-index]').length ?? 0;
+  pendingFinish(Array.from({ length: count }, () => false));
 }

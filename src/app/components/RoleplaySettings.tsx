@@ -2,10 +2,11 @@ import { useEffect, useState } from 'react';
 import type { RoleplayPreferences } from '../../domain/preferences';
 import { childEntities, serializeRoleplayWorld, type RoleplayWorld, type RoleplayWorldEntity } from '../../domain/roleplay-world';
 import { loadRoleplayWorld } from '../../persistence/roleplay-world';
+import { ToggleSwitch } from './ToggleSwitch';
 import './roleplay-settings.css';
 
 const WORLD_UPDATED_EVENT = 'elara-roleplay-world-updated';
-const ROLEPLAY_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/docs/ROLEPLAY_WORLD_CANVAS_GUIDE.md';
+const ROLEPLAY_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/documents/character.md#roleplay-world';
 
 export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferences; onChange: (value: RoleplayPreferences) => void }) {
   const [world, setWorld] = useState<RoleplayWorld | null>(null);
@@ -59,9 +60,7 @@ export function RoleplaySettings({ value, onChange }: { value: RoleplayPreferenc
         <strong>Roleplay Mode</strong>
         <span>Creative context backed by a persistent World Canvas. Elara can inspect and propose changes through the Roleplay world tools.</span>
       </div>
-      <button type="button" className={`roleplay-switch${value.enabled ? ' is-on' : ''}`} role="switch" aria-label={value.enabled ? 'Roleplay mode on' : 'Roleplay mode off'} aria-checked={value.enabled} onClick={() => onChange({ ...value, enabled: !value.enabled })}>
-        <span className="roleplay-switch__track" aria-hidden="true"><span className="roleplay-switch__thumb" /></span>
-      </button>
+      <ToggleSwitch className="roleplay-switch" checked={value.enabled} onCheckedChange={(enabled) => onChange({ ...value, enabled })} label={value.enabled ? 'Roleplay mode on' : 'Roleplay mode off'} />
     </div>
 
     {value.enabled && <div className="roleplay-detail">

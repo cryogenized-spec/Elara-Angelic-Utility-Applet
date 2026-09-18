@@ -137,6 +137,22 @@ export class GoogleGmailService {
     return this.sendJson('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: encoded }, 'POST', await this.oauth.authorize('gmail.send'));
   }
 
+  async sendComposedMessage(input: { to: readonly string[]; cc?: readonly string[]; subject: string; body: string; threadId?: string }): Promise<unknown> {
+    const headers = [
+      `To: ${input.to.join(', ')}`,
+      ...(input.cc?.length ? [`Cc: ${input.cc.join(', ')}`] : []),
+      `Subject: ${input.subject.replace(/[\r\n]+/g, ' ')}`,
+      'MIME-Version: 1.0',
+      'Content-Type: text/plain; charset=UTF-8',
+    ];
+    const raw = `${headers.join('\r\n')}\r\n\r\n${input.body}`;
+    const encoded = rawRfc822ToBase64Url(raw);
+    if (new TextEncoder().encode(raw).byteLength > MAX_RAW_MESSAGE_BYTES) throw new Error('Gmail message exceeds the application size limit.');
+    const payload: Record<string, unknown> = { raw: encoded };
+    if (input.threadId?.trim()) payload.threadId = input.threadId.trim();
+    return this.sendJson('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', payload, 'POST', await this.oauth.authorize('gmail.send'));
+  }
+
   private async postWrite(capability: 'gmail.modify', path: string): Promise<unknown> {
     const access = await this.oauth.authorize(capability);
     return this.sendJson(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, undefined, 'POST', access);

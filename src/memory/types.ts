@@ -38,6 +38,14 @@ export interface DurableMemory {
   expiresAt: number | null;
   lastRecalledAt: number | null;
   recallCount: number;
+  /** User-owned landmark/salience flag. It never changes confidence, kind, scope or lifecycle eligibility. */
+  pinned?: boolean;
+  /**
+   * Explicit per-memory consent for inclusion in the Autonomy Context
+   * (design §8.5). Default false — no automatic inference ever includes a
+   * memory in what travels to the worker.
+   */
+  autonomyContext: boolean;
 }
 
 export interface MemoryInput {
@@ -57,6 +65,8 @@ export interface MemoryInput {
   supersededBy?: string[];
   folderId?: string | null;
   expiresAt?: number | null;
+  pinned?: boolean;
+  autonomyContext?: boolean;
 }
 
 export interface MemoryRetrievalScope {

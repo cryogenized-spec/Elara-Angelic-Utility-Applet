@@ -14,8 +14,14 @@ import {
   startBoardSync,
   SYNC_INTERVAL,
   type Board,
+  type BoardTask,
 } from "./store";
 
+const mocks = {
+  lists: vi.fn<GoogleTasksService['listTaskLists']>(),
+  tasks: vi.fn<GoogleTasksService['listTasks']>(),
+  status: vi.fn<typeof googleOAuthAuthority.getStatus>(),
+};
 const initial: Board = {
   account: "one@example.com",
   lists: [{ id: "a", title: "Work" }],
@@ -23,11 +29,11 @@ const initial: Board = {
   routines: [{ id: "r", name: "Watch", days: 1, listId: "", enabled: true }],
   syncedAt: 1,
 };
-const task = {
+const task: BoardTask = {
   id: "t",
   listId: "a",
   title: "Review",
-  due: "2026-09-17T00:00:00.000Z",
+  scheduledDate: "2026-09-17T00:00:00.000Z",
   status: "needsAction",
 };
 
@@ -44,26 +50,26 @@ describe("kanban due-date and memo semantics", () => {
   it("does not mark today overdue and uses local calendar days rather than elapsed hours", () => {
     const now = new Date(2026, 8, 18, 0, 5);
     expect(overdueDays("2026-09-18T00:00:00Z", now)).toBe(0);
-    expect(overdueDays(task.due, now)).toBe(1);
+    expect(overdueDays(task.scheduledDate, now)).toBe(1);
     expect(overdueDays("2026-09-19T00:00:00Z", now)).toBe(0);
     expect(overdueDays(undefined, now)).toBe(0);
     expect(overdueDays("invalid", now)).toBe(0);
   });
   it("deduplicates overlapping rules and resolves completed/deleted/rescheduled tasks", () => {
-    const board = {
+    const board: Board = {
       ...initial,
       tasks: [
         task,
         { ...task, id: "done", status: "completed" },
         { ...task, id: "gone", deleted: true },
-        { ...task, id: "future", due: "2026-09-30" },
+        { ...task, id: "future", scheduledDate: "2026-09-30" },
       ],
       routines: [...initial.routines, { ...initial.routines[0], id: "r2" }],
     };
     expect(overdueMemo(board, new Date(2026, 8, 18))).toEqual([task]);
   });
   it("honors list scope, disabled rules and thresholds", () => {
-    const board = { ...initial, tasks: [task] };
+    const board: Board = { ...initial, tasks: [task] };
     expect(
       overdueMemo(
         { ...board, routines: [{ ...initial.routines[0], listId: "other" }] },
@@ -88,23 +94,28 @@ describe("kanban due-date and memo semantics", () => {
 describe("snapshot reconciliation", () => {
   beforeEach(() => {
     vi.restoreAllMocks();
-    vi.spyOn(googleOAuthAuthority, "getStatus").mockResolvedValue({
+    mocks.lists.mockReset(); mocks.tasks.mockReset(); mocks.status.mockReset();
+    vi.spyOn(googleOAuthAuthority, "getStatus").mockImplementation(mocks.status);
+    vi.spyOn(GoogleTasksService.prototype, "listTaskLists").mockImplementation(mocks.lists);
+    vi.spyOn(GoogleTasksService.prototype, "listTasks").mockImplementation(mocks.tasks);
+    mocks.status.mockResolvedValue({
       state: "connected",
+      enabledCapabilities: ["tasks.read", "tasks.write"], grantedProviderScopes: [], sessionReady: true,
       grantedCapabilities: ["tasks.read", "tasks.write"],
       account: { email: initial.account },
     });
-    vi.spyOn(GoogleTasksService.prototype, "listTaskLists").mockResolvedValue({
+    mocks.lists.mockResolvedValue({
       items: initial.lists,
     });
-    vi.spyOn(GoogleTasksService.prototype, "listTasks").mockResolvedValue({
+    mocks.tasks.mockResolvedValue({
       items: [task],
     });
   });
   it("walks all list/task pages and preserves imported fields without writes", async () => {
-    vi.mocked(GoogleTasksService.prototype.listTaskLists)
+    mocks.lists
       .mockResolvedValueOnce({ items: initial.lists, nextPageToken: "lists-2" })
       .mockResolvedValueOnce({ items: [{ id: "b", title: "Home" }] });
-    vi.mocked(GoogleTasksService.prototype.listTasks)
+    mocks.tasks
       .mockResolvedValueOnce({
         items: [
           {
@@ -132,7 +143,7 @@ describe("snapshot reconciliation", () => {
       etag: "etag",
       listId: "a",
     });
-    expect(GoogleTasksService.prototype.listTasks).toHaveBeenNthCalledWith(
+    expect(mocks.tasks).toHaveBeenNthCalledWith(
       2,
       "a",
       expect.objectContaining({
@@ -143,7 +154,7 @@ describe("snapshot reconciliation", () => {
     );
   });
   it("rejects repeated page tokens rather than looping indefinitely", async () => {
-    vi.mocked(GoogleTasksService.prototype.listTaskLists).mockResolvedValue({
+    mocks.lists.mockResolvedValue({
       items: [],
       nextPageToken: "same",
     });
@@ -154,7 +165,7 @@ describe("snapshot reconciliation", () => {
   it("retains the last complete snapshot after a failed page and coalesces overlapping syncs", async () => {
     await syncBoard();
     const original = boardStore.getSnapshot().board;
-    vi.mocked(GoogleTasksService.prototype.listTasks).mockRejectedValueOnce(
+    mocks.tasks.mockRejectedValueOnce(
       new Error("Network interrupted"),
     );
     const first = syncBoard();
@@ -164,8 +175,8 @@ describe("snapshot reconciliation", () => {
     expect(boardStore.getSnapshot().error).toBe("Network interrupted");
   });
   it("persists rules, supplies bounded untrusted memo context, and excludes disconnected accounts", async () => {
-    vi.mocked(GoogleTasksService.prototype.listTasks).mockResolvedValue({
-      items: [{ ...task, due: "2020-01-01" }],
+    mocks.tasks.mockResolvedValue({
+      items: [{ ...task, scheduledDate: "2020-01-01" }],
     });
     await syncBoard();
     await saveRoutines(initial.routines);
@@ -173,8 +184,9 @@ describe("snapshot reconciliation", () => {
     expect(boardStore.getSnapshot().board?.routines).toEqual(initial.routines);
     expect(await kanbanContext()).toContain("Review");
     expect(await kanbanContext()).toContain("untrusted data");
-    vi.mocked(googleOAuthAuthority.getStatus).mockResolvedValue({
+    mocks.status.mockResolvedValue({
       state: "disconnected",
+      enabledCapabilities: [], grantedProviderScopes: [], sessionReady: false,
       grantedCapabilities: [],
     });
     expect(await kanbanContext()).toBe("");
@@ -182,10 +194,11 @@ describe("snapshot reconciliation", () => {
     expect(boardStore.getSnapshot().board).toBeNull();
   });
   it("does not publish results after the Google account changes mid-sync", async () => {
-    vi.mocked(GoogleTasksService.prototype.listTasks).mockImplementationOnce(
+    mocks.tasks.mockImplementationOnce(
       async () => {
-        vi.mocked(googleOAuthAuthority.getStatus).mockResolvedValue({
+        mocks.status.mockResolvedValue({
           state: "connected",
+      enabledCapabilities: ["tasks.read", "tasks.write"], grantedProviderScopes: [], sessionReady: true,
           grantedCapabilities: ["tasks.read"],
           account: { email: "two@example.com" },
         });
@@ -207,7 +220,7 @@ describe("snapshot reconciliation", () => {
     const stop = startBoardSync();
     try {
       await syncBoard();
-      const read = vi.mocked(GoogleTasksService.prototype.listTaskLists);
+      const read = mocks.lists;
       const calls = read.mock.calls.length;
       await vi.advanceTimersByTimeAsync(SYNC_INTERVAL);
       await syncBoard();

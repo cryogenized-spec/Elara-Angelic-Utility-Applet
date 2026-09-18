@@ -11,9 +11,13 @@ import { GeminiApiLockbox } from './GeminiApiLockbox';
 import { CharacterSettings } from './CharacterSettings';
 import { DurableMemorySettings } from './DurableMemorySettings';
 import { RoleplaySettings } from './RoleplaySettings';
+import { ToggleSwitch } from './ToggleSwitch';
 import { ChatAppearanceSettings } from './ChatAppearanceSettings';
 import { GoogleOAuthSettings } from './GoogleOAuthSettings';
 import { WorkspaceShortcutSettings } from './WorkspaceShortcutSettings';
+import { AutonomySettings } from './AutonomySettings';
+import { PlaybackPreferenceSettings } from './media/PlaybackPreferenceSettings';
+import { YouTubePolicyConsent } from './media/YouTubePolicyConsent';
 import type { CharacterProfile } from '../../domain/character';
 import type { ChatAppearancePreferences, RoleplayPreferences } from '../../domain/preferences';
 import './model-settings.css';
@@ -23,6 +27,11 @@ import './chat-appearance-settings.css';
 import './google-oauth-settings.css';
 import './settings-fixes.css';
 import './workspace-shortcut-settings.css';
+import './autonomy-settings.css';
+
+const YOUTUBE_GUIDE_URL = 'https://github.com/cryogenized-spec/Elara-Angelic-Utility-Applet/blob/main/documents/youtube/README.md';
+const YOUTUBE_TERMS_URL = 'https://www.youtube.com/t/terms';
+const GOOGLE_PRIVACY_URL = 'https://policies.google.com/privacy';
 
 const settingsSections = [
   { id: 'appearance', label: 'Appearance', icon: 'palette' as const },
@@ -31,12 +40,13 @@ const settingsSections = [
   { id: 'typography', label: 'Typography', icon: 'type' as const },
   { id: 'model', label: 'Gemini', icon: 'bot' as const },
   { id: 'google', label: 'Google', icon: 'shield' as const },
+  { id: 'autonomy', label: 'Autonomy', icon: 'calendar' as const },
   { id: 'chat', label: 'Chat', icon: 'message-circle' as const },
   { id: 'roleplay', label: 'Roleplay', icon: 'wand-sparkles' as const },
   { id: 'security', label: 'Lockbox', icon: 'lock-keyhole' as const },
 ] as const;
 
-type SettingsSection = typeof settingsSections[number]['id'];
+export type SettingsSection = typeof settingsSections[number]['id'];
 
 const css2UrlSchema = z.string().url().refine((value) => {
   try {
@@ -84,6 +94,9 @@ export function SettingsScreen({
   onChatAppearanceChange,
   roleplay,
   onRoleplayChange,
+  enterToSend,
+  onEnterToSendChange,
+  initialSection,
   onBack,
 }: {
   font: FontSelection;
@@ -105,9 +118,12 @@ export function SettingsScreen({
   onChatAppearanceChange: (value: ChatAppearancePreferences) => void;
   roleplay: RoleplayPreferences;
   onRoleplayChange: (value: RoleplayPreferences) => void;
+  enterToSend: boolean;
+  onEnterToSendChange: (value: boolean) => void;
+  initialSection?: SettingsSection;
   onBack: () => void;
 }) {
-  const [section, setSection] = useState<SettingsSection>('appearance');
+  const [section, setSection] = useState<SettingsSection>(initialSection ?? 'appearance');
   const [customUrl, setCustomUrl] = useState('');
   const [customError, setCustomError] = useState<string | null>(null);
   const model = getGeminiModel(selectedModel);
@@ -145,10 +161,11 @@ export function SettingsScreen({
           {section === 'memory' && <div className="settings-copy"><span className="panel-kicker">DURABLE CONTEXT</span><h2>Memory Bank</h2><p>Inspect, search, edit, archive, promote, restore, or permanently delete durable memory. This is a projection over the same canonical store used by Gemini retrieval.</p><DurableMemorySettings /></div>}
           {section === 'typography' && <div className="settings-copy"><span className="panel-kicker">TYPE</span><h2>Typography</h2><p>Choose the global font used throughout the app, then tune the text size specifically for the conversation.</p><div className="typography-preview" style={{ fontFamily: fontFamilyForCss(font), fontSize: `${chatTextSize}px` }}><span className="typography-preview__label">LIVE PREVIEW</span><p>The quick brown fox jumps over the lazy dog.</p><p>0123456789 · Aa Bb Cc · crisp, readable, and ready for chat.</p></div><div className="font-options" role="radiogroup" aria-label="Font family">{BUILT_IN_FONTS.map((option) => { const active = font.kind === 'built-in' && font.family === option.family; return <button key={option.family} className={`font-option${active ? ' is-active' : ''}`} type="button" role="radio" aria-checked={active} onClick={() => onFontChange({ kind: 'built-in', family: option.family })} style={{ fontFamily: fontFamilyForCss(option.family) }}><span>{option.family}</span><small>The quick brown fox jumps over the lazy dog.</small></button>; })}{font.kind === 'custom' && <button className="font-option is-active" type="button" role="radio" aria-checked="true" style={{ fontFamily: fontFamilyForCss(font) }}><span>{font.family}</span><small>Custom Google font · loaded from your CSS2 link.</small></button>}</div><div className="custom-font-card"><div><strong>Add a Google font</strong><span>Paste the CSS2 stylesheet URL generated by Google Fonts.</span></div><input className="custom-font-input" value={customUrl} onChange={(event) => { setCustomUrl(event.target.value); setCustomError(null); }} placeholder="https://fonts.googleapis.com/css2?family=..." inputMode="url" aria-label="Google Fonts CSS2 URL" /><button className="custom-font-button" type="button" onClick={applyCustomFont}>Load font</button>{customError && <small className="custom-font-error" role="alert">{customError}</small>}</div><RangeSlider id="chat-text-size" label="Chat text size" min={10} max={24} value={chatTextSize} valueLabel={`${chatTextSize}px`} minLabel="10px" maxLabel="24px" onChange={onChatTextSizeChange} /></div>}
           {section === 'model' && <div className="settings-copy"><span className="panel-kicker">GEMINI</span><h2>Model & generation</h2><p>The selected production model controls which generation settings are valid. Changes save automatically.</p><div className="model-settings"><div className="model-settings__field"><label htmlFor="gemini-model">Model</label><select id="gemini-model" className="model-settings__select" value={selectedModel} onChange={(event) => onModelChange(event.target.value)}>{GEMINI_MODELS.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}</select><span className="model-settings__hint">{model.id} · {model.inputTokenLimit.toLocaleString()} input · {model.outputTokenLimit.toLocaleString()} output tokens</span></div><GeminiGenerationControls model={model} settings={geminiSettings} onChange={onGeminiSettingsChange} /><div className="model-settings__unsupported">Temperature, top-p and top-k are intentionally not offered here.</div><div className="model-settings__actions"><button className="model-settings__button model-settings__button--reset" type="button" onClick={onResetGeminiSettings}>Reset to {model.name} defaults</button></div><div className="model-settings__status" role="status">Settings save automatically.</div></div></div>}
-          {section === 'google' && <div className="settings-copy"><span className="panel-kicker">AUTHORIZATION</span><h2>Google</h2><p>Connect Workspace capabilities independently. Authorization state and secrets remain owned by the protected OAuth authority.</p><GoogleOAuthSettings /><WorkspaceShortcutSettings /></div>}
-          {section === 'chat' && <div className="settings-copy"><span className="panel-kicker">CONVERSATION</span><h2>Chat</h2><p>Conversation-specific preferences live here as the application grows. Speaker colour and surface controls are in Appearance.</p><div className="setting-card"><strong>Gemini transport</strong><span>Direct browser connection · API key supplied by the local Lockbox</span></div><div className="setting-card"><strong>Startup screen</strong><span>Chat / empty chat · last chat option planned</span></div></div>}
+          {section === 'google' && <div className="settings-copy"><span className="panel-kicker">ACCOUNT & AUTHORIZATION</span><h2>Google</h2><p>Connect your Google account first, then grant Workspace permissions only for the services Elara should use. Authorization state and secrets remain owned by the protected OAuth authority.</p><GoogleOAuthSettings /><WorkspaceShortcutSettings /></div>}
+          {section === 'autonomy' && <div className="settings-copy"><span className="panel-kicker">ROUTINES</span><h2>Autonomy</h2><p>Scheduled routines Elara runs on your behalf. Every run is read-only, policy-gated, and lands in the Autonomy Inbox — nothing is sent silently. Local “Run now” proves the loop today; the cloud scheduler arrives in the next phase.</p><AutonomySettings /></div>}
+          {section === 'chat' && <div className="settings-copy"><span className="panel-kicker">CONVERSATION</span><h2>Chat</h2><p>Conversation-specific preferences live here as the application grows. Speaker colour and surface controls are in Appearance.</p><div className="setting-card setting-card--switch"><div className="setting-card__copy"><strong id="enter-to-send-label">Enter sends message</strong><span id="enter-to-send-hint">{enterToSend ? 'Enter sends · Shift+Enter inserts a new line.' : 'Enter inserts a new line · Ctrl/Cmd+Enter sends. The Send button always works.'}</span></div><ToggleSwitch checked={enterToSend} onCheckedChange={onEnterToSendChange} labelledBy="enter-to-send-label" describedBy="enter-to-send-hint" /></div><PlaybackPreferenceSettings /><div className="setting-card"><strong>Gemini transport</strong><span>Direct browser connection · API key supplied by the local Lockbox</span></div><div className="setting-card"><strong>Startup screen</strong><span>Chat / empty chat · last chat option planned</span></div></div>}
           {section === 'roleplay' && <div className="settings-copy"><span className="panel-kicker">CREATIVE CONTEXT</span><h2>Roleplay</h2><p>Roleplay is an explicit fictional/creative context. Its controls are hidden while disabled.</p><RoleplaySettings value={roleplay} onChange={onRoleplayChange} /></div>}
-          {section === 'security' && <div className="settings-copy"><span className="panel-kicker">SECURITY</span><h2>API Lockbox</h2><p>The Gemini API key is encrypted locally with a Lockbox password. It must be unlocked before Gemini can use it.</p><GeminiApiLockbox /></div>}
+          {section === 'security' && <div className="settings-copy"><span className="panel-kicker">SECURITY</span><h2>API Lockbox</h2><p>The Gemini API key is encrypted locally with a Lockbox password. It must be unlocked before Gemini can use it.</p><YouTubePolicyConsent /><GeminiApiLockbox /><div className="setting-card"><strong>YouTube API information</strong><span>How search, quota, caching and handoff work, plus the official policies that govern this integration.</span><p><a href={YOUTUBE_GUIDE_URL} target="_blank" rel="noreferrer noopener">Read the YouTube API guide</a> · <a href={YOUTUBE_TERMS_URL} target="_blank" rel="noreferrer noopener">YouTube Terms</a> · <a href={GOOGLE_PRIVACY_URL} target="_blank" rel="noreferrer noopener">Google Privacy Policy</a></p></div></div>}
         </section>
       </div>
     </main>

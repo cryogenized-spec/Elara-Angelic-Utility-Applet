@@ -33,6 +33,10 @@ export const durableMemorySchema = z.object({
   expiresAt: z.number().finite().nullable(),
   lastRecalledAt: z.number().finite().nullable(),
   recallCount: z.number().int().nonnegative(),
+  // Older records predate landmarks; validation materializes the safe default.
+  pinned: z.boolean().default(false),
+  // Records written before the consent flag existed parse as false (not consented).
+  autonomyContext: z.boolean().default(false),
 }).strict();
 
 export const memoryInputSchema = z.object({
@@ -52,4 +56,6 @@ export const memoryInputSchema = z.object({
   supersededBy: z.array(z.string().min(1)).max(MEMORY_MAX_RELATIONSHIPS).optional(),
   folderId: z.string().min(1).max(256).nullable().optional(),
   expiresAt: z.number().finite().nullable().optional(),
+  pinned: z.boolean().optional(),
+  autonomyContext: z.boolean().optional(),
 }).strict();

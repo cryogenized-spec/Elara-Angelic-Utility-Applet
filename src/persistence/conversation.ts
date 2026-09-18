@@ -1,6 +1,8 @@
 import Dexie, { type Table } from 'dexie';
 import type { ChatMessage, ConversationState, ConversationThread } from '../domain/chat';
+import { freshMediaItems } from '../domain/media';
 import type { DurableMemory } from '../domain/memory';
+import type { StoredArtifactBlob, StoredArtifactMetadata } from '../domain/artifact';
 import { DEFAULT_GEMINI_MODEL, getGeminiModel } from '../gemini/model-registry';
 import { defaultsForModel, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import type { StoredWorkspaceShortcut } from './workspace-shortcuts';
@@ -34,6 +36,21 @@ export interface StoredFolderAssignment {
   updatedAt: number;
 }
 
+function stripLegacyEmbedUrls(value: unknown): { value: unknown; changed: boolean } {
+  if (!Array.isArray(value)) return { value, changed: false };
+  const entries: readonly unknown[] = value;
+  let changed = false;
+  const migrated = entries.map((entry): unknown => {
+    if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) return entry;
+    const record = entry as Record<string, unknown>;
+    if (!Object.prototype.hasOwnProperty.call(record, 'embedUrl')) return entry;
+    const { embedUrl: _retired, ...withoutEmbedUrl } = record;
+    changed = true;
+    return withoutEmbedUrl;
+  });
+  return { value: migrated, changed };
+}
+
 export class ElaraDatabase extends Dexie {
   messages!: Table<ChatMessage, string>;
   threads!: Table<StoredThread, string>;
@@ -42,9 +59,11 @@ export class ElaraDatabase extends Dexie {
   folders!: Table<StoredConversationFolder, string>;
   folderAssignments!: Table<StoredFolderAssignment, string>;
   memories!: Table<DurableMemory, string>;
+  artifactMetadata!: Table<StoredArtifactMetadata, string>;
+  artifactBlobs!: Table<StoredArtifactBlob, string>;
 
-  constructor() {
-    super('elara-angelic-utility-applet');
+  constructor(name = 'elara-angelic-utility-applet') {
+    super(name);
     this.version(1).stores({ messages: 'id, createdAt, role' });
     this.version(2).stores({
       messages: 'id, conversationId, createdAt, role',
@@ -111,6 +130,50 @@ export class ElaraDatabase extends Dexie {
       folderAssignments: 'id, threadId, folderId, updatedAt',
       memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt',
     });
+    this.version(7).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+      memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt',
+      artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
+      artifactBlobs: 'id',
+    });
+    // v8: per-memory Autonomy Context consent flag (design §8.5) — index only,
+    // no data migration: records predating the flag default to false (not
+    // consented) when validated.
+    this.version(8).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+      memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt, autonomyContext',
+      artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
+      artifactBlobs: 'id',
+    });
+    // v9 retires the old derived iframe URL. Preserve every other raw field so
+    // the ordinary strict validator still decides whether each migrated item is
+    // trustworthy; this migration only removes the now-obsolete field.
+    this.version(9).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+      memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt, autonomyContext',
+      artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
+      artifactBlobs: 'id',
+    }).upgrade(async (transaction) => {
+      await transaction.table('messages').toCollection().modify((message: Record<string, unknown>) => {
+        const migrated = stripLegacyEmbedUrls(message.media);
+        if (migrated.changed) message.media = migrated.value;
+      });
+    });
   }
 }
 
@@ -129,16 +192,53 @@ async function ensurePrimaryThread(): Promise<StoredThread> {
   return primary;
 }
 
+function sanitizePersistedMedia(message: ChatMessage, now: number): { message: ChatMessage; changed: boolean } {
+  if (message.media === undefined) return { message, changed: false };
+  const rawMedia: unknown = message.media;
+  const media = freshMediaItems(rawMedia, now);
+  if (Array.isArray(rawMedia) && media.length === rawMedia.length) return { message, changed: false };
+  const { media: _discarded, ...withoutMedia } = message;
+  return media.length > 0
+    ? { message: { ...withoutMedia, media }, changed: true }
+    : { message: withoutMedia as ChatMessage, changed: true };
+}
+
+/**
+ * Physically remove stale/corrupt YouTube API metadata from every conversation.
+ * Message text, activity, artifacts and thread timestamps are deliberately left
+ * alone: retention hygiene must not rewrite chat history or look like user edit.
+ */
+export async function pruneExpiredConversationMedia(now: number = Date.now()): Promise<number> {
+  const messages = await db.messages.toArray();
+  const updates: ChatMessage[] = [];
+  for (const message of messages) {
+    const sanitized = sanitizePersistedMedia(message, now);
+    if (sanitized.changed) updates.push(sanitized.message);
+  }
+  if (updates.length) await db.messages.bulkPut(updates);
+  return updates.length;
+}
+
 export async function loadThreads(includeArchived = false): Promise<ConversationThread[]> {
   await ensurePrimaryThread();
   const threads = await db.threads.orderBy('updatedAt').reverse().toArray();
   return (includeArchived ? threads : threads.filter((thread) => !thread.archived)).map(({ id, title, createdAt, updatedAt, archived }) => ({ id, title, createdAt, updatedAt, archived }));
 }
 
-export async function loadConversation(id = PRIMARY_ID): Promise<ConversationState> {
+export async function loadConversation(id = PRIMARY_ID, now: number = Date.now()): Promise<ConversationState> {
   const thread = (await db.threads.get(id)) ?? (id === PRIMARY_ID ? await ensurePrimaryThread() : undefined);
   if (!thread) throw new Error('Conversation thread not found.');
-  const messages = await db.messages.where('conversationId').equals(id).sortBy('createdAt');
+  const storedMessages = await db.messages.where('conversationId').equals(id).sortBy('createdAt');
+  const messages: ChatMessage[] = [];
+  const cleanup: ChatMessage[] = [];
+  for (const stored of storedMessages) {
+    const sanitized = sanitizePersistedMedia(stored, now);
+    messages.push(sanitized.message);
+    if (sanitized.changed) cleanup.push(sanitized.message);
+  }
+  // Read safety is authoritative even if physical cleanup fails. The user sees the
+  // sanitized copy; best-effort persistence merely prevents rediscovering it.
+  if (cleanup.length) await db.messages.bulkPut(cleanup).catch(() => undefined);
   return { id: thread.id, title: thread.title, createdAt: thread.createdAt, updatedAt: thread.updatedAt, messages };
 }
 

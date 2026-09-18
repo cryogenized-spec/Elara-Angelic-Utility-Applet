@@ -5,7 +5,12 @@ export interface AppUiPreferences {
   chatTextSize: number;
   portraitScale: 1 | 2 | 3;
   portraitBackground: 'midnight' | 'blue-hour' | 'violet' | 'rose';
+  /** Composer: Enter sends (Shift+Enter newline) when true; Enter inserts a newline and Ctrl/Cmd+Enter sends when false. */
+  enterToSend: boolean;
 }
+
+export const MEDIA_PLAYER_SURFACE_PRESETS = ['minimal', 'glass', 'cinema'] as const;
+export type MediaPlayerSurfacePreset = (typeof MEDIA_PLAYER_SURFACE_PRESETS)[number];
 
 export interface ChatAppearancePreferences {
   chatBackgroundMode: 'solid' | 'gradient' | 'image';
@@ -19,6 +24,8 @@ export interface ChatAppearancePreferences {
   userSurfaceColor: string;
   userSurfaceOpacity: number;
   userSurfaceStyle: 'solid' | 'frosted' | 'gradient';
+  generationActivityAccent: string;
+  mediaPlayerSurfacePreset: MediaPlayerSurfacePreset;
 }
 
 export interface RoleplayPreferences {
@@ -36,6 +43,7 @@ export const DEFAULT_APP_UI: AppUiPreferences = {
   chatTextSize: 15,
   portraitScale: 2,
   portraitBackground: 'midnight',
+  enterToSend: true,
 };
 
 export const DEFAULT_CHAT_APPEARANCE: ChatAppearancePreferences = {
@@ -50,6 +58,8 @@ export const DEFAULT_CHAT_APPEARANCE: ChatAppearancePreferences = {
   userSurfaceColor: '#28344F',
   userSurfaceOpacity: 0.78,
   userSurfaceStyle: 'frosted',
+  generationActivityAccent: '#6EA8FF',
+  mediaPlayerSurfacePreset: 'glass',
 };
 
 export const DEFAULT_ROLEPLAY: RoleplayPreferences = {
@@ -60,4 +70,16 @@ export const DEFAULT_ROLEPLAY: RoleplayPreferences = {
   timeOfDay: '',
   weather: '',
   atmosphere: '',
+};
+
+export interface AutonomyPreferences {
+  /** Master switch: when false, no autonomous execution of any kind. */
+  enabled: boolean;
+  /** Maximum AutonomousEvents per rolling 24 hours across all routines. */
+  maxEventsPerDay: number;
+}
+
+export const DEFAULT_AUTONOMY: AutonomyPreferences = {
+  enabled: false,
+  maxEventsPerDay: 10,
 };

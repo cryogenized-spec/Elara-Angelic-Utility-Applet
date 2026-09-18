@@ -1,91 +1,44 @@
 import { expect, test, type Page } from "@playwright/test";
 
+type FixtureTask = { id: string; title: string; notes?: string; due?: string | null; status: string; etag: string; position: string };
+
 async function seedWorkspace(page: Page) {
-  await page.evaluate(async () => {
-    const { googleOAuthAuthority: oauth } =
-      await import("/Elara-Angelic-Utility-Applet/src/google/oauth/authority.ts");
-    const { syncBoard } =
-      await import("/Elara-Angelic-Utility-Applet/src/kanban/store.ts");
-    const lists = [
-      { id: "studio", title: "Studio projects" },
-      { id: "personal", title: "Personal" },
-      { id: "reading", title: "Reading list" },
-      { id: "later", title: "Someday" },
-    ];
-    const tasks = [
-      {
-        id: "review",
-        title: "Review the launch proposal",
-        notes: "Read the source email and confirm the next steps.",
-        due: "2020-01-01T00:00:00Z",
-        status: "needsAction",
-        etag: "one",
-        position: "0001",
-      },
-      ...Array.from({ length: 8 }, (_, index) => ({
-        id: `task-${index}`,
-        title: `Project milestone ${index + 1}`,
-        status: "needsAction",
-        etag: "one",
-        position: `000${index + 2}`,
-      })),
-    ];
-    oauth.getStatus = async () => ({
-      state: "connected",
-      grantedCapabilities: ["tasks.read", "tasks.write"],
-      account: { email: "test@example.com" },
-    });
-    oauth.authorize = async (capability) => ({
-      capability,
-      fetch: async (url, init) => {
-        const path = new URL(String(url)).pathname;
-        let result: unknown;
-        if (path.endsWith("/users/@me/lists")) {
-          if (init?.method === "POST") {
-            const list = {
-              id: crypto.randomUUID(),
-              ...JSON.parse(String(init.body)),
-            };
-            lists.push(list);
-            result = list;
-          } else result = { items: lists };
-        } else if (path.includes("/users/@me/lists/")) {
-          const id = decodeURIComponent(path.split("/").at(-1)!);
-          const index = lists.findIndex((list) => list.id === id);
-          if (init?.method === "DELETE") { lists.splice(index, 1); return new Response(null, { status: 204 }); }
-          Object.assign(lists[index], JSON.parse(String(init?.body))); result = lists[index];
-        } else if (path.endsWith("/move")) {
-          const id = path.split("/").at(-2)!;
-          const source = tasks.splice(tasks.findIndex((task) => task.id === id), 1)[0];
-          const previous = new URL(String(url)).searchParams.get("previous");
-          tasks.splice(previous ? tasks.findIndex((task) => task.id === previous) + 1 : 0, 0, source);
-          tasks.forEach((task, index) => { task.position = String(index).padStart(4, "0"); });
-          result = source;
-        } else if (init?.method === "DELETE") {
-          const index = tasks.findIndex((task) => path.endsWith("/" + task.id));
-          tasks.splice(index, 1); return new Response(null, { status: 204 });
-        } else if (!init?.method && !path.endsWith("/tasks")) {
-          result = tasks.find((task) => path.endsWith("/" + task.id));
-        } else if (init?.method === "PATCH") {
-          const task = tasks.find((item) => path.endsWith("/" + item.id));
-          Object.assign(task!, JSON.parse(String(init.body)));
-          result = task;
-        } else if (init?.method === "POST") {
-          const task = {
-            id: crypto.randomUUID(),
-            status: "needsAction",
-            ...JSON.parse(String(init.body)),
-          };
-          tasks.push(task);
-          result = task;
-        } else result = { items: path.includes("/studio/") ? tasks : [] };
-        return new Response(JSON.stringify(result), {
-          headers: { "content-type": "application/json" },
-        });
-      },
-    });
-    await syncBoard();
+  const lists = [{ id: 'studio', title: 'Studio projects' }, { id: 'personal', title: 'Personal' }, { id: 'reading', title: 'Reading list' }, { id: 'later', title: 'Someday' }];
+  const tasks: FixtureTask[] = [{ id: 'review', title: 'Review the launch proposal', notes: 'Read the source email and confirm the next steps.', due: '2020-01-01T00:00:00Z', status: 'needsAction', etag: 'one', position: '0001' }, ...Array.from({ length: 8 }, (_, index) => ({ id: `task-${index}`, title: `Project milestone ${index + 1}`, status: 'needsAction', etag: 'one', position: `000${index + 2}` }))];
+  await page.route('https://accounts.google.com/gsi/client', (route) => route.fulfill({ contentType: 'text/javascript', body: `window.google = { accounts: { oauth2: { initTokenClient: (config) => ({ requestAccessToken: () => config.callback({ access_token: "kanban-test-token", expires_in: 3600, scope: config.scope }) }), revoke: (_token, callback) => callback({}) } } };` }));
+  await page.route('https://www.googleapis.com/oauth2/v2/userinfo*', (route) => route.fulfill({ json: { email: 'test@example.com', name: 'Kanban Test' } }));
+  await page.route('https://tasks.googleapis.com/**', async (route) => {
+    const request = route.request(); const url = new URL(request.url()); const path = url.pathname; const method = request.method();
+    const body = request.postData() ? request.postDataJSON() as Partial<FixtureTask> : {};
+    let result: unknown;
+    if (method === 'OPTIONS') { await route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS', 'access-control-allow-headers': '*' } }); return; }
+    if (path.endsWith('/users/@me/lists')) {
+      if (method === 'POST') { const list = { id: crypto.randomUUID(), title: body.title ?? '' }; lists.push(list); result = list; } else result = { items: lists };
+    } else if (path.includes('/users/@me/lists/')) {
+      const index = lists.findIndex((list) => path.endsWith('/' + list.id));
+      if (method === 'DELETE') { lists.splice(index, 1); await route.fulfill({ status: 204 }); return; }
+      Object.assign(lists[index], body); result = lists[index];
+    } else if (path.endsWith('/move')) {
+      const id = path.split('/').at(-2); const source = tasks.splice(tasks.findIndex((task) => task.id === id), 1)[0];
+      const previous = url.searchParams.get('previous');
+      tasks.splice(previous ? tasks.findIndex((task) => task.id === previous) + 1 : 0, 0, source);
+      tasks.forEach((task, index) => { task.position = String(index).padStart(4, '0'); }); result = source;
+    } else if (method === 'DELETE') {
+      tasks.splice(tasks.findIndex((task) => path.endsWith('/' + task.id)), 1); await route.fulfill({ status: 204 }); return;
+    } else if (method === 'GET' && !path.endsWith('/tasks')) result = tasks.find((task) => path.endsWith('/' + task.id));
+    else if (method === 'PATCH') { const task = tasks.find((task) => path.endsWith('/' + task.id)); Object.assign(task!, body); result = task; }
+    else if (method === 'POST') { const task: FixtureTask = { id: crypto.randomUUID(), title: body.title ?? '', status: 'needsAction', etag: 'one', position: '9999', ...body }; tasks.push(task); result = task; }
+    else result = { items: path.includes('/studio/') ? tasks : [] };
+    await route.fulfill({ json: result, headers: { 'access-control-allow-origin': '*' } });
   });
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Google', exact: true }).click();
+  await page.getByRole('button', { name: 'Connect Google account' }).click();
+  const service = page.locator('.google-oauth-service').filter({ hasText: 'Google Tasks' });
+  await service.getByRole('button', { name: 'Enable read access' }).click();
+  await service.getByRole('button', { name: 'Enable writes' }).click();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 
 test("kanban command palette, Google writes, memo resolution and two-axis canvas", async ({
@@ -239,4 +192,40 @@ test("reordering uses Google move, supports dragging and disables filtered reord
   await page.getByLabel("Type DELETE to confirm").fill("DELETE");
   await page.getByRole("button", { name: "Confirm removal" }).click();
   await expect(page.getByRole("button", { name: "Review the launch proposal", exact: true })).toHaveCount(0);
+});
+
+test('overdue memo reaches an ordinary Gemini turn without a hidden user message', async ({ page }) => {
+  const requests: Array<Record<string, unknown>> = [];
+  await page.route('**/v1/interactions*', async (route) => {
+    requests.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({ contentType: 'text/event-stream', body: [
+      `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: 'kanban-memo-turn', status: 'in_progress', model: 'gemini-3.8-flash' } })}\n\n`,
+      `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', interaction_id: 'kanban-memo-turn', index: 0, delta: { type: 'text', text: 'I can see your overdue memo.' } })}\n\n`,
+      `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: 'kanban-memo-turn', status: 'completed' } })}\n\n`,
+    ].join('') });
+  });
+  await page.goto(''); await seedWorkspace(page);
+  await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+  await page.getByRole('button', { name: 'Open workspace command palette' }).click();
+  await page.getByRole('button', { name: /Create new subroutine/ }).click();
+  await page.getByRole('button', { name: 'Enable subroutine' }).click();
+  await expect(page.locator('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: 'Back to chat' }).click();
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Lockbox', exact: true }).click();
+  await page.getByLabel('Gemini API key').fill(['kanban', 'test', 'key'].join('-'));
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
+  await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
+  await page.getByRole('textbox', { name: 'Message Elara' }).fill('Any overdue tasks?');
+  await page.getByRole('button', { name: 'Send message' }).click();
+  await expect(page.getByText('I can see your overdue memo.')).toBeVisible();
+  const request = requests.find((entry) => JSON.stringify(entry.input).includes('Any overdue tasks?'));
+  expect(request).toBeDefined();
+  expect(request?.system_instruction).toEqual(expect.stringContaining('Review the launch proposal'));
+  expect(request?.system_instruction).toEqual(expect.stringContaining('untrusted data'));
+  expect(JSON.stringify(request?.input)).not.toContain('Review the launch proposal');
 });

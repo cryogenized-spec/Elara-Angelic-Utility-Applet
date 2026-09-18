@@ -8,6 +8,7 @@ import {
 import {
   GENERATION_ACTIVITY_GLYPH_LABELS,
   GENERATION_ACTIVITY_GLYPH_SUGGESTIONS,
+  generationActivityGlyphText,
   normalizeGenerationActivityGlyph,
 } from '../../ui/activity-glyphs';
 import { NOTO_EMOJI_PREVIEW_FAMILY, previewNotoEmoji } from '../../ui/noto-emoji';
@@ -32,7 +33,14 @@ export function GenerationActivityGlyphSettings({
   const [customKeys, setCustomKeys] = useState<ReadonlySet<GenerationActivityGlyphKey>>(() => new Set());
   const [customInputs, setCustomInputs] = useState<Partial<Record<GenerationActivityGlyphKey, string>>>({});
   const [invalidKey, setInvalidKey] = useState<GenerationActivityGlyphKey | null>(null);
-  const [previewState, setPreviewState] = useState<'loading' | 'ready' | 'unavailable'>('loading');
+  const [readyPreviewSignature, setReadyPreviewSignature] = useState<string | null>(null);
+  const [unavailablePreviewSignature, setUnavailablePreviewSignature] = useState<string | null>(null);
+  const previewSignature = generationActivityGlyphText(value);
+  const previewState = readyPreviewSignature === previewSignature
+    ? 'ready'
+    : unavailablePreviewSignature === previewSignature
+      ? 'unavailable'
+      : 'loading';
 
   const customByValue = useMemo(() => new Set(
     GENERATION_ACTIVITY_GLYPH_KEYS.filter(
@@ -42,17 +50,21 @@ export function GenerationActivityGlyphSettings({
 
   useEffect(() => {
     let cancelled = false;
-    setPreviewState('loading');
+    const signature = previewSignature;
     const timer = window.setTimeout(() => {
       void previewNotoEmoji(value)
-        .then((ready) => { if (!cancelled) setPreviewState(ready ? 'ready' : 'unavailable'); })
-        .catch(() => { if (!cancelled) setPreviewState('unavailable'); });
+        .then((ready) => {
+          if (cancelled) return;
+          if (ready) setReadyPreviewSignature(signature);
+          else setUnavailablePreviewSignature(signature);
+        })
+        .catch(() => { if (!cancelled) setUnavailablePreviewSignature(signature); });
     }, 280);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [value]);
+  }, [previewSignature, value]);
 
   function choose(key: GenerationActivityGlyphKey, next: string): void {
     setInvalidKey(null);

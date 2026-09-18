@@ -37,7 +37,7 @@ import { getGeminiModel } from '../gemini/model-registry';
 import { resolveMasterCharacterInstruction } from '../character/system-instruction';
 import { Icon } from '../ui/icons';
 import { fontFamilyForCss } from '../ui/fontRegistry';
-import { commitNotoEmoji, restoreNotoEmoji } from '../ui/noto-emoji';
+import { commitNotoEmoji, restoreNotoEmoji, suspendNotoEmojiRendering } from '../ui/noto-emoji';
 import { useVisualViewport } from '../ui/useVisualViewport';
 import { applyPwaUpdate, initPwaUpdater } from '../pwa';
 import { Sidebar } from './components/Sidebar';
@@ -509,6 +509,7 @@ export function App() {
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save chat appearance.'); }
   }
   async function handleSettingsBack(activityGlyphs: GenerationActivityGlyphs): Promise<void> {
+    suspendNotoEmojiRendering();
     setSettingsOpen(false);
     try {
       const saved = await queueChatAppearanceSave({ ...chatAppearance, generationActivityGlyphs: activityGlyphs });

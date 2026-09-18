@@ -126,6 +126,29 @@ describe('direct Google OAuth authority', () => {
     expect(stored).not.toContain('calendar.');
   });
 
+  it('refreshes the account session without dropping already-enabled Workspace scopes', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['google.account', 'calendar.events.read'],
+      grantedProviderScopes: [EMAIL_SCOPE, CALENDAR_READ_SCOPE],
+      account: { email: 'test@example.com', displayName: 'Test User' },
+      updatedAt: new Date().toISOString(),
+    }));
+    tokenMock.mockResolvedValueOnce(token('fresh-session-token', `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE}`));
+
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(false);
+    await googleOAuthAuthority.authorize('google.account');
+
+    expect(tokenMock).toHaveBeenCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE} ${OPENID_SCOPE}`,
+      prompt: '',
+    });
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.sessionReady).toBe(true);
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
+  });
+
   it('records GIS scopes and persists metadata without persisting the access token', async () => {
     tokenMock.mockResolvedValueOnce(token('secret-access-token', CALENDAR_READ_SCOPE));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');

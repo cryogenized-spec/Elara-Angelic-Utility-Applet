@@ -547,7 +547,7 @@ export function App() {
     </div>
     <MasterPromptWarning systemInstruction={character.systemInstruction} />
     <PortraitBanner collapsed={sidebarOpen} scale={uiSettings.portraitScale} background={uiSettings.portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
-    <ConversationSurface key={conversation.id} messages={visibleMessages} generation={generation} onRegenerate={handleRegenerate} />
+    <ConversationSurface key={conversation.id} messages={visibleMessages} generation={generation} onRegenerate={handleRegenerate} activityGlyphs={chatAppearance.generationActivityGlyphs} />
     {error && <GenerationError message={error} structured={structuredError} onRetry={canRetry ? () => void retryLastTurn() : null} onOpenLockbox={showLockboxAction ? () => openLockbox() : null} />}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} attachments={draftAttachments} onFilesSelected={(files) => void handleFilesSelected(files)} onRemoveAttachment={(id) => void removeDraftAttachment(id)} enterToSend={uiSettings.enterToSend} />
     {pwaUpdateAvailable && <UpdateToast onRefresh={() => applyPwaUpdate()} onDismiss={() => setPwaUpdateAvailable(false)} />}

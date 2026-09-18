@@ -24,6 +24,10 @@ export function getNotoEmojiReady(): boolean {
   return committedReady;
 }
 
+export function suspendNotoEmojiRendering(): void {
+  setCommittedReady(false);
+}
+
 function setCommittedReady(value: boolean): void {
   if (committedReady === value) return;
   committedReady = value;
@@ -122,6 +126,7 @@ export async function previewNotoEmoji(glyphs: GenerationActivityGlyphs): Promis
  * retrieval, older subsets are removed, and the committed face is installed.
  */
 export async function commitNotoEmoji(glyphs: GenerationActivityGlyphs): Promise<boolean> {
+  setCommittedReady(false);
   const text = generationActivityGlyphText(glyphs);
   if (!text) return false;
   const key = syntheticCacheUrl(text);

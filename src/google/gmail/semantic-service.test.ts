@@ -111,6 +111,46 @@ describe('GoogleGmailSemanticService', () => {
     expect(result.bodyText).not.toContain('piece-5-99');
   });
 
+  it('retrieves full threads metadata-first and fetches only the newest bounded messages', async () => {
+    const requests: string[] = [];
+    const references = Array.from({ length: 25 }, (_, index) => ({ id: `m${index + 1}`, threadId: 'thread-many' }));
+    const service = new GoogleGmailSemanticService(authority(async (url) => {
+      const target = new URL(String(url));
+      requests.push(target.toString());
+      if (target.pathname.endsWith('/threads/thread-many')) {
+        expect(target.searchParams.get('format')).toBe('minimal');
+        return json({ id: 'thread-many', historyId: '77', messages: references });
+      }
+      const messageId = target.pathname.split('/').at(-1) ?? '';
+      expect(target.searchParams.get('format')).toBe('full');
+      return json({
+        id: messageId,
+        threadId: 'thread-many',
+        payload: { mimeType: 'text/plain', body: { data: b64url(`body-${messageId}`) } },
+      });
+    }));
+
+    const result = await service.getThread('thread-many', 'full');
+
+    expect(result.messageCount).toBe(25);
+    expect(result.messages).toHaveLength(20);
+    expect(result.messages[0]?.id).toBe('m6');
+    expect(result.messages.at(-1)?.id).toBe('m25');
+    expect(result.messagesTruncated).toBe(true);
+    expect(requests).toHaveLength(21);
+    expect(requests.some((request) => request.includes('/messages/m1?'))).toBe(false);
+    expect(requests.some((request) => request.includes('/messages/m6?'))).toBe(true);
+  });
+
+  it('rejects oversized Gmail provider JSON before materializing it', async () => {
+    const service = new GoogleGmailSemanticService(authority(async () => new Response('{}', {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'content-length': String(8 * 1024 * 1024 + 1) },
+    })));
+
+    await expect(service.getMessage('m-oversize', 'full')).rejects.toThrow('byte budget');
+  });
+
   it('translates semantic mailbox actions to the documented mutable system labels', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const service = new GoogleGmailSemanticService(authority(async (url, init) => { requests.push({ url: String(url), init }); return json({ id: 'm1' }); }));

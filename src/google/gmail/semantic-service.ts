@@ -332,6 +332,10 @@ function assertTurnActive(guard: GmailTurnGuard | undefined): void {
   }
 }
 
+function providerWriteGuard(guard: GmailTurnGuard | undefined): (() => void) | undefined {
+  return guard ? () => assertTurnActive(guard) : undefined;
+}
+
 export class GoogleGmailSemanticService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
@@ -437,7 +441,11 @@ export class GoogleGmailSemanticService {
     const access = await this.oauth.authorize('gmail.labels');
     await this.requireUserLabel(id, access);
     assertTurnActive(guard);
-    const response = await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    const response = await access.fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`,
+      { method: 'DELETE', ...(guard?.signal ? { signal: guard.signal } : {}) },
+      providerWriteGuard(guard),
+    );
     if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`);
   }
 
@@ -504,12 +512,30 @@ export class GoogleGmailSemanticService {
   private labelName(name: string): string { const normalized = name.trim(); if (!normalized || normalized.length > 500 || /[\r\n]/.test(normalized) || normalized.includes('\0')) throw new Error('Gmail label name is invalid.'); return normalized; }
   private async sendAndDiscard(url: string, body: unknown, access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>, guard: GmailTurnGuard | undefined): Promise<void> {
     assertTurnActive(guard);
-    const response = await access.fetch(url, { method: 'POST', headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const response = await access.fetch(
+      url,
+      {
+        method: 'POST',
+        headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(guard?.signal ? { signal: guard.signal } : {}),
+      },
+      providerWriteGuard(guard),
+    );
     if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`);
   }
   private async sendJson<T = unknown>(url: string, body: unknown, method: 'POST' | 'PATCH', access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>, guard: GmailTurnGuard | undefined): Promise<T> {
     assertTurnActive(guard);
-    const response = await access.fetch(url, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    const response = await access.fetch(
+      url,
+      {
+        method,
+        headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(guard?.signal ? { signal: guard.signal } : {}),
+      },
+      providerWriteGuard(guard),
+    );
     return this.readJson<T>(response);
   }
   private async readJson<T>(response: Response): Promise<T> { if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); return (await response.json()) as T; }

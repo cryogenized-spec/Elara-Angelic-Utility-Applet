@@ -3,6 +3,7 @@ import { moveBefore, moveOne, type TaskMove } from "../../kanban/reordering";
 import type { TaskListSummary } from "../../kanban/google-port";
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -114,9 +115,14 @@ function KanbanWorkspace({
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
     void syncBoard("automatic");
-    const timer = window.setInterval(() => setClock(Date.now()), 1000);
-    return () => clearInterval(timer);
   }, []);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const now = Date.now();
+      setClock((previous) => nextRetryAt !== null || new Date(previous).toDateString() !== new Date(now).toDateString() ? now : previous);
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [nextRetryAt]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (
@@ -131,7 +137,18 @@ function KanbanWorkspace({
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, []);
-  const memo = board ? overdueMemo(board) : [];
+  const localDay = new Date(clock).toDateString();
+  const memo = useMemo(() => board ? overdueMemo(board, new Date(localDay)) : [], [board, localDay]);
+  const tasksByList = useMemo(() => {
+    const groups = new Map<string, BoardTask[]>();
+    for (const task of board?.tasks ?? []) {
+      const group = groups.get(task.listId);
+      if (group) group.push(task); else groups.set(task.listId, [task]);
+    }
+    for (const [id, tasks] of groups) groups.set(id, orderedTasks(tasks));
+    return groups;
+  }, [board?.tasks]);
+  const openCount = useMemo(() => board?.tasks.filter((task) => task.status !== 'completed').length ?? 0, [board?.tasks]);
   const openEditor = (next: Editor) => {
     setPalette(false);
     setActionError(null);
@@ -267,7 +284,7 @@ function KanbanWorkspace({
         <div className="kb-sync-label" role="status">
           {phase === 'backoff' && nextRetryAt !== null ? `Retrying read in ${Math.max(0, Math.ceil((nextRetryAt - clock) / 1000))}s · ` : phase === 'offline' ? 'Offline · ' : phase === 'paused' ? 'Auto-sync paused · ' : ''}
           {board
-            ? `${board.tasks.filter((task) => task.status !== "completed").length} open · Synced ${new Date(board.syncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+            ? `${openCount} open · Synced ${new Date(board.syncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
             : "Your tasks, one workspace"}
         </div>
       </div>
@@ -295,9 +312,7 @@ function KanbanWorkspace({
         >
           <div className="kb-canvas">
             {board?.lists.map((list, index) => {
-              const tasks = orderedTasks(
-                board.tasks.filter((task) => task.listId === list.id),
-              );
+              const tasks = tasksByList.get(list.id) ?? [];
               const matches = tasks.filter(visible);
               return (
                 <section

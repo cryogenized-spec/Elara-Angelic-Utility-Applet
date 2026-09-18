@@ -250,11 +250,23 @@ export function orderedTasks(tasks: BoardTask[]): BoardTask[] {
   const ids = new Set(sorted.map((task) => task.id));
   const result: BoardTask[] = [];
   const visited = new Set<string>();
-  const append = (task: BoardTask) => {
-    if (visited.has(task.id)) return;
-    visited.add(task.id);
-    result.push(task);
-    sorted.filter((child) => child.parent === task.id).forEach(append);
+  const children = new Map<string, BoardTask[]>();
+  for (const task of sorted) {
+    if (!task.parent) continue;
+    const siblings = children.get(task.parent);
+    if (siblings) siblings.push(task); else children.set(task.parent, [task]);
+  }
+  const append = (root: BoardTask) => {
+    // Iterative DFS avoids stack overflow on deeply nested imported data.
+    const pending = [root];
+    while (pending.length) {
+      const task = pending.pop()!;
+      if (visited.has(task.id)) continue;
+      visited.add(task.id);
+      result.push(task);
+      const siblings = children.get(task.id) ?? [];
+      for (let index = siblings.length - 1; index >= 0; index--) pending.push(siblings[index]);
+    }
   };
   sorted
     .filter((task) => !task.parent || !ids.has(task.parent))
@@ -264,16 +276,16 @@ export function orderedTasks(tasks: BoardTask[]): BoardTask[] {
 }
 
 export function overdueMemo(board: Board, now = new Date()): BoardTask[] {
-  return board.tasks.filter(
-    (task) =>
-      task.status !== "completed" &&
-      !task.deleted &&
-      board.routines.some(
-        (rule) =>
-          rule.enabled &&
-          (!rule.listId || rule.listId === task.listId) &&
-          overdueDays(task.scheduledDate, now) >= Math.max(1, rule.days),
-      ),
+  // Overlapping enabled rules reduce to the smallest threshold per scope.
+  const thresholds = new Map<string, number>();
+  for (const rule of board.routines) {
+    if (!rule.enabled) continue;
+    thresholds.set(rule.listId, Math.min(thresholds.get(rule.listId) ?? Infinity, Math.max(1, rule.days)));
+  }
+  const allLists = thresholds.get('') ?? Infinity;
+  return board.tasks.filter((task) =>
+    task.status !== 'completed' && !task.deleted &&
+    overdueDays(task.scheduledDate, now) >= Math.min(allLists, thresholds.get(task.listId) ?? Infinity),
   );
 }
 

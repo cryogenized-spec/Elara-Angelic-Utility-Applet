@@ -42,6 +42,33 @@ const task: BoardTask = {
 };
 
 describe("kanban due-date and memo semantics", () => {
+  it('orders twenty thousand nested tasks without recursive stack growth', () => {
+    const tasks = Array.from({ length: 20_000 }, (_, index) => ({ ...task, id: String(index), parent: index ? String(index - 1) : undefined, position: String(index).padStart(5, '0') }));
+    const imported = [...tasks].reverse();
+    expect(orderedTasks(imported)).toEqual(tasks);
+    expect(imported[0].id).toBe('19999'); // Input remains untouched.
+  });
+  it('retains stable sibling order, orphans and cycles exactly once', () => {
+    const tasks = [
+      { ...task, id: 'child-b', parent: 'root', position: '2' },
+      { ...task, id: 'cycle-a', parent: 'cycle-b', position: '4' },
+      { ...task, id: 'child-a', parent: 'root', position: '1' },
+      { ...task, id: 'root', position: '3' },
+      { ...task, id: 'orphan', parent: 'missing', position: '5' },
+      { ...task, id: 'cycle-b', parent: 'cycle-a', position: '6' },
+      { ...task, id: 'self', parent: 'self', position: '7' },
+    ];
+    expect(orderedTasks(tasks).map(({ id }) => id)).toEqual(['root', 'child-a', 'child-b', 'orphan', 'cycle-a', 'cycle-b', 'self']);
+  });
+  it('indexes overlapping rule thresholds without changing scope or task order', () => {
+    const tasks = Array.from({ length: 10_000 }, (_, index) => ({ ...task, id: String(index), listId: index % 2 ? 'b' : 'a' }));
+    const routines = Array.from({ length: 100 }, (_, index) => ({ ...initial.routines[0], id: String(index), listId: 'a', days: index + 1 }));
+    const board = { ...initial, tasks, routines };
+    expect(overdueMemo(board, new Date(2026, 8, 18))).toEqual(tasks.filter(({ listId }) => listId === 'a'));
+    expect(overdueMemo({ ...board, routines: [...routines, { ...routines[0], listId: '' }] }, new Date(2026, 8, 18))).toEqual(tasks);
+    expect(overdueMemo({ ...board, routines: [] }, new Date(2026, 8, 18))).toEqual([]);
+  });
+
   it("keeps nested tasks beneath their parents while preserving sibling positions", () => {
     expect(
       orderedTasks([

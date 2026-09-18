@@ -25,7 +25,7 @@ describe('Gmail Pass 3 tool parity', () => {
       'gmail.modifyMessage', 'gmail.modifyThread', 'gmail.trashMessage', 'gmail.untrashMessage', 'gmail.trashThread', 'gmail.untrashThread',
       'gmail.createLabel', 'gmail.updateLabel', 'gmail.deleteLabel', 'gmail.sendMessage', 'gmail.replyMessage',
     ]));
-    expect(googleToolRegistry.find((entry) => entry.name === 'gmail.replyMessage')).toMatchObject({ risk: 'send', capability: 'gmail.send', exposure: 'gemini' });
+    expect(googleToolRegistry.find((entry) => entry.name === 'gmail.replyMessage')).toMatchObject({ risk: 'send', capability: 'gmail.send', prerequisiteCapabilities: ['gmail.read'], exposure: 'gemini' });
   });
 
   it('does not let mailbox-modify authority substitute for explicit send authority', async () => {
@@ -38,6 +38,27 @@ describe('Gmail Pass 3 tool parity', () => {
     expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'gmail.send' });
     expect(confirm).not.toHaveBeenCalled();
     expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('requires Gmail read authority before reply confirmation even when send is enabled', async () => {
+    const handler = vi.fn(async () => ({ sent: true }));
+    const confirm = vi.fn(async () => true);
+    const call = { tool: 'gmail.replyMessage' as const, arguments: { threadId: 't1', to: 'bob@example.com', subject: 'Re: Hello', body: 'Body', inReplyTo: '<m1@example.com>' } };
+    const result = await executeGoogleTool(
+      call,
+      { oauth: oauthFor('gmail.send'), handlers: { 'gmail.replyMessage': handler }, confirm },
+    );
+    expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'gmail.read' });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+
+    const approved = await executeGoogleTool(
+      call,
+      { oauth: oauthFor('gmail.send', 'gmail.read'), handlers: { 'gmail.replyMessage': handler }, confirm },
+    );
+    expect(approved.ok).toBe(true);
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(handler).toHaveBeenCalledOnce();
   });
 
   it('keeps declarations aligned to semantic actions rather than raw provider label arrays/resources', () => {

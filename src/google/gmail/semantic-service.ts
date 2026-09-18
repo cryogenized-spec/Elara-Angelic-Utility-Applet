@@ -193,18 +193,20 @@ function plainTextParts(part: ProviderPart | undefined, sink: string[], state: M
   const attachmentId = typeof part.body?.attachmentId === 'string' ? part.body.attachmentId.trim() : '';
   if (filename || attachmentId) return;
 
-  const mimeType = typeof part.mimeType === 'string' ? part.mimeType.toLowerCase() : '';
-  const decoded = decodeBase64Url(part.body?.data);
-  if (decoded.truncated) state.truncated = true;
-  if ((mimeType === 'text/plain' || (!mimeType && decoded.text)) && decoded.text) {
-    const separator = sink.length ? 1 : 0;
-    const remaining = Math.max(0, MAX_BODY_TEXT_CHARS - state.chars - separator);
-    const text = decoded.text.slice(0, remaining);
-    if (text) {
-      sink.push(text);
-      state.chars += separator + text.length;
+  const mimeType = typeof part.mimeType === 'string' ? part.mimeType.toLowerCase().split(';', 1)[0].trim() : '';
+  if (mimeType === 'text/plain') {
+    const decoded = decodeBase64Url(part.body?.data);
+    if (decoded.truncated) state.truncated = true;
+    if (decoded.text) {
+      const separator = sink.length ? 1 : 0;
+      const remaining = Math.max(0, MAX_BODY_TEXT_CHARS - state.chars - separator);
+      const text = decoded.text.slice(0, remaining);
+      if (text) {
+        sink.push(text);
+        state.chars += separator + text.length;
+      }
+      if (text.length < decoded.text.length) state.truncated = true;
     }
-    if (text.length < decoded.text.length) state.truncated = true;
   }
 
   if (!Array.isArray(part.parts) || state.chars >= MAX_BODY_TEXT_CHARS) return;
@@ -319,6 +321,17 @@ function actionLabels(action: GmailOrganizeAction, labelId?: string): { addLabel
   }
 }
 
+export interface GmailTurnGuard {
+  readonly signal?: AbortSignal;
+  readonly isGenerationActive?: () => boolean;
+}
+
+function assertTurnActive(guard: GmailTurnGuard | undefined): void {
+  if (guard?.signal?.aborted || guard?.isGenerationActive?.() === false) {
+    throw new DOMException('The Gmail operation lost turn authority.', 'AbortError');
+  }
+}
+
 export class GoogleGmailSemanticService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
@@ -369,33 +382,94 @@ export class GoogleGmailSemanticService {
   }
   async getLabel(labelId: string): Promise<GmailLabelView> { const id = requiredId(labelId, 'Gmail label id'); const access = await this.oauth.authorize('gmail.read'); return normalizeLabel(await this.readJson<ProviderLabel>(await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`))); }
 
-  async organizeMessage(messageId: string, action: GmailOrganizeAction, labelId?: string): Promise<GmailMutationAck> { return this.organize('messages', requiredId(messageId, 'Gmail message id'), action, labelId); }
-  async organizeThread(threadId: string, action: GmailOrganizeAction, labelId?: string): Promise<GmailMutationAck> { return this.organize('threads', requiredId(threadId, 'Gmail thread id'), action, labelId); }
-  async trashMessage(messageId: string): Promise<GmailMutationAck> { const id = requiredId(messageId, 'Gmail message id'); await this.postWrite(`messages/${encodeURIComponent(id)}/trash`); return { changed: true, target: 'message', id, action: 'trash' }; }
-  async untrashMessage(messageId: string): Promise<GmailMutationAck> { const id = requiredId(messageId, 'Gmail message id'); await this.postWrite(`messages/${encodeURIComponent(id)}/untrash`); return { changed: true, target: 'message', id, action: 'untrash' }; }
-  async trashThread(threadId: string): Promise<GmailMutationAck> { const id = requiredId(threadId, 'Gmail thread id'); await this.postWrite(`threads/${encodeURIComponent(id)}/trash`); return { changed: true, target: 'thread', id, action: 'trash' }; }
-  async untrashThread(threadId: string): Promise<GmailMutationAck> { const id = requiredId(threadId, 'Gmail thread id'); await this.postWrite(`threads/${encodeURIComponent(id)}/untrash`); return { changed: true, target: 'thread', id, action: 'untrash' }; }
+  async organizeMessage(messageId: string, action: GmailOrganizeAction, labelId?: string, guard?: GmailTurnGuard): Promise<GmailMutationAck> {
+    assertTurnActive(guard);
+    return this.organize('messages', requiredId(messageId, 'Gmail message id'), action, labelId, guard);
+  }
+  async organizeThread(threadId: string, action: GmailOrganizeAction, labelId?: string, guard?: GmailTurnGuard): Promise<GmailMutationAck> {
+    assertTurnActive(guard);
+    return this.organize('threads', requiredId(threadId, 'Gmail thread id'), action, labelId, guard);
+  }
+  async trashMessage(messageId: string, guard?: GmailTurnGuard): Promise<GmailMutationAck> {
+    assertTurnActive(guard);
+    const id = requiredId(messageId, 'Gmail message id');
+    await this.postWrite(`messages/${encodeURIComponent(id)}/trash`, guard);
+    return { changed: true, target: 'message', id, action: 'trash' };
+  }
+  async untrashMessage(messageId: string, guard?: GmailTurnGuard): Promise<GmailMutationAck> {
+    assertTurnActive(guard);
+    const id = requiredId(messageId, 'Gmail message id');
+    await this.postWrite(`messages/${encodeURIComponent(id)}/untrash`, guard);
+    return { changed: true, target: 'message', id, action: 'untrash' };
+  }
+  async trashThread(threadId: string, guard?: GmailTurnGuard): Promise<GmailMutationAck> {
+    assertTurnActive(guard);
+    const id = requiredId(threadId, 'Gmail thread id');
+    await this.postWrite(`threads/${encodeURIComponent(id)}/trash`, guard);
+    return { changed: true, target: 'thread', id, action: 'trash' };
+  }
+  async untrashThread(threadId: string, guard?: GmailTurnGuard): Promise<GmailMutationAck> {
+    assertTurnActive(guard);
+    const id = requiredId(threadId, 'Gmail thread id');
+    await this.postWrite(`threads/${encodeURIComponent(id)}/untrash`, guard);
+    return { changed: true, target: 'thread', id, action: 'untrash' };
+  }
 
-  async createLabel(name: string): Promise<GmailLabelView> { const safeName = this.labelName(name); const access = await this.oauth.authorize('gmail.labels'); return normalizeLabel(await this.sendJson<ProviderLabel>('https://gmail.googleapis.com/gmail/v1/users/me/labels', { name: safeName }, 'POST', access)); }
-  async updateLabel(labelId: string, name: string): Promise<GmailLabelView> { const id = requiredId(labelId, 'Gmail label id'); const safeName = this.labelName(name); const access = await this.oauth.authorize('gmail.labels'); await this.requireUserLabel(id, access); return normalizeLabel(await this.sendJson<ProviderLabel>(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`, { name: safeName }, 'PATCH', access)); }
-  async deleteLabel(labelId: string): Promise<void> { const id = requiredId(labelId, 'Gmail label id'); const access = await this.oauth.authorize('gmail.labels'); await this.requireUserLabel(id, access); const response = await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`, { method: 'DELETE' }); if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); }
+  async createLabel(name: string, guard?: GmailTurnGuard): Promise<GmailLabelView> {
+    assertTurnActive(guard);
+    const safeName = this.labelName(name);
+    const access = await this.oauth.authorize('gmail.labels');
+    assertTurnActive(guard);
+    return normalizeLabel(await this.sendJson<ProviderLabel>('https://gmail.googleapis.com/gmail/v1/users/me/labels', { name: safeName }, 'POST', access, guard));
+  }
+  async updateLabel(labelId: string, name: string, guard?: GmailTurnGuard): Promise<GmailLabelView> {
+    assertTurnActive(guard);
+    const id = requiredId(labelId, 'Gmail label id');
+    const safeName = this.labelName(name);
+    const access = await this.oauth.authorize('gmail.labels');
+    await this.requireUserLabel(id, access);
+    assertTurnActive(guard);
+    return normalizeLabel(await this.sendJson<ProviderLabel>(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`, { name: safeName }, 'PATCH', access, guard));
+  }
+  async deleteLabel(labelId: string, guard?: GmailTurnGuard): Promise<void> {
+    assertTurnActive(guard);
+    const id = requiredId(labelId, 'Gmail label id');
+    const access = await this.oauth.authorize('gmail.labels');
+    await this.requireUserLabel(id, access);
+    assertTurnActive(guard);
+    const response = await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`);
+  }
 
-  async sendMessage(input: { readonly to: readonly string[]; readonly cc?: readonly string[]; readonly subject: string; readonly body: string }): Promise<GmailSendAck> {
-    const to = validateRecipients(input.to, true); const cc = validateRecipients(input.cc, false); if (to.length + cc.length > 50) throw new Error('Gmail send exceeds the 50-recipient application limit.'); const subject = validateSubject(input.subject); const body = validateBody(input.body);
+  async sendMessage(input: { readonly to: readonly string[]; readonly cc?: readonly string[]; readonly subject: string; readonly body: string }, guard?: GmailTurnGuard): Promise<GmailSendAck> {
+    assertTurnActive(guard);
+    const to = validateRecipients(input.to, true);
+    const cc = validateRecipients(input.cc, false);
+    if (to.length + cc.length > 50) throw new Error('Gmail send exceeds the 50-recipient application limit.');
+    const subject = validateSubject(input.subject);
+    const body = validateBody(input.body);
     const raw = composeRaw([`To: ${to.join(', ')}`, ...(cc.length ? [`Cc: ${cc.join(', ')}`] : []), `Subject: ${subject}`], body);
     const access = await this.oauth.authorize('gmail.send');
-    await this.sendAndDiscard('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw) }, access);
+    assertTurnActive(guard);
+    await this.sendAndDiscard('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw) }, access, guard);
     return { sent: true };
   }
-  async replyMessage(input: { readonly threadId: string; readonly to: string; readonly subject: string; readonly body: string; readonly inReplyTo: string }): Promise<GmailSendAck> {
-    const threadId = requiredId(input.threadId, 'Gmail thread id'); const to = validateAddress(input.to); const subject = validateSubject(input.subject); const body = validateBody(input.body); const inReplyTo = validateMessageId(input.inReplyTo);
+  async replyMessage(input: { readonly threadId: string; readonly to: string; readonly subject: string; readonly body: string; readonly inReplyTo: string }, guard?: GmailTurnGuard): Promise<GmailSendAck> {
+    assertTurnActive(guard);
+    const threadId = requiredId(input.threadId, 'Gmail thread id');
+    const to = validateAddress(input.to);
+    const subject = validateSubject(input.subject);
+    const body = validateBody(input.body);
+    const inReplyTo = validateMessageId(input.inReplyTo);
     const readAccess = await this.oauth.authorize('gmail.read');
+    assertTurnActive(guard);
     const threadUrl = new URL(`https://gmail.googleapis.com/gmail/v1/users/me/threads/${encodeURIComponent(threadId)}`);
     threadUrl.searchParams.set('format', 'metadata');
     threadUrl.searchParams.append('metadataHeaders', 'Subject');
     threadUrl.searchParams.append('metadataHeaders', 'Message-ID');
     threadUrl.searchParams.append('metadataHeaders', 'References');
     const thread = await this.readJson<ProviderThread>(await readAccess.fetch(threadUrl));
+    assertTurnActive(guard);
     const messages = Array.isArray(thread.messages) ? thread.messages.filter((item): item is ProviderMessage => Boolean(item) && typeof item === 'object') : [];
     const target = messages.find((message) => headerMap(message.payload?.headers).get('message-id') === inReplyTo);
     if (!target) throw new Error('Gmail reply target Message-ID is not present in the selected thread.');
@@ -405,17 +479,38 @@ export class GoogleGmailSemanticService {
     const references = [...new Set([...parseReferenceIds(targetHeaders.get('references')), inReplyTo])];
     const raw = composeRaw([`To: ${to}`, `Subject: ${subject}`, `In-Reply-To: ${inReplyTo}`, `References: ${references.join(' ')}`], body);
     const sendAccess = await this.oauth.authorize('gmail.send');
-    await this.sendAndDiscard('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw), threadId }, sendAccess);
+    assertTurnActive(guard);
+    await this.sendAndDiscard('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', { raw: rawRfc822ToBase64Url(raw), threadId }, sendAccess, guard);
     return { sent: true, threadId };
   }
 
-  private async organize(kind: 'messages' | 'threads', id: string, action: GmailOrganizeAction, labelId?: string): Promise<GmailMutationAck> {
-    const access = await this.oauth.authorize('gmail.modify'); if ((action === 'applyLabel' || action === 'removeLabel') && labelId) await this.requireUserLabel(requiredId(labelId, 'Gmail user label id'), access); const labels = actionLabels(action, labelId); await this.sendAndDiscard(`https://gmail.googleapis.com/gmail/v1/users/me/${kind}/${encodeURIComponent(id)}/modify`, labels, access); return { changed: true, target: kind === 'messages' ? 'message' : 'thread', id, action };
+  private async organize(kind: 'messages' | 'threads', id: string, action: GmailOrganizeAction, labelId: string | undefined, guard: GmailTurnGuard | undefined): Promise<GmailMutationAck> {
+    const access = await this.oauth.authorize('gmail.modify');
+    if ((action === 'applyLabel' || action === 'removeLabel') && labelId) await this.requireUserLabel(requiredId(labelId, 'Gmail user label id'), access);
+    assertTurnActive(guard);
+    const labels = actionLabels(action, labelId);
+    await this.sendAndDiscard(`https://gmail.googleapis.com/gmail/v1/users/me/${kind}/${encodeURIComponent(id)}/modify`, labels, access, guard);
+    return { changed: true, target: kind === 'messages' ? 'message' : 'thread', id, action };
   }
-  private async requireUserLabel(id: string, access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<void> { const label = normalizeLabel(await this.readJson<ProviderLabel>(await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`))); if (label.type !== 'user') throw new Error('Gmail custom-label operations require a USER label id.'); }
-  private async postWrite(path: string): Promise<void> { const access = await this.oauth.authorize('gmail.modify'); await this.sendAndDiscard(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, undefined, access); }
+  private async requireUserLabel(id: string, access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<void> {
+    const label = normalizeLabel(await this.readJson<ProviderLabel>(await access.fetch(`https://gmail.googleapis.com/gmail/v1/users/me/labels/${encodeURIComponent(id)}`)));
+    if (label.type !== 'user') throw new Error('Gmail custom-label operations require a USER label id.');
+  }
+  private async postWrite(path: string, guard: GmailTurnGuard | undefined): Promise<void> {
+    const access = await this.oauth.authorize('gmail.modify');
+    assertTurnActive(guard);
+    await this.sendAndDiscard(`https://gmail.googleapis.com/gmail/v1/users/me/${path}`, undefined, access, guard);
+  }
   private labelName(name: string): string { const normalized = name.trim(); if (!normalized || normalized.length > 500 || /[\r\n]/.test(normalized) || normalized.includes('\0')) throw new Error('Gmail label name is invalid.'); return normalized; }
-  private async sendAndDiscard(url: string, body: unknown, access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<void> { const response = await access.fetch(url, { method: 'POST', headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); }
-  private async sendJson<T = unknown>(url: string, body: unknown, method: 'POST' | 'PATCH', access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>): Promise<T> { const response = await access.fetch(url, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }); return this.readJson<T>(response); }
+  private async sendAndDiscard(url: string, body: unknown, access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>, guard: GmailTurnGuard | undefined): Promise<void> {
+    assertTurnActive(guard);
+    const response = await access.fetch(url, { method: 'POST', headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`);
+  }
+  private async sendJson<T = unknown>(url: string, body: unknown, method: 'POST' | 'PATCH', access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>, guard: GmailTurnGuard | undefined): Promise<T> {
+    assertTurnActive(guard);
+    const response = await access.fetch(url, { method, headers: body === undefined ? undefined : { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
+    return this.readJson<T>(response);
+  }
   private async readJson<T>(response: Response): Promise<T> { if (!response.ok) throw new Error(`Gmail request failed (${response.status}).`); return (await response.json()) as T; }
 }

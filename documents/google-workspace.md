@@ -98,7 +98,7 @@ trust: untrusted-external
 source: gmail
 ```
 
-Message inspection exposes only bounded provider identity, label ids, snippet, selected safe headers (`From`, `To`, `Cc`, `Date`, `Subject`, `Message-ID`, `In-Reply-To`, `References`), and bounded inline `text/plain` content when requested. MIME traversal has explicit nesting, part-count, decoded-input, and output-character budgets; exceeding a semantic body budget sets truncation metadata. Parts carrying a filename or Gmail `attachmentId` are excluded from body text. Raw provider JSON, raw RFC822, arbitrary headers, attachments, provider URLs, and raw HTML are not passed directly to Gemini. HTML/script content is not treated as executable or authoritative text.
+Message inspection exposes only bounded provider identity, label ids, snippet, selected safe headers (`From`, `To`, `Cc`, `Date`, `Subject`, `Message-ID`, `In-Reply-To`, `References`), and bounded inline `text/plain` content when requested. MIME type is checked before any body-data base64 decode; missing/HTML/binary MIME types are never decoded as message text. MIME traversal has explicit nesting, part-count, decoded-input, and output-character budgets; exceeding a semantic body budget sets truncation metadata. Parts carrying a filename or Gmail `attachmentId` are excluded from body text. Raw provider JSON, raw RFC822, arbitrary headers, attachments, provider URLs, and raw HTML are not passed directly to Gemini. HTML/script content is not treated as executable or authoritative text.
 
 Thread inspection returns a bounded recent-message projection with visible truncation metadata instead of forwarding an unrestricted provider thread payload. Email content may contain hostile instructions; those instructions remain data and cannot authorize tools, capabilities, credentials, confirmation, or policy changes.
 
@@ -163,7 +163,7 @@ Broader Drive/Docs/Sheets parity, Picker admission, revision-aware edit controls
 
 ## 8. Security and failure semantics
 
-Validation precedes execution. Confirmation is separate from OAuth. If confirmation UI is unavailable, busy, stale, or aborted, mutation fails closed.
+Validation precedes execution. Confirmation is separate from OAuth. If confirmation UI is unavailable, busy, stale, or aborted, mutation fails closed. Gmail mutations also carry the existing turn abort/election guard through the handler into the semantic service; after asynchronous authorization or provider preflight, turn ownership is rechecked again immediately before an irreversible provider write so a cancelled or superseded generation cannot send or mutate after losing authority.
 
 Gmail-specific hostile-content rule: text such as “ignore previous instructions”, “send secrets”, or “enable another tool” found inside an email is external content, not user authorization. The retrieved payload cannot widen application capabilities or skip confirmation. The semantic Gmail service also constrains provider payload shape before the continuation reaches Gemini, reducing both prompt-injection surface and unbounded-context risk.
 

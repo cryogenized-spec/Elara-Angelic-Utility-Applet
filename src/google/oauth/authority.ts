@@ -330,18 +330,22 @@ async function fetchGoogleAccount(accessToken: string): Promise<{ email: string;
   return null;
 }
 
-function requestedGoogleScopes(requiredScope: string): string {
-  return [...new Set([requiredScope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE])].join(' ');
+function requestedGoogleScopes(capability: GoogleCapabilityKey, enabledCapabilities: readonly GoogleCapabilityKey[]): string {
+  const descriptor = getGoogleScope(capability);
+  const preservedScopes = capability === 'google.account'
+    ? enabledCapabilities.map((enabled) => getGoogleScope(enabled).scope).filter(Boolean)
+    : [];
+  return [...new Set([descriptor.scope, ...preservedScopes, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].filter(Boolean))].join(' ');
 }
 
 async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' | 'none'): Promise<void> {
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   try {
-    const requestedScope = requestedGoogleScopes(descriptor.scope);
+    const current = loadStored();
+    const requestedScope = requestedGoogleScopes(capability, current.enabledCapabilities);
     const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: requestedScope, prompt });
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
-    const current = loadStored();
     const returnedScopes = parseProviderScopes(response.scope);
     const grantedProviderScopes = returnedScopes.length
       ? returnedScopes
@@ -381,7 +385,7 @@ async function acquireDurableToken(capability: GoogleCapabilityKey, pairing: Aut
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   const current = loadStored();
-  const requestedScope = requestedGoogleScopes(descriptor.scope);
+  const requestedScope = requestedGoogleScopes(capability, current.enabledCapabilities);
   const code = await requestGoogleAuthorizationCode({
     clientId: ensureClientId(),
     scope: requestedScope,

@@ -49,6 +49,25 @@ describe('GoogleDriveService', () => {
     expect(calls[1]).toContain('PATCH:');
   });
 
+  it('rechecks elected-turn authority immediately before a provider write', async () => {
+    let active = true;
+    const providerFetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit, beforeProviderFetch?: () => void) => {
+      active = false;
+      beforeProviderFetch?.();
+      return jsonResponse(FILE_METADATA);
+    });
+    const oauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({ capability, fetch: providerFetch }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+      disconnect: async () => undefined,
+    };
+    const service = new GoogleDriveService(oauth);
+
+    await expect(service.createFile({ name: 'Plan' }, { isGenerationActive: () => active }))
+      .rejects.toMatchObject({ name: 'AbortError' });
+    expect(providerFetch).toHaveBeenCalledOnce();
+  });
+
   it('sends one concrete strong ETag as the conditional-write precondition', async () => {
     const calls: Array<{ method?: string; ifMatch?: string; body?: string }> = [];
     const oauth = makeOAuth(async (_url, init) => {

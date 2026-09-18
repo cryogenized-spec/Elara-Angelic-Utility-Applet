@@ -219,7 +219,7 @@ export function GenerationActivity(props: Props) {
       >
         <span className="generation-activity__dot" aria-hidden="true" />
         {liveStatusGlyph && (
-          <span className="generation-activity__header-glyph" aria-hidden="true">
+          <span className="generation-activity__header-glyph" data-activity-glyph={liveStatusGlyph} aria-hidden="true">
             <ActivityGlyph glyphKey={liveStatusGlyph} glyphs={glyphs} fallback={statusFallbackIcon(live?.statusMessage)} />
           </span>
         )}
@@ -235,7 +235,7 @@ export function GenerationActivity(props: Props) {
                 const duration = formatActivityDuration(row.durationMs);
                 return (
                   <li key={row.id} className={`generation-activity__step is-${row.state}`}>
-                    <span className="generation-activity__step-icon" aria-hidden="true"><ActivityGlyph glyphKey={rowGlyphKey(row)} glyphs={glyphs} fallback={rowIcon(row)} /></span>
+                    <span className="generation-activity__step-icon" data-activity-glyph={rowGlyphKey(row)} aria-hidden="true"><ActivityGlyph glyphKey={rowGlyphKey(row)} glyphs={glyphs} fallback={rowIcon(row)} /></span>
                     <span className="generation-activity__step-copy">
                       <span className="generation-activity__step-mainline">
                         <span className="generation-activity__step-primary">{copy.primary}</span>

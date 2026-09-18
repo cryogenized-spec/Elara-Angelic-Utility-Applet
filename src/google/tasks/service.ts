@@ -200,14 +200,15 @@ export class GoogleTasksService {
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('elara:tasks-changed'));
   }
 
-  async listTaskLists(pageToken?: string, maxResults?: number): Promise<GoogleTaskListPage> {
+  async listTaskLists(pageToken?: string, maxResults?: number, signal?: AbortSignal): Promise<GoogleTaskListPage> {
+    signal?.throwIfAborted();
     const access = await this.oauth.authorize('tasks.read');
     const url = new URL('https://tasks.googleapis.com/tasks/v1/users/@me/lists');
     const safePageToken = boundedPageToken(pageToken);
     const safeMaxResults = boundedMaxResults(maxResults, MAX_TASK_LIST_RESULTS, 'task-list maxResults');
     if (safePageToken) url.searchParams.set('pageToken', safePageToken);
     if (safeMaxResults !== undefined) url.searchParams.set('maxResults', String(safeMaxResults));
-    const response = await access.fetch(url);
+    const response = await access.fetch(url, { signal });
     const payload = await this.readJson<TaskListsResponse>(response);
     return {
       items: (payload.items ?? []).flatMap((item) => {
@@ -257,7 +258,8 @@ export class GoogleTasksService {
     this.changed();
   }
 
-  async listTasks(taskListId: string, options: { pageToken?: string; showCompleted?: boolean; showDeleted?: boolean; showHidden?: boolean; showAssigned?: boolean; dueMin?: string; dueMax?: string; updatedMin?: string; completedMin?: string; completedMax?: string; maxResults?: number } = {}): Promise<GoogleTaskPage> {
+  async listTasks(taskListId: string, options: { signal?: AbortSignal; pageToken?: string; showCompleted?: boolean; showDeleted?: boolean; showHidden?: boolean; showAssigned?: boolean; dueMin?: string; dueMax?: string; updatedMin?: string; completedMin?: string; completedMax?: string; maxResults?: number } = {}): Promise<GoogleTaskPage> {
+    options.signal?.throwIfAborted();
     const access = await this.oauth.authorize('tasks.read');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks`);
     const safePageToken = boundedPageToken(options.pageToken);
@@ -276,7 +278,7 @@ export class GoogleTasksService {
       completedMax: boundedFilterTimestamp(options.completedMax, 'completedMax'),
     };
     this.applyParams(url, params);
-    const response = await access.fetch(url);
+    const response = await access.fetch(url, { signal: options.signal });
     const payload = await this.readJson<TasksResponse>(response);
     return { items: this.mapTasks(payload.items ?? []), nextPageToken: payload.nextPageToken };
   }

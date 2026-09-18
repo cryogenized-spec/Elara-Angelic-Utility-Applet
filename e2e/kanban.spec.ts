@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 type FixtureTask = { id: string; title: string; notes?: string; due?: string | null; status: string; etag: string; position: string };
 
-async function seedWorkspace(page: Page) {
+async function seedWorkspace(page: Page, existing = false) {
   const lists = [{ id: 'studio', title: 'Studio projects' }, { id: 'personal', title: 'Personal' }, { id: 'reading', title: 'Reading list' }, { id: 'later', title: 'Someday' }];
   const tasks: FixtureTask[] = [{ id: 'review', title: 'Review the launch proposal', notes: 'Read the source email and confirm the next steps.', due: '2020-01-01T00:00:00Z', status: 'needsAction', etag: 'one', position: '0001' }, ...Array.from({ length: 8 }, (_, index) => ({ id: `task-${index}`, title: `Project milestone ${index + 1}`, status: 'needsAction', etag: 'one', position: `000${index + 2}` }))];
   await page.route('https://accounts.google.com/gsi/client', (route) => route.fulfill({ contentType: 'text/javascript', body: `window.google = { accounts: { oauth2: { initTokenClient: (config) => ({ requestAccessToken: () => config.callback({ access_token: "kanban-test-token", expires_in: 3600, scope: config.scope }) }), revoke: (_token, callback) => callback({}) } } };` }));
@@ -34,10 +34,13 @@ async function seedWorkspace(page: Page) {
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Google', exact: true }).click();
-  await page.getByRole('button', { name: 'Connect Google account' }).click();
+  await page.getByRole('button', { name: /Connect Google account|Refresh Google session/ }).click();
   const service = page.locator('.google-oauth-service').filter({ hasText: 'Google Tasks' });
-  await service.getByRole('button', { name: 'Enable read access' }).click();
-  await service.getByRole('button', { name: 'Enable writes' }).click();
+  if (!existing) {
+    await service.getByRole('button', { name: 'Enable read access' }).click();
+    await service.getByRole('button', { name: 'Enable writes' }).click();
+  }
+  await expect(service.getByLabel('Google Tasks base access authorized')).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 
@@ -206,6 +209,7 @@ test('overdue memo reaches an ordinary Gemini turn without a hidden user message
   });
   await page.goto(''); await seedWorkspace(page);
   await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Open workspace command palette' }).click();
   await page.getByRole('button', { name: /Create new subroutine/ }).click();
   await page.getByRole('button', { name: 'Enable subroutine' }).click();
@@ -228,4 +232,57 @@ test('overdue memo reaches an ordinary Gemini turn without a hidden user message
   expect(request?.system_instruction).toEqual(expect.stringContaining('Review the launch proposal'));
   expect(request?.system_instruction).toEqual(expect.stringContaining('untrusted data'));
   expect(JSON.stringify(request?.input)).not.toContain('Review the launch proposal');
+});
+
+
+test('rate limits retain the last snapshot and defer reads until Retry-After', async ({ page }) => {
+  await page.goto(''); await seedWorkspace(page);
+  await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+  await page.clock.install();
+  let reads = 0;
+  await page.route('https://tasks.googleapis.com/tasks/v1/users/@me/lists*', async (route) => {
+    reads++;
+    if (reads === 1) await route.fulfill({ status: 429, headers: { 'retry-after': '60' }, json: { error: 'rate limited' } });
+    else await route.fallback();
+  });
+  await page.getByRole('button', { name: 'Sync now' }).click();
+  await expect(page.getByRole('alert')).toContainText('429');
+  await expect(page.getByRole('button', { name: 'Cooling down' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+  await page.clock.fastForward(30000);
+  expect(reads).toBe(1);
+  await page.clock.fastForward(31000);
+  await expect(page.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(reads).toBe(2);
+});
+
+test('two tabs share local rules and stale editors cannot overwrite each other', async ({ page, context }) => {
+  await page.goto(''); await seedWorkspace(page);
+  await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Open workspace command palette' }).click();
+  await page.getByRole('button', { name: /Create new subroutine/ }).click();
+  await page.getByRole('button', { name: 'Enable subroutine' }).click();
+  await expect(page.locator('dialog')).toHaveCount(0);
+  await page.getByRole('button', { name: /Internal memo/ }).click();
+  await page.getByRole('button', { name: 'Edit subroutine Overdue watch' }).click();
+  const peer = await context.newPage();
+  try {
+    await peer.goto(''); await seedWorkspace(peer, true);
+    await peer.getByRole('button', { name: 'Kanban', exact: true }).click();
+    await peer.getByRole('button', { name: /Internal memo/ }).click();
+    await peer.getByRole('button', { name: 'Edit subroutine Overdue watch' }).click();
+    await peer.getByLabel('Subroutine name').fill('Changed in another tab');
+    await peer.getByRole('button', { name: 'Save subroutine' }).click();
+    await expect(peer.locator('dialog')).toHaveCount(0);
+    await page.bringToFront();
+    await page.getByLabel('Subroutine name').fill('Stale draft');
+    await page.getByRole('button', { name: 'Save subroutine' }).click();
+    await expect(page.getByRole('alert')).toContainText('changed in another tab');
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await expect(page.getByRole('button', { name: 'Edit subroutine Changed in another tab' })).toBeVisible();
+  } finally { await peer.close(); }
 });

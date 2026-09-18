@@ -27,7 +27,10 @@ Gemini uses the existing registry, semantic schemas, grouped confirmations and h
 3. Successful Google Tasks service writes, including model writes, emit `elara:tasks-changed`. A mutation during a paginated read requests a subsequent read.
 4. Coalesce concurrent requests; walk every list/task page before publishing a complete result. Preserve the last complete snapshot on fetch failure. Unchanged payload arrays are reused; reconciliation never issues Google writes merely to reconcile unchanged data.
 5. Human edits write through immediately. Ambiguous creation failures are not automatically retried; check Google before retrying.
-6. No offline mutation queue, service-worker task sync or push notifications. An already-running request may finish after the document becomes hidden.
+6. Hidden/offline transitions and app teardown abort in-flight board reads. Reads have a two-minute timeout; canceled or partial results are not published. Returning to the workspace safely resumes canceled reconciliation.
+7. Only reads retry network failures and HTTP 429/500/502/503/504, with exponential jitter, provider Retry-After as a minimum, and a five-failure automatic retry budget. Manual sync cannot bypass an active cooldown. Other failures pause automatic sync until explicit retry; no retry initiates consent or replays a mutation. Sync, cooldown, offline and paused states are visible in the board.
+8. Browser tabs observe account-keyed cached boards and rules. Rule edits/deletions compare the original rule inside a transaction, merge unrelated edits and reject stale editors. Rule changes do not themselves request Google reconciliation. Tabs do not yet elect a polling leader.
+9. No offline mutation queue, service-worker task sync or push notifications.
 
 ## Internal memo and chat
 
@@ -45,6 +48,6 @@ Snapshots and subroutines are browser-local, not encrypted or cross-device stora
 
 ## Verification and limits
 
-Tests cover pagination/repeated-token protection, last-good snapshots, coalescing, local calendar days, hierarchy/order, memo deduplication/resolution, account/session admission, persistence, timer visibility/cleanup, conditional writes and strict model arguments. Browser tests use real UI/OAuth state transitions with mocked external Google boundaries; they do not import application modules or seed internal task stores.
+Tests cover pagination/repeated-token protection, last-good snapshots, coalescing, local calendar days, hierarchy/order, memo deduplication/resolution, account/session admission, persistence, timer visibility/cleanup, abort/resume, read timeouts, provider cooldown/retry budgets, cross-tab rule conflicts, conditional writes and strict model arguments. Browser tests use real UI/OAuth state transitions with mocked external Google boundaries; they do not import application modules or seed internal task stores.
 
-Remaining work: cross-tab leadership; backoff/rate-limit telemetry; large-account incremental reads; cancellation of in-flight reads on app teardown; cache management/export; authenticated cross-device rules; cross-list drag UX with hierarchy/assignment safeguards; and deployed-account acceptance checks. Do not claim offline writes, cross-device memos or background push alerts.
+Remaining work: cross-tab polling leadership; aggregate sync telemetry; large-account incremental reads; cache management/export; authenticated cross-device rules; cross-list drag UX with hierarchy/assignment safeguards; and deployed-account acceptance checks. Do not claim offline writes, cross-device memos or background push alerts.

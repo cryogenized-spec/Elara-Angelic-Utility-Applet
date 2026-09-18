@@ -1,4 +1,5 @@
-import Dexie, { type Table } from "dexie";
+import { MAX_READ_FAILURES, READ_TIMEOUT_MS, RetryableReadError, readRetryDelay } from './sync-policy';
+import Dexie, { liveQuery, type Table } from "dexie";
 import { googleOAuthAuthority } from "../google/oauth/authority";
 import { taskService, type GoogleTask, type TaskListSummary, type TaskReader } from './google-port';
 export { taskService } from './google-port';
@@ -24,6 +25,9 @@ export interface BoardState {
   board: Board | null;
   busy: boolean;
   error: string | null;
+  phase: "idle" | "syncing" | "backoff" | "paused" | "offline";
+  nextRetryAt: number | null;
+  failures: number;
 }
 class BoardDatabase extends Dexie {
   boards!: Table<Board, string>;
@@ -34,7 +38,7 @@ class BoardDatabase extends Dexie {
 }
 const db = new BoardDatabase();
 export const SYNC_INTERVAL = 20 * 60 * 1000;
-let state: BoardState = { board: null, busy: false, error: null };
+let state: BoardState = { board: null, busy: false, error: null, phase: "idle", nextRetryAt: null, failures: 0 };
 const listeners = new Set<() => void>();
 function publish(next: Partial<BoardState>) {
   state = { ...state, ...next };
@@ -62,13 +66,16 @@ export async function currentAccount(): Promise<string | null> {
 /** Fetch all pages before publishing, so a failed page never looks like remote deletions. */
 export async function fetchBoard(
   service: TaskReader,
+  signal?: AbortSignal,
 ): Promise<Pick<Board, "lists" | "tasks">> {
   const lists: TaskListSummary[] = [];
   const tasks: BoardTask[] = [];
   let pageToken: string | undefined;
   const listTokens = new Set<string>();
   do {
-    const page = await service.listTaskLists(pageToken);
+    signal?.throwIfAborted();
+    const page = await service.listTaskLists(pageToken, undefined, signal);
+    signal?.throwIfAborted();
     lists.push(...page.items);
     pageToken = page.nextPageToken;
     if (pageToken && listTokens.has(pageToken))
@@ -79,13 +86,16 @@ export async function fetchBoard(
     pageToken = undefined;
     const tokens = new Set<string>();
     do {
+      signal?.throwIfAborted();
       const page = await service.listTasks(list.id, {
+        signal,
         pageToken,
         showCompleted: true,
         showHidden: true,
         showDeleted: false,
         maxResults: 100,
       });
+      signal?.throwIfAborted();
       tasks.push(
         ...page.items
           .filter((task) => !task.deleted)
@@ -100,102 +110,128 @@ export async function fetchBoard(
   return { lists, tasks };
 }
 let inFlight: Promise<void> | null = null;
-export function syncBoard(): Promise<void> {
+let activeRead: AbortController | null = null;
+let retryAccount: string | null = null;
+let needsRefresh = true;
+
+/** Cancels reads only. User/model mutations never share this controller. */
+export function cancelBoardSync(): void {
+  if (activeRead) { needsRefresh = true; activeRead.abort(); }
+}
+
+export function syncBoard(reason: 'manual' | 'automatic' | 'mutation' = 'manual'): Promise<void> {
   if (inFlight) return inFlight;
+  const controller = new AbortController();
+  activeRead = controller;
+  const signal = controller.signal;
+  let timedOut = false;
+  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, READ_TIMEOUT_MS);
   inFlight = (async () => {
-    const account = await currentAccount();
-    if (!account) {
-      publish({
-        board: null,
-        error:
-          "Connect or unlock your Google session with Tasks access in Settings to open your workspace.",
-        busy: false,
-      });
-      return;
-    }
-    if (state.board?.account !== account) publish({ board: null });
-    publish({ busy: true, error: null });
     try {
-      const cached = await db.boards.get(account);
-      if ((await currentAccount()) !== account) {
-        publish({ board: null });
+      const account = await currentAccount();
+      signal.throwIfAborted();
+      if (account !== retryAccount) {
+        retryAccount = account;
+        publish({ failures: 0, nextRetryAt: null, phase: 'idle', error: null });
+      }
+      if (!account) {
+        publish({ board: null, phase: 'paused', error: 'Connect or unlock your Google session with Tasks access in Settings to open your workspace.' });
         return;
       }
-      if (!state.board && cached) publish({ board: cached });
-      const remote = await fetchBoard(taskService);
-      if ((await currentAccount()) !== account) {
-        publish({ board: null });
-        return;
-      }
-      const latest = await db.boards.get(account);
-      const board: Board = {
-        account,
-        ...remote,
-        routines: latest?.routines ?? [],
-        syncedAt: Date.now(),
+      if (state.board?.account !== account) publish({ board: null });
+      if (state.nextRetryAt !== null && Date.now() < state.nextRetryAt) return;
+      if (reason === 'automatic' && state.phase === 'paused') return;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) { publish({ phase: 'offline' }); return; }
+      if (reason === 'manual' && state.phase === 'paused') publish({ failures: 0 });
+      publish({ busy: true, error: null, phase: 'syncing', nextRetryAt: null });
+      const stillCurrent = async () => {
+        signal.throwIfAborted();
+        if (await currentAccount() !== account) {
+          publish({ board: null });
+          controller.abort();
+        }
+        signal.throwIfAborted();
       };
-      // Reads are required to detect differences; no remote writes occur during reconciliation.
-      if (
-        JSON.stringify(remote) ===
-        JSON.stringify({ lists: state.board?.lists, tasks: state.board?.tasks })
-      ) {
-        board.lists = state.board!.lists;
-        board.tasks = state.board!.tasks;
+      const cached = await db.boards.get(account);
+      await stillCurrent();
+      if (!state.board && cached) publish({ board: cached });
+      const remote = await fetchBoard(taskService, signal);
+      await stillCurrent();
+      const board: Board = { account, ...remote, routines: [], syncedAt: Date.now() };
+      if (JSON.stringify(remote) === JSON.stringify({ lists: state.board?.lists, tasks: state.board?.tasks })) {
+        board.lists = state.board!.lists; board.tasks = state.board!.tasks;
       }
-      await db.transaction("rw", db.boards, async () => {
-        const current = await db.boards.get(board.account);
-        board.routines = current?.routines ?? [];
-        await db.boards.put(board);
-      });
-      publish({ board });
+      let removeAbortListener: (() => void) | undefined;
+      try {
+        await db.transaction('rw', db.boards, async (transaction) => {
+          const abort = () => transaction.abort();
+          signal.addEventListener('abort', abort, { once: true });
+          removeAbortListener = () => signal.removeEventListener('abort', abort);
+          signal.throwIfAborted();
+          board.routines = (await db.boards.get(account))?.routines ?? [];
+          signal.throwIfAborted();
+          await db.boards.put(board);
+          signal.throwIfAborted();
+        });
+      } finally { removeAbortListener?.(); }
+      await stillCurrent();
+      needsRefresh = false;
+      publish({ board, failures: 0, nextRetryAt: null, phase: 'idle' });
     } catch (error) {
-      publish({
-        error:
-          error instanceof Error
-            ? error.message
-            : "Task sync failed. The last successful snapshot is retained.",
-      });
+      if (signal.aborted && !timedOut) {
+        publish({ phase: !navigator.onLine ? 'offline' : state.nextRetryAt ? 'backoff' : 'idle' });
+        return;
+      }
+      const failure = timedOut ? new RetryableReadError('Task sync timed out.') : error;
+      const failures = state.failures + 1;
+      const retryable = failure instanceof RetryableReadError;
+      // A provider-requested cooldown is retained even when the automatic
+      // retry budget is exhausted. Manual clicks cannot bypass Retry-After.
+      const delay = retryable ? readRetryDelay(failures, failure.retryAfterMs) : 0;
+      const nextRetryAt = delay ? Math.min(8_640_000_000_000_000, Date.now() + delay) : null;
+      publish({ failures, nextRetryAt, phase: retryable && failures < MAX_READ_FAILURES ? 'backoff' : 'paused',
+        error: failure instanceof Error ? failure.message : 'Could not refresh the task workspace.' });
     } finally {
-      publish({ busy: false });
+      clearTimeout(timeout);
+      if (state.busy) publish({ busy: false });
+      activeRead = null;
     }
-  })()
-    .catch((error: unknown) => {
-      publish({
-        busy: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not open the task workspace.",
-      });
-    })
-    .finally(() => {
-      inFlight = null;
-    });
+  })().finally(() => { inFlight = null; });
   return inFlight;
 }
 
-export async function saveRoutines(routines: Subroutine[]): Promise<void> {
-  if (
-    routines.length > 100 ||
-    routines.some(
-      (rule) =>
-        !rule.name.trim() ||
-        rule.name.length > 256 ||
-        !Number.isInteger(rule.days) ||
-        rule.days < 1 ||
-        rule.days > 365,
-    )
-  )
-    throw new Error("Invalid subroutine configuration (maximum 100 rules).");
+function sameRule(a: Subroutine | undefined, b: Subroutine | null): boolean {
+  if (!a || !b) return !a && !b;
+  return a.id === b.id && a.name === b.name && a.listId === b.listId && a.days === b.days && a.enabled === b.enabled;
+}
+
+async function changeRoutine(next: Subroutine | null, expected: Subroutine | null): Promise<void> {
   const board = state.board;
-  if (!board || (await currentAccount()) !== board.account)
-    throw new Error("Google account changed. Reconnect and sync first.");
-  await db.transaction("rw", db.boards, async () => {
+  if (!board || await currentAccount() !== board.account) throw new Error('Google account changed. Reconnect and sync first.');
+  const id = next?.id ?? expected?.id;
+  if (!id) throw new Error('A subroutine ID is required.');
+  await db.transaction('rw', db.boards, async () => {
+    const latest = await db.boards.get(board.account);
+    if (!latest) throw new Error('Sync before changing subroutines.');
+    const existing = latest.routines.find((rule) => rule.id === id);
+    if (!sameRule(existing, expected)) throw new Error('This subroutine changed in another tab. Close this editor and reopen the rule before saving.');
+    const routines = latest.routines.filter((rule) => rule.id !== id);
+    if (next) routines.push(next);
+    if (routines.length > 100) throw new Error('Maximum 100 subroutines.');
     await db.boards.update(board.account, { routines });
   });
-  if (state.board?.account === board.account)
-    publish({ board: { ...state.board, routines } });
+  const latest = await db.boards.get(board.account);
+  if (latest && await currentAccount() === board.account && state.board?.account === board.account) publish({ board: latest });
 }
+
+export function saveRoutine(rule: Subroutine, expected: Subroutine | null): Promise<void> {
+  if (!rule.id.trim() || rule.id.length > 500 || !rule.name.trim() || rule.name.length > 256 || rule.listId.length > 500 || !Number.isInteger(rule.days) || rule.days < 1 || rule.days > 365 || typeof rule.enabled !== 'boolean') {
+    return Promise.reject(new Error('Invalid subroutine configuration.'));
+  }
+  // Clone both inputs so a caller cannot change the comparison during IDB work.
+  return changeRoutine({ ...rule, name: rule.name.trim() }, expected ? { ...expected } : null);
+}
+export function removeRoutine(rule: Subroutine): Promise<void> { return changeRoutine(null, { ...rule }); }
 
 /** Google Tasks due values are date-only, even though represented as RFC3339. */
 export function overdueDays(due: string | undefined, now = new Date()): number {
@@ -268,42 +304,69 @@ export async function kanbanContext(): Promise<string> {
   }
 }
 
-/** No service worker/background timer. Cleanup stops all scheduling on unmount. */
+/** No service worker/background timer. All scheduling and observation has one lifecycle owner. */
 export function startBoardSync(): () => void {
   let stopped = false;
-  const refresh = () => {
-    if (!stopped && document.visibilityState === "visible") void syncBoard();
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let cacheSubscription: { unsubscribe(): void } | undefined;
+  let observedAccount: string | undefined;
+  let observingIdentity = false;
+  const refresh = (reason: 'automatic' | 'mutation' = 'automatic') => {
+    if (stopped || document.visibilityState !== 'visible' || !navigator.onLine) return;
+    // StrictMode remounts and rapid visibility changes can resume while the
+    // prior read is still unwinding its abort. Wait, then recheck this owner.
+    if (inFlight && activeRead?.signal.aborted) { void inFlight.then(() => refresh(reason)); return; }
+    void syncBoard(reason);
   };
+  const observe = () => {
+    clearTimeout(retryTimer);
+    if (!stopped && state.phase === 'backoff' && state.nextRetryAt !== null && document.visibilityState === 'visible' && navigator.onLine) {
+      retryTimer = setTimeout(() => refresh(), Math.min(2_147_483_647, Math.max(0, state.nextRetryAt - Date.now())));
+    }
+    const account = state.board?.account;
+    if (observedAccount === account) return;
+    observedAccount = account; cacheSubscription?.unsubscribe();
+    if (!account) return;
+    cacheSubscription = liveQuery(() => db.boards.get(account)).subscribe({
+      next: (board) => {
+        if (!stopped && board && state.board?.account === account && board.syncedAt >= state.board.syncedAt) publish({ board });
+      },
+      error: () => { /* A cache observer failure must not trigger provider writes or erase the last snapshot. */ },
+    });
+  };
+  const stopObserving = boardStore.subscribe(observe);
   const resume = () => {
-    if (!state.board || Date.now() - state.board.syncedAt >= SYNC_INTERVAL)
-      refresh();
+    if (document.visibilityState !== 'visible' || !navigator.onLine) {
+      clearTimeout(retryTimer); cancelBoardSync();
+      if (!navigator.onLine) publish({ phase: 'offline' });
+      return;
+    }
+    observe();
+    if (needsRefresh || !state.board || state.phase === 'offline' || Date.now() - state.board.syncedAt >= SYNC_INTERVAL) refresh();
   };
-  refresh();
   const changed = () => {
-    // A write may finish halfway through a paginated read. Always follow that read with a fresh one.
-    if (inFlight) void inFlight.then(refresh);
-    else refresh();
+    needsRefresh = true;
+    if (inFlight) void inFlight.then(() => refresh('mutation')); else refresh('mutation');
   };
-  const timer = window.setInterval(refresh, SYNC_INTERVAL);
-  document.addEventListener("visibilitychange", resume);
-  window.addEventListener("online", refresh);
-  window.addEventListener("elara:tasks-changed", changed);
-  // Account changes/disconnection are reflected even between scheduled remote reads.
+  observe(); refresh();
+  const timer = window.setInterval(() => refresh(), SYNC_INTERVAL);
+  document.addEventListener('visibilitychange', resume);
+  window.addEventListener('online', resume);
+  window.addEventListener('offline', resume);
+  window.addEventListener('elara:tasks-changed', changed);
   const accountTimer = window.setInterval(() => {
-    void currentAccount()
-      .then((account) => {
-        if (stopped) return;
-        if (state.board && state.board.account !== account)
-          publish({ board: null });
-      })
-      .catch(() => undefined);
+    // Avoid overlapping or hidden-tab Worker status requests.
+    if (stopped || observingIdentity || document.visibilityState !== 'visible') return;
+    observingIdentity = true;
+    void currentAccount().then((account) => {
+      if (!stopped && state.board && state.board.account !== account) { cancelBoardSync(); publish({ board: null }); }
+    }).catch(() => undefined).finally(() => { observingIdentity = false; });
   }, 5000);
   return () => {
-    stopped = true;
-    clearInterval(timer);
-    clearInterval(accountTimer);
-    document.removeEventListener("visibilitychange", resume);
-    window.removeEventListener("online", refresh);
-    window.removeEventListener("elara:tasks-changed", changed);
+    stopped = true; cancelBoardSync(); clearTimeout(retryTimer); clearInterval(timer); clearInterval(accountTimer);
+    stopObserving(); cacheSubscription?.unsubscribe();
+    document.removeEventListener('visibilitychange', resume);
+    window.removeEventListener('online', resume); window.removeEventListener('offline', resume);
+    window.removeEventListener('elara:tasks-changed', changed);
   };
 }

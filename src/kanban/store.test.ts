@@ -1,5 +1,7 @@
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import Dexie from 'dexie';
+import { READ_TIMEOUT_MS, RetryableReadError } from './sync-policy';
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { googleOAuthAuthority } from "../google/oauth/authority";
 import { GoogleTasksService } from "../google/tasks/service";
 import {
@@ -9,7 +11,9 @@ import {
   orderedTasks,
   overdueDays,
   overdueMemo,
-  saveRoutines,
+  saveRoutine,
+  removeRoutine,
+  cancelBoardSync,
   syncBoard,
   startBoardSync,
   SYNC_INTERVAL,
@@ -92,8 +96,10 @@ describe("kanban due-date and memo semantics", () => {
 });
 
 describe("snapshot reconciliation", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.restoreAllMocks();
+    const database = new Dexie('elara-kanban'); database.version(1).stores({ boards: '&account' });
+    try { await database.table('boards').clear(); } finally { database.close(); }
     mocks.lists.mockReset(); mocks.tasks.mockReset(); mocks.status.mockReset();
     vi.spyOn(googleOAuthAuthority, "getStatus").mockImplementation(mocks.status);
     vi.spyOn(GoogleTasksService.prototype, "listTaskLists").mockImplementation(mocks.lists);
@@ -110,6 +116,102 @@ describe("snapshot reconciliation", () => {
     mocks.tasks.mockResolvedValue({
       items: [task],
     });
+  });
+  afterEach(() => { vi.useRealTimers(); });
+  it('preserves unrelated rules and rejects a stale editor after another database connection updates a rule', async () => {
+    await syncBoard();
+    const first = { ...initial.routines[0], id: 'cross-tab-a' };
+    const second = { ...first, id: 'cross-tab-b' };
+    await Promise.all([saveRoutine(first, null), saveRoutine(second, null)]);
+    const peer = new Dexie('elara-kanban'); peer.version(1).stores({ boards: '&account' });
+    try {
+      await peer.transaction('rw', peer.table('boards'), async () => {
+        const board = await peer.table<Board>('boards').get(initial.account);
+        await peer.table('boards').update(initial.account, { routines: board!.routines.map((rule) => rule.id === first.id ? { ...rule, name: 'Changed elsewhere' } : rule) });
+      });
+      await expect(saveRoutine({ ...first, name: 'Stale edit' }, first)).rejects.toThrow('another tab');
+      await expect(removeRoutine(first)).rejects.toThrow('another tab');
+      await saveRoutine({ ...second, days: 7 }, second);
+      const board = await peer.table<Board>('boards').get(initial.account);
+      expect(board?.routines.find((rule) => rule.id === first.id)?.name).toBe('Changed elsewhere');
+      expect(board?.routines.find((rule) => rule.id === second.id)?.days).toBe(7);
+    } finally { peer.close(); }
+  });
+  it('aborts a paginated sync without publishing a partial snapshot or an error', async () => {
+    await syncBoard();
+    const before = boardStore.getSnapshot().board;
+    let finish: ((value: { items: BoardTask[] }) => void) | undefined;
+    const waiting = new Promise<{ items: BoardTask[] }>((resolve) => { finish = resolve; });
+    let reading = false;
+    mocks.tasks.mockImplementationOnce(() => { reading = true; return waiting; });
+    const pending = syncBoard();
+    await vi.waitFor(() => expect(reading).toBe(true));
+    cancelBoardSync(); finish!({ items: [{ ...task, title: 'Incomplete snapshot' }] });
+    await pending;
+    expect(boardStore.getSnapshot().board?.tasks).toEqual(before?.tasks);
+    expect(boardStore.getSnapshot().error).toBeNull();
+    expect(boardStore.getSnapshot().busy).toBe(false);
+  });
+  it('times out a stalled read and schedules only a read retry', async () => {
+    await syncBoard();
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    let reading = false;
+    mocks.tasks.mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+      reading = true;
+      options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }));
+    const pending = syncBoard();
+    await vi.waitFor(() => expect(reading).toBe(true));
+    await vi.advanceTimersByTimeAsync(READ_TIMEOUT_MS);
+    await pending;
+    expect(boardStore.getSnapshot()).toMatchObject({ busy: false, phase: 'backoff', error: 'Task sync timed out.' });
+    vi.setSystemTime(boardStore.getSnapshot().nextRetryAt! + 1);
+    await syncBoard();
+  });
+  it('resumes after an aborted lifecycle without committing the old read', async () => {
+    let finish: ((value: { items: BoardTask[] }) => void) | undefined;
+    let reading = false;
+    mocks.tasks.mockImplementationOnce(() => { reading = true; return new Promise((resolve) => { finish = resolve; }); });
+    const stopFirst = startBoardSync();
+    await vi.waitFor(() => expect(reading).toBe(true));
+    stopFirst();
+    const stopNext = startBoardSync();
+    try {
+      finish!({ items: [{ ...task, title: 'Cancelled result' }] });
+      await vi.waitFor(() => {
+        expect(mocks.tasks).toHaveBeenCalledTimes(2);
+        expect(boardStore.getSnapshot().phase).toBe('idle');
+        expect(boardStore.getSnapshot().board?.tasks[0]?.title).toBe(task.title);
+      });
+    } finally { stopNext(); await syncBoard(); }
+  });
+  it('honors provider cooldown even for manual refresh and resets after recovery', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    await syncBoard();
+    mocks.tasks.mockRejectedValueOnce(new RetryableReadError('Rate limited', 60000));
+    await syncBoard();
+    const { nextRetryAt, phase } = boardStore.getSnapshot();
+    expect(phase).toBe('backoff');
+    expect(nextRetryAt).toBeGreaterThanOrEqual(Date.now() + 60000);
+    const calls = mocks.tasks.mock.calls.length;
+    await syncBoard(); expect(mocks.tasks).toHaveBeenCalledTimes(calls);
+    vi.setSystemTime(nextRetryAt! + 1);
+    await syncBoard('automatic');
+    expect(boardStore.getSnapshot()).toMatchObject({ phase: 'idle', failures: 0, nextRetryAt: null, error: null });
+  });
+  it('stops automatic retries after five failures and permits an explicit later retry', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    await syncBoard();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      mocks.tasks.mockRejectedValueOnce(new RetryableReadError('Unavailable'));
+      await syncBoard(attempt ? 'automatic' : 'manual');
+      vi.setSystemTime(boardStore.getSnapshot().nextRetryAt! + 1);
+    }
+    expect(boardStore.getSnapshot()).toMatchObject({ phase: 'paused', failures: 5 });
+    const calls = mocks.tasks.mock.calls.length;
+    await syncBoard('automatic'); expect(mocks.tasks).toHaveBeenCalledTimes(calls);
+    await syncBoard();
+    expect(boardStore.getSnapshot()).toMatchObject({ phase: 'idle', failures: 0 });
   });
   it("walks all list/task pages and preserves imported fields without writes", async () => {
     mocks.lists
@@ -179,7 +281,7 @@ describe("snapshot reconciliation", () => {
       items: [{ ...task, scheduledDate: "2020-01-01" }],
     });
     await syncBoard();
-    await saveRoutines(initial.routines);
+    await saveRoutine(initial.routines[0], null);
     await syncBoard();
     expect(boardStore.getSnapshot().board?.routines).toEqual(initial.routines);
     expect(await kanbanContext()).toContain("Review");
@@ -211,7 +313,7 @@ describe("snapshot reconciliation", () => {
   });
   it("rejects invalid routine thresholds", async () => {
     await expect(
-      saveRoutines([{ ...initial.routines[0], days: 0 }]),
+      saveRoutine({ ...initial.routines[0], days: 0 }, null),
     ).rejects.toThrow("Invalid");
   });
   it('schedules only while visible and removes timers on cleanup', async () => {

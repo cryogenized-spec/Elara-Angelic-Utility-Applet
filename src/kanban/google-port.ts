@@ -1,3 +1,4 @@
+import { RetryableReadError, retryAfterMilliseconds } from './sync-policy';
 import { googleOAuthAuthority } from '../google/oauth/authority';
 import type { GoogleCapabilityKey } from '../google/oauth/contracts';
 import { GoogleTasksService } from '../google/tasks/service';
@@ -26,8 +27,25 @@ export const taskService = new GoogleTasksService({
     const access = await googleOAuthAuthority.authorize(capability);
     await admittedAccount(capability, account);
     return { capability, fetch: async (input, init) => {
+      init?.signal?.throwIfAborted();
       await admittedAccount(capability, account);
-      return access.fetch(input, init);
+      init?.signal?.throwIfAborted();
+      // Only GET failures are eligible for automatic retry. Mutations retain
+      // their original errors and must never be replayed by the board timer.
+      const isRead = !init?.method || init.method.toUpperCase() === 'GET';
+      let response: Response;
+      try { response = await access.fetch(input, init, () => init?.signal?.throwIfAborted()); }
+      catch (error) {
+        if (isRead && !init?.signal?.aborted && error instanceof TypeError) throw new RetryableReadError('Google Tasks is temporarily unreachable.');
+        throw error;
+      }
+      if (isRead && [429, 500, 502, 503, 504].includes(response.status)) {
+        const delay = retryAfterMilliseconds(response.headers.get('retry-after'));
+        // The error body is not task data and must not enter the memo/context.
+        await response.body?.cancel();
+        throw new RetryableReadError(`Google Tasks is temporarily unavailable (${response.status}).`, delay);
+      }
+      return response;
     } };
   },
 });

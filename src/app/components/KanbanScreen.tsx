@@ -33,7 +33,8 @@ import {
   orderedTasks,
   overdueDays,
   overdueMemo,
-  saveRoutines,
+  saveRoutine,
+  removeRoutine,
   syncBoard,
   taskService,
   type BoardTask,
@@ -93,7 +94,7 @@ function KanbanWorkspace({
   onBack: () => void;
   onSettings: () => void;
 }) {
-  const { board, busy, error } = useSyncExternalStore(
+  const { board, busy, error, phase, nextRetryAt } = useSyncExternalStore(
     boardStore.subscribe,
     boardStore.getSnapshot,
   );
@@ -110,10 +111,10 @@ function KanbanWorkspace({
   const [announcement, setAnnouncement] = useState("");
   const canReorder = !saving && !busy && filter === "all" && !query;
   const [actionError, setActionError] = useState<string | null>(null);
-  const [, tick] = useState(0);
+  const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
-    void syncBoard();
-    const timer = window.setInterval(() => tick((value) => value + 1), 60000);
+    void syncBoard("automatic");
+    const timer = window.setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
   useEffect(() => {
@@ -136,7 +137,7 @@ function KanbanWorkspace({
     setActionError(null);
     setEditor(next);
   };
-  async function run(action: () => Promise<unknown>, close = false) {
+  async function run(action: () => Promise<unknown>, close = false, reconcile = true) {
     if (savingRef.current || !board) return;
     savingRef.current = true;
     setSaving(true);
@@ -149,7 +150,7 @@ function KanbanWorkspace({
         setEditor(null);
         setRemoval(null);
       }
-      await syncBoard();
+      if (reconcile) await syncBoard("mutation");
     } catch (cause) {
       setActionError(
         cause instanceof Error
@@ -235,11 +236,11 @@ function KanbanWorkspace({
           </button>
           <button
             onClick={() => void syncBoard()}
-            disabled={busy || saving}
+            disabled={busy || saving || (nextRetryAt !== null && nextRetryAt > clock)}
             title="Reconcile with Google Tasks"
           >
             <RefreshCw size={16} className={busy ? "kb-spinning" : ""} />
-            <span>{busy ? "Syncing" : "Sync now"}</span>
+            <span>{busy ? "Syncing" : nextRetryAt !== null && nextRetryAt > clock ? "Cooling down" : "Sync now"}</span>
           </button>
         </div>
       </header>
@@ -264,6 +265,7 @@ function KanbanWorkspace({
           <option value="done">Completed</option>
         </select>
         <div className="kb-sync-label" role="status">
+          {phase === 'backoff' && nextRetryAt !== null ? `Retrying read in ${Math.max(0, Math.ceil((nextRetryAt - clock) / 1000))}s · ` : phase === 'offline' ? 'Offline · ' : phase === 'paused' ? 'Auto-sync paused · ' : ''}
           {board
             ? `${board.tasks.filter((task) => task.status !== "completed").length} open · Synced ${new Date(board.syncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
             : "Your tasks, one workspace"}
@@ -272,6 +274,7 @@ function KanbanWorkspace({
       {error && (
         <div className="kb-notice" role="alert">
           {error}{" "}
+          {board && <span>Showing the last complete snapshot. {phase === "paused" ? "Use Sync now after resolving the issue." : "No task writes will be retried."}</span>}
           {!board && (
             <button onClick={onSettings}>
               Google settings <ChevronRight size={14} />
@@ -565,13 +568,7 @@ function KanbanWorkspace({
                   disabled={saving}
                   onChange={() =>
                     void run(() =>
-                      saveRoutines(
-                        board.routines.map((item) =>
-                          item.id === rule.id
-                            ? { ...item, enabled: !item.enabled }
-                            : item,
-                        ),
-                      ),
+                      saveRoutine({ ...rule, enabled: !rule.enabled }, rule), false, false,
                     )
                   }
                 />
@@ -724,14 +721,8 @@ function KanbanWorkspace({
                 };
                 void run(
                   () =>
-                    saveRoutines(
-                      editor.rule
-                        ? board.routines.map((item) =>
-                            item.id === rule.id ? rule : item,
-                          )
-                        : [...board.routines, rule],
-                    ),
-                  true,
+                    saveRoutine(rule, editor.rule ?? null),
+                  true, false,
                 );
               } else {
                 const due = String(data.get("due") ?? "");
@@ -939,12 +930,8 @@ function KanbanWorkspace({
                           removal.list.id,
                           removal.list.etag,
                         )
-                      : saveRoutines(
-                          board.routines.filter(
-                            (rule) => rule.id !== removal.rule.id,
-                          ),
-                        ),
-                true,
+                      : removeRoutine(removal.rule),
+                true, removal.kind !== 'routine',
               );
             }}
           >

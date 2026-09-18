@@ -39,3 +39,31 @@ describe('human board authorization boundary', () => {
     } finally { window.removeEventListener('elara:tasks-changed', listener); }
   });
 });
+
+describe('read-only retry classification', () => {
+  it('classifies a throttled read with its cooldown, without replaying the request', async () => {
+    vi.spyOn(googleOAuthAuthority, 'getStatus').mockResolvedValue(ready);
+    const fetch = vi.fn(async () => new Response('quota response', { status: 429, headers: { 'retry-after': '60' } }));
+    vi.spyOn(googleOAuthAuthority, 'authorize').mockImplementation(async (capability) => ({ capability, fetch }));
+    await expect(taskService.listTaskLists()).rejects.toMatchObject({ name: 'RetryableReadError', retryAfterMs: 60000 });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it('does not classify or automatically retry a failed mutation', async () => {
+    vi.spyOn(googleOAuthAuthority, 'getStatus').mockResolvedValue(ready);
+    const fetch = vi.fn(async () => new Response('', { status: 503 }));
+    vi.spyOn(googleOAuthAuthority, 'authorize').mockImplementation(async (capability) => ({ capability, fetch }));
+    await expect(taskService.createTaskList('Work')).rejects.toMatchObject({ name: 'Error', message: 'Google Tasks request failed (503).' });
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it('passes cancellation to the actual provider boundary and rejects aborted reads', async () => {
+    vi.spyOn(googleOAuthAuthority, 'getStatus').mockResolvedValue(ready);
+    const controller = new AbortController();
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit, guard?: () => void) => {
+      controller.abort(); guard?.();
+      return new Response(JSON.stringify({ items: [] }));
+    });
+    vi.spyOn(googleOAuthAuthority, 'authorize').mockImplementation(async (capability) => ({ capability, fetch }));
+    await expect(taskService.listTaskLists(undefined, undefined, controller.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(fetch.mock.calls[0]?.[1]?.signal).toBe(controller.signal);
+  });
+});

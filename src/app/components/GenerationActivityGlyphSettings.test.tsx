@@ -23,6 +23,15 @@ function Harness() {
   return <GenerationActivityGlyphSettings value={value} onChange={setValue} />;
 }
 
+function changeInputValue(input: HTMLInputElement, value: string): void {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+  if (!setter) throw new Error('expected native input value setter');
+  act(() => {
+    setter.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
   previewNotoEmoji.mockClear();
@@ -57,14 +66,11 @@ describe('Generation Activity glyph settings', () => {
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Custom Memory icon"]');
     if (!input) throw new Error('expected Memory custom input');
 
-    act(() => {
-      input.value = '♥️';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    changeInputValue(input, '♥️');
 
     const preview = container.querySelector<HTMLElement>('.generation-glyph-setting:nth-child(3) .generation-glyph-setting__preview');
     expect(preview).not.toBeNull();
+    expect(input.value).toBe('♥');
     expect(input.getAttribute('aria-invalid')).toBe('false');
   });
 
@@ -77,11 +83,7 @@ describe('Generation Activity glyph settings', () => {
     });
     const input = container.querySelector<HTMLInputElement>('input[aria-label="Custom Reasoning icon"]');
     if (!input) throw new Error('expected custom input');
-    act(() => {
-      input.value = 'ab';
-      input.dispatchEvent(new Event('input', { bubbles: true }));
-      input.dispatchEvent(new Event('change', { bubbles: true }));
-    });
+    changeInputValue(input, 'ab');
     expect(input.getAttribute('aria-invalid')).toBe('true');
     expect(container.textContent).toContain('Use exactly one visible symbol or emoji.');
 

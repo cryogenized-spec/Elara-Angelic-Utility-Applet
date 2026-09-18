@@ -66,7 +66,7 @@ test('account connection is prominent, establishes a live session, and then unlo
   await connectGoogleAccount(page);
 
   await expect(page.getByText('Google account connected')).toBeVisible();
-  await expect(page.getByText(STUB_EMAIL)).toBeVisible();
+  await expect(page.getByText(STUB_EMAIL, { exact: true })).toBeVisible();
   await expect(page.getByText('Session ready')).toBeVisible();
   await expect(page.locator('.google-oauth-service')).toHaveCount(6);
 

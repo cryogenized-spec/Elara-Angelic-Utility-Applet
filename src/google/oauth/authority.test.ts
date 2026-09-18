@@ -501,16 +501,6 @@ describe('direct Google OAuth authority', () => {
       state: 'disconnected',
       grantedCapabilities: [],
       enabledCapabilities: [],
-it('disconnects the local browser authorization state and revokes the active token', async () => {
-    tokenMock.mockResolvedValueOnce(token('access-123', CALENDAR_READ_SCOPE));
-    await googleOAuthAuthority.authorize('calendar.events.read');
-    await googleOAuthAuthority.disconnect();
-
-    expect(revokeMock).toHaveBeenCalledWith('access-123');
-    await expect(googleOAuthAuthority.getStatus()).resolves.toEqual({
-      state: 'disconnected',
-      grantedCapabilities: [],
-      enabledCapabilities: [],
       grantedProviderScopes: [],
       sessionReady: false,
     });

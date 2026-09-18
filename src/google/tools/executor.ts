@@ -95,6 +95,32 @@ function authorizationNeeded(status: GoogleOAuthStatus, capability: ToolCapabili
   const stateNeedsRecovery = status.state === 'disconnected' || status.state === 'needs-consent' || status.state === 'revoked' || status.state === 'reauthorization-required';
   return !isCapabilityAuthorized(capability, status.grantedCapabilities) || stateNeedsRecovery;
 }
+
+function oauthCapabilitiesForDescriptor(descriptor: GoogleToolDescriptor): readonly GoogleCapabilityKey[] {
+  const capability = safeCapability(descriptor.capability);
+  const prerequisites = (descriptor.prerequisiteCapabilities ?? []).map(safeCapability);
+  return [...new Set<ToolCapability>([capability, ...prerequisites])].filter(isGoogleOAuthCapability);
+}
+
+/**
+ * Pure admission probe used by the Gemini loop before it displays a mutation
+ * confirmation. It validates the tool shape and returns the first missing
+ * Google capability without running a handler or confirmation broker.
+ */
+export async function googleToolAuthorizationRequirement(
+  call: GoogleToolCall,
+  oauth: GoogleOAuthAuthority,
+): Promise<GoogleCapabilityKey | null> {
+  const parsed = googleToolCallSchema.safeParse(call);
+  if (!parsed.success) return null;
+  const descriptor = findDescriptor(parsed.data.tool);
+  if (!descriptor) return null;
+  try { validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
+  const required = oauthCapabilitiesForDescriptor(descriptor);
+  if (!required.length) return null;
+  const status = await oauth.getStatus();
+  return required.find((capability) => authorizationNeeded(status, capability)) ?? null;
+}
 function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
 }
@@ -236,11 +262,9 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   let args: Readonly<Record<string, unknown>>;
   try { args = validateArguments(validCall.tool, validCall.arguments); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) }; }
   const capability = safeCapability(descriptor.capability);
-  const prerequisites = (descriptor.prerequisiteCapabilities ?? []).map(safeCapability);
-  const requiredCapabilities = [...new Set<ToolCapability>([capability, ...prerequisites])];
   const isRoleplayTool = validCall.tool.startsWith('roleplay_setting.');
   if (isRoleplayTool && !(await loadRoleplayPreferences()).enabled) return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
-  const oauthCapabilities = requiredCapabilities.filter(isGoogleOAuthCapability);
+  const oauthCapabilities = oauthCapabilitiesForDescriptor(descriptor);
   if (oauthCapabilities.length) {
     let status: GoogleOAuthStatus;
     try { status = await options.oauth.getStatus(); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) }; }

@@ -273,6 +273,39 @@ describe('GoogleGmailSemanticService', () => {
     expect(raw).toContain('Subject: Re: Status');
   });
 
+  it('matches reply subjects without locale-sensitive case folding', async () => {
+    const localeFold = vi.spyOn(String.prototype, 'toLocaleLowerCase').mockImplementation(() => {
+      throw new Error('locale-sensitive folding must not be used');
+    });
+    try {
+      const service = new GoogleGmailSemanticService(authority(async (url) => {
+        if (String(url).includes('/threads/thread-1')) {
+          return json({
+            id: 'thread-1',
+            messages: [{
+              id: 'm1',
+              payload: { headers: [
+                { name: 'Subject', value: 'INVOICE' },
+                { name: 'Message-ID', value: '<m1@example.com>' },
+              ] },
+            }],
+          });
+        }
+        return json({ id: 'reply-1', threadId: 'thread-1' });
+      }));
+      await expect(service.replyMessage({
+        threadId: 'thread-1',
+        to: 'alice@example.com',
+        subject: 'Re: invoice',
+        body: 'Thanks',
+        inReplyTo: '<m1@example.com>',
+      })).resolves.toEqual({ sent: true, threadId: 'thread-1' });
+      expect(localeFold).not.toHaveBeenCalled();
+    } finally {
+      localeFold.mockRestore();
+    }
+  });
+
   it('fails closed if reply turn authority is lost during provider preflight', async () => {
     let active = true;
     let sendCalls = 0;

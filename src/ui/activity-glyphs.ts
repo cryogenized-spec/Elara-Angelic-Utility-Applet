@@ -68,5 +68,5 @@ export function normalizeGenerationActivityGlyphs(value: unknown): GenerationAct
 }
 
 export function generationActivityGlyphText(glyphs: GenerationActivityGlyphs): string {
-  return [...new Set(GENERATION_ACTIVITY_GLYPH_KEYS.map((key) => glyphs[key]))].join('');
+  return [...new Set(GENERATION_ACTIVITY_GLYPH_KEYS.map((key) => glyphs[key]))].join(' ');
 }

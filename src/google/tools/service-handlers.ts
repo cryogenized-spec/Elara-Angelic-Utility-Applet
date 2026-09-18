@@ -1,6 +1,7 @@
 import { GoogleCalendarService, type CalendarSendUpdates } from '../calendar/service';
 import { GoogleChatService } from '../chat/service';
 import { GoogleDocsService } from '../docs/service';
+import { downloadDriveFileArtifact } from '../drive/download';
 import { GoogleDriveService } from '../drive/service';
 import { GoogleGmailService } from '../gmail/service';
 import { googleOAuthAuthority } from '../oauth/authority';
@@ -73,15 +74,6 @@ function taskStatus(args: Record<string, unknown>): GoogleTaskStatus | undefined
   if (value !== 'needsAction' && value !== 'completed') throw new Error('Google Tasks status must be needsAction or completed.');
   return value;
 }
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
-  }
-  return btoa(binary);
-}
-
 export const googleServiceToolHandlers: GoogleToolHandlers = {
   ...googleReadToolHandlers,
 
@@ -256,17 +248,33 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
 
   'drive.searchFiles': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return drive.listFiles({ query: stringArg(args, 'query', false), pageToken: stringArg(args, 'pageToken', false), pageSize: optionalNumber(args, 'pageSize') });
+    return drive.listFiles({
+      query: stringArg(args, 'query', false),
+      pageToken: stringArg(args, 'pageToken', false),
+      pageSize: optionalNumber(args, 'pageSize'),
+      showTrashed: optionalBoolean(args, 'showTrashed'),
+    });
   },
   'drive.searchLibrary': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return drive.searchLibrary({ query: stringArg(args, 'query', false), pageToken: stringArg(args, 'pageToken', false), pageSize: optionalNumber(args, 'pageSize') });
+    return drive.searchLibrary({
+      query: stringArg(args, 'query', false),
+      pageToken: stringArg(args, 'pageToken', false),
+      pageSize: optionalNumber(args, 'pageSize'),
+      showTrashed: optionalBoolean(args, 'showTrashed'),
+    });
   },
   'drive.getFile': async ({ arguments: raw }) => drive.getFile(stringArg(objectArgs(raw), 'fileId')!),
-  'drive.downloadFile': async ({ arguments: raw }) => {
+  'drive.downloadFile': async ({ arguments: raw, signal, generationId, isGenerationActive, conversationId }) => {
     const args = objectArgs(raw);
-    const result = await drive.downloadFile(stringArg(args, 'fileId')!, optionalNumber(args, 'maxBytes'));
-    return { mimeType: result.mimeType, bytesBase64: bytesToBase64(result.bytes) };
+    return downloadDriveFileArtifact({
+      fileId: stringArg(args, 'fileId')!,
+      maxBytes: optionalNumber(args, 'maxBytes'),
+      conversationId,
+      signal,
+      generationId,
+      isGenerationActive,
+    });
   },
   'drive.createFile': async ({ arguments: raw }) => {
     const args = objectArgs(raw);

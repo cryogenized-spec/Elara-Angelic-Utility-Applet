@@ -1,8 +1,9 @@
 import { z } from 'zod';
+import { DRIVE_LIMITS } from '../drive/limits';
 
-const fileIdSchema = z.string().trim().min(1).max(500);
+const fileIdSchema = z.string().trim().min(1).max(DRIVE_LIMITS.maxFileIdLength);
 const a1RangeSchema = z.string().trim().min(1).max(500);
-const pageTokenSchema = z.string().trim().min(1).max(2048);
+const pageTokenSchema = z.string().trim().min(1).max(DRIVE_LIMITS.maxPageTokenLength);
 const rowSchema = z.array(z.unknown()).max(100);
 const valuesSchema = z.array(rowSchema).min(1).max(1000);
 const updateRequestSchema = z.record(z.string(), z.unknown());
@@ -51,17 +52,22 @@ const singleCellA1Schema = a1RangeSchema.refine(
 
 export const driveSheetsToolArgumentSchemas = {
   'drive.searchFiles': z.object({
-    query: z.string().trim().max(2000).optional(),
+    query: z.string().trim().max(DRIVE_LIMITS.maxQueryLength).optional(),
     pageToken: pageTokenSchema.optional(),
-    pageSize: z.number().int().min(1).max(100).optional(),
+    pageSize: z.number().int().min(1).max(DRIVE_LIMITS.maxPageSize).optional(),
+    showTrashed: z.boolean().optional(),
   }).strict(),
   'drive.searchLibrary': z.object({
-    query: z.string().trim().max(2000).optional(),
+    query: z.string().trim().max(DRIVE_LIMITS.maxQueryLength).optional(),
     pageToken: pageTokenSchema.optional(),
-    pageSize: z.number().int().min(1).max(100).optional(),
+    pageSize: z.number().int().min(1).max(DRIVE_LIMITS.maxPageSize).optional(),
+    showTrashed: z.boolean().optional(),
   }).strict(),
   'drive.getFile': z.object({ fileId: fileIdSchema }).strict(),
-  'drive.downloadFile': z.object({ fileId: fileIdSchema }).strict(),
+  'drive.downloadFile': z.object({
+    fileId: fileIdSchema,
+    maxBytes: z.number().int().min(1).max(DRIVE_LIMITS.maxTransferBytes).optional(),
+  }).strict(),
   'drive.createFile': z.object({
     name: z.string().trim().min(1).max(500),
     mimeType: z.string().trim().min(1).max(200).optional(),

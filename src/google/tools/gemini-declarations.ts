@@ -1,6 +1,7 @@
 import { googleToolRegistry, googleToolsForPlane } from './registry';
 import type { GoogleToolDescriptor, GoogleToolExecutionPlane } from './contracts';
 import { MAX_MEDIA_QUERIES_PER_CALL } from '../../domain/media';
+import { DRIVE_LIMITS } from '../drive/limits';
 
 export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly name: string; readonly description: string; readonly parameters: { readonly type: 'object'; readonly properties: Record<string, unknown>; readonly additionalProperties: boolean; readonly required?: readonly string[]; }; }
 
@@ -95,10 +96,23 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'gmail.updateLabel': { labelId: stringProperty('Gmail label id.'), label: objectProperty('Updated Gmail label resource.') },
   'gmail.deleteLabel': { labelId: stringProperty('Gmail label id.') },
   'gmail.sendMessage': { to: arrayProperty('Recipient email addresses.'), cc: arrayProperty('Optional CC email addresses.'), subject: stringProperty('Email subject.'), body: stringProperty('Plain-text email body.'), threadId: stringProperty('Optional Gmail thread id for replies.') },
-  'drive.searchFiles': { query: stringProperty('Optional Drive query expression.'), pageToken: stringProperty('Optional pagination token.'), pageSize: { type: 'integer', minimum: 1, maximum: 100 } },
-  'drive.searchLibrary': { query: stringProperty('Optional Drive query expression for the broader library.'), pageToken: stringProperty('Optional pagination token.'), pageSize: { type: 'integer', minimum: 1, maximum: 100 } },
+  'drive.searchFiles': {
+    query: { type: 'string', maxLength: DRIVE_LIMITS.maxQueryLength, description: "Optional Drive query expression, for example \"name contains 'quarterly report'\", \"mimeType = 'application/pdf'\", or \"'<folder id>' in parents\" to list one folder's children." },
+    pageToken: stringProperty('Optional pagination token.'),
+    pageSize: { type: 'integer', minimum: 1, maximum: DRIVE_LIMITS.maxPageSize },
+    showTrashed: { type: 'boolean', description: 'Include trashed files. Trashed files are excluded by default.' },
+  },
+  'drive.searchLibrary': {
+    query: { type: 'string', maxLength: DRIVE_LIMITS.maxQueryLength, description: "Optional Drive query expression for the broader library, using the same syntax as drive.searchFiles, for example \"fullText contains 'invoice'\"." },
+    pageToken: stringProperty('Optional pagination token.'),
+    pageSize: { type: 'integer', minimum: 1, maximum: DRIVE_LIMITS.maxPageSize },
+    showTrashed: { type: 'boolean', description: 'Include trashed files. Trashed files are excluded by default.' },
+  },
   'drive.getFile': { fileId: stringProperty('Drive file id.') },
-  'drive.downloadFile': { fileId: stringProperty('Drive file id.') },
+  'drive.downloadFile': {
+    fileId: stringProperty('Drive file id.'),
+    maxBytes: { type: 'integer', minimum: 1, maximum: DRIVE_LIMITS.maxTransferBytes, description: 'Optional transfer ceiling in bytes for this download. Defaults to the 10 MiB application limit, which cannot be exceeded.' },
+  },
   'drive.createFile': { name: stringProperty('New file name.'), mimeType: stringProperty('Optional MIME type.'), parents: arrayProperty('Optional parent folder ids.') },
   'drive.updateFile': { fileId: stringProperty('Drive file id.'), patch: objectProperty('Explicit Drive metadata fields to update.') },
   'drive.moveFile': { fileId: stringProperty('Drive file id.'), parentId: stringProperty('Destination parent folder id.'), previousParentId: stringProperty('Optional previous parent folder id to remove.') },

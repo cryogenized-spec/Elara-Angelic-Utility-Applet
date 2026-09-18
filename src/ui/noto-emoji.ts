@@ -111,6 +111,40 @@ async function installFace(family: string, bytes: ArrayBuffer, kind: 'committed'
   return true;
 }
 
+async function openFontCache(): Promise<Cache | null> {
+  if (typeof caches === 'undefined') return null;
+  try { return await caches.open(CACHE_NAME); }
+  catch { return null; }
+}
+
+async function removeOtherSubsets(cache: Cache, keepUrl: string): Promise<void> {
+  try {
+    for (const request of await cache.keys()) {
+      if (request.url !== keepUrl) await cache.delete(request);
+    }
+  } catch {
+    // Cache cleanup is acceleration hygiene, never preference authority.
+  }
+}
+
+async function installCachedFace(cache: Cache, key: string): Promise<boolean> {
+  try {
+    const existing = await cache.match(key);
+    if (!existing) return false;
+    const bytes = await existing.arrayBuffer();
+    if (bytes.byteLength === 0 || bytes.byteLength > MAX_FONT_BYTES) {
+      await cache.delete(key);
+      return false;
+    }
+    await installFace(NOTO_EMOJI_FAMILY, bytes, 'committed');
+    await removeOtherSubsets(cache, key);
+    return true;
+  } catch {
+    try { await cache.delete(key); } catch { /* best-effort corrupt-cache eviction */ }
+    return false;
+  }
+}
+
 /** Network-only preview. Never writes CacheStorage. */
 export async function previewNotoEmoji(glyphs: GenerationActivityGlyphs): Promise<boolean> {
   const text = generationActivityGlyphText(glyphs);
@@ -130,25 +164,18 @@ export async function commitNotoEmoji(glyphs: GenerationActivityGlyphs): Promise
   const text = generationActivityGlyphText(glyphs);
   if (!text) return false;
   const key = syntheticCacheUrl(text);
-  if (typeof caches !== 'undefined') {
-    const cache = await caches.open(CACHE_NAME);
-    const existing = await cache.match(key);
-    if (existing) {
-      const bytes = await existing.arrayBuffer();
-      if (bytes.byteLength > 0 && bytes.byteLength <= MAX_FONT_BYTES) {
-        return installFace(NOTO_EMOJI_FAMILY, bytes, 'committed');
-      }
-    }
-  }
+  const cache = await openFontCache();
+  if (cache && await installCachedFace(cache, key)) return true;
 
   const bytes = await fetchSubsetBytes(text);
-  if (typeof caches !== 'undefined') {
-    const cache = await caches.open(CACHE_NAME);
-    await cache.put(key, new Response(bytes.slice(0), {
-      headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable' },
-    }));
-    for (const request of await cache.keys()) {
-      if (request.url !== key) await cache.delete(request);
+  if (cache) {
+    try {
+      await cache.put(key, new Response(bytes.slice(0), {
+        headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable' },
+      }));
+      await removeOtherSubsets(cache, key);
+    } catch {
+      // The installed face still works; cache is reconstructible acceleration.
     }
   }
 
@@ -164,16 +191,8 @@ export async function restoreNotoEmoji(glyphs: GenerationActivityGlyphs): Promis
   if (!text) return false;
   setCommittedReady(false);
 
-  if (typeof caches !== 'undefined') {
-    const cache = await caches.open(CACHE_NAME);
-    const cached = await cache.match(syntheticCacheUrl(text));
-    if (cached) {
-      const bytes = await cached.arrayBuffer();
-      if (bytes.byteLength > 0 && bytes.byteLength <= MAX_FONT_BYTES) {
-        return installFace(NOTO_EMOJI_FAMILY, bytes, 'committed');
-      }
-    }
-  }
+  const cache = await openFontCache();
+  if (cache && await installCachedFace(cache, syntheticCacheUrl(text))) return true;
 
   try {
     return await installFace(NOTO_EMOJI_FAMILY, await fetchSubsetBytes(text), 'committed');

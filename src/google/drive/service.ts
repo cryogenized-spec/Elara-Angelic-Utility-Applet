@@ -105,6 +105,33 @@ function boundedText(value: unknown, maxLength: number = DRIVE_LIMITS.maxProvide
   return typeof value === 'string' ? value.slice(0, maxLength) : undefined;
 }
 
+/**
+ * A web-view link is either present and truthful or absent.
+ *
+ * A truncated URL would be a lie the user could click, so an oversized or
+ * non-HTTPS link is dropped instead of cut.
+ */
+function boundedWebViewLink(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !value || value.length > DRIVE_LIMITS.maxProviderTextLength) return undefined;
+  try {
+    return new URL(value).protocol === 'https:' ? value : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A MIME type is classification authority, so a truncated one is worse than
+ * none: an implausible value falls back to the generic binary type. This is the
+ * same fallback the artifact boundary already applies to a generic media type.
+ */
+function boundedMimeType(value: unknown): string {
+  if (typeof value !== 'string') return 'application/octet-stream';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > DRIVE_LIMITS.maxExportMimeTypeLength) return 'application/octet-stream';
+  return trimmed;
+}
+
 function asProviderSize(value: unknown): number | undefined {
   // Drive serializes `size` as a string. A malformed or out-of-range value is
   // reported as unknown rather than guessed, because the download ceiling and
@@ -131,11 +158,11 @@ function asFileSummary(value: unknown): GoogleDriveFileSummary {
   const createdTime = boundedText(file.createdTime);
   const etag = boundedText(file.etag);
   const modifiedTime = boundedText(file.modifiedTime);
-  const webViewLink = boundedText(file.webViewLink);
+  const webViewLink = boundedWebViewLink(file.webViewLink);
   return {
     id: requireText(String(file.id ?? ''), 'file ID', DRIVE_LIMITS.maxFileIdLength),
     name: boundedText(file.name, DRIVE_LIMITS.maxNameLength) ?? '',
-    mimeType: boundedText(file.mimeType, DRIVE_LIMITS.maxExportMimeTypeLength) ?? 'application/octet-stream',
+    mimeType: boundedMimeType(file.mimeType),
     ...(modifiedTime !== undefined ? { modifiedTime } : {}),
     ...(createdTime !== undefined ? { createdTime } : {}),
     ...(webViewLink !== undefined ? { webViewLink } : {}),

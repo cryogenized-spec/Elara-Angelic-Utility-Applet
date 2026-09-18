@@ -84,11 +84,26 @@ describe('Drive adversarial certification', () => {
 
     const file = await service.getFile('file-1');
     expect(file.name).toHaveLength(DRIVE_LIMITS.maxNameLength);
-    expect(file.mimeType).toHaveLength(DRIVE_LIMITS.maxExportMimeTypeLength);
     expect(file.description).toHaveLength(DRIVE_LIMITS.maxDescriptionLength);
-    expect(file.webViewLink).toHaveLength(DRIVE_LIMITS.maxProviderTextLength);
     expect(file.createdTime).toHaveLength(DRIVE_LIMITS.maxProviderTextLength);
     expect(file.parents).toHaveLength(DRIVE_LIMITS.maxParents);
+    // An implausible MIME type is classification authority, so it falls back to
+    // the generic binary type; a link too long to present truthfully is dropped
+    // rather than truncated into a broken URL the user could click.
+    expect(file.mimeType).toBe('application/octet-stream');
+    expect(file.webViewLink).toBeUndefined();
+  });
+
+  it('drops a non-HTTPS web-view link and keeps an ordinary one', async () => {
+    const service = new GoogleDriveService(oauthFor(async () => jsonResponse({
+      ...FILE,
+      webViewLink: 'http://drive.google.com/file/d/file-1/view',
+      mimeType: 'application/pdf',
+      size: '3',
+    })));
+    const file = await service.getFile('file-1');
+    expect(file.webViewLink).toBeUndefined();
+    expect(file.mimeType).toBe('application/pdf');
   });
 
   it('refuses every invalid validator before authorization or a provider request', async () => {

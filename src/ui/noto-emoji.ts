@@ -11,6 +11,7 @@ const MAX_FONT_BYTES = 1_000_000;
 
 let committedFace: FontFace | null = null;
 let previewFace: FontFace | null = null;
+let previewSequence = 0;
 let committedReady = false;
 const listeners = new Set<() => void>();
 
@@ -110,7 +111,10 @@ async function installFace(family: string, bytes: ArrayBuffer, kind: 'committed'
 export async function previewNotoEmoji(glyphs: GenerationActivityGlyphs): Promise<boolean> {
   const text = generationActivityGlyphText(glyphs);
   if (!text) return false;
-  return installFace(NOTO_EMOJI_PREVIEW_FAMILY, await fetchSubsetBytes(text), 'preview');
+  const sequence = ++previewSequence;
+  const bytes = await fetchSubsetBytes(text);
+  if (sequence !== previewSequence) return false;
+  return installFace(NOTO_EMOJI_PREVIEW_FAMILY, bytes, 'preview');
 }
 
 /**
@@ -120,11 +124,21 @@ export async function previewNotoEmoji(glyphs: GenerationActivityGlyphs): Promis
 export async function commitNotoEmoji(glyphs: GenerationActivityGlyphs): Promise<boolean> {
   const text = generationActivityGlyphText(glyphs);
   if (!text) return false;
-  const bytes = await fetchSubsetBytes(text);
-
+  const key = syntheticCacheUrl(text);
   if (typeof caches !== 'undefined') {
     const cache = await caches.open(CACHE_NAME);
-    const key = syntheticCacheUrl(text);
+    const existing = await cache.match(key);
+    if (existing) {
+      const bytes = await existing.arrayBuffer();
+      if (bytes.byteLength > 0 && bytes.byteLength <= MAX_FONT_BYTES) {
+        return installFace(NOTO_EMOJI_FAMILY, bytes, 'committed');
+      }
+    }
+  }
+
+  const bytes = await fetchSubsetBytes(text);
+  if (typeof caches !== 'undefined') {
+    const cache = await caches.open(CACHE_NAME);
     await cache.put(key, new Response(bytes.slice(0), {
       headers: { 'Content-Type': 'font/woff2', 'Cache-Control': 'public, max-age=31536000, immutable' },
     }));

@@ -25,7 +25,19 @@ describe('Gmail Pass 3 tool parity', () => {
       'gmail.modifyMessage', 'gmail.modifyThread', 'gmail.trashMessage', 'gmail.untrashMessage', 'gmail.trashThread', 'gmail.untrashThread',
       'gmail.createLabel', 'gmail.updateLabel', 'gmail.deleteLabel', 'gmail.sendMessage', 'gmail.replyMessage',
     ]));
-    expect(googleToolRegistry.find((entry) => entry.name === 'gmail.replyMessage')).toMatchObject({ risk: 'send', capability: 'gmail.modify', exposure: 'gemini' });
+    expect(googleToolRegistry.find((entry) => entry.name === 'gmail.replyMessage')).toMatchObject({ risk: 'send', capability: 'gmail.send', exposure: 'gemini' });
+  });
+
+  it('does not let mailbox-modify authority substitute for explicit send authority', async () => {
+    const handler = vi.fn(async () => ({ sent: true }));
+    const confirm = vi.fn(async () => true);
+    const result = await executeGoogleTool(
+      { tool: 'gmail.replyMessage', arguments: { threadId: 't1', to: 'bob@example.com', subject: 'Re: Hello', body: 'Body', inReplyTo: '<m1@example.com>' } },
+      { oauth: oauthFor('gmail.modify'), handlers: { 'gmail.replyMessage': handler }, confirm },
+    );
+    expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'gmail.send' });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
   });
 
   it('keeps declarations aligned to semantic actions rather than raw provider label arrays/resources', () => {

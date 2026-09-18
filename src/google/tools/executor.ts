@@ -19,7 +19,18 @@ export type LocalToolCapability = 'documents.local' | 'media.youtube.read' | 'me
 export type ToolCapability = GoogleCapabilityKey | LocalToolCapability;
 export type GoogleToolInvocation = GoogleToolCall & { readonly callId?: string };
 
+/**
+ * Capabilities satisfied inside the application rather than by a Google OAuth
+ * scope. They are not members of `googleCapabilityKeySchema`, so `safeCapability`
+ * must recognize them before it parses.
+ */
 const LOCAL_TOOL_CAPABILITIES: ReadonlySet<string> = new Set<string>(['documents.local', 'media.youtube.read', 'memory.durable.local']);
+
+/**
+ * Capabilities that need no OAuth authorization check. This is the local set plus
+ * `roleplay.world.local`, which is a registered capability key but is backed by
+ * local storage rather than a Google scope.
+ */
 const NON_OAUTH_CAPABILITIES: ReadonlySet<string> = new Set<string>([...LOCAL_TOOL_CAPABILITIES, 'roleplay.world.local']);
 
 export interface GoogleToolExecutionContext {
@@ -64,6 +75,7 @@ function safeCapability(value: string): ToolCapability {
   return googleCapabilityKeySchema.parse(value);
 }
 function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Record<string, unknown>> {
+  // Schema modules remain validation-only; provider/cache/runtime work stays in handlers.
   if (Object.prototype.hasOwnProperty.call(memoryToolArgumentSchemas, tool)) return validateMemoryToolArguments(tool as MemoryToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(youtubeToolArgumentSchemas, tool)) return validateYouTubeToolArguments(tool as YouTubeToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(roleplayWorldToolArgumentSchemas, tool)) return validateRoleplayWorldToolArguments(tool as RoleplayWorldToolName, value) as Readonly<Record<string, unknown>>;
@@ -74,13 +86,18 @@ function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Recor
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Tool arguments must be an object.');
   return Object.freeze({ ...(value as Record<string, unknown>) });
 }
-function isGoogleOAuthCapability(capability: ToolCapability): capability is GoogleCapabilityKey { return !NON_OAUTH_CAPABILITIES.has(capability); }
+/** Narrows a capability to one backed by a Google OAuth scope. */
+function isGoogleOAuthCapability(capability: ToolCapability): capability is GoogleCapabilityKey {
+  return !NON_OAUTH_CAPABILITIES.has(capability);
+}
 function authorizationNeeded(status: GoogleOAuthStatus, capability: ToolCapability): boolean {
   if (!isGoogleOAuthCapability(capability)) return false;
   const stateNeedsRecovery = status.state === 'disconnected' || status.state === 'needs-consent' || status.state === 'revoked' || status.state === 'reauthorization-required';
   return !isCapabilityAuthorized(capability, status.grantedCapabilities) || stateNeedsRecovery;
 }
-function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined { return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined; }
+function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
+  return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
+}
 function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<string, unknown>>): string | undefined {
   if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
   if ((tool === 'gmail.sendMessage' || tool === 'gmail.replyMessage') && typeof args.body === 'string') return args.body;
@@ -90,15 +107,47 @@ function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<stri
 function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, fallback: string): string {
   const id = value(args, 'id') ?? value(args, 'ref');
   switch (tool) {
-    case 'calendar.createEvent': { const summary = value(args, 'summary') ?? 'untitled event'; const start = value(args, 'start'); const updates = value(args, 'sendUpdates'); return `Create Calendar event “${summary}”${start ? ` at ${start}` : ''}${updates ? ` and send guest updates (${updates})` : ''}.`; }
-    case 'calendar.updateEvent': { const updates = value(args, 'sendUpdates'); return `Update Calendar event ${value(args, 'eventId') ?? 'selected event'} using the version just read${updates ? ` and send guest updates (${updates})` : ''}.`; }
-    case 'calendar.deleteEvent': { const updates = value(args, 'sendUpdates'); return `Delete Calendar event ${value(args, 'eventId') ?? 'selected event'} using the version just read${updates ? ` and send guest updates (${updates})` : ''}.`; }
+    case 'calendar.createEvent': {
+      const summary = value(args, 'summary') ?? 'untitled event';
+      const start = value(args, 'start');
+      const updates = value(args, 'sendUpdates');
+      return `Create Calendar event “${summary}”${start ? ` at ${start}` : ''}${updates ? ` and send guest updates (${updates})` : ''}.`;
+    }
+    case 'calendar.updateEvent': {
+      const updates = value(args, 'sendUpdates');
+      return `Update Calendar event ${value(args, 'eventId') ?? 'selected event'} using the version just read${updates ? ` and send guest updates (${updates})` : ''}.`;
+    }
+    case 'calendar.deleteEvent': {
+      const updates = value(args, 'sendUpdates');
+      return `Delete Calendar event ${value(args, 'eventId') ?? 'selected event'} using the version just read${updates ? ` and send guest updates (${updates})` : ''}.`;
+    }
     case 'tasks.createTaskList': return `Create Google Tasks list “${value(args, 'title') ?? 'Untitled'}”.`;
     case 'tasks.updateTaskList': return `Rename Google Tasks list ${value(args, 'taskListId') ?? 'selected list'} to “${value(args, 'title') ?? 'Untitled'}”.`;
     case 'tasks.deleteTaskList': return `Delete Google Tasks list ${value(args, 'taskListId') ?? 'selected list'} and the tasks it contains. If any contained task is assigned from Google Docs or Chat, Google may also delete that originating assignment.`;
-    case 'tasks.createTask': { const title = value(args, 'title') ?? 'untitled task'; const scheduledDate = value(args, 'scheduledDate'); return `Create Google Task “${title}” in list ${value(args, 'taskListId') ?? 'selected list'}${scheduledDate ? ` scheduled for ${scheduledDate} (date only; no task time-of-day)` : ''}.`; }
-    case 'tasks.updateTask': { const changes: string[] = []; if (value(args, 'title')) changes.push('title'); if (Object.prototype.hasOwnProperty.call(args, 'notes')) changes.push('notes'); if (value(args, 'scheduledDate')) changes.push(`scheduled date to ${value(args, 'scheduledDate')}`); if (args.clearScheduledDate === true) changes.push('remove the scheduled date'); if (value(args, 'status')) changes.push(`status to ${value(args, 'status')}`); return `Update Google Task ${value(args, 'taskId') ?? 'selected task'} in list ${value(args, 'taskListId') ?? 'selected list'}${changes.length ? `: ${changes.join(', ')}` : ''}.`; }
-    case 'tasks.moveTask': { const sourceList = value(args, 'taskListId') ?? 'selected list'; const destinationList = value(args, 'destinationTaskListId'); const parent = value(args, 'parent'); const previous = value(args, 'previous'); const listMove = destinationList ? ` from list ${sourceList} to list ${destinationList}` : ` within list ${sourceList}`; const destination = parent ? ` under parent ${parent}` : ' to the top level'; const position = previous ? ` after sibling ${previous}` : ' as the first task among its destination siblings'; return `Move Google Task ${value(args, 'taskId') ?? 'selected task'}${listMove}${destination}${position}.`; }
+    case 'tasks.createTask': {
+      const title = value(args, 'title') ?? 'untitled task';
+      const scheduledDate = value(args, 'scheduledDate');
+      return `Create Google Task “${title}” in list ${value(args, 'taskListId') ?? 'selected list'}${scheduledDate ? ` scheduled for ${scheduledDate} (date only; no task time-of-day)` : ''}.`;
+    }
+    case 'tasks.updateTask': {
+      const changes: string[] = [];
+      if (value(args, 'title')) changes.push('title');
+      if (Object.prototype.hasOwnProperty.call(args, 'notes')) changes.push('notes');
+      if (value(args, 'scheduledDate')) changes.push(`scheduled date to ${value(args, 'scheduledDate')}`);
+      if (args.clearScheduledDate === true) changes.push('remove the scheduled date');
+      if (value(args, 'status')) changes.push(`status to ${value(args, 'status')}`);
+      return `Update Google Task ${value(args, 'taskId') ?? 'selected task'} in list ${value(args, 'taskListId') ?? 'selected list'}${changes.length ? `: ${changes.join(', ')}` : ''}.`;
+    }
+    case 'tasks.moveTask': {
+      const sourceList = value(args, 'taskListId') ?? 'selected list';
+      const destinationList = value(args, 'destinationTaskListId');
+      const parent = value(args, 'parent');
+      const previous = value(args, 'previous');
+      const listMove = destinationList ? ` from list ${sourceList} to list ${destinationList}` : ` within list ${sourceList}`;
+      const destination = parent ? ` under parent ${parent}` : ' to the top level';
+      const position = previous ? ` after sibling ${previous}` : ' as the first task among its destination siblings';
+      return `Move Google Task ${value(args, 'taskId') ?? 'selected task'}${listMove}${destination}${position}.`;
+    }
     case 'tasks.deleteTask': return `Delete Google Task ${value(args, 'taskId') ?? 'selected task'} from list ${value(args, 'taskListId') ?? 'selected list'}. If it is assigned from Google Docs or Chat, Google also deletes the originating assignment.`;
     case 'tasks.clearCompleted': return `Clear completed Google Tasks from list ${value(args, 'taskListId') ?? 'selected list'}; Google will hide those completed tasks from normal results.`;
     case 'docs.createDocument': return `Create the Google Doc “${value(args, 'title') ?? 'Untitled'}”.`;
@@ -140,10 +189,20 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
 
 function staticConfirmationRequest(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, descriptor: GoogleToolDescriptor, requestedAt: string): WriteConfirmationRequest {
   const reviewText = confirmationReviewText(tool, args);
-  return { tool: descriptor.name, risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>, resourceSummary: confirmationSummary(tool, args, descriptor.description), ...(reviewText ? { reviewText } : {}), requestedAt };
+  return {
+    tool: descriptor.name,
+    risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>,
+    resourceSummary: confirmationSummary(tool, args, descriptor.description),
+    ...(reviewText ? { reviewText } : {}),
+    requestedAt,
+  };
 }
 
-export function confirmationRequestForCall(call: GoogleToolCall, now = new Date(), context: GoogleToolConfirmationContext = {}): WriteConfirmationRequest | null {
+export function confirmationRequestForCall(
+  call: GoogleToolCall,
+  now = new Date(),
+  context: GoogleToolConfirmationContext = {},
+): WriteConfirmationRequest | null {
   const parsed = googleToolCallSchema.safeParse(call);
   if (!parsed.success) return null;
   const descriptor = findDescriptor(parsed.data.tool);
@@ -152,12 +211,18 @@ export function confirmationRequestForCall(call: GoogleToolCall, now = new Date(
   try { args = validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
   const request = staticConfirmationRequest(parsed.data.tool, args, descriptor, now.toISOString());
   if (parsed.data.tool !== 'memory.reconcile') return request;
-  const targetRef = value(args, 'targetRef'); const relation = value(args, 'relation') ?? 'related';
+  const targetRef = value(args, 'targetRef');
+  const relation = value(args, 'relation') ?? 'related';
   if (!targetRef) return null;
   try {
     const target = describeMemoryReconcileTarget(targetRef, context.conversationId, context.messageId, context.generationId);
-    return { ...request, resourceSummary: `Reconcile durable memory “${target.title}” (${target.kind}; ${target.lifecycle}) as ${relation}. Current content: “${target.excerpt}”. Proposed evidence/replacement: “${value(args, 'title') ?? 'Untitled evidence'}”. Review the full proposed body below before approving.` };
-  } catch { return null; }
+    return {
+      ...request,
+      resourceSummary: `Reconcile durable memory “${target.title}” (${target.kind}; ${target.lifecycle}) as ${relation}. Current content: “${target.excerpt}”. Proposed evidence/replacement: “${value(args, 'title') ?? 'Untitled evidence'}”. Review the full proposed body below before approving.`,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function executeGoogleTool(call: GoogleToolInvocation, options: GoogleToolExecutorOptions): Promise<GoogleToolExecutionResult> {
@@ -165,7 +230,8 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   const providerCallId = typeof call.callId === 'string' && call.callId.trim() ? call.callId.trim() : undefined;
   const parsed = googleToolCallSchema.safeParse(call);
   if (!parsed.success) return { ok: false, correlationId: id, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) };
-  const validCall = parsed.data; const descriptor = findDescriptor(validCall.tool);
+  const validCall = parsed.data;
+  const descriptor = findDescriptor(validCall.tool);
   if (!descriptor) return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) };
   let args: Readonly<Record<string, unknown>>;
   try { args = validateArguments(validCall.tool, validCall.arguments); } catch { return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) }; }
@@ -179,16 +245,35 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   }
   const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {
-    const confirmation = confirmationRequestForCall(validCall, options.now?.() ?? new Date(), { conversationId: options.conversationId, messageId: options.messageId, generationId: options.generationId });
+    const confirmation = confirmationRequestForCall(validCall, options.now?.() ?? new Date(), {
+      conversationId: options.conversationId,
+      messageId: options.messageId,
+      generationId: options.generationId,
+    });
     if (!confirmation) return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) };
-    const confirm = options.confirm ?? requestGoogleToolConfirmation; let approved: boolean; let confirmationInvoked = false;
+    const confirm = options.confirm ?? requestGoogleToolConfirmation;
+    let approved: boolean;
+    let confirmationInvoked = false;
     try { confirmationInvoked = true; approved = await confirm(confirmation) && isConfirmationFresh(confirmation.requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
     if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: confirmationInvoked ? 'USER_DECLINED' : 'CONFIRMATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
   }
   const handler = options.handlers[descriptor.name];
   if (!handler) return { ok: false, correlationId: id, tool: validCall.tool, code: 'HANDLER_UNAVAILABLE', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
   try {
-    const result = await handler({ tool: descriptor.name, descriptor, capability, risk: descriptor.risk, arguments: args, callId: providerCallId, conversationId: options.conversationId, messageId: options.messageId, signal: options.signal, generationId: options.generationId, isGenerationActive: options.isGenerationActive });
+    const result = await handler({
+      tool: descriptor.name,
+      descriptor,
+      capability,
+      risk: descriptor.risk,
+      arguments: args,
+      callId: providerCallId,
+      conversationId: options.conversationId,
+      messageId: options.messageId,
+      signal: options.signal,
+      generationId: options.generationId,
+      isGenerationActive: options.isGenerationActive,
+    });
     return { ok: true, correlationId: id, tool: descriptor.name, result };
-  } catch { return { ok: false, correlationId: id, tool: descriptor.name, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'provider' }) }; }
+  }
+  catch { return { ok: false, correlationId: id, tool: descriptor.name, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'provider' }) }; }
 }

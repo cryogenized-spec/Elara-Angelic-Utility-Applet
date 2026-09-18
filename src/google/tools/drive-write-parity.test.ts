@@ -121,10 +121,10 @@ describe('Drive conditional-write parity', () => {
       fileId: 'file-1', etag: STRONG_ETAG,
     }));
 
-    expect(driveMocks.updateFile).toHaveBeenCalledWith('file-1', STRONG_ETAG, { name: 'Renamed', starred: true });
-    expect(driveMocks.moveFile).toHaveBeenNthCalledWith(1, 'file-1', STRONG_ETAG, 'folder-2', 'folder-1');
-    expect(driveMocks.moveFile).toHaveBeenNthCalledWith(2, 'file-1', STRONG_ETAG, 'folder-3', undefined);
-    expect(driveMocks.trashFile).toHaveBeenCalledWith('file-1', STRONG_ETAG);
+    expect(driveMocks.updateFile).toHaveBeenCalledWith('file-1', STRONG_ETAG, { name: 'Renamed', starred: true }, {});
+    expect(driveMocks.moveFile).toHaveBeenNthCalledWith(1, 'file-1', STRONG_ETAG, 'folder-2', 'folder-1', {});
+    expect(driveMocks.moveFile).toHaveBeenNthCalledWith(2, 'file-1', STRONG_ETAG, 'folder-3', undefined, {});
+    expect(driveMocks.trashFile).toHaveBeenCalledWith('file-1', STRONG_ETAG, {});
   });
 
   it('states the ETag precondition, the parent consequence and the recoverable trash outcome before approval', () => {

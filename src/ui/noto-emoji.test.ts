@@ -105,6 +105,25 @@ describe('Noto Emoji activity font authority', () => {
     expect(getNotoEmojiReady()).toBe(false);
   });
 
+  it('still installs the committed face when CacheStorage is unavailable', async () => {
+    vi.stubGlobal('caches', { open: vi.fn(async () => { throw new Error('storage unavailable'); }) });
+    await expect(commitNotoEmoji(DEFAULT_GENERATION_ACTIVITY_GLYPHS)).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getNotoEmojiReady()).toBe(true);
+  });
+
+  it('evicts a corrupt cached subset and heals from the reviewed network source', async () => {
+    await commitNotoEmoji(DEFAULT_GENERATION_ACTIVITY_GLYPHS);
+    const key = (await cache.keys())[0];
+    if (!key) throw new Error('expected cached subset');
+    await cache.put(key, new Response(new Uint8Array()));
+
+    fetchMock.mockClear();
+    await expect(restoreNotoEmoji(DEFAULT_GENERATION_ACTIVITY_GLYPHS)).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(getNotoEmojiReady()).toBe(true);
+  });
+
   it('uses a transient session font on startup cache miss without creating durable cache', async () => {
     const cachePut = vi.spyOn(cache, 'put');
     await expect(restoreNotoEmoji(DEFAULT_GENERATION_ACTIVITY_GLYPHS)).resolves.toBe(true);

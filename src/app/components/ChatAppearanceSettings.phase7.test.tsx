@@ -31,7 +31,7 @@ describe('Phase 7 Chat appearance player presets', () => {
   it('shows Glass as the default selected preset and emits only the appearance patch', () => {
     const changes: ChatAppearancePreferences[] = [];
     act(() => {
-      root.render(<ChatAppearanceSettings value={DEFAULT_CHAT_APPEARANCE} onChange={(value) => changes.push(value)} />);
+      root.render(<ChatAppearanceSettings value={DEFAULT_CHAT_APPEARANCE} onChange={(value) => changes.push(value)} activityGlyphs={DEFAULT_CHAT_APPEARANCE.generationActivityGlyphs} onActivityGlyphsChange={() => undefined} />);
     });
 
     expect(buttonByText('Glass').getAttribute('aria-checked')).toBe('true');
@@ -46,7 +46,7 @@ describe('Phase 7 Chat appearance player presets', () => {
 
   it('describes the preset as an outer-shell change rather than a YouTube control replacement', () => {
     act(() => {
-      root.render(<ChatAppearanceSettings value={{ ...DEFAULT_CHAT_APPEARANCE, mediaPlayerSurfacePreset: 'minimal' }} onChange={() => undefined} />);
+      root.render(<ChatAppearanceSettings value={{ ...DEFAULT_CHAT_APPEARANCE, mediaPlayerSurfacePreset: 'minimal' }} onChange={() => undefined} activityGlyphs={DEFAULT_CHAT_APPEARANCE.generationActivityGlyphs} onActivityGlyphsChange={() => undefined} />);
     });
 
     const text = container.textContent ?? '';

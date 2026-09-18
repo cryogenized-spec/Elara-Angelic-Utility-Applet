@@ -35,12 +35,15 @@ domain operation
 | Autonomy | `src/persistence/autonomy.ts` |
 | Roleplay world | `src/persistence/roleplay-world.ts` |
 | Media cache | `src/media/cache.ts` |
+| Generation Activity font subset cache | `src/ui/noto-emoji.ts` |
 
 ## 4. Data and contracts
 
 Central `ElaraDatabase` tables are: `messages`, `threads`, `settings`, `workspaceShortcuts`, `folders`, `folderAssignments`, `memories`, `artifactMetadata`, `artifactBlobs`. Schema migrations evolved these tables from v1 through v8; v8 adds the indexed `autonomyContext` memory consent field. A legacy folder localStorage cache is migrated into tables and removed only after successful parsing/write.
 
 Related correctness-sensitive writes use Dexie transactions, for example message/thread updates and artifact association/storage. Persisted Gemini settings are per-model and normalized through the model settings engine.
+
+Chat Appearance preferences remain authoritative for Generation Activity glyph selection. The selected twelve Unicode graphemes live in the existing `elara-preferences` / `chat-appearance` record and are normalized on every load/save, so no schema bump is required for older rows. Noto Emoji WOFF2 bytes live separately in CacheStorage as disposable derived data keyed by the final glyph subset. Preview never writes that cache; only the Settings-exit commit may replace the committed subset. A missing/corrupt cache is recoverable from preferences and must not change the selected glyph values.
 
 ## 5. Invariants
 

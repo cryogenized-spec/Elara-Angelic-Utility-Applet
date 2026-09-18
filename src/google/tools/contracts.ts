@@ -39,6 +39,8 @@ export interface GoogleToolDescriptor {
   readonly name: GoogleToolName;
   readonly risk: GoogleToolRisk;
   readonly capability: string;
+  /** Additional authorities that must already be effective before confirmation/handler execution. */
+  readonly prerequisiteCapabilities?: readonly string[];
   readonly description: string;
   readonly exposure: GoogleToolExposure;
   readonly executionPlane?: GoogleToolExecutionPlane;

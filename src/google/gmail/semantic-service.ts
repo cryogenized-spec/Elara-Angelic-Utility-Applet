@@ -293,7 +293,7 @@ function parseReferenceIds(value: string | undefined): string[] {
   return value.split(/\s+/).filter((item) => MESSAGE_ID_PATTERN.test(item)).slice(-20);
 }
 function replySubjectKey(value: string): string {
-  return value.trim().replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/i, '').trim().toLocaleLowerCase();
+  return value.trim().replace(/^(?:(?:re|fw|fwd)\s*:\s*)+/i, '').trim().toLowerCase();
 }
 function rawRfc822ToBase64Url(value: string): string {
   const bytes = new TextEncoder().encode(value);

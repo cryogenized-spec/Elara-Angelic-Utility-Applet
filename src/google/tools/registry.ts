@@ -50,7 +50,7 @@ export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'gmail.updateLabel', risk: 'write', capability: 'gmail.labels', exposure: 'gemini', description: 'Rename one Gmail USER label.' },
   { name: 'gmail.deleteLabel', risk: 'destructive', capability: 'gmail.labels', exposure: 'gemini', description: 'Delete one Gmail USER label and remove it from messages/threads.' },
   { name: 'gmail.sendMessage', risk: 'send', capability: 'gmail.send', exposure: 'gemini', description: 'Send a new plain-text email to explicit recipients. This tool never implicitly replies to a thread.' },
-  { name: 'gmail.replyMessage', risk: 'send', capability: 'gmail.send', exposure: 'gemini', description: 'Send a plain-text reply with explicit Gmail thread identity and RFC Message-ID reply context from a prior read.' },
+  { name: 'gmail.replyMessage', risk: 'send', capability: 'gmail.modify', exposure: 'gemini', description: 'Verify a target Gmail thread/message, then send a plain-text reply with provider-derived RFC reply context.' },
   { name: 'drive.searchFiles', risk: 'read', capability: 'drive.files.app.read', exposure: 'gemini', description: 'Search files inside Elara’s app-file boundary.' },
   { name: 'drive.searchLibrary', risk: 'read', capability: 'drive.library.read', exposure: 'gemini', description: 'Search the user’s broader Google Drive library. Requires Drive library consent.' },
   { name: 'drive.getFile', risk: 'read', capability: 'drive.files.app.read', exposure: 'gemini', description: 'Retrieve metadata for one Drive file in the app-file or library-read boundary.' },

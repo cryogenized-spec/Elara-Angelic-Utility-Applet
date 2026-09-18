@@ -205,7 +205,7 @@ export function GenerationActivity(props: Props) {
   const controlLabel = live && live.phase !== 'completed'
     ? `Generation activity details: ${liveLabel}`
     : `Generation activity details: ${headerText}`;
-  const liveStatusGlyph = live ? statusGlyphKey(live.statusMessage) : undefined;
+  const liveStatusGlyph = live && active ? statusGlyphKey(live.statusMessage) : undefined;
 
   return (
     <section className={`generation-activity${live ? ` is-${live.phase}` : ' is-complete'}`} aria-label="Generation activity">

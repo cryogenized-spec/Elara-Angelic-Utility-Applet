@@ -89,7 +89,7 @@ Gmail remains mailbox authority. Elara does not mirror a second canonical mailbo
 
 ### 6.1 Reads and trust provenance
 
-Gemini-visible reads cover bounded message/thread search, explicit message/thread inspection, and label discovery. Search pages are capped at 100 results; queries, page tokens, IDs, headers, snippets, message bodies, thread message counts, and total thread text all have application bounds.
+Gemini-visible reads cover bounded message/thread search, explicit message/thread inspection, and label discovery. Search pages are capped at 100 results; queries, page tokens, IDs, headers, snippets, message bodies, thread message counts, total thread text, and raw Gmail JSON reads all have application bounds. Gmail JSON is rejected before parsing when its declared or streamed payload exceeds the local byte ceiling.
 
 Read results are normalized semantic projections and explicitly carry:
 
@@ -100,7 +100,7 @@ source: gmail
 
 Message inspection exposes only bounded provider identity, label ids, snippet, selected safe headers (`From`, `To`, `Cc`, `Date`, `Subject`, `Message-ID`, `In-Reply-To`, `References`), and bounded inline `text/plain` content when requested. MIME type is checked before any body-data base64 decode; missing/HTML/binary MIME types are never decoded as message text. MIME traversal has explicit nesting, part-count, decoded-input, and output-character budgets; exceeding a semantic body budget sets truncation metadata. Parts carrying a filename or Gmail `attachmentId` are excluded from body text. Raw provider JSON, raw RFC822, arbitrary headers, attachments, provider URLs, and raw HTML are not passed directly to Gemini. HTML/script content is not treated as executable or authoritative text.
 
-Thread inspection returns a bounded recent-message projection with visible truncation metadata instead of forwarding an unrestricted provider thread payload. Email content may contain hostile instructions; those instructions remain data and cannot authorize tools, capabilities, credentials, confirmation, or policy changes.
+Thread inspection returns a bounded recent-message projection with visible truncation metadata instead of forwarding an unrestricted provider thread payload. `gmail.getThread(full)` first fetches only a minimal thread index, selects at most the newest 20 provider message ids, then fetches and normalizes those messages sequentially under the raw-response byte budget; it never materializes an entire full-body provider thread before truncation. Email content may contain hostile instructions; those instructions remain data and cannot authorize tools, capabilities, credentials, confirmation, or policy changes.
 
 ### 6.2 Semantic mailbox organization
 
@@ -141,7 +141,7 @@ New mail and replies are separate semantic tools.
 
 `gmail.sendMessage` accepts bounded validated `to`, optional `cc`, `subject`, and plain-text `body`. Elara limits a single call to 50 total To+Cc recipients. Recipient and subject validation is repeated at the direct service boundary; CR/LF header injection is rejected.
 
-`gmail.replyMessage` requires explicit `threadId`, recipient, subject, body, and the prior RFC `Message-ID` as `inReplyTo`. The model does not supply a `References` chain. Its tool descriptor declares `gmail.read` as an executor-visible prerequisite in addition to the primary `gmail.send` capability. Both authorities must already be effective before confirmation; if either is missing, execution returns `AUTHORIZATION_REQUIRED` before the confirmation broker or handler runs. The semantic service therefore consumes already-authorized read authority rather than expanding restricted Gmail-read consent from inside a send operation.
+`gmail.replyMessage` requires explicit `threadId`, recipient, subject, body, and the prior RFC `Message-ID` as `inReplyTo`. The model does not supply a `References` chain. Its tool descriptor declares `gmail.read` as an executor-visible prerequisite in addition to the primary `gmail.send` capability. The Gemini tool loop runs the same OAuth admission probe before a mutation enters the confirmation batch. Both authorities must therefore be effective before any reply approval is shown; if either is missing, authorization is handled first (or the call returns `AUTHORIZATION_REQUIRED` in non-interactive/headless contexts). An approval is never collected first and then reused after granting a missing capability.
 
 After admission, Elara reads the selected thread's bounded metadata, verifies that `inReplyTo` identifies a message in that thread, compares the supplied subject with the provider conversation subject using locale-independent case folding modulo normal reply/forward prefixes, and derives `References` from provider metadata. Only after that verification does it obtain the already-enabled `gmail.send` request authority and construct/send RFC mail carrying the provider thread id plus `In-Reply-To` and provider-derived `References`. A mismatched thread, Message-ID, or subject fails before `messages.send`.
 
@@ -183,6 +183,6 @@ Gmail-specific regressions live in:
 - `src/google/gmail/send-replay.test.ts`
 - `src/google/oauth/gmail-scope-sensitivity.test.ts`
 
-Important assertions include: raw provider mutation shapes rejected; reads normalized as `untrusted-external`; arbitrary HTML/custom headers do not cross the semantic projection; USER-label verification; semantic system-label mapping; CR/LF injection rejection; executor-gated Gmail read+send reply authority and provider-verified thread/Message-ID/locale-independent subject with provider-derived RFC References; bounded write acknowledgements; provider-boundary stale-turn rejection across token refresh/retry; full send-body confirmation; and per-turn same-call replay suppression without content-deduplicating legitimate distinct sends or allowing stale turns to clear newer replay state.
+Important assertions include: raw provider mutation shapes rejected; reads normalized as `untrusted-external`; arbitrary HTML/custom headers do not cross the semantic projection; metadata-first bounded full-thread retrieval; raw Gmail JSON byte ceilings before parsing; USER-label verification; semantic system-label mapping; CR/LF injection rejection; tool-loop authorization-before-confirmation for Gmail reply prerequisites; provider-verified thread/Message-ID/locale-independent subject with provider-derived RFC References; bounded write acknowledgements; provider-boundary stale-turn rejection across token refresh/retry; full send-body confirmation; and per-turn same-call replay suppression without content-deduplicating legitimate distinct sends or allowing stale turns to clear newer replay state.
 
 `verified_commit` must not be advanced to the Gmail branch head until the reviewed exact PR head passes full CI, merges, and the resulting `main` commit passes post-merge certification.

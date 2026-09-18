@@ -35,7 +35,7 @@ describe('executeGoogleTool', () => {
     const handler = vi.fn(async () => ({ id: 'file-1' }));
     const confirm = vi.fn(async () => false);
     const result = await executeGoogleTool(
-      { tool: 'drive.updateFile', arguments: { fileId: 'file-1', patch: { name: 'Renamed' } } },
+      { tool: 'drive.updateFile', arguments: { fileId: 'file-1', etag: '"etag-1"', patch: { name: 'Renamed' } } },
       { oauth: oauthFor('drive.files.app.write'), handlers: { 'drive.updateFile': handler }, confirm, now: () => new Date('2026-09-04T06:00:00.000Z') },
     );
     expect(result).toMatchObject({ ok: false, code: 'USER_DECLINED', confirmation: { tool: 'drive.updateFile', risk: 'write' } });

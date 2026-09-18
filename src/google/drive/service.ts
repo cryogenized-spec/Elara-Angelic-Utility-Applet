@@ -205,6 +205,27 @@ function boundedParameter(value: string | undefined, field: string, maxLength: n
   return trimmed;
 }
 
+/**
+ * One concrete strong ETag is the only validator a conditional write accepts.
+ * Weak (`W/"..."`), wildcard (`*`) and multi-value validators are rejected here
+ * rather than at the provider, so a direct caller cannot widen the contract the
+ * model schema and declaration establish.
+ */
+const CONCRETE_DRIVE_ETAG_PATTERN = /^"[^"]+"$/;
+
+function conditionalHeaders(etag: string): Record<string, string> {
+  const safeEtag = boundedParameter(etag, 'ETag', DRIVE_LIMITS.maxEtagLength);
+  if (!safeEtag || !CONCRETE_DRIVE_ETAG_PATTERN.test(safeEtag)) {
+    throw new Error('Google Drive mutations require one concrete provider ETag. Read the file again before changing it.');
+  }
+  return { 'If-Match': safeEtag };
+}
+
+function throwMutationFailure(response: Response, action: string): never {
+  if (response.status === 412) throw new Error(`Google Drive ${action} was rejected because the file changed. Read the file again before retrying.`);
+  throw new Error(`Google Drive ${action} request failed (${response.status}).`);
+}
+
 function transferLimit(maxBytes: number | undefined): number {
   if (maxBytes === undefined || !Number.isFinite(maxBytes)) return DRIVE_LIMITS.maxTransferBytes;
   return Math.max(1, Math.min(DRIVE_LIMITS.maxTransferBytes, Math.trunc(maxBytes)));
@@ -290,24 +311,36 @@ export class GoogleDriveService {
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
 
-  async updateFile(fileId: string, patch: { name?: string; description?: string; starred?: boolean; trashed?: boolean }): Promise<GoogleDriveFileSummary> {
+  /**
+   * Conditional metadata write: the caller must present the ETag it read, and
+   * the provider rejects the write if the file changed in between. Trashing is
+   * deliberately absent from this ordinary-write patch; {@link trashFile} is the
+   * one explicit path that moves a file to trash.
+   */
+  async updateFile(fileId: string, etag: string, patch: { name?: string; description?: string; starred?: boolean }): Promise<GoogleDriveFileSummary> {
+    const headers = { 'content-type': 'application/json', ...conditionalHeaders(etag) };
     const access = await this.oauth.authorize('drive.files.app.write');
     const body: Record<string, unknown> = {};
     if (patch.name !== undefined) body.name = requireText(patch.name, 'file name');
     if (patch.description !== undefined) body.description = patch.description.slice(0, DRIVE_LIMITS.maxDescriptionLength);
     if (patch.starred !== undefined) body.starred = patch.starred;
-    if (patch.trashed !== undefined) body.trashed = patch.trashed;
     if (!Object.keys(body).length) throw new Error('Google Drive update requires at least one field.');
 
     const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?fields=${encodeURIComponent(DRIVE_FILE_FIELDS)}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
     });
+    if (!response.ok) throwMutationFailure(response, 'update');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
 
-  async moveFile(fileId: string, parentId: string, previousParentId?: string): Promise<GoogleDriveFileSummary> {
+  /**
+   * Move a file by adding one parent and optionally removing another. Drive
+   * files may have several parents: when `previousParentId` is omitted the file
+   * stays in its current folder as well as appearing in the destination.
+   */
+  async moveFile(fileId: string, etag: string, parentId: string, previousParentId?: string): Promise<GoogleDriveFileSummary> {
     const access = await this.oauth.authorize('drive.files.app.write');
     const params = new URLSearchParams({
       addParents: requireFileId(parentId),
@@ -315,7 +348,27 @@ export class GoogleDriveService {
     });
     if (previousParentId?.trim()) params.set('removeParents', requireFileId(previousParentId));
 
-    const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?${params.toString()}`, { method: 'PATCH' });
+    const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?${params.toString()}`, {
+      method: 'PATCH',
+      headers: conditionalHeaders(etag),
+    });
+    if (!response.ok) throwMutationFailure(response, 'move');
+    return asFileSummary(await this.readJson<DriveFileResponse>(response));
+  }
+
+  /**
+   * Move one file to trash under a conditional write. Elara never permanently
+   * deletes a Drive file: trash is the model-visible end state, and the provider
+   * keeps the file recoverable.
+   */
+  async trashFile(fileId: string, etag: string): Promise<GoogleDriveFileSummary> {
+    const access = await this.oauth.authorize('drive.files.app.write');
+    const response = await access.fetch(`${DRIVE_API}/files/${encodeURIComponent(requireFileId(fileId))}?fields=${encodeURIComponent(DRIVE_FILE_FIELDS)}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', ...conditionalHeaders(etag) },
+      body: JSON.stringify({ trashed: true }),
+    });
+    if (!response.ok) throwMutationFailure(response, 'trash');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
 

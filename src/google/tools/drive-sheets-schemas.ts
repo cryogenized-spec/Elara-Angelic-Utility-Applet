@@ -4,6 +4,7 @@ import { DRIVE_LIMITS } from '../drive/limits';
 const fileIdSchema = z.string().trim().min(1).max(DRIVE_LIMITS.maxFileIdLength);
 const a1RangeSchema = z.string().trim().min(1).max(500);
 const pageTokenSchema = z.string().trim().min(1).max(DRIVE_LIMITS.maxPageTokenLength);
+const etagSchema = z.string().trim().min(2).max(DRIVE_LIMITS.maxEtagLength);
 const rowSchema = z.array(z.unknown()).max(100);
 const valuesSchema = z.array(rowSchema).min(1).max(1000);
 const updateRequestSchema = z.record(z.string(), z.unknown());
@@ -75,6 +76,7 @@ export const driveSheetsToolArgumentSchemas = {
   }).strict(),
   'drive.updateFile': z.object({
     fileId: fileIdSchema,
+    etag: etagSchema,
     patch: z.object({
       name: z.string().trim().min(1).max(500).optional(),
       description: z.string().max(2000).optional(),
@@ -83,8 +85,13 @@ export const driveSheetsToolArgumentSchemas = {
   }).strict(),
   'drive.moveFile': z.object({
     fileId: fileIdSchema,
+    etag: etagSchema,
     parentId: fileIdSchema,
     previousParentId: fileIdSchema.optional(),
+  }).strict(),
+  'drive.trashFile': z.object({
+    fileId: fileIdSchema,
+    etag: etagSchema,
   }).strict(),
   'sheets.getSpreadsheet': z.object({ spreadsheetId: fileIdSchema }).strict(),
   'sheets.readRange': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema }).strict(),

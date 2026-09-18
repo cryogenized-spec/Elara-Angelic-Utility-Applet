@@ -44,9 +44,49 @@ describe('GoogleDriveService', () => {
     });
     const service = new GoogleDriveService(oauth);
     await expect(service.getFile('file-1')).resolves.toMatchObject({ id: 'file-1' });
-    await expect(service.updateFile('file-1', { name: 'Updated' })).resolves.toMatchObject({ name: 'Plan' });
+    await expect(service.updateFile('file-1', '"etag-1"', { name: 'Updated' })).resolves.toMatchObject({ name: 'Plan' });
     expect(calls[0]).toContain('/files/file-1?fields=');
     expect(calls[1]).toContain('PATCH:');
+  });
+
+  it('sends one concrete strong ETag as the conditional-write precondition', async () => {
+    const calls: Array<{ method?: string; ifMatch?: string; body?: string }> = [];
+    const oauth = makeOAuth(async (_url, init) => {
+      const headers = init?.headers as Record<string, string> | undefined;
+      calls.push({ method: init?.method, ifMatch: headers?.['If-Match'], body: typeof init?.body === 'string' ? init.body : undefined });
+      return jsonResponse(FILE_METADATA);
+    });
+    const service = new GoogleDriveService(oauth);
+
+    await service.updateFile('file-1', '"etag-1"', { name: 'Renamed' });
+    await service.moveFile('file-1', '"etag-1"', 'folder-2', 'folder-1');
+    await service.trashFile('file-1', '"etag-1"');
+
+    expect(calls.map((call) => call.ifMatch)).toEqual(['"etag-1"', '"etag-1"', '"etag-1"']);
+    expect(calls.map((call) => call.method)).toEqual(['PATCH', 'PATCH', 'PATCH']);
+    expect(calls[2].body).toBe(JSON.stringify({ trashed: true }));
+  });
+
+  it('rejects weak, wildcard, multi-value and empty ETags at the service boundary', async () => {
+    const fetchSpy = vi.fn(async () => jsonResponse(FILE_METADATA));
+    const oauth = makeOAuth(fetchSpy);
+    const service = new GoogleDriveService(oauth);
+
+    for (const invalid of ['W/"etag-1"', '*', '', '   ', '"one", "two"', 'etag-1']) {
+      await expect(service.updateFile('file-1', invalid, { name: 'Renamed' })).rejects.toThrow(/concrete provider ETag/);
+      await expect(service.moveFile('file-1', invalid, 'folder-2')).rejects.toThrow(/concrete provider ETag/);
+      await expect(service.trashFile('file-1', invalid)).rejects.toThrow(/concrete provider ETag/);
+    }
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('turns a rejected conditional write into a read-again failure', async () => {
+    const oauth = makeOAuth(async () => new Response('{}', { status: 412, headers: { 'content-type': 'application/json' } }));
+    const service = new GoogleDriveService(oauth);
+
+    await expect(service.updateFile('file-1', '"etag-1"', { name: 'Renamed' })).rejects.toThrow('Read the file again before retrying.');
+    await expect(service.moveFile('file-1', '"etag-1"', 'folder-2')).rejects.toThrow('Read the file again before retrying.');
+    await expect(service.trashFile('file-1', '"etag-1"')).rejects.toThrow('Read the file again before retrying.');
   });
 
   it('projects provider identity and user metadata in every read', async () => {
@@ -240,11 +280,41 @@ describe('GoogleDriveService', () => {
       calls.push({ url: String(url), method: init?.method });
       return jsonResponse({ id: 'file-1', name: 'Plan', mimeType: 'text/plain', parents: ['folder-2'] });
     });
-    const result = await new GoogleDriveService(oauth).moveFile('file-1', 'folder-2', 'folder-1');
+    const service = new GoogleDriveService(oauth);
+    const result = await service.moveFile('file-1', '"etag-1"', 'folder-2', 'folder-1');
     expect(result.parents).toEqual(['folder-2']);
     expect(calls[0].method).toBe('PATCH');
     expect(calls[0].url).toContain('addParents=folder-2');
     expect(calls[0].url).toContain('removeParents=folder-1');
+
+    // Omitting the previous parent keeps the existing one: Drive files may have
+    // several parents, so this is an add rather than a move.
+    await service.moveFile('file-1', '"etag-1"', 'folder-3');
+    expect(calls[1].url).toContain('addParents=folder-3');
+    expect(calls[1].url).not.toContain('removeParents');
+  });
+
+  it('never permanently deletes a file', async () => {
+    const methods: string[] = [];
+    const oauth = makeOAuth(async (url, init) => {
+      methods.push(`${init?.method ?? 'GET'}:${String(url)}`);
+      return jsonResponse(FILE_METADATA);
+    });
+    await new GoogleDriveService(oauth).trashFile('file-1', '"etag-1"');
+    expect(methods.every((entry) => !entry.startsWith('DELETE'))).toBe(true);
+  });
+
+  it('keeps trashing out of the ordinary metadata update patch', async () => {
+    const calls: string[] = [];
+    const oauth = makeOAuth(async (url, init) => {
+      calls.push(typeof init?.body === 'string' ? init.body : '');
+      return jsonResponse(FILE_METADATA);
+    });
+    const service = new GoogleDriveService(oauth);
+    // TypeScript already rejects `trashed` in this patch; this pins the runtime
+    // body so a widened internal caller cannot smuggle it through.
+    await service.updateFile('file-1', '"etag-1"', { name: 'Renamed', description: undefined, starred: true } as { name?: string; description?: string; starred?: boolean });
+    expect(calls[0]).not.toContain('trashed');
   });
 
   it('does not leak file payloads into authorization arguments', async () => {

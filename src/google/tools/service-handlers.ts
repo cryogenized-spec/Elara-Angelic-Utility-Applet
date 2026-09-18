@@ -1,6 +1,7 @@
 import { GoogleCalendarService, type CalendarSendUpdates } from '../calendar/service';
 import { GoogleChatService } from '../chat/service';
 import { GoogleDocsService } from '../docs/service';
+import { runDriveCreateOnce } from '../drive/create-replay';
 import { downloadDriveFileArtifact } from '../drive/download';
 import { GoogleDriveService } from '../drive/service';
 import { GoogleGmailService } from '../gmail/service';
@@ -276,11 +277,19 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       isGenerationActive,
     });
   },
-  'drive.createFile': async ({ arguments: raw }) => {
+  'drive.createFile': async ({ arguments: raw, callId, conversationId, messageId, generationId }) => {
     const args = objectArgs(raw);
     const parents = stringArrayArg(args, 'parents');
     const mimeType = stringArg(args, 'mimeType', false);
-    return drive.createFile({ name: stringArg(args, 'name')!, ...(mimeType !== undefined ? { mimeType } : {}), ...(parents ? { parents } : {}) });
+    const input = { name: stringArg(args, 'name')!, ...(mimeType !== undefined ? { mimeType } : {}), ...(parents ? { parents } : {}) };
+    // Keyed by (name, mimeType, parents) per call id: a replayed call returns
+    // the first result instead of creating a second file, and a replayed call
+    // id with different arguments fails closed.
+    return runDriveCreateOnce(
+      { tool: 'drive.createFile', callId, conversationId, messageId, generationId },
+      input,
+      () => drive.createFile(input),
+    );
   },
   'drive.updateFile': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
@@ -288,7 +297,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     const name = stringArg(patch, 'name', false);
     const description = stringArg(patch, 'description', false);
     const starred = optionalBoolean(patch, 'starred');
-    return drive.updateFile(stringArg(args, 'fileId')!, {
+    return drive.updateFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, {
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(starred !== undefined ? { starred } : {}),
@@ -296,7 +305,11 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'drive.moveFile': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return drive.moveFile(stringArg(args, 'fileId')!, stringArg(args, 'parentId')!, stringArg(args, 'previousParentId', false));
+    return drive.moveFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, stringArg(args, 'parentId')!, stringArg(args, 'previousParentId', false));
+  },
+  'drive.trashFile': async ({ arguments: raw }) => {
+    const args = objectArgs(raw);
+    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!);
   },
 
   'sheets.getSpreadsheet': async ({ arguments: raw }) => sheets.getSpreadsheet(stringArg(objectArgs(raw), 'spreadsheetId')!),

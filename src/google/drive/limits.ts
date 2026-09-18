@@ -15,6 +15,8 @@ export const DRIVE_LIMITS = {
   maxPageTokenLength: 2_048,
   maxPageSize: 100,
   maxExportMimeTypeLength: 200,
+  /** Bound for one provider ETag passed as a conditional-write precondition. */
+  maxEtagLength: 1_024,
   maxNameLength: 500,
   maxDescriptionLength: 2_000,
 } as const;

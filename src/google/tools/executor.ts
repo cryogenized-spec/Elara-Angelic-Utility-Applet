@@ -169,8 +169,16 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
       return `Send email to ${to} with subject “${value(args, 'subject') ?? '(no subject)'}”.`;
     }
     case 'drive.createFile': return `Create the Drive file “${value(args, 'name') ?? 'Untitled'}”.`;
-    case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the requested metadata changes.`;
-    case 'drive.moveFile': return `Move Drive file ${value(args, 'fileId') ?? 'selected file'} to ${value(args, 'parentId') ?? 'the requested folder'}.`;
+    case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the requested metadata changes. The write only applies while the file still matches the ETag read for it.`;
+    case 'drive.moveFile': {
+      const file = value(args, 'fileId') ?? 'selected file';
+      const destination = value(args, 'parentId') ?? 'the requested folder';
+      const previous = value(args, 'previousParentId');
+      return previous
+        ? `Move Drive file ${file} from folder ${previous} to ${destination}.`
+        : `Add folder ${destination} as a parent of Drive file ${file}. Drive files can have several parents, so the file stays in its current folder too unless a previous parent is removed.`;
+    }
+    case 'drive.trashFile': return `Move Drive file ${value(args, 'fileId') ?? 'selected file'} to trash. Trash is recoverable and Elara never permanently deletes files.`;
     case 'sheets.writeRange': return `Write the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}.`;
     case 'sheets.appendRows': return `Append the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}.`;
     case 'sheets.updateCell': return `Write one cell at ${value(args, 'range') ?? 'the selected cell'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}. Review the exact cell input below before approving.`;

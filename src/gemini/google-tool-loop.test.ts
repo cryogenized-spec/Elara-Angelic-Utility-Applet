@@ -98,6 +98,52 @@ describe('streamGoogleToolLoop', () => {
     expect(collected.at(-1)).toMatchObject({ type: 'completed', interactionId: 'interaction-drift' });
   });
 
+  it('admits Gmail reply prerequisites before showing mutation confirmation', async () => {
+    const handler = vi.fn(async () => ({ sent: true }));
+    const confirm = vi.fn(async () => true);
+    const sendOnlyOauth = {
+      authorize: async (capability: string) => ({ capability: capability as never, fetch: async () => new Response('{}', { status: 200 }) }),
+      getStatus: async () => ({
+        state: 'partially-authorized' as const,
+        grantedCapabilities: ['gmail.send' as const],
+        enabledCapabilities: ['gmail.send' as const],
+        grantedProviderScopes: [],
+      }),
+      disconnect: async () => undefined,
+    };
+
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-reply-auth', model: 'gemini-3.8-flash' },
+      {
+        type: 'tool-call',
+        interactionId: 'interaction-reply-auth',
+        index: 0,
+        callId: 'call-reply-auth',
+        name: 'gmail.replyMessage',
+        arguments: { threadId: 't1', to: 'bob@example.com', subject: 'Re: Hello', body: 'Body', inReplyTo: '<m1@example.com>' },
+      },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction-reply-auth-done', status: 'completed', durationMs: 4 },
+    ));
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Reply to Bob.', systemInstruction, tools: ['gmail.replyMessage'] },
+      { tools: ['gmail.replyMessage'], readOnly: false, executor: { oauth: sendOnlyOauth, handlers: { 'gmail.replyMessage': handler }, confirm } },
+    )) {
+      // Consume the complete interaction.
+    }
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      results: [expect.objectContaining({
+        callId: 'call-reply-auth',
+        result: { ok: false, error: 'AUTHORIZATION_REQUIRED' },
+      })],
+    }), undefined);
+  });
+
   it('routes a Google write through explicit confirmation before the handler executes', async () => {
     const handler = vi.fn(async () => ({ id: 'task-1' }));
     const confirm = vi.fn(async (request: WriteConfirmationRequest) => request.risk === 'write');

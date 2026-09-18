@@ -141,9 +141,11 @@ New mail and replies are separate semantic tools.
 
 `gmail.sendMessage` accepts bounded validated `to`, optional `cc`, `subject`, and plain-text `body`. Elara limits a single call to 50 total To+Cc recipients. Recipient and subject validation is repeated at the direct service boundary; CR/LF header injection is rejected.
 
-`gmail.replyMessage` requires explicit `threadId`, recipient, subject, body, the prior RFC `Message-ID` as `inReplyTo`, and an optional prior `References` chain. The adapter constructs RFC mail carrying the provider thread id plus `In-Reply-To` and `References`; the supplied subject must represent the target conversation subject. Reply identity comes from a prior Gmail read rather than invented model state.
+`gmail.replyMessage` requires explicit `threadId`, recipient, subject, body, and the prior RFC `Message-ID` as `inReplyTo`. The model does not supply a `References` chain. Before sending, Elara authorizes `gmail.modify`, reads the selected thread's bounded metadata, verifies that `inReplyTo` identifies a message in that thread, verifies the supplied subject matches that provider conversation subject modulo normal reply/forward prefixes, and derives `References` from provider metadata. Only then does it construct RFC mail carrying the provider thread id plus `In-Reply-To` and provider-derived `References`. A mismatched thread, Message-ID, or subject fails before `messages.send`.
 
-Both send/reply are `send` risk. Confirmation identifies the target/thread and subject and exposes the complete validated body through the confirmation broker's scroll-bounded `reviewText`; a benign prefix cannot hide an unreviewed tail.
+New-message send remains on the narrower `gmail.send` capability. Reply deliberately uses `gmail.modify` because the same provider authority can both verify thread metadata and send the reply; Elara does not combine an unverified model claim with a blind send.
+
+Both send/reply are `send` risk. Confirmation identifies the target/thread and subject and exposes the complete validated body through the confirmation broker's scroll-bounded `reviewText`; a benign prefix cannot hide an unreviewed tail. Provider write responses are discarded and replaced with bounded application-owned acknowledgements rather than forwarded raw Gmail resources.
 
 Gmail does not expose a Calendar-style client-chosen message resource id for deterministic reconciliation. Elara therefore uses a same-call elected-turn replay fence keyed by tool + conversation + user message + generation + Gemini call id + validated payload hash. Replaying the exact same send/reply in the same live turn returns the same promise/result or retained ambiguous failure and does not issue a second `messages.send`. Reusing the call id with changed arguments fails closed. Distinct calls remain distinct. After a full page/runtime restart, an ambiguous provider acceptance remains an explicit limitation rather than a fabricated exactly-once guarantee.
 
@@ -179,6 +181,6 @@ Gmail-specific regressions live in:
 - `src/google/gmail/send-replay.test.ts`
 - `src/google/oauth/gmail-scope-sensitivity.test.ts`
 
-Important assertions include: raw provider mutation shapes rejected; reads normalized as `untrusted-external`; arbitrary HTML/custom headers do not cross the semantic projection; USER-label verification; semantic system-label mapping; CR/LF injection rejection; RFC reply headers/thread id; full send-body confirmation; and exact same-call replay suppression without content-deduplicating legitimate distinct sends.
+Important assertions include: raw provider mutation shapes rejected; reads normalized as `untrusted-external`; arbitrary HTML/custom headers do not cross the semantic projection; USER-label verification; semantic system-label mapping; CR/LF injection rejection; provider-verified reply thread/Message-ID/subject with provider-derived RFC References; bounded write acknowledgements; full send-body confirmation; and exact same-call replay suppression without content-deduplicating legitimate distinct sends.
 
 `verified_commit` must not be advanced to the Gmail branch head until the reviewed exact PR head passes full CI, merges, and the resulting `main` commit passes post-merge certification.

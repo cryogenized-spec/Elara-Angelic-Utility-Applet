@@ -105,4 +105,20 @@ describe('direct Google OAuth authority', () => {
     await expect(googleOAuthAuthority.getStatus()).resolves.toEqual({ state: 'disconnected', grantedCapabilities: [] });
     expect(localStorage.getItem('elara.google.authorization.v2')).toBeNull();
   });
+  it('verifies Tasks account identity and never persists the access token', async () => {
+    tokenMock.mockResolvedValueOnce(token('tasks-secret'));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response(JSON.stringify({ email: 'Owner@example.com', verified_email: true })));
+    await googleOAuthAuthority.authorize('tasks.read');
+    expect(tokenMock).toHaveBeenCalledWith(expect.objectContaining({ scope: expect.stringContaining('userinfo.email') }));
+    expect((await googleOAuthAuthority.getStatus()).account?.email).toBe('owner@example.com');
+    expect(localStorage.getItem('elara.google.authorization.v2')).not.toContain('tasks-secret');
+  });
+
+  it('fails closed when Tasks account identity cannot be verified', async () => {
+    tokenMock.mockResolvedValueOnce(token('tasks-secret'));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(new Response('{}'));
+    await expect(googleOAuthAuthority.authorize('tasks.read')).rejects.toThrow('identity');
+    expect((await googleOAuthAuthority.getStatus()).account).toBeUndefined();
+  });
+
 });

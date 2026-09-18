@@ -77,6 +77,10 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     return calendar.createEvent({ calendarId: stringArg(args, 'calendarId', false), event: recordArg(args, 'event')! });
   },
 
+  'tasks.renameTaskList': async ({ arguments: args }) => tasks.renameTaskList(stringArg(objectArgs(args), 'taskListId')!, stringArg(objectArgs(args), 'title')!, stringArg(objectArgs(args), 'etag', false)),
+  'tasks.deleteTaskList': async ({ arguments: args }) => tasks.deleteTaskList(stringArg(objectArgs(args), 'taskListId')!, stringArg(objectArgs(args), 'etag', false)),
+  'tasks.patchTask': async ({ arguments: args }) => tasks.patchTask(stringArg(objectArgs(args), 'taskListId')!, stringArg(objectArgs(args), 'taskId')!, recordArg(objectArgs(args), 'patch')!, stringArg(objectArgs(args), 'etag')!),
+  'tasks.createTaskList': async ({ arguments: args }) => tasks.createTaskList(stringArg(objectArgs(args), 'title')!),
   'tasks.createTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
     return tasks.createTask(stringArg(args, 'taskListId')!, recordArg(args, 'task')!, stringArg(args, 'parent', false), stringArg(args, 'previous', false));

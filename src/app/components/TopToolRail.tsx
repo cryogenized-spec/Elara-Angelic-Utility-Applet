@@ -1,3 +1,4 @@
+import { LayoutGrid } from 'lucide-react';
 import { useState } from 'react';
 import { Icon } from '../../ui/icons';
 import { DEFAULT_QUICK_ACTIONS } from '../quick-actions/defaults';
@@ -10,11 +11,13 @@ import './workspace-shortcut-menu.css';
 export type QuickTool = typeof DEFAULT_QUICK_ACTIONS[number];
 
 export function TopToolRail({
+  onKanban,
   tools = DEFAULT_QUICK_ACTIONS,
   onAction,
   activeId = null,
   systemInstruction,
 }: {
+  onKanban?: () => void;
   tools?: readonly QuickTool[];
   onAction: (shortcut: WorkspaceShortcutDefinition) => void;
   activeId?: QuickActionId | null;
@@ -35,6 +38,7 @@ export function TopToolRail({
     <>
       <nav className="tool-rail" aria-label="Quick actions">
         <div className="tool-rail__track">
+          {onKanban && <button type="button" className="tool-pill" onClick={onKanban} title="Open task orchestration workspace"><LayoutGrid size={17} /><span>Kanban</span></button>}
           {tools.map((tool) => {
             const isOpen = openId === tool.id;
             const isActive = isOpen || activeId === tool.id;

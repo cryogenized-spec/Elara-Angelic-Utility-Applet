@@ -9,3 +9,6 @@ worker/.dev.vars.*
 .env
 .env.*
 !.env.example
+
+dev-dist/
+e2e/.auth/

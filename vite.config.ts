@@ -4,6 +4,7 @@ import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
   base: '/Elara-Angelic-Utility-Applet/',
+  server: { host: '0.0.0.0', allowedHosts: ['.e2b.app'] },
   plugins: [
     react(),
     VitePWA({

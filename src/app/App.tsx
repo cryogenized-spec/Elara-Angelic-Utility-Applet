@@ -1,3 +1,5 @@
+import { KanbanScreen } from './components/KanbanScreen';
+import { kanbanContext, startBoardSync } from '../kanban/store';
 import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
@@ -64,6 +66,8 @@ export function App() {
   const [status, setStatus] = useState<ProviderStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [kanbanOpen, setKanbanOpen] = useState(false);
+  useEffect(() => startBoardSync(), []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [firstRunWelcomeOpen, setFirstRunWelcomeOpen] = useState(false);
   const [workspaceShortcuts, setWorkspaceShortcuts] = useState<StoredWorkspaceShortcut[]>([]);
@@ -128,7 +132,7 @@ export function App() {
   async function send() {
     const text = draft.trim();
     if (!text || status === 'streaming' || !conversation.id || !activeConversationIdRef.current) return;
-    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
+    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction) + await kanbanContext();
     setDraft(''); setError(null); setStatus('streaming');
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
@@ -169,7 +173,7 @@ export function App() {
     const nextVariant = workingConversation.messages.filter((message) => message.role === 'assistant' && (message.responseGroupId ?? message.id) === groupId).length + 1;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
+    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction) + await kanbanContext();
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setError(null); setStatus('streaming');
@@ -190,7 +194,7 @@ export function App() {
     const controller = new AbortController(); abortControllerRef.current = controller; const conversationId = conversation.id;
     const selectedSettings = geminiPerModelSettings[geminiModel] ?? defaultsForModel(geminiModel);
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
-    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction);
+    const systemInstruction = resolveMasterCharacterInstruction(character.systemInstruction) + await kanbanContext();
     const hiddenTask = `Execute the saved Workspace shortcut “${shortcut.label}”.\nUser intent: ${shortcut.intent}\nUse only the registered tools supplied for this shortcut.`;
     try {
       await streamAssistantTurn(hiddenTask, conversation, conversationId, controller, { systemInstruction, generationConfig, tools: shortcut.tools });
@@ -264,11 +268,12 @@ export function App() {
   const appStyle = useMemo(() => ({ '--chat-background': backgroundValue(chatAppearance), '--chat-background-opacity': chatAppearance.chatBackgroundOpacity, '--chat-overlay': chatAppearance.chatBackgroundOverlay, '--chat-blur': `${chatAppearance.chatBackgroundBlur}px`, '--assistant-text-color': chatAppearance.assistantTextColor, '--user-text-color': chatAppearance.userTextColor, '--user-surface-color': chatAppearance.userSurfaceColor, '--user-surface-opacity': chatAppearance.userSurfaceOpacity, '--body-font-size': `${uiSettings.chatTextSize}px` } as React.CSSProperties), [chatAppearance, uiSettings.chatTextSize]);
   const visibleMessages = conversation.messages.filter((message) => message.conversationId === conversation.id);
   if (settingsOpen) return <SettingsScreen font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value: ChatAppearancePreferences) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value) => void handleRoleplayChange(value)} onBack={() => setSettingsOpen(false)} />;
+  if (kanbanOpen) return <main style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}><KanbanScreen onBack={() => setKanbanOpen(false)} onSettings={() => setSettingsOpen(true)} /></main>;
   return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}>
     <div className="app-shell__background" aria-hidden="true" />
     <div className="left-spine" aria-label="Application controls"><button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button></div>
     <PortraitBanner collapsed={sidebarOpen} scale={uiSettings.portraitScale} background={uiSettings.portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
-    <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} systemInstruction={character.systemInstruction} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
+    <TopToolRail onKanban={() => setKanbanOpen(true)} tools={DEFAULT_QUICK_ACTIONS} activeId={null} systemInstruction={character.systemInstruction} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
     <ConversationSurface key={conversation.id} messages={visibleMessages} fontSize={uiSettings.chatTextSize} onRegenerate={(messageId) => void regenerate(messageId)} />
     {error && <div className="error" role="alert">{error}</div>}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} />

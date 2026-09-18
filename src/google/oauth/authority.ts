@@ -24,6 +24,7 @@ type StoredAuthorization = {
 };
 
 type AccessSession = {
+  accountEmail?: string;
   accessToken: string;
   expiresAt: number;
   grantedCapabilities: GoogleCapabilityKey[];
@@ -65,7 +66,7 @@ function loadStored(): StoredAuthorization {
       ...(parsed.needsReauthorization ? { needsReauthorization: true } : {}),
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     };
-    if (!nextStored.grantedCapabilities.length || nextStored.needsReauthorization) session = null;
+    if (!nextStored.grantedCapabilities.length || nextStored.needsReauthorization || (session && session.accountEmail !== nextStored.account?.email)) session = null;
     stored = nextStored;
   } catch {
     stored = emptyStored();
@@ -111,19 +112,31 @@ async function acquireToken(capability: GoogleCapabilityKey, prompt: '' | 'none'
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   try {
-    const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: descriptor.scope, prompt });
+    const previous = loadStored();
+    // Tasks snapshots must be isolated by an identity verified with this token.
+    const identifyAccount = capability.startsWith('tasks.') || Boolean(previous.account);
+    const scope = identifyAccount ? `${descriptor.scope} https://www.googleapis.com/auth/userinfo.email` : descriptor.scope;
+    const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope, prompt });
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
+    if (identifyAccount) {
+      const identityResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: `Bearer ${response.access_token}` } });
+      const identity = await identityResponse.json() as { email?: string; verified_email?: boolean };
+      if (!identityResponse.ok || !identity.email || identity.verified_email !== true) throw new Error('Google account identity could not be verified. Reconnect Google Tasks.');
+      if (previous.account?.email.toLowerCase() !== identity.email.toLowerCase()) stored.grantedCapabilities = [];
+      stored.account = { email: identity.email.toLowerCase() };
+    }
     session = {
+      accountEmail: stored.account?.email,
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
-      grantedCapabilities: [...new Set([...(loadStored().grantedCapabilities), capability])],
+      grantedCapabilities: [...new Set([...stored.grantedCapabilities, capability])],
     };
     stored.grantedCapabilities = session.grantedCapabilities;
     stored.needsReauthorization = false;
     saveStored();
   } catch (error) {
     const raw = error instanceof Error ? error.message : undefined;
-    if (prompt === 'none') {
+    if (prompt === 'none' || capability.startsWith('tasks.')) {
       stored.needsReauthorization = true;
       session = null;
       saveStored();
@@ -141,7 +154,9 @@ async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = f
 
 async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const target = assertGoogleApiTarget(input);
+  const expectedAccount = loadStored().account?.email;
   const token = await ensureToken(capability, false);
+  if (expectedAccount && stored.account?.email !== expectedAccount) throw new Error('Google account changed. Retry from the current account workspace.');
   const request = new Request(target, init);
   const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
   const requestOptions = (accessToken: string): RequestInit => {
@@ -157,6 +172,7 @@ async function authorizedFetch(capability: GoogleCapabilityKey, input: RequestIn
   session = null;
   try {
     await acquireToken(capability, 'none');
+    if (expectedAccount && stored.account?.email !== expectedAccount) throw new Error('Google account changed. Reconnect before retrying.');
   } catch {
     stored.needsReauthorization = true;
     saveStored();

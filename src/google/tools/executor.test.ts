@@ -75,3 +75,23 @@ describe('executeGoogleTool', () => {
     if (!result.ok) expect(result.failure.message).not.toContain('ABC123');
   });
 });
+
+describe('kanban tool trust boundary', () => {
+  it('blocks malformed deletions before confirmation', async () => {
+    const handler = vi.fn(); const confirm = vi.fn(async () => true);
+    const result = await executeGoogleTool({ tool: 'tasks.deleteTaskList', arguments: { taskListId: '' } }, { oauth: oauthFor('tasks.write'), handlers: { 'tasks.deleteTaskList': handler }, confirm });
+    expect(result).toMatchObject({ ok: false, code: 'INVALID_TOOL_CALL' });
+    expect(confirm).not.toHaveBeenCalled(); expect(handler).not.toHaveBeenCalled();
+  });
+  it('makes the list-wide destructive effect explicit and honors rejection', async () => {
+    const handler = vi.fn(); const confirm = vi.fn(async () => false);
+    const result = await executeGoogleTool({ tool: 'tasks.deleteTaskList', arguments: { taskListId: 'work' } }, { oauth: oauthFor('tasks.write'), handlers: { 'tasks.deleteTaskList': handler }, confirm });
+    expect(result).toMatchObject({ ok: false, code: 'USER_DECLINED' });
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ risk: 'destructive', resourceSummary: expect.stringContaining('ALL tasks') }));
+    expect(handler).not.toHaveBeenCalled();
+  });
+  it('rejects model partial updates that omit concurrency metadata', async () => {
+    const result = await executeGoogleTool({ tool: 'tasks.patchTask', arguments: { taskListId: 'work', taskId: 't', patch: { title: 'Next' } } }, { oauth: oauthFor('tasks.write'), handlers: {} });
+    expect(result).toMatchObject({ ok: false, code: 'INVALID_TOOL_CALL' });
+  });
+});

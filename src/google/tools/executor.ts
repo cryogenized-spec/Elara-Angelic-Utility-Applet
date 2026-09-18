@@ -1,3 +1,4 @@
+import { kanbanToolSchemas, type KanbanToolName } from './kanban-schemas';
 import { googleToolCallSchema, type GoogleToolCall, type GoogleToolDescriptor, type GoogleToolName, type GoogleToolRisk } from './contracts';
 import { googleToolRegistry } from './registry';
 import { evaluateWriteConfirmation, isConfirmationFresh, type WriteConfirmationRequest } from '../confirmation/policy';
@@ -21,6 +22,7 @@ function correlationId(): string { return crypto.randomUUID(); }
 function findDescriptor(tool: GoogleToolName): GoogleToolDescriptor | undefined { return googleToolRegistry.find((entry) => entry.name === tool); }
 function safeCapability(value: string): GoogleCapabilityKey { return googleCapabilityKeySchema.parse(value); }
 function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Record<string, unknown>> {
+  if (Object.prototype.hasOwnProperty.call(kanbanToolSchemas, tool)) return Object.freeze(kanbanToolSchemas[tool as KanbanToolName].parse(value));
   if (Object.prototype.hasOwnProperty.call(roleplayWorldToolArgumentSchemas, tool)) return validateRoleplayWorldToolArguments(tool as RoleplayWorldToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(driveSheetsToolArgumentSchemas, tool)) return validateDriveSheetsToolArguments(tool as DriveSheetsToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(googleReadToolArgumentSchemas, tool)) return validateGoogleReadToolArguments(tool as GoogleReadToolName, value) as Readonly<Record<string, unknown>>;
@@ -46,6 +48,10 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
       return `Create Calendar event “${summary}”${start ? ` at ${String(start)}` : ''}.`;
     }
     case 'tasks.createTask': return `Create a Google Task${value(args, 'taskListId') ? ` in list ${value(args, 'taskListId')}` : ''}.`;
+    case 'tasks.renameTaskList': return `Rename Google Tasks list ${value(args, 'taskListId')} to “${value(args, 'title')}”.`;
+    case 'tasks.deleteTaskList': return `Permanently delete Google Tasks list ${value(args, 'taskListId')} and ALL tasks in it.`;
+    case 'tasks.createTaskList': return `Create Google Tasks list “${value(args, 'title') ?? 'Untitled'}”.`;
+    case 'tasks.patchTask':
     case 'tasks.updateTask': return `Update Google Task ${value(args, 'taskId') ?? 'selected task'} in list ${value(args, 'taskListId') ?? 'selected list'}.`;
     case 'tasks.moveTask': return `Move Google Task ${value(args, 'taskId') ?? 'selected task'} to the requested position.`;
     case 'tasks.deleteTask': return `Delete Google Task ${value(args, 'taskId') ?? 'selected task'}.`;

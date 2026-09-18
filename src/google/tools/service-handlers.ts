@@ -1,6 +1,8 @@
 import { GoogleCalendarService, type CalendarSendUpdates } from '../calendar/service';
 import { GoogleChatService } from '../chat/service';
 import { GoogleDocsService } from '../docs/service';
+import { runDriveCreateOnce } from '../drive/create-replay';
+import { downloadDriveFileArtifact } from '../drive/download';
 import { GoogleDriveService } from '../drive/service';
 import { runGmailSendOnce } from '../gmail/send-replay';
 import { GoogleGmailSemanticService, type GmailTurnGuard } from '../gmail/semantic-service';
@@ -86,15 +88,6 @@ function gmailTurnGuard(signal: AbortSignal | undefined, isGenerationActive: (()
     ...(isGenerationActive ? { isGenerationActive } : {}),
   };
 }
-function bytesToBase64(bytes: Uint8Array): string {
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
-  }
-  return btoa(binary);
-}
-
 export const googleServiceToolHandlers: GoogleToolHandlers = {
   ...googleReadToolHandlers,
 
@@ -322,39 +315,73 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
 
   'drive.searchFiles': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return drive.listFiles({ query: stringArg(args, 'query', false), pageToken: stringArg(args, 'pageToken', false), pageSize: optionalNumber(args, 'pageSize') });
+    return drive.listFiles({
+      query: stringArg(args, 'query', false),
+      pageToken: stringArg(args, 'pageToken', false),
+      pageSize: optionalNumber(args, 'pageSize'),
+      showTrashed: optionalBoolean(args, 'showTrashed'),
+    });
   },
   'drive.searchLibrary': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return drive.searchLibrary({ query: stringArg(args, 'query', false), pageToken: stringArg(args, 'pageToken', false), pageSize: optionalNumber(args, 'pageSize') });
+    return drive.searchLibrary({
+      query: stringArg(args, 'query', false),
+      pageToken: stringArg(args, 'pageToken', false),
+      pageSize: optionalNumber(args, 'pageSize'),
+      showTrashed: optionalBoolean(args, 'showTrashed'),
+    });
   },
   'drive.getFile': async ({ arguments: raw }) => drive.getFile(stringArg(objectArgs(raw), 'fileId')!),
-  'drive.downloadFile': async ({ arguments: raw }) => {
+  'drive.downloadFile': async ({ arguments: raw, signal, generationId, isGenerationActive, conversationId }) => {
     const args = objectArgs(raw);
-    const result = await drive.downloadFile(stringArg(args, 'fileId')!, optionalNumber(args, 'maxBytes'));
-    return { mimeType: result.mimeType, bytesBase64: bytesToBase64(result.bytes) };
+    return downloadDriveFileArtifact({
+      fileId: stringArg(args, 'fileId')!,
+      maxBytes: optionalNumber(args, 'maxBytes'),
+      conversationId,
+      signal,
+      generationId,
+      isGenerationActive,
+    });
   },
-  'drive.createFile': async ({ arguments: raw }) => {
+  'drive.createFile': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     const parents = stringArrayArg(args, 'parents');
     const mimeType = stringArg(args, 'mimeType', false);
-    return drive.createFile({ name: stringArg(args, 'name')!, ...(mimeType !== undefined ? { mimeType } : {}), ...(parents ? { parents } : {}) });
+    const input = { name: stringArg(args, 'name')!, ...(mimeType !== undefined ? { mimeType } : {}), ...(parents ? { parents } : {}) };
+    // Keyed by (name, mimeType, parents) per call id: a replayed call returns
+    // the first result instead of creating a second file, and a replayed call
+    // id with different arguments fails closed.
+    return runDriveCreateOnce(
+      { tool: 'drive.createFile', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
+      input,
+      () => drive.createFile(input, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) }),
+    );
   },
-  'drive.updateFile': async ({ arguments: raw }) => {
+  'drive.updateFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     const patch = recordArg(args, 'patch')!;
     const name = stringArg(patch, 'name', false);
     const description = stringArg(patch, 'description', false);
     const starred = optionalBoolean(patch, 'starred');
-    return drive.updateFile(stringArg(args, 'fileId')!, {
+    return drive.updateFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, {
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(starred !== undefined ? { starred } : {}),
-    });
+    }, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
   },
-  'drive.moveFile': async ({ arguments: raw }) => {
+  'drive.moveFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return drive.moveFile(stringArg(args, 'fileId')!, stringArg(args, 'parentId')!, stringArg(args, 'previousParentId', false));
+    return drive.moveFile(
+      stringArg(args, 'fileId')!,
+      stringArg(args, 'etag')!,
+      stringArg(args, 'parentId')!,
+      stringArg(args, 'previousParentId', false),
+      { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
+    );
+  },
+  'drive.trashFile': async ({ arguments: raw, signal, isGenerationActive }) => {
+    const args = objectArgs(raw);
+    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
   },
 
   'sheets.getSpreadsheet': async ({ arguments: raw }) => sheets.getSpreadsheet(stringArg(objectArgs(raw), 'spreadsheetId')!),

@@ -14,10 +14,10 @@ export default defineConfig({
     },
     {
       name: 'android-portrait',
-      // Phone-specific reliability, media handoff/delivery acceptance and
-      // Generation Activity viewport behaviour run against the canonical
-      // 9:16-ish Android canvas with reduced motion.
-      testMatch: /(?:mobile-reliability|vtt|media-handoff|media-delivery\.phase3|media-lifecycle\.acceptance|generation-activity)\.spec\.ts/,
+      // Phone-specific reliability, media handoff/delivery, Workspace Drive,
+      // and Generation Activity behaviour run against the canonical 9:16-ish
+      // Android canvas with reduced motion.
+      testMatch: /(?:mobile-reliability|vtt|media-handoff|media-delivery\.phase3|media-lifecycle\.acceptance|generation-activity|google-drive)\.spec\.ts/,
       use: {
         browserName: 'chromium',
         viewport: { width: 412, height: 915 },

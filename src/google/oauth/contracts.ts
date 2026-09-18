@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 export const googleCapabilityKeySchema = z.enum([
+  'google.account',
   'calendar.events.read',
   'calendar.events.write',
   'calendar.list.read',
@@ -60,6 +61,8 @@ export interface GoogleOAuthStatus {
   readonly enabledCapabilities: readonly GoogleCapabilityKey[];
   /** Provider scopes actually returned by Google (GIS `scope` or durable code exchange equivalent). */
   readonly grantedProviderScopes: readonly string[];
+  /** True only while a usable short-lived Google access token is live in browser memory. */
+  readonly sessionReady?: boolean;
   readonly account?: {
     readonly email: string;
     readonly displayName?: string;

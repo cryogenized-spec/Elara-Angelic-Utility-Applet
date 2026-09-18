@@ -93,7 +93,7 @@ function isGoogleOAuthCapability(capability: ToolCapability): capability is Goog
 function authorizationNeeded(status: GoogleOAuthStatus, capability: ToolCapability): boolean {
   if (!isGoogleOAuthCapability(capability)) return false;
   const stateNeedsRecovery = status.state === 'disconnected' || status.state === 'needs-consent' || status.state === 'revoked' || status.state === 'reauthorization-required';
-  return !isCapabilityAuthorized(capability, status.grantedCapabilities) || stateNeedsRecovery;
+  return !isCapabilityAuthorized(capability, status.grantedCapabilities) || stateNeedsRecovery || status.sessionReady === false;
 }
 
 function oauthCapabilitiesForDescriptor(descriptor: GoogleToolDescriptor): readonly GoogleCapabilityKey[] {

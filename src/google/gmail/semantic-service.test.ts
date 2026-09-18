@@ -53,6 +53,45 @@ describe('GoogleGmailSemanticService', () => {
     expect(JSON.stringify(result)).not.toContain('<script>');
   });
 
+  it('excludes text attachments and fails bounded on hostile MIME nesting', async () => {
+    let nested: Record<string, unknown> = { mimeType: 'text/plain', body: { data: b64url('too-deep') } };
+    for (let index = 0; index < 25; index += 1) nested = { mimeType: 'multipart/mixed', parts: [nested] };
+    const service = new GoogleGmailSemanticService(authority(async () => json({
+      id: 'm-depth',
+      payload: {
+        mimeType: 'multipart/mixed',
+        parts: [
+          { mimeType: 'text/plain', body: { data: b64url('Visible body') } },
+          { mimeType: 'text/plain', filename: 'secret.txt', body: { data: b64url('attachment-secret') } },
+          nested,
+        ],
+      },
+    })));
+    const result = await service.getMessage('m-depth', 'full');
+    expect(result.bodyText).toBe('Visible body');
+    expect(result.bodyTruncated).toBe(true);
+    expect(JSON.stringify(result)).not.toContain('attachment-secret');
+    expect(JSON.stringify(result)).not.toContain('too-deep');
+  });
+
+  it('caps total MIME part traversal even when provider structure is very broad', async () => {
+    const groups = Array.from({ length: 6 }, (_, group) => ({
+      mimeType: 'multipart/mixed',
+      parts: Array.from({ length: 100 }, (_, part) => ({
+        mimeType: 'text/plain',
+        body: { data: b64url(`piece-${group}-${part}`) },
+      })),
+    }));
+    const service = new GoogleGmailSemanticService(authority(async () => json({
+      id: 'm-broad',
+      payload: { mimeType: 'multipart/mixed', parts: groups },
+    })));
+    const result = await service.getMessage('m-broad', 'full');
+    expect(result.bodyTruncated).toBe(true);
+    expect(result.bodyText).toContain('piece-0-0');
+    expect(result.bodyText).not.toContain('piece-5-99');
+  });
+
   it('translates semantic mailbox actions to the documented mutable system labels', async () => {
     const requests: Array<{ url: string; init?: RequestInit }> = [];
     const service = new GoogleGmailSemanticService(authority(async (url, init) => { requests.push({ url: String(url), init }); return json({ id: 'm1' }); }));

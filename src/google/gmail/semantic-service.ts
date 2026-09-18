@@ -218,7 +218,7 @@ function plainTextParts(part: ProviderPart | undefined, sink: string[], state: M
     if (part.parts.length > 0) state.truncated = true;
     return;
   }
-  const children = part.parts.slice(0, 100);
+  const children = part.parts.slice(0, 100) as unknown[];
   for (let index = 0; index < children.length; index += 1) {
     const child = children[index];
     if (child && typeof child === 'object') plainTextParts(child as ProviderPart, sink, state, depth + 1);

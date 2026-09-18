@@ -105,15 +105,60 @@ describe('GoogleGmailSemanticService', () => {
     await expect(service.sendMessage({ to: ['bob@example.com'], subject: 'Hello\r\nBcc: thief@example.com', body: 'Body' })).rejects.toThrow('subject');
   });
 
-  it('constructs a threaded reply with threadId, In-Reply-To and References', async () => {
+  it('verifies the selected Gmail thread before sending a reply and derives References from provider metadata', async () => {
+    const capabilityCalls: string[] = [];
     let requestBody = '';
-    const service = new GoogleGmailSemanticService(authority(async (_url, init) => { requestBody = String(init?.body ?? ''); return json({ id: 'reply-1', threadId: 'thread-1' }); }));
-    await service.replyMessage({ threadId: 'thread-1', to: 'alice@example.com', subject: 'Re: Status', body: 'Thanks', inReplyTo: '<m1@example.com>', references: ['<root@example.com>'] });
+    const service = new GoogleGmailSemanticService(authority(async (url, init) => {
+      const target = String(url);
+      if (target.includes('/threads/thread-1')) {
+        return json({
+          id: 'thread-1',
+          messages: [{
+            id: 'm1',
+            threadId: 'thread-1',
+            payload: { headers: [
+              { name: 'Subject', value: 'Status' },
+              { name: 'Message-ID', value: '<m1@example.com>' },
+              { name: 'References', value: '<root@example.com>' },
+            ] },
+          }],
+        });
+      }
+      requestBody = String(init?.body ?? '');
+      return json({ id: 'reply-1', threadId: 'thread-1', noise: 'x'.repeat(50_000) });
+    }, capabilityCalls));
+    const result = await service.replyMessage({ threadId: 'thread-1', to: 'alice@example.com', subject: 'Re: Status', body: 'Thanks', inReplyTo: '<m1@example.com>' });
+    expect(capabilityCalls).toEqual(['gmail.modify']);
+    expect(result).toEqual({ sent: true, threadId: 'thread-1' });
+    expect(JSON.stringify(result)).not.toContain('noise');
     const payload = JSON.parse(requestBody) as { raw: string; threadId: string };
     expect(payload.threadId).toBe('thread-1');
     const raw = new TextDecoder().decode(Uint8Array.from(atob(payload.raw.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - payload.raw.length % 4) % 4)), (character) => character.charCodeAt(0)));
     expect(raw).toContain('In-Reply-To: <m1@example.com>');
     expect(raw).toContain('References: <root@example.com> <m1@example.com>');
     expect(raw).toContain('Subject: Re: Status');
+  });
+
+  it('rejects mismatched reply identity before messages.send', async () => {
+    let sendCalls = 0;
+    const service = new GoogleGmailSemanticService(authority(async (url, init) => {
+      if (String(url).includes('/threads/thread-1')) {
+        return json({
+          id: 'thread-1',
+          messages: [{
+            id: 'm1',
+            payload: { headers: [
+              { name: 'Subject', value: 'Status' },
+              { name: 'Message-ID', value: '<m1@example.com>' },
+            ] },
+          }],
+        });
+      }
+      if (init?.method === 'POST') sendCalls += 1;
+      return json({});
+    }));
+    await expect(service.replyMessage({ threadId: 'thread-1', to: 'alice@example.com', subject: 'Re: Different subject', body: 'Thanks', inReplyTo: '<m1@example.com>' })).rejects.toThrow('subject does not match');
+    await expect(service.replyMessage({ threadId: 'thread-1', to: 'alice@example.com', subject: 'Re: Status', body: 'Thanks', inReplyTo: '<missing@example.com>' })).rejects.toThrow('not present');
+    expect(sendCalls).toBe(0);
   });
 });

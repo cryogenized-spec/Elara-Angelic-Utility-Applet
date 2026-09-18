@@ -28,7 +28,12 @@ export type GoogleCapabilityKey = z.infer<typeof googleCapabilityKeySchema>;
 
 export interface AuthorizedGoogleRequest {
   readonly capability: GoogleCapabilityKey;
-  readonly fetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+  /**
+   * Optional guard runs immediately before each real provider fetch, including
+   * a retry after token refresh. It must throw when the caller has lost the
+   * authority to perform the request.
+   */
+  readonly fetch: (input: RequestInfo | URL, init?: RequestInit, beforeProviderFetch?: () => void) => Promise<Response>;
 }
 
 /**

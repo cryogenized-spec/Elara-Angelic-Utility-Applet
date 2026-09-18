@@ -92,7 +92,7 @@ async function openMemoryBank(page: Page): Promise<void> {
   await expect(page.getByText('One human-facing view over the canonical durable-memory store.', { exact: false })).toBeVisible();
 }
 
-test('chat exposes memory tools and persists organic capture with the paging-book trace', async ({ page }) => {
+test('chat exposes memory tools and persists organic capture with the memory activity glyph', async ({ page }) => {
   test.setTimeout(25_000);
   const chatRequests: InteractionPayload[] = [];
   const observerRequests: InteractionPayload[] = [];

@@ -69,15 +69,36 @@ describe('Google Drive create replay fence', () => {
     expect(secondOperation).toHaveBeenCalledOnce();
   });
 
-  it('clears prior replay state when a new elected turn arrives', async () => {
+  it('keeps replay state isolated across simultaneously live elected turns', async () => {
     const firstOperation = vi.fn().mockResolvedValue({ id: 'file-1' });
     const secondOperation = vi.fn().mockResolvedValue({ id: 'file-2' });
+    const firstContext = { ...baseContext, isGenerationActive: () => true };
+    const secondContext = { ...baseContext, generationId: 'generation-2', isGenerationActive: () => true };
 
-    await runDriveCreateOnce(baseContext, { name: 'Plan' }, firstOperation, 1000);
-    await runDriveCreateOnce({ ...baseContext, generationId: 'generation-2' }, { name: 'Plan' }, secondOperation, 1001);
+    await runDriveCreateOnce(firstContext, { name: 'Plan' }, firstOperation, 1000);
+    await runDriveCreateOnce(secondContext, { name: 'Plan' }, secondOperation, 1001);
+    await runDriveCreateOnce(firstContext, { name: 'Plan' }, firstOperation, 1002);
+    await runDriveCreateOnce(secondContext, { name: 'Plan' }, secondOperation, 1003);
 
     expect(firstOperation).toHaveBeenCalledOnce();
     expect(secondOperation).toHaveBeenCalledOnce();
+  });
+
+  it('does not let a stale turn clear a newer turn ambiguous-create fence', async () => {
+    let oldActive = true;
+    const oldOperation = vi.fn().mockResolvedValue({ id: 'old-file' });
+    const newFailure = new Error('network response lost');
+    const newOperation = vi.fn().mockRejectedValue(newFailure);
+    const oldContext = { ...baseContext, generationId: 'generation-old', isGenerationActive: () => oldActive };
+    const newContext = { ...baseContext, generationId: 'generation-new', isGenerationActive: () => true };
+
+    await expect(runDriveCreateOnce(newContext, { name: 'Plan' }, newOperation, 1000)).rejects.toThrow('network response lost');
+    oldActive = false;
+    await expect(runDriveCreateOnce(oldContext, { name: 'Old plan' }, oldOperation, 1001)).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(runDriveCreateOnce(newContext, { name: 'Plan' }, newOperation, 1002)).rejects.toThrow('network response lost');
+
+    expect(oldOperation).not.toHaveBeenCalled();
+    expect(newOperation).toHaveBeenCalledOnce();
   });
 
   it('does not claim replay safety when elected-turn provenance is unavailable', async () => {

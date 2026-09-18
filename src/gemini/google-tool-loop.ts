@@ -1,6 +1,6 @@
 import type { GeminiToolContinuationRequest, GeminiToolResult, GeminiTurnRequest, GeminiStreamEvent } from './contracts';
 import { geminiTurnPort } from './provider';
-import { executeGoogleTool, confirmationRequestForCall, type GoogleToolHandlers, type GoogleToolExecutorOptions } from '../google/tools/executor';
+import { executeGoogleTool, confirmationRequestForCall, googleToolAuthorizationRequirement, type GoogleToolHandlers, type GoogleToolExecutorOptions } from '../google/tools/executor';
 import type { GoogleToolCall, GoogleToolName } from '../google/tools/contracts';
 import { googleToolRegistry } from '../google/tools/registry';
 import { googleServiceToolHandlers } from '../google/tools/service-handlers';
@@ -234,8 +234,54 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         messageId: executeOptions.messageId,
         generationId: executeOptions.generationId,
       });
-      if (confirmation) mutationEntries.push({ call, confirmation });
-      else immediateCalls.push(call);
+      if (!confirmation) {
+        immediateCalls.push(call);
+        continue;
+      }
+
+      let requiredCapability: GoogleCapabilityKey | null;
+      try {
+        requiredCapability = await googleToolAuthorizationRequirement(call, executeOptions.oauth);
+      } catch {
+        results.push(errorToolResult(call, 'EXECUTION_FAILED'));
+        continue;
+      }
+
+      if (requiredCapability) {
+        if (executeOptions.confirm || options.headless) {
+          results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
+          continue;
+        }
+
+        yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
+        const pendingGrant = requestGoogleCapabilityGrant(requiredCapability, signal);
+        let granted: boolean;
+        for (;;) {
+          const outcome = await Promise.race([
+            pendingGrant.then((value) => ({ settled: true as const, value })),
+            delay(TOOL_CONFIRMATION_HEARTBEAT_MS).then(() => ({ settled: false as const })),
+          ]);
+          if (outcome.settled) { granted = outcome.value; break; }
+          yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
+        }
+        if (!granted || signal?.aborted || request.isGenerationActive?.() === false) {
+          results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
+          continue;
+        }
+
+        try {
+          requiredCapability = await googleToolAuthorizationRequirement(call, executeOptions.oauth);
+        } catch {
+          results.push(errorToolResult(call, 'EXECUTION_FAILED'));
+          continue;
+        }
+        if (requiredCapability) {
+          results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
+          continue;
+        }
+      }
+
+      mutationEntries.push({ call, confirmation });
     }
 
     if (immediateCalls.length > 0) {
@@ -322,31 +368,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(entry.call, 'USER_DECLINED'));
         continue;
       }
-      let result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+      const result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
         return;
-      }
-      if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
-        yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
-        const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
-        // Assigned on the only loop exit (break) before any read.
-        let granted: boolean;
-        for (;;) {
-          const outcome = await Promise.race([
-            pendingGrant.then((value) => ({ settled: true as const, value })),
-            delay(TOOL_CONFIRMATION_HEARTBEAT_MS).then(() => ({ settled: false as const })),
-          ]);
-          if (outcome.settled) { granted = outcome.value; break; }
-          yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
-        }
-        if (granted && !signal?.aborted && request.isGenerationActive?.() !== false) {
-          if (!isConfirmationFresh(entry.confirmation.requestedAt, executeOptions.now?.() ?? new Date())) {
-            results.push(errorToolResult(entry.call, 'USER_DECLINED'));
-            continue;
-          }
-          result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
-        }
       }
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };

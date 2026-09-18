@@ -93,6 +93,25 @@ describe('GoogleGmailSemanticService', () => {
     expect(JSON.stringify(result)).not.toContain('too-deep');
   });
 
+  it('marks exact body-budget exhaustion truncated when unread MIME siblings remain', async () => {
+    const exactBudget = 'x'.repeat(100_000);
+    const service = new GoogleGmailSemanticService(authority(async () => json({
+      id: 'm-exact-budget',
+      payload: {
+        mimeType: 'multipart/mixed',
+        parts: [
+          { mimeType: 'text/plain', body: { data: b64url(exactBudget) } },
+          { mimeType: 'text/plain', body: { data: b64url('unread-tail') } },
+        ],
+      },
+    })));
+
+    const result = await service.getMessage('m-exact-budget', 'full');
+    expect(result.bodyText).toHaveLength(100_000);
+    expect(result.bodyTruncated).toBe(true);
+    expect(result.bodyText).not.toContain('unread-tail');
+  });
+
   it('caps total MIME part traversal even when provider structure is very broad', async () => {
     const groups = Array.from({ length: 6 }, (_, group) => ({
       mimeType: 'multipart/mixed',

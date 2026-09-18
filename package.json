@@ -52,7 +52,7 @@
     "test:workers": "vitest run --config vitest.workers.config.ts"
   },
   "dependencies": {
-    "@google/genai": "2.21.0",
+    "@google/genai": "2.22.0",
     "dexie": "^4.0.0",
     "lucide-react": "1.40.0",
     "react": "^19.0.0",

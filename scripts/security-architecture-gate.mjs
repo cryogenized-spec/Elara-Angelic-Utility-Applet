@@ -347,14 +347,14 @@ if (!executor.includes('evaluateWriteConfirmation')) fail('Google executor must 
 if (!executor.includes('requestGoogleToolConfirmation')) fail('Google executor must retain the shared confirmation broker');
 const toolLoop = read('src/gemini/google-tool-loop.ts');
 if (!toolLoop.includes('requestGoogleToolConfirmations')) fail('Gemini tool loop must retain grouped mutation confirmation');
-if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN')) fail('Gemini tool loop must retain the untrusted-read same-turn mutation barrier');
+if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isUntrustedExternalReadTool') || !toolLoop.includes('UNTRUSTED_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN')) fail('Gemini tool loop must intrinsically taint external provider reads and retain the same-turn mutation barrier');
 
 const googleBroker = read('src/google/confirmation/broker.ts');
 if (googleBroker.includes("all.dataset.decision = 'all';") || googleBroker.includes('✓ Approve all')) fail('Google confirmation broker must not expose approve-all');
 if (!googleBroker.includes('checkbox.checked = requests.length === 1;')) fail('Grouped Google confirmations must default unselected');
 
 const workerProvider = read('worker/src/index.ts');
-if (!workerProvider.includes('verifyBearerToken') || !workerProvider.includes('requireProviderAdmission')) fail('Worker provider routes must retain installation bearer admission');
+if (!workerProvider.includes('verifyBearerToken') || !workerProvider.includes('requireProviderAdmission') || !workerProvider.includes('admissionConfigured')) fail('Worker provider routes and health contract must retain installation bearer admission');
 if (!workerProvider.includes("maxOutputTokens: z.number().int().min(1).max(65_536)")) fail('Worker provider output budget must remain bounded');
 
 if (errors.length) {

@@ -27,6 +27,8 @@ export type CalendarSendUpdates = 'all' | 'externalOnly';
 export type CalendarMinAccessRole = 'freeBusyReader' | 'reader' | 'writerWithoutPrivateAccess' | 'writer' | 'owner';
 
 export interface CalendarEventSummary {
+  readonly trust: 'untrusted-external';
+  readonly source: 'calendar';
   readonly id: string;
   readonly etag?: string;
   readonly summary: string;
@@ -37,6 +39,7 @@ export interface CalendarEventSummary {
   readonly status?: string;
   readonly htmlLink?: string;
   readonly recurringEventId?: string;
+  readonly truncatedFields?: readonly string[];
 }
 
 export interface CalendarEventAttendee {
@@ -60,11 +63,16 @@ export interface CalendarEventDetail extends CalendarEventSummary {
 }
 
 export interface CalendarEventPage {
+  readonly trust: 'untrusted-external';
+  readonly source: 'calendar';
   readonly events: readonly CalendarEventSummary[];
   readonly nextPageToken?: string;
+  readonly truncated?: boolean;
 }
 
 export interface CalendarListEntrySummary {
+  readonly trust: 'untrusted-external';
+  readonly source: 'calendar';
   readonly id: string;
   readonly summary: string;
   readonly primary: boolean;
@@ -72,11 +80,15 @@ export interface CalendarListEntrySummary {
   readonly accessRole?: string;
   readonly timeZone?: string;
   readonly backgroundColor?: string;
+  readonly truncatedFields?: readonly string[];
 }
 
 export interface CalendarListPage {
+  readonly trust: 'untrusted-external';
+  readonly source: 'calendar';
   readonly calendars: readonly CalendarListEntrySummary[];
   readonly nextPageToken?: string;
+  readonly truncated?: boolean;
 }
 
 export interface CalendarFreeBusyInterval {
@@ -91,6 +103,8 @@ export interface CalendarFreeBusyEntry {
 }
 
 export interface CalendarFreeBusyResult {
+  readonly trust: 'untrusted-external';
+  readonly source: 'calendar';
   readonly timeMin: string;
   readonly timeMax: string;
   readonly calendars: readonly CalendarFreeBusyEntry[];
@@ -205,6 +219,45 @@ interface CalendarFreeBusyResponse {
     busy?: Array<{ start?: string; end?: string }>;
     errors?: Array<{ reason?: string; domain?: string }>;
   }>;
+}
+
+function projectedProviderText(
+  value: unknown,
+  maxLength: number,
+  field: string,
+  truncated: Set<string>,
+  trim = false,
+): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = (trim ? value.trim() : value).split('\0').join('');
+  if (!normalized) return undefined;
+  if (normalized.length > maxLength) {
+    truncated.add(field);
+    return normalized.slice(0, maxLength);
+  }
+  return normalized;
+}
+
+function projectedProviderId(value: unknown, maxLength: number, field: string, truncated: Set<string>): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  if (normalized.length > maxLength) {
+    truncated.add(field);
+    return undefined;
+  }
+  return normalized;
+}
+
+function projectedProviderHttpsUrl(value: unknown, maxLength: number, field: string, truncated: Set<string>): string | undefined {
+  const candidate = projectedProviderText(value, maxLength, field, truncated, true);
+  if (!candidate) return undefined;
+  try {
+    return new URL(candidate).protocol === 'https:' ? candidate : undefined;
+  } catch {
+    truncated.add(field);
+    return undefined;
+  }
 }
 
 function boundedText(value: string | undefined, field: string, maxLength: number): string | undefined {
@@ -349,45 +402,79 @@ function boundedEvent(event: Readonly<Record<string, unknown>>): Readonly<Record
 }
 
 function normalizeEventSummary(event: CalendarApiEvent): CalendarEventSummary | null {
-  const id = typeof event.id === 'string' && event.id.trim() ? event.id.trim() : '';
+  const truncated = new Set<string>();
+  const id = projectedProviderId(event.id, MAX_EVENT_ID_LENGTH, 'id', truncated);
   if (!id) return null;
+  const etag = projectedProviderId(event.etag, MAX_ETAG_LENGTH, 'etag', truncated);
+  const summary = projectedProviderText(event.summary, MAX_EVENT_SUMMARY_LENGTH, 'summary', truncated) ?? '(untitled)';
+  const startValue = projectedProviderText(event.start?.dateTime ?? event.start?.date, MAX_TIME_PARAMETER_LENGTH, 'start', truncated) ?? '';
+  const endValue = projectedProviderText(event.end?.dateTime ?? event.end?.date, MAX_TIME_PARAMETER_LENGTH, 'end', truncated) ?? '';
+  const startTimeZone = projectedProviderText(event.start?.timeZone, MAX_TIME_ZONE_LENGTH, 'startTimeZone', truncated);
+  const endTimeZone = projectedProviderText(event.end?.timeZone, MAX_TIME_ZONE_LENGTH, 'endTimeZone', truncated);
+  const status = projectedProviderText(event.status, 128, 'status', truncated);
+  const htmlLink = projectedProviderHttpsUrl(event.htmlLink, 2_000, 'htmlLink', truncated);
+  const recurringEventId = projectedProviderId(event.recurringEventId, MAX_EVENT_ID_LENGTH, 'recurringEventId', truncated);
   return {
+    trust: 'untrusted-external',
+    source: 'calendar',
     id,
-    ...(event.etag ? { etag: event.etag } : {}),
-    summary: event.summary ?? '(untitled)',
-    start: event.start?.dateTime ?? event.start?.date ?? '',
-    end: event.end?.dateTime ?? event.end?.date ?? '',
-    ...(event.start?.timeZone ? { startTimeZone: event.start.timeZone } : {}),
-    ...(event.end?.timeZone ? { endTimeZone: event.end.timeZone } : {}),
-    ...(event.status ? { status: event.status } : {}),
-    ...(event.htmlLink ? { htmlLink: event.htmlLink } : {}),
-    ...(event.recurringEventId ? { recurringEventId: event.recurringEventId } : {}),
+    ...(etag ? { etag } : {}),
+    summary,
+    start: startValue,
+    end: endValue,
+    ...(startTimeZone ? { startTimeZone } : {}),
+    ...(endTimeZone ? { endTimeZone } : {}),
+    ...(status ? { status } : {}),
+    ...(htmlLink ? { htmlLink } : {}),
+    ...(recurringEventId ? { recurringEventId } : {}),
+    ...(truncated.size ? { truncatedFields: [...truncated].sort() } : {}),
   };
 }
 
 function normalizeEventDetail(event: CalendarApiEvent): CalendarEventDetail {
   const summary = normalizeEventSummary(event);
-  if (!summary) throw new Error('Google Calendar returned an event without an ID.');
-  const attendees = (event.attendees ?? [])
-    .filter((attendee): attendee is typeof attendee & { email: string } => Boolean(attendee.email))
-    .map((attendee) => ({
-      email: attendee.email,
-      ...(attendee.responseStatus ? { responseStatus: attendee.responseStatus } : {}),
-      ...(attendee.self !== undefined ? { self: attendee.self } : {}),
-      ...(attendee.organizer !== undefined ? { organizer: attendee.organizer } : {}),
-      ...(attendee.optional !== undefined ? { optional: attendee.optional } : {}),
-    }));
+  if (!summary) throw new Error('Google Calendar returned an event without a usable ID.');
+  const truncated = new Set(summary.truncatedFields ?? []);
+  const rawAttendees = Array.isArray(event.attendees) ? event.attendees : [];
+  if (rawAttendees.length > MAX_ATTENDEES) truncated.add('attendees');
+  const attendees = rawAttendees.slice(0, MAX_ATTENDEES).flatMap((attendee) => {
+    const email = projectedProviderText(attendee.email, 320, 'attendees.email', truncated, true);
+    if (!email) return [];
+    const responseStatus = projectedProviderText(attendee.responseStatus, 128, 'attendees.responseStatus', truncated, true);
+    return [{
+      email,
+      ...(responseStatus ? { responseStatus } : {}),
+      ...(attendee.self !== undefined ? { self: Boolean(attendee.self) } : {}),
+      ...(attendee.organizer !== undefined ? { organizer: Boolean(attendee.organizer) } : {}),
+      ...(attendee.optional !== undefined ? { optional: Boolean(attendee.optional) } : {}),
+    }];
+  });
+  const rawRecurrence = Array.isArray(event.recurrence) ? event.recurrence : [];
+  if (rawRecurrence.length > MAX_RECURRENCE_RULES) truncated.add('recurrence');
+  const recurrence = rawRecurrence.slice(0, MAX_RECURRENCE_RULES).flatMap((rule) => {
+    const value = projectedProviderText(rule, MAX_RECURRENCE_RULE_LENGTH, 'recurrence', truncated);
+    return value ? [value] : [];
+  });
+  const location = projectedProviderText(event.location, MAX_EVENT_LOCATION_LENGTH, 'location', truncated);
+  const description = projectedProviderText(event.description, MAX_EVENT_DESCRIPTION_LENGTH, 'description', truncated);
+  const organizerEmail = projectedProviderText(event.organizer?.email, 320, 'organizerEmail', truncated, true);
+  const creatorEmail = projectedProviderText(event.creator?.email, 320, 'creatorEmail', truncated, true);
+  const eventType = projectedProviderText(event.eventType, 128, 'eventType', truncated, true);
+  const transparency = projectedProviderText(event.transparency, 128, 'transparency', truncated, true);
+  const visibility = projectedProviderText(event.visibility, 128, 'visibility', truncated, true);
+
   return {
     ...summary,
-    ...(event.location ? { location: event.location } : {}),
-    ...(event.description ? { description: event.description } : {}),
-    ...(event.recurrence?.length ? { recurrence: event.recurrence } : {}),
+    ...(location ? { location } : {}),
+    ...(description ? { description } : {}),
+    ...(recurrence.length ? { recurrence } : {}),
     ...(attendees.length ? { attendees } : {}),
-    ...(event.organizer?.email ? { organizerEmail: event.organizer.email } : {}),
-    ...(event.creator?.email ? { creatorEmail: event.creator.email } : {}),
-    ...(event.eventType ? { eventType: event.eventType } : {}),
-    ...(event.transparency ? { transparency: event.transparency } : {}),
-    ...(event.visibility ? { visibility: event.visibility } : {}),
+    ...(organizerEmail ? { organizerEmail } : {}),
+    ...(creatorEmail ? { creatorEmail } : {}),
+    ...(eventType ? { eventType } : {}),
+    ...(transparency ? { transparency } : {}),
+    ...(visibility ? { visibility } : {}),
+    ...(truncated.size ? { truncatedFields: [...truncated].sort() } : {}),
   };
 }
 

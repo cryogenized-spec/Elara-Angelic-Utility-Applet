@@ -105,6 +105,16 @@ export interface RoutineRunResult {
 
 const MAX_ACCUMULATED_TEXT = 120_000;
 
+/**
+ * Read-risk does not automatically mean safe for unattended routines.
+ * Export tools materialize local artifacts, so they remain interactive even
+ * though their provider operation is read-only.
+ */
+const AUTONOMY_READ_TOOL_EXCLUSIONS = new Set<GoogleToolName>([
+  'docs.exportDocument',
+  'sheets.exportSpreadsheet',
+]);
+
 function generateId(): string {
   return crypto.randomUUID?.() ?? `id-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
@@ -113,7 +123,10 @@ function generateId(): string {
 export function routineToolSet(routine: ElaraRoutine): GoogleToolName[] {
   const granted = new Set<string>(routine.permissions.google);
   return googleToolRegistry
-    .filter((descriptor) => descriptor.exposure === 'gemini' && descriptor.risk === 'read' && granted.has(descriptor.capability))
+    .filter((descriptor) => descriptor.exposure === 'gemini'
+      && descriptor.risk === 'read'
+      && granted.has(descriptor.capability)
+      && !AUTONOMY_READ_TOOL_EXCLUSIONS.has(descriptor.name))
     .map((descriptor) => descriptor.name);
 }
 

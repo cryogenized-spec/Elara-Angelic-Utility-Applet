@@ -68,13 +68,21 @@ for (const [path, source] of runtime) {
 }
 
 // Dynamic script insertion is executable-network authority. Elara currently
-// needs exactly two such loaders: Google Identity Services and YouTube's
-// official IFrame API. Freeze both the owners and their provider URLs.
+// needs exactly three such loaders: Google Identity Services, Google Picker,
+// and YouTube's official IFrame API. Freeze the owners and provider URLs.
 const reviewedScriptLoaders = new Map([
   ['src/google/oauth/gis.ts', [
     "const GIS_SCRIPT_URL = 'https://accounts.google.com/gsi/client';",
     "document.createElement('script')",
     'script.src = GIS_SCRIPT_URL;',
+  ]],
+  ['src/google/picker/service.ts', [
+    "const PICKER_SCRIPT_URL = 'https://apis.google.com/js/api.js';",
+    "const PICKER_ORIGIN = 'https://apis.google.com';",
+    "document.createElement('script')",
+    'script.src = PICKER_SCRIPT_URL;',
+    ".setOAuthToken(token)",
+    ".setOrigin(window.location.origin)",
   ]],
   ['src/media/youtube/player.ts', [
     "const IFRAME_API_SRC = 'https://www.youtube.com/iframe_api';",

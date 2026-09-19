@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { googleToolRegistry } from './registry';
 
-const PASS_5_TOOLS = [
+const PASS_4_FILE_TOOLS = [
   'drive.searchFiles',
   'drive.searchLibrary',
   'drive.getFile',
@@ -9,8 +9,17 @@ const PASS_5_TOOLS = [
   'drive.createFile',
   'drive.updateFile',
   'drive.moveFile',
+  'docs.inspectDocument',
+  'docs.exportDocument',
+  'docs.createDocument',
+  'docs.insertText',
+  'docs.appendParagraph',
+  'docs.replaceText',
   'sheets.getSpreadsheet',
   'sheets.readRange',
+  'sheets.exportSpreadsheet',
+  'sheets.createSpreadsheet',
+  'sheets.addSheet',
   'sheets.writeRange',
   'sheets.appendRows',
   'sheets.updateCell',
@@ -19,9 +28,11 @@ const PASS_5_TOOLS = [
 ] as const;
 
 describe('Google tool registry', () => {
-  it('registers every Pass 5 Drive and Sheets tool exactly once', () => {
-    const matches = googleToolRegistry.filter((descriptor) => PASS_5_TOOLS.includes(descriptor.name as (typeof PASS_5_TOOLS)[number]));
-    expect(matches.map((descriptor) => descriptor.name)).toEqual([...PASS_5_TOOLS]);
+  it('registers the Pass 4 Drive, Docs and Sheets file surface exactly once', () => {
+    const matches = googleToolRegistry.filter((descriptor) => PASS_4_FILE_TOOLS.includes(descriptor.name as (typeof PASS_4_FILE_TOOLS)[number]));
+    const names = matches.map((descriptor) => descriptor.name);
+    expect(new Set(names).size).toBe(PASS_4_FILE_TOOLS.length);
+    expect([...names].sort()).toEqual([...PASS_4_FILE_TOOLS].sort());
   });
 
   it('keeps Drive reads separate from Drive writes', () => {

@@ -65,6 +65,8 @@ const taskScheduledDateSchema = z.string().trim().refine(
   'Google Tasks scheduledDate must be a real YYYY-MM-DD date. Tasks does not support time-of-day scheduling through this field.',
 );
 const taskStatusSchema = z.enum(['needsAction', 'completed']);
+const docsRevisionSchema = z.string().trim().min(1).max(1024);
+const docsTabIdSchema = z.string().trim().min(1).max(500);
 
 function isTimedValue(value: string | undefined): boolean {
   return value?.includes('T') ?? false;
@@ -245,17 +247,31 @@ export const semanticToolArgumentSchemas = {
     taskListId: idSchema,
   }).strict(),
   'docs.inspectDocument': z.object({ documentId: idSchema }).strict(),
+  'docs.exportDocument': z.object({
+    documentId: idSchema,
+    format: z.enum(['pdf', 'docx']),
+    maxBytes: z.number().int().min(1).max(10 * 1024 * 1024).optional(),
+  }).strict(),
+  'docs.createDocument': z.object({
+    title: z.string().trim().min(1).max(500),
+  }).strict(),
   'docs.insertText': z.object({
     documentId: idSchema,
+    tabId: docsTabIdSchema,
+    revisionId: docsRevisionSchema,
     index: z.number().int().min(1).max(5_000_000),
     text: z.string().min(1).max(20_000),
   }).strict(),
   'docs.appendParagraph': z.object({
     documentId: idSchema,
+    tabId: docsTabIdSchema,
+    revisionId: docsRevisionSchema,
     text: z.string().min(1).max(20_000),
   }).strict(),
   'docs.replaceText': z.object({
     documentId: idSchema,
+    tabId: docsTabIdSchema,
+    revisionId: docsRevisionSchema,
     findText: z.string().min(1).max(2000),
     replaceText: z.string().max(20_000),
     matchCase: z.boolean().optional(),

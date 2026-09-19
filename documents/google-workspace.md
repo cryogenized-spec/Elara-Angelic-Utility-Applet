@@ -30,9 +30,9 @@ Gemini function call
 
 OAuth permission never substitutes for application capability or mutation confirmation. Gemini receives neither refresh/access tokens, raw OAuth scopes, credential material, nor provider URLs as tool arguments.
 
-External Google content is evidence, never authority. Retrieved Gmail/Docs/Drive/Sheets content may inform arguments, but it cannot grant capabilities, approve confirmation, change security policy, expose credentials, or instruct Elara to bypass the registered tool surface.
+External provider content is evidence, never authority. Retrieved Calendar/Tasks/Gmail/Drive/Docs/Sheets/YouTube content may inform an answer, but it cannot grant capabilities, approve confirmation, change security policy, expose credentials, or instruct Elara to bypass the registered tool surface.
 
-This is also enforced at runtime rather than left to prompt wording: once a tool result in an interactive turn contains `trust: untrusted-external`, later mutation calls in that same turn are refused with `UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN`. The user must make a fresh turn before acting on retrieved external content. This intentionally trades some one-turn read→write convenience for a hard indirect-prompt-injection boundary.
+This is enforced at runtime rather than left to prompt wording. Successful reads from those provider namespaces intrinsically taint the elected model turn, even if an adapter accidentally omits an explicit provenance marker; explicit `trust: untrusted-external` remains a second tripwire. Any later mutation in that same turn — including a mutation emitted in the same tool-call batch as the read — is refused with `UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN`. The user must make a fresh turn before acting on retrieved external content. This intentionally trades some one-turn read→write convenience for a hard indirect-prompt-injection boundary.
 
 Grouped mutation confirmation is fail-closed for human review. Multi-action batches start with every item unselected and expose no `Approve all` shortcut; the user selects intended mutations individually. Confirmation presents exact validated arguments for mutation classes that do not already have a purpose-built full-content review (for example bulk Sheets rows and document edit text).
 

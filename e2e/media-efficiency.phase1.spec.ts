@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const VIDEO_ID = 'phase1EfficiencyVid';
 const TITLE = 'Phase 1 Efficiency Track';
-const TEST_PIN = `284${619}`;
+const TEST_PIN = '2846197531';
 const TEST_GEMINI_KEY = ['phase1', 'e2e', 'gemini', 'key'].join('-');
 const TEST_YOUTUBE_KEY = ['phase1', 'e2e', 'youtube', 'key'].join('-');
 

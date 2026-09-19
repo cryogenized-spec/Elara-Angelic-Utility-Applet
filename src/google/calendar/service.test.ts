@@ -52,7 +52,11 @@ describe('GoogleCalendarService', () => {
       query: 'review',
       timeZone: 'Africa/Johannesburg',
     })).resolves.toEqual({
+      trust: 'untrusted-external',
+      source: 'calendar',
       events: [{
+        trust: 'untrusted-external',
+        source: 'calendar',
         id: 'event-1', etag: '"etag-event-1"', summary: 'Design review',
         start: '2026-09-03T10:00:00Z', end: '2026-09-03T11:00:00Z',
         startTimeZone: 'Africa/Johannesburg', endTimeZone: 'Africa/Johannesburg',
@@ -109,7 +113,11 @@ describe('GoogleCalendarService', () => {
   it('reads account settings through its own narrow capability', async () => {
     const { oauth, capabilities } = authority(async () => json({ items: [{ id: 'timezone', value: 'Africa/Johannesburg' }, { id: 'weekStart', value: '1' }] }));
     const service = new GoogleCalendarService(oauth);
-    await expect(service.getSettings()).resolves.toEqual({ timezone: 'Africa/Johannesburg', weekStart: '1' });
+    await expect(service.getSettings()).resolves.toEqual({
+      trust: 'untrusted-external',
+      source: 'calendar',
+      settings: { timezone: 'Africa/Johannesburg', weekStart: '1' },
+    });
     expect(capabilities).toEqual(['calendar.settings.read']);
   });
 

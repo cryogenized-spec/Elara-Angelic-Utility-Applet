@@ -117,6 +117,12 @@ A mutation confirmation is time-bounded application authority, not an OAuth gran
 
 The optional Worker's Gemini/transcription provider routes require the deployment installation bearer credential on every request; CORS is an additional browser boundary, never authentication. Originless or spoofed-origin HTTP clients cannot consume the deployment's Gemini credential without the installation token. The Worker CORS allowlist is deployment-owned configuration. A fork must configure its own exact PWA origin; it must not rely on another deployment's allowlist.
 
+Cross-tab session state is part of the credential boundary. A protected Lockbox lock, idle timeout, or credential change clears the current tab's plaintext session and writes only an opaque revocation nonce to a dedicated Web Storage key; sibling tabs consume that signal and clear their own in-memory Gemini and YouTube plaintext. No credential, derived key, or protection metadata is carried through Web Storage.
+
+Browser Google OAuth access tokens remain tab-memory-only. Any sibling-tab change to the shared authorization record invalidates the local token, and the authorization record revision is rechecked immediately before each Google API egress. Silent token recovery must prove continuity with the previously known Google account; ambiguity or mismatch requires explicit reauthorization.
+
+The optional Worker Gemini endpoint authenticates before body processing, reads JSON through a finite byte budget, and relays provider SSE through finite event, text, thought, and byte budgets. Authentication is never treated as permission for unbounded resource consumption.
+
 ## 8. Verification
 
 Primary checks are `npm run security:check`, `npm run verify:gates`, unit/Worker/E2E tests and `npm run reliability:check`.

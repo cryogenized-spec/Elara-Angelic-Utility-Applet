@@ -1,4 +1,5 @@
 import type { GeminiStreamEvent, GeminiUsage } from '../gemini/contracts';
+import { GEMINI_STREAM_LIMITS } from '../gemini/stream-limits';
 import { normalizeGeminiError, type NormalizedProviderError } from '../gemini/errors';
 import type { GenerationActivityRecord, GenerationActivityState, GenerationContextCategory } from '../domain/chat';
 import { mergeMediaItems, type MediaItem } from '../domain/media';
@@ -211,12 +212,19 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
     case 'thought-summary-delta': {
       const position = lastRunningStepOfKind(next.steps, 'thinking', event.index);
       if (position < 0) {
+        if (event.text.length > GEMINI_STREAM_LIMITS.maxThoughtChars) {
+          return failGeneration(next, generationProtocolError('Gemini thought summary exceeded the live safety limit.'), receivedAt);
+        }
         const opened = openStep(next, 'thinking', receivedAt, event.index);
         const created = opened.steps.length - 1;
         return { ...updateStepAt(opened, created, { detail: event.text }), phase: 'thinking' };
       }
       const current = next.steps[position].detail ?? '';
-      return updateStepAt(next, position, { detail: `${current}${event.text}` });
+      const detail = `${current}${event.text}`;
+      if (detail.length > GEMINI_STREAM_LIMITS.maxThoughtChars) {
+        return failGeneration(next, generationProtocolError('Gemini thought summary exceeded the live safety limit.'), receivedAt);
+      }
+      return updateStepAt(next, position, { detail });
     }
     case 'thought-signature': {
       return next;
@@ -255,7 +263,11 @@ export function applyGenerationEvent(state: GenerationState, envelope: Generatio
       let withStep = next;
       const position = lastRunningStepOfKind(next.steps, 'generation', event.index);
       if (position < 0) withStep = openStep(next, 'generation', receivedAt, event.index);
-      return { ...withStep, transcript: `${withStep.transcript}${event.text}`, phase: 'generating' };
+      const transcript = `${withStep.transcript}${event.text}`;
+      if (transcript.length > GEMINI_STREAM_LIMITS.maxTextChars) {
+        return failGeneration(withStep, generationProtocolError('Gemini response exceeded the live text safety limit.'), receivedAt);
+      }
+      return { ...withStep, transcript, phase: 'generating' };
     }
     case 'step-stop': {
       const position = lastRunningStepIndex(next.steps, event.index);

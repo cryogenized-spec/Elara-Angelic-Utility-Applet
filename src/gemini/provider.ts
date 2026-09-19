@@ -7,6 +7,7 @@ import { composeSystemInstructionWithStatus } from './memory-context';
 import { artifactRepository } from '../artifacts/repository';
 import { ArtifactError } from '../artifacts/errors';
 import { isAttachment } from '../domain/artifact';
+import { GEMINI_STREAM_LIMITS } from './stream-limits';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
@@ -166,6 +167,9 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   let interactionId: string | undefined;
   let sawTerminalEvent = false;
   let sawRequiresAction = false;
+  let streamEvents = 0;
+  let streamedTextChars = 0;
+  let streamedThoughtChars = 0;
   const pendingFunctions = new Map<number, PendingFunctionCall>();
   const thoughtSummaryParts = new Map<number, string>();
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
@@ -215,6 +219,11 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           return;
         }
         if (next.done) break;
+        streamEvents += 1;
+        if (streamEvents > GEMINI_STREAM_LIMITS.maxEvents) {
+          yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream exceeded the event safety limit.'), { requestId, interactionId }) };
+          return;
+        }
         const raw = asRecord(next.value);
         const eventType = readString(raw, 'event_type') ?? readString(raw, 'type') ?? '';
         const eventInteractionId = interactionIdFrom(raw);
@@ -230,7 +239,15 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
             const summaryBlocks = Array.isArray(step.summary) ? step.summary : [];
             for (const summaryBlock of summaryBlocks) {
               const text = readString(asRecord(summaryBlock), 'text');
-              if (text) { appendThoughtSummary(thoughtSummaryParts, index, text); yield { type: 'thought-summary-delta', index, text }; }
+              if (text) {
+                streamedThoughtChars += text.length;
+                if (streamedThoughtChars > GEMINI_STREAM_LIMITS.maxThoughtChars) {
+                  yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini thought summary exceeded the live safety limit.'), { requestId, interactionId }) };
+                  return;
+                }
+                appendThoughtSummary(thoughtSummaryParts, index, text);
+                yield { type: 'thought-summary-delta', index, text };
+              }
             }
           }
           const signature = readString(step, 'signature');
@@ -241,9 +258,36 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         if (eventType === 'step.delta') {
           const delta = asRecord(raw.delta); const index = stepIndex(raw); const deltaType = readString(delta, 'type'); const content = asRecord(delta.content); const deltaText = readString(delta, 'text') ?? readString(content, 'text');
           if (deltaType === 'thought_signature') { const signature = readString(delta, 'signature'); if (signature) yield { type: 'thought-signature', index, signature }; }
-          else if (deltaType === 'thought_summary') { if (deltaText) { appendThoughtSummary(thoughtSummaryParts, index, deltaText); yield { type: 'thought-summary-delta', index, text: deltaText }; } }
-          else if (deltaType === 'text' && deltaText) { yield { type: 'text-delta', index, text: deltaText }; }
-          else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
+          else if (deltaType === 'thought_summary') {
+            if (deltaText) {
+              streamedThoughtChars += deltaText.length;
+              if (streamedThoughtChars > GEMINI_STREAM_LIMITS.maxThoughtChars) {
+                yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini thought summary exceeded the live safety limit.'), { requestId, interactionId }) };
+                return;
+              }
+              appendThoughtSummary(thoughtSummaryParts, index, deltaText);
+              yield { type: 'thought-summary-delta', index, text: deltaText };
+            }
+          }
+          else if (deltaType === 'text' && deltaText) {
+            streamedTextChars += deltaText.length;
+            if (streamedTextChars > GEMINI_STREAM_LIMITS.maxTextChars) {
+              yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini response exceeded the live text safety limit.'), { requestId, interactionId }) };
+              return;
+            }
+            yield { type: 'text-delta', index, text: deltaText };
+          }
+          else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) {
+            const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments');
+            if (partialArguments) {
+              const pending = pendingFunctions.get(index)!;
+              if (pending.arguments.length + partialArguments.length > GEMINI_STREAM_LIMITS.maxFunctionArgumentChars) {
+                yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini function-call arguments exceeded the live safety limit.'), { requestId, interactionId }) };
+                return;
+              }
+              pending.arguments += partialArguments;
+            }
+          }
           continue;
         }
         if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }

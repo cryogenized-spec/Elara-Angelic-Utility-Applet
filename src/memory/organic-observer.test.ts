@@ -180,6 +180,29 @@ describe('bounded organic memory observer', () => {
     expect(await listMemories()).toHaveLength(0);
   });
 
+  it('deterministically rejects common bare credential formats without relying on labels', async () => {
+    const samples = [
+      ['AK', 'IA1234567890ABCDEF'].join(''),
+      ['AI', 'zaSyA1234567890bcdefghijklmnopqrstuv'].join(''),
+      ['gh', 'p_1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcd'].join(''),
+      ['xo', 'xb-123456789012-123456789012-abcdefghijklmnopqrstuv'].join(''),
+      ['ey', 'Jabcdefghijk.abcdefghijklmnop.abcdefghijklmnop'].join(''),
+    ];
+
+    for (let index = 0; index < samples.length; index += 1) {
+      const evidence = samples[index];
+      const result = await observePersistedTurn({
+        conversationId: 'thread_organic',
+        messageId: `bare_secret_${index}`,
+        userMessage: `Keep this recurring project value: ${evidence}`,
+        extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence }] }),
+      });
+      expect(result).toEqual({ status: 'empty', count: 0 });
+    }
+
+    expect(await listMemories()).toHaveLength(0);
+  });
+
   it('fails closed on malformed classifier output', async () => {
     const result = await observePersistedTurn(baseRequest(async () => ({
       candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout', extraAuthority: true }],

@@ -1,7 +1,7 @@
 ---
 id: SYS-GWS
 status: active
-verified_commit: 92e69c0cf30e5abd705e5ce28a77c4757939e2d5
+verified_commit: 33b558612a3e5f13d2f61c2f7d830e0709225e32
 scope: Google Workspace service adapters and model tool execution
 paths: [src/google/calendar, src/google/tasks, src/google/gmail, src/google/docs, src/google/drive, src/google/sheets, src/google/chat, src/google/tools, src/google/confirmation]
 keywords: [workspace, calendar, tasks, gmail, docs, drive, sheets, tools, confirmation]
@@ -185,12 +185,20 @@ Sheets exposes bounded semantic metadata/range reads with `untrusted-external` p
 
 Validation precedes execution. Confirmation is separate from OAuth. If confirmation UI is unavailable, busy, stale, or aborted, mutation fails closed. Gmail, Drive, Docs, and Sheets mutations carry the existing turn abort/election guard through the handler into the service and into the OAuth-authorized request boundary. Turn ownership is rechecked after asynchronous authorization/provider preflight and again immediately before every real Google provider write, including a retry after 401/token refresh. The same turn signal is propagated into the provider request. A cancelled or superseded generation therefore cannot send or mutate merely because token/status work completed after it lost authority. Docs/Sheets resource creation additionally uses per-elected-turn call-id/payload replay fencing; an exact replay shares the first result or ambiguous failure, while changed arguments under the same call id fail closed.
 
+Cross-Workspace hostile-content rule: Calendar, Tasks, Gmail, Drive, Docs, and Sheets provider reads are external evidence, never application authority. Semantic projections carry `trust: untrusted-external` and a source marker. The Gemini tool loop freezes a matching provenance instruction into the interaction system instruction before the initial provider request and reuses that exact instruction on tool continuations. Independently, successful provider reads taint later mutation confirmations at the application layer, so instructions embedded inside Workspace content cannot silently authorize capabilities, reveal credentials, change policy, skip confirmation, or widen the declared tool set. The model instruction is defense-in-depth; exact declared-tool admission, application capabilities, schemas, turn authority, and the confirmation broker remain the enforcement authorities.
+
+Provider response amplification is separately bounded. Calendar (4 MiB), Tasks (2 MiB), Drive metadata (2 MiB), Docs (8 MiB), and Sheets (2 MiB) use a shared streamed JSON byte boundary before `JSON.parse`; declared size is checked but never trusted as the sole ceiling. Gmail retains its dedicated raw-response/MIME ceilings. Semantic projections then apply tighter field/list/text budgets and expose truncation metadata instead of silently forwarding provider overrun. Docs inspection additionally caps tabs/blocks/text independently of the raw JSON ceiling, while Sheets range reads cap rows/columns/cells and per-cell text.
+
 Gmail-specific hostile-content rule: text such as “ignore previous instructions”, “send secrets”, or “enable another tool” found inside an email is external content, not user authorization. The retrieved payload cannot widen application capabilities or skip confirmation. The semantic Gmail service also constrains provider payload shape before the continuation reaches Gemini, reducing both prompt-injection surface and unbounded-context risk.
 
 Gmail send/reply uses fixed provider endpoints and locally generated RFC headers from validated semantic fields. Raw RFC822 is not a Gemini argument. Permanent delete is absent. Custom-label mutation verifies USER type. Invalid ids/query/page sizes/recipient/header/body inputs fail before the corresponding provider mutation and, where possible, before OAuth authorization.
 
 
 Drive-specific failure semantics are likewise fail-closed. Invalid validators and contradictory moves fail before provider mutation; transfer ceilings are enforced before and during reads; a stream failure becomes a typed transfer failure rather than a partial artifact. Drive file writes carry the same provider-boundary turn guard used by Gmail so OAuth/token refresh cannot turn an expired approval or stale generation into a provider mutation. Permanent file DELETE is absent.
+
+Untrusted-content isolation is an application-enforced information-flow rule, not only prompt guidance. Once a model continuation has consumed an external Workspace or YouTube result, newly proposed external read calls are refused with UNTRUSTED_CONTEXT_REQUIRES_FRESH_USER_TURN and require a fresh user turn. Reads proposed together in the same pre-taint model batch remain valid because the model had not yet consumed any returned content when it chose them.
+
+Uploaded attachments are considered untrusted contextual input before the first tool batch, so attachment-authored instructions cannot silently fan out into Workspace or YouTube reads. Durable-memory context is also non-authoritative: recalled memory and explicit memory.lookup evidence elevate any later mutation confirmation, while ordinary user-requested reads are not disabled merely because benign memory context was recalled. External content, attachments, and memory can inform answers; none can expand tool authority.
 
 ## 9. Verification
 
@@ -212,8 +220,8 @@ Drive regressions additionally live in `src/google/drive/*test.ts`, `src/google/
 
 Pass 4 implementation now covers the planned Drive/Docs/Sheets/Picker contract. The deliberately broader `drive.library.read` surface remains discovery-only: a file found solely through that optional restricted scope must be deliberately admitted through Picker before Elara’s ordinary file/document/spreadsheet operations may use it. This preserves `drive.file` as the normal action boundary instead of turning library search into an implicit whole-Drive mutation authority.
 
-Pass 5 orchestration/Kanban must consume these provider/tool contracts rather than become a competing authority; PR #79 remains a separate WIP and is not part of this branch. Pass 6 still owns cross-Workspace hostile provider-payload budgets/truncation metadata, prompt-injection certification across Gmail/Docs/Drive/Sheets, stale-read/write race matrices, replay/idempotency edge cases, and final end-to-end handover.
+Pass 5 orchestration/Kanban must consume these provider/tool contracts rather than become a competing authority; PR #79 remains a separate WIP and is intentionally held from this certification branch. Pass 6 owns the final adversarial evidence for the completed Workspace stack: provider-payload ceilings/provenance, hostile-content authority isolation, stale read/write and stale-generation races, replay/idempotency edge cases, fixed egress, Worker OAuth/CORS boundaries, UI rendering safety, CI/gate integrity, and final handover.
 
-Pass 4 is not declared certified until this PR’s exact head passes the complete CI matrix and the resulting merged `main` receives post-merge certification.
+Pass 6 is not declared certified until this branch’s exact integrated head passes the complete CI matrix and the resulting merged `main` receives post-merge certification.
 
 `verified_commit` advances only after an exact reviewed PR head passes full CI, merges, and the resulting `main` commit passes post-merge certification.

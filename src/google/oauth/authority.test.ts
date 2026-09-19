@@ -619,4 +619,70 @@ describe('direct Google OAuth authority', () => {
     const status = await googleOAuthAuthority.getStatus();
     expect(status.account).toBeUndefined();
   });
+
+  it('invalidates the tab-local browser access token when a sibling tab changes Google authorization state', async () => {
+    tokenMock.mockResolvedValueOnce(token('access-tab-a', CALENDAR_READ_SCOPE));
+    await googleOAuthAuthority.authorize('calendar.events.read');
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(true);
+
+    const storedAuthorization = localStorage.getItem('elara.google.authorization.v2');
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'elara.google.authorization.v2',
+      oldValue: storedAuthorization,
+      newValue: storedAuthorization,
+    }));
+
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(false);
+  });
+
+  it('fails silent browser token recovery closed when Google identity changes', async () => {
+    tokenMock.mockResolvedValueOnce(token('access-account-a', CALENDAR_READ_SCOPE));
+    const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
+
+    const persisted = localStorage.getItem('elara.google.authorization.v2');
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'elara.google.authorization.v2',
+      oldValue: persisted,
+      newValue: persisted,
+    }));
+
+    tokenMock.mockResolvedValueOnce(token('access-account-b', CALENDAR_READ_SCOPE));
+    let providerCalls = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.includes('userinfo') || url.includes('openidconnect')) return userinfoResponse('other@example.com');
+      providerCalls += 1;
+      return new Response('{}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    await expect(authorized.fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events'))
+      .rejects.toThrow('account continuity could not be verified');
+
+    expect(providerCalls).toBe(0);
+    expect(tokenMock).toHaveBeenLastCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
+      prompt: 'none',
+    });
+    expect((await googleOAuthAuthority.getStatus()).state).toBe('reauthorization-required');
+  });
+
+  it('rechecks the authorization revision immediately before Google API egress', async () => {
+    tokenMock.mockResolvedValueOnce(token('access-race', CALENDAR_READ_SCOPE));
+    const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
+    const providerFetch = vi.fn(async () => new Response('{}', { status: 200 }));
+    globalThis.fetch = providerFetch as unknown as typeof fetch;
+
+    await expect(authorized.fetch(
+      'https://www.googleapis.com/calendar/v3/calendars/primary/events',
+      undefined,
+      () => {
+        const current = JSON.parse(localStorage.getItem('elara.google.authorization.v2') ?? '{}') as Record<string, unknown>;
+        localStorage.setItem('elara.google.authorization.v2', JSON.stringify({ ...current, updatedAt: 'race-revision' }));
+      },
+    )).rejects.toThrow('authorization changed before the provider request');
+
+    expect(providerFetch).not.toHaveBeenCalled();
+  });
+
 });

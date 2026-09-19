@@ -84,6 +84,10 @@ The organic-memory classifier is treated as an untrusted selector, not an author
 
 The app may expose provider-produced thought summaries, but it does not treat hidden reasoning/signatures as a user-editable second transcript.
 
+Interactive streaming has finite live-memory ceilings before persistence: at most 50,000 provider events, 1,000,000 generated-text characters, 64,000 thought-summary characters, and 100,000 streamed function-argument characters per provider interaction stream. The provider enforces these limits before yielding oversized deltas, and the chat reducer independently enforces the text and thought ceilings so a future alternate adapter cannot bypass the live-state boundary. Persisted diagnostic truncation is defense-in-depth, not the resource limit.
+
+Tool-enabled turns freeze a single untrusted-context policy into every continuation. Attachments, recalled durable memory, and external provider results are evidence rather than instructions; application code, not model compliance, owns the recursive-read refusal and elevated-mutation behavior.
+
 ## 7. Verification and tests
 
 Use `src/gemini/*.test.ts`, tool-loop integration/read-only/runtime-context tests, multimodal tests, model/settings tests and the repository reliability gate. `memory-observer.test.ts` additionally pins the organic classifier's no-tools/no-memory contract, strict JSON handling, provider completion requirement and output ceiling. The gate explicitly forbids legacy `generateContent`, Worker routing for browser chat and obsolete SDK API-version configuration.

@@ -113,8 +113,8 @@ describe('direct Google OAuth authority', () => {
       prompt: '',
     });
     const status = await googleOAuthAuthority.getStatus();
-    expect(status.enabledCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
-    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
+    expect(status.enabledCapabilities).toEqual(expect.arrayContaining([...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES]));
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining([...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES]));
     expect(status.grantedProviderScopes).toContain(EMAIL_SCOPE);
     expect(status.state).toBe('connected');
     expect(status.sessionReady).toBe(true);
@@ -148,7 +148,7 @@ describe('direct Google OAuth authority', () => {
     });
     const status = await googleOAuthAuthority.getStatus();
     expect(status.sessionReady).toBe(true);
-    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining([...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES]));
   });
 
   it('reopens the canonical Workspace bundle with explicit consent for permission review', async () => {
@@ -162,7 +162,7 @@ describe('direct Google OAuth authority', () => {
       prompt: 'consent',
     });
     const status = await googleOAuthAuthority.getStatus();
-    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining([...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES]));
     expect(status.sessionReady).toBe(true);
   });
 

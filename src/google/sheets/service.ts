@@ -25,6 +25,8 @@ export interface GoogleSheetRange {
 }
 
 export interface GoogleSheetValuesResult {
+  readonly trust: 'untrusted-external';
+  readonly source: 'sheets';
   range?: string;
   majorDimension?: 'ROWS' | 'COLUMNS';
   values: readonly (readonly GoogleSheetCellValue[])[];
@@ -48,6 +50,8 @@ export interface GoogleSheetsExportResult {
 }
 
 export interface GoogleSpreadsheetSummary {
+  readonly trust: 'untrusted-external';
+  readonly source: 'sheets';
   spreadsheetId: string;
   driveFileId: string;
   title: string;
@@ -150,15 +154,40 @@ function sheetSummaries(payload: SpreadsheetResponse): GoogleSpreadsheetSummary[
   return result;
 }
 
+function spreadsheetSummary(payload: SpreadsheetResponse, fallbackId?: string, fallbackTitle = 'Untitled spreadsheet'): GoogleSpreadsheetSummary {
+  const id = typeof payload.spreadsheetId === 'string' && payload.spreadsheetId.trim()
+    ? payload.spreadsheetId.trim().slice(0, MAX_ID_LENGTH)
+    : fallbackId?.trim().slice(0, MAX_ID_LENGTH) ?? '';
+  if (!id) throw new Error('Google Sheets response did not contain a spreadsheet ID.');
+  const properties = payload.properties && typeof payload.properties === 'object' && !Array.isArray(payload.properties)
+    ? payload.properties as Record<string, unknown>
+    : {};
+  const title = typeof properties.title === 'string' && properties.title.trim()
+    ? properties.title.trim().slice(0, MAX_TITLE_LENGTH)
+    : fallbackTitle;
+  return {
+    trust: 'untrusted-external',
+    source: 'sheets',
+    spreadsheetId: id,
+    driveFileId: id,
+    title,
+    ...(typeof payload.spreadsheetUrl === 'string' && /^https:\/\/docs\.google\.com\/spreadsheets\//.test(payload.spreadsheetUrl) && payload.spreadsheetUrl.length <= 2_000
+      ? { spreadsheetUrl: payload.spreadsheetUrl }
+      : {}),
+    sheets: sheetSummaries(payload),
+  };
+}
+
 export class GoogleSheetsService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
-  async getSpreadsheet(spreadsheetIdValue: string): Promise<SpreadsheetResponse> {
-    const id = encodeURIComponent(spreadsheetId(spreadsheetIdValue));
+  async getSpreadsheet(spreadsheetIdValue: string): Promise<GoogleSpreadsheetSummary> {
+    const safeId = spreadsheetId(spreadsheetIdValue);
+    const id = encodeURIComponent(safeId);
     const fields = encodeURIComponent('spreadsheetId,spreadsheetUrl,properties(title,locale,timeZone),sheets(properties(sheetId,title,index,gridProperties(rowCount,columnCount)))');
     const access = await this.oauth.authorize('sheets.read');
     const response = await access.fetch(`${SHEETS_API}/${id}?fields=${fields}`);
-    return this.readJson<SpreadsheetResponse>(response);
+    return spreadsheetSummary(await this.readJson<SpreadsheetResponse>(response), safeId);
   }
 
   async readRange(spreadsheetIdValue: string, rangeValue: string): Promise<GoogleSheetValuesResult> {
@@ -171,6 +200,8 @@ export class GoogleSheetsService {
     const rawValues = Array.isArray(payload.values) ? payload.values.filter(Array.isArray) as readonly (readonly unknown[])[] : [];
     const values = rawValues.length ? normalizeValues(rawValues) : [];
     return {
+      trust: 'untrusted-external',
+      source: 'sheets',
       ...(typeof payload.range === 'string' ? { range: payload.range.slice(0, MAX_RANGE_LENGTH) } : {}),
       ...(payload.majorDimension === 'ROWS' || payload.majorDimension === 'COLUMNS' ? { majorDimension: payload.majorDimension } : {}),
       values,
@@ -204,6 +235,8 @@ export class GoogleSheetsService {
       ? normalizeValues(payload.updatedData.values.filter(Array.isArray) as readonly (readonly unknown[])[])
       : [];
     return {
+      trust: 'untrusted-external',
+      source: 'sheets',
       ...(typeof payload.updatedData?.range === 'string' ? { range: payload.updatedData.range.slice(0, MAX_RANGE_LENGTH) } : {}),
       ...(payload.updatedData?.majorDimension === 'ROWS' || payload.updatedData?.majorDimension === 'COLUMNS' ? { majorDimension: payload.updatedData.majorDimension } : {}),
       values: updatedValues,
@@ -237,6 +270,8 @@ export class GoogleSheetsService {
       ? normalizeValues(payload.updates.updatedData.values.filter(Array.isArray) as readonly (readonly unknown[])[])
       : safeValues;
     return {
+      trust: 'untrusted-external',
+      source: 'sheets',
       ...(typeof payload.updates?.updatedRange === 'string' ? { range: payload.updates.updatedRange.slice(0, MAX_RANGE_LENGTH) } : {}),
       values: updatedValues,
     };
@@ -293,22 +328,7 @@ export class GoogleSheetsService {
       ...(options.signal ? { signal: options.signal } : {}),
     }, () => requireMutationCurrent(options, 'Google Sheets create spreadsheet'));
     const payload = await this.readJson<SpreadsheetResponse>(response);
-    if (typeof payload.spreadsheetId !== 'string' || !payload.spreadsheetId.trim()) {
-      throw new Error('Google Sheets response did not contain a spreadsheet ID.');
-    }
-    const spreadsheetIdValue = payload.spreadsheetId.trim().slice(0, MAX_ID_LENGTH);
-    const properties = payload.properties && typeof payload.properties === 'object' && !Array.isArray(payload.properties)
-      ? payload.properties as Record<string, unknown>
-      : {};
-    return {
-      spreadsheetId: spreadsheetIdValue,
-      driveFileId: spreadsheetIdValue,
-      title: typeof properties.title === 'string' && properties.title.trim() ? properties.title.trim().slice(0, MAX_TITLE_LENGTH) : safeTitle,
-      ...(typeof payload.spreadsheetUrl === 'string' && /^https:\/\/docs\.google\.com\/spreadsheets\//.test(payload.spreadsheetUrl)
-        ? { spreadsheetUrl: payload.spreadsheetUrl.slice(0, 2_000) }
-        : {}),
-      sheets: sheetSummaries(payload),
-    };
+    return spreadsheetSummary(payload, undefined, safeTitle);
   }
 
   async addSheet(

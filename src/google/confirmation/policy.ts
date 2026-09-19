@@ -1,12 +1,14 @@
 import { z } from 'zod';
 import type { GoogleToolRisk } from '../tools/contracts';
 
+export const MAX_CONFIRMATION_REVIEW_CHARS = 1_250_000;
+
 export const writeConfirmationSchema = z.object({
   tool: z.string().min(1),
   risk: z.enum(['write', 'destructive', 'send']),
   resourceSummary: z.string().min(1),
   /** Optional full text that the human must be able to inspect before approving the mutation. */
-  reviewText: z.string().min(1).max(10_000).optional(),
+  reviewText: z.string().min(1).max(MAX_CONFIRMATION_REVIEW_CHARS).optional(),
   /**
    * True when external provider content was observed before the model proposed
    * this mutation. Such content is evidence, never authority, so the broker

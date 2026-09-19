@@ -17,7 +17,7 @@ export default defineConfig({
       // Phone-specific reliability, media handoff/delivery, Workspace Drive,
       // and Generation Activity behaviour run against the canonical 9:16-ish
       // Android canvas with reduced motion.
-      testMatch: /(?:mobile-reliability|vtt|media-handoff|media-delivery\.phase3|media-lifecycle\.acceptance|generation-activity|google-drive)\.spec\.ts/,
+      testMatch: /(?:mobile-reliability|vtt|media-handoff|media-delivery\.phase3|media-lifecycle\.acceptance|generation-activity|google-drive|google-picker)\.spec\.ts/,
       use: {
         browserName: 'chromium',
         viewport: { width: 412, height: 915 },
@@ -49,6 +49,11 @@ export default defineConfig({
     // The Google settings E2E drives the real OAuth authority, which refuses
     // to run without a configured client id. Client IDs are public browser
     // configuration (see .env.example); this value exists only for tests.
-    env: { ...process.env, VITE_GOOGLE_CLIENT_ID: 'e2e-public-client-id.apps.googleusercontent.com' },
+    env: {
+      ...process.env,
+      VITE_GOOGLE_CLIENT_ID: 'e2e-public-client-id.apps.googleusercontent.com',
+      VITE_GOOGLE_PICKER_API_KEY: 'e2e-public-picker-api-key',
+      VITE_GOOGLE_CLOUD_PROJECT_NUMBER: '123456789012',
+    },
   },
 });

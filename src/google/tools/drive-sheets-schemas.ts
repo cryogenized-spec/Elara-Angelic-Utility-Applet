@@ -5,10 +5,15 @@ const fileIdSchema = z.string().trim().min(1).max(DRIVE_LIMITS.maxFileIdLength);
 const a1RangeSchema = z.string().trim().min(1).max(500);
 const pageTokenSchema = z.string().trim().min(1).max(DRIVE_LIMITS.maxPageTokenLength);
 const etagSchema = z.string().trim().min(2).max(DRIVE_LIMITS.maxEtagLength);
-const rowSchema = z.array(z.unknown()).max(100);
-const valuesSchema = z.array(rowSchema).min(1).max(1000);
+const cellValueSchema = z.union([z.string().max(50_000), z.number().finite(), z.boolean(), z.null()]);
+const rowSchema = z.array(cellValueSchema).max(100);
+const valuesSchema = z.array(rowSchema).min(1).max(1000).superRefine((rows, context) => {
+  const cellCount = rows.reduce((total, row) => total + row.length, 0);
+  if (cellCount > 10_000) context.addIssue({ code: 'custom', message: 'Google Sheets writes are limited to 10,000 cells per operation.' });
+  if (new TextEncoder().encode(JSON.stringify({ values: rows })).byteLength > 1_000_000) context.addIssue({ code: 'custom', message: 'Google Sheets write exceeds the application request limit.' });
+});
 const updateRequestSchema = z.record(z.string(), z.unknown());
-const cellValueSchema = z.string().max(50_000);
+const inputModeSchema = z.enum(['literal', 'userEntered']).optional();
 
 function singleCellPart(value: string): string | undefined {
   const normalized = value.trim();
@@ -95,12 +100,23 @@ export const driveSheetsToolArgumentSchemas = {
   }).strict(),
   'sheets.getSpreadsheet': z.object({ spreadsheetId: fileIdSchema }).strict(),
   'sheets.readRange': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema }).strict(),
-  'sheets.writeRange': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema, values: valuesSchema }).strict(),
-  'sheets.appendRows': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema, values: valuesSchema }).strict(),
+  'sheets.createSpreadsheet': z.object({
+    title: z.string().trim().min(1).max(500),
+    firstSheetTitle: z.string().trim().min(1).max(100).optional(),
+  }).strict(),
+  'sheets.addSheet': z.object({
+    spreadsheetId: fileIdSchema,
+    title: z.string().trim().min(1).max(100),
+    rowCount: z.number().int().min(1).max(100_000).optional(),
+    columnCount: z.number().int().min(1).max(1_000).optional(),
+  }).strict(),
+  'sheets.writeRange': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema, values: valuesSchema, inputMode: inputModeSchema }).strict(),
+  'sheets.appendRows': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema, values: valuesSchema, inputMode: inputModeSchema }).strict(),
   'sheets.updateCell': z.object({
     spreadsheetId: fileIdSchema,
     range: singleCellA1Schema,
     value: cellValueSchema,
+    inputMode: inputModeSchema,
   }).strict(),
   'sheets.insertRows': z.object({
     spreadsheetId: fileIdSchema,

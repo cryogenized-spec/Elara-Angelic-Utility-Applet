@@ -79,8 +79,9 @@ describe('read-only retry classification', () => {
   it('passes cancellation to the actual provider boundary and rejects aborted reads', async () => {
     vi.spyOn(googleOAuthAuthority, 'getStatus').mockResolvedValue(ready);
     const controller = new AbortController();
-    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit, guard?: () => void) => {
-      controller.abort(); guard?.();
+    const fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit, guard?: () => void | Promise<void>) => {
+      controller.abort();
+      await guard?.();
       return new Response(JSON.stringify({ items: [] }));
     });
     vi.spyOn(googleOAuthAuthority, 'authorizeExisting').mockImplementation(async (capability) => ({ capability, fetch }));

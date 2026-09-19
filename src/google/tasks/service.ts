@@ -29,6 +29,8 @@ export interface GoogleTaskAssignmentInfo {
 }
 
 export interface GoogleTask {
+  readonly trust: 'untrusted-external';
+  readonly source: 'tasks';
   readonly id: string;
   readonly title?: string;
   readonly etag?: string;
@@ -45,23 +47,33 @@ export interface GoogleTask {
   readonly links?: readonly GoogleTaskLink[];
   readonly webViewLink?: string;
   readonly assignmentInfo?: GoogleTaskAssignmentInfo;
+  readonly truncatedFields?: readonly string[];
 }
 
 export interface TaskListSummary {
+  readonly trust: 'untrusted-external';
+  readonly source: 'tasks';
   readonly id: string;
   readonly title: string;
   readonly etag?: string;
   readonly updated?: string;
+  readonly truncatedFields?: readonly string[];
 }
 
 export interface GoogleTaskListPage {
+  readonly trust: 'untrusted-external';
+  readonly source: 'tasks';
   readonly items: readonly TaskListSummary[];
   readonly nextPageToken?: string;
+  readonly truncated?: boolean;
 }
 
 export interface GoogleTaskPage {
+  readonly trust: 'untrusted-external';
+  readonly source: 'tasks';
   readonly items: readonly GoogleTask[];
   readonly nextPageToken?: string;
+  readonly truncated?: boolean;
 }
 
 export interface CreateSemanticTaskInput {
@@ -109,6 +121,37 @@ type TaskPayload = {
 type TaskListPayload = { id?: string; etag?: string; title?: string; updated?: string };
 type TasksResponse = { items?: TaskPayload[]; nextPageToken?: string };
 type TaskListsResponse = { items?: TaskListPayload[]; nextPageToken?: string };
+
+const MAX_PROVIDER_LINKS = 20;
+const MAX_PROVIDER_TEXT_LENGTH = 2_000;
+
+function projectedProviderText(
+  value: unknown,
+  maxLength: number,
+  field: string,
+  truncated: Set<string>,
+  trim = false,
+): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = (trim ? value.trim() : value).split('\0').join('');
+  if (!normalized) return undefined;
+  if (normalized.length > maxLength) {
+    truncated.add(field);
+    return normalized.slice(0, maxLength);
+  }
+  return normalized;
+}
+
+function projectedProviderId(value: unknown, maxLength: number, field: string, truncated: Set<string>): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  if (normalized.length > maxLength) {
+    truncated.add(field);
+    return undefined;
+  }
+  return normalized;
+}
 
 function boundedId(value: string, field: string, maxLength: number): string {
   const normalized = value.trim();
@@ -206,12 +249,23 @@ export class GoogleTasksService {
     if (safeMaxResults !== undefined) url.searchParams.set('maxResults', String(safeMaxResults));
     const response = await access.fetch(url);
     const payload = await this.readJson<TaskListsResponse>(response);
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    const items = rawItems.slice(0, MAX_TASK_LIST_RESULTS).flatMap((item) => {
+      try {
+        return [this.mapTaskList(item)];
+      } catch {
+        return [];
+      }
+    });
+    const nextPageToken = typeof payload.nextPageToken === 'string' && payload.nextPageToken.length <= MAX_PAGE_TOKEN_LENGTH
+      ? payload.nextPageToken
+      : undefined;
     return {
-      items: (payload.items ?? []).flatMap((item) => {
-        if (!item.id || !item.title) return [];
-        return [{ id: item.id, title: item.title, etag: item.etag, updated: item.updated }];
-      }),
-      nextPageToken: payload.nextPageToken,
+      trust: 'untrusted-external',
+      source: 'tasks',
+      items,
+      ...(nextPageToken ? { nextPageToken } : {}),
+      ...((rawItems.length > MAX_TASK_LIST_RESULTS || (typeof payload.nextPageToken === 'string' && !nextPageToken)) ? { truncated: true } : {}),
     };
   }
 
@@ -268,7 +322,17 @@ export class GoogleTasksService {
     this.applyParams(url, params);
     const response = await access.fetch(url);
     const payload = await this.readJson<TasksResponse>(response);
-    return { items: this.mapTasks(payload.items ?? []), nextPageToken: payload.nextPageToken };
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    const nextPageToken = typeof payload.nextPageToken === 'string' && payload.nextPageToken.length <= MAX_PAGE_TOKEN_LENGTH
+      ? payload.nextPageToken
+      : undefined;
+    return {
+      trust: 'untrusted-external',
+      source: 'tasks',
+      items: this.mapTasks(rawItems.slice(0, MAX_TASK_RESULTS)),
+      ...(nextPageToken ? { nextPageToken } : {}),
+      ...((rawItems.length > MAX_TASK_RESULTS || (typeof payload.nextPageToken === 'string' && !nextPageToken)) ? { truncated: true } : {}),
+    };
   }
 
   async getTask(taskListId: string, taskId: string): Promise<GoogleTask> {
@@ -346,39 +410,85 @@ export class GoogleTasksService {
   }
 
   private mapTaskList(item: TaskListPayload): TaskListSummary {
-    if (!item.id || !item.title) throw new Error('Google Tasks response contained an incomplete task list.');
-    return { id: item.id, title: item.title, etag: item.etag, updated: item.updated };
+    const truncated = new Set<string>();
+    const id = projectedProviderId(item.id, MAX_TASK_LIST_ID_LENGTH, 'id', truncated);
+    const title = projectedProviderText(item.title, MAX_TITLE_LENGTH, 'title', truncated);
+    if (!id || !title) throw new Error('Google Tasks response contained an incomplete task list.');
+    const etag = projectedProviderId(item.etag, 1_024, 'etag', truncated);
+    const updated = projectedProviderText(item.updated, 128, 'updated', truncated, true);
+    return {
+      trust: 'untrusted-external',
+      source: 'tasks',
+      id,
+      title,
+      ...(etag ? { etag } : {}),
+      ...(updated ? { updated } : {}),
+      ...(truncated.size ? { truncatedFields: [...truncated].sort() } : {}),
+    };
   }
 
   private mapTasks(items: TaskPayload[]): GoogleTask[] {
-    return items.flatMap((item) => item.id ? [this.mapTask(item)] : []);
+    return items.flatMap((item) => {
+      try {
+        return item.id ? [this.mapTask(item)] : [];
+      } catch {
+        return [];
+      }
+    });
   }
 
   private mapTask(item: TaskPayload): GoogleTask {
-    if (!item.id) throw new Error('Google Tasks response contained a task without an id.');
+    const truncated = new Set<string>();
+    const id = projectedProviderId(item.id, MAX_TASK_ID_LENGTH, 'id', truncated);
+    if (!id) throw new Error('Google Tasks response contained a task without a usable id.');
     const info = item.assignmentInfo;
     const surfaceType = assignmentSurface(info?.surfaceType);
+    const rawLinks = Array.isArray(item.links) ? item.links : [];
+    if (rawLinks.length > MAX_PROVIDER_LINKS) truncated.add('links');
+    const links = rawLinks.slice(0, MAX_PROVIDER_LINKS).map((link) => ({
+      ...(projectedProviderText(link.type, 128, 'links.type', truncated, true) ? { type: projectedProviderText(link.type, 128, 'links.type', truncated, true) } : {}),
+      ...(projectedProviderText(link.description, MAX_PROVIDER_TEXT_LENGTH, 'links.description', truncated) ? { description: projectedProviderText(link.description, MAX_PROVIDER_TEXT_LENGTH, 'links.description', truncated) } : {}),
+      ...(projectedProviderText(link.link, MAX_PROVIDER_TEXT_LENGTH, 'links.link', truncated, true) ? { link: projectedProviderText(link.link, MAX_PROVIDER_TEXT_LENGTH, 'links.link', truncated, true) } : {}),
+    }));
+    const title = projectedProviderText(item.title, MAX_TITLE_LENGTH, 'title', truncated);
+    const etag = projectedProviderId(item.etag, 1_024, 'etag', truncated);
+    const notes = projectedProviderText(item.notes, MAX_NOTES_LENGTH, 'notes', truncated);
+    const completed = projectedProviderText(item.completed, 128, 'completed', truncated, true);
+    const parent = projectedProviderId(item.parent, MAX_TASK_ID_LENGTH, 'parent', truncated);
+    const position = projectedProviderText(item.position, 256, 'position', truncated, true);
+    const updated = projectedProviderText(item.updated, 128, 'updated', truncated, true);
+    const webViewLink = projectedProviderText(item.webViewLink, MAX_PROVIDER_TEXT_LENGTH, 'webViewLink', truncated, true);
+    const linkToTask = projectedProviderText(info?.linkToTask, MAX_PROVIDER_TEXT_LENGTH, 'assignmentInfo.linkToTask', truncated, true);
+    const driveFileId = projectedProviderId(info?.driveResourceInfo?.driveFileId, 500, 'assignmentInfo.driveFileId', truncated);
+    const resourceKey = projectedProviderText(info?.driveResourceInfo?.resourceKey, 1_024, 'assignmentInfo.resourceKey', truncated, true);
+    const space = projectedProviderText(info?.spaceInfo?.space, 1_024, 'assignmentInfo.space', truncated, true);
+
     return {
-      id: item.id,
-      title: item.title,
-      etag: item.etag,
-      notes: item.notes,
+      trust: 'untrusted-external',
+      source: 'tasks',
+      id,
+      ...(title ? { title } : {}),
+      ...(etag ? { etag } : {}),
+      ...(notes !== undefined ? { notes } : {}),
       scheduledDate: scheduledDateFromProviderDue(item.due),
       status: taskStatus(item.status),
-      completed: item.completed,
-      parent: item.parent,
-      position: item.position,
-      updated: item.updated,
-      deleted: item.deleted,
-      hidden: item.hidden,
-      links: item.links?.map((link) => ({ type: link.type, description: link.description, link: link.link })),
-      webViewLink: item.webViewLink,
-      assignmentInfo: info ? {
-        linkToTask: info.linkToTask,
-        surfaceType,
-        driveResourceInfo: info.driveResourceInfo ? { driveFileId: info.driveResourceInfo.driveFileId, resourceKey: info.driveResourceInfo.resourceKey } : undefined,
-        spaceInfo: info.spaceInfo ? { space: info.spaceInfo.space } : undefined,
-      } : undefined,
+      ...(completed ? { completed } : {}),
+      ...(parent ? { parent } : {}),
+      ...(position ? { position } : {}),
+      ...(updated ? { updated } : {}),
+      ...(typeof item.deleted === 'boolean' ? { deleted: item.deleted } : {}),
+      ...(typeof item.hidden === 'boolean' ? { hidden: item.hidden } : {}),
+      ...(links.length ? { links } : {}),
+      ...(webViewLink ? { webViewLink } : {}),
+      ...(info ? {
+        assignmentInfo: {
+          ...(linkToTask ? { linkToTask } : {}),
+          ...(surfaceType ? { surfaceType } : {}),
+          ...((driveFileId || resourceKey) ? { driveResourceInfo: { ...(driveFileId ? { driveFileId } : {}), ...(resourceKey ? { resourceKey } : {}) } } : {}),
+          ...(space ? { spaceInfo: { space } } : {}),
+        },
+      } : {}),
+      ...(truncated.size ? { truncatedFields: [...truncated].sort() } : {}),
     };
   }
 

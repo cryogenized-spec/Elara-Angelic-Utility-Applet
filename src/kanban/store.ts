@@ -134,6 +134,7 @@ export async function fetchBoard(
         showCompleted: true,
         showHidden: true,
         showDeleted: false,
+        showAssigned: true,
         maxResults: 100,
       });
       recordProviderPage();

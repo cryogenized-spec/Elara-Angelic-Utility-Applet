@@ -1,10 +1,10 @@
 import { expect, test, type Page } from "@playwright/test";
 
-type FixtureTask = { id: string; title: string; notes?: string; due?: string | null; status: string; etag: string; position: string };
+type FixtureTask = { id: string; title: string; notes?: string; due?: string | null; status: string; etag: string; position: string; assignmentInfo?: { surfaceType: 'DOCUMENT'; linkToTask?: string } };
 
 async function seedWorkspace(page: Page, existing = false) {
   const lists = [{ id: 'studio', title: 'Studio projects' }, { id: 'personal', title: 'Personal' }, { id: 'reading', title: 'Reading list' }, { id: 'later', title: 'Someday' }];
-  const tasks: FixtureTask[] = [{ id: 'review', title: 'Review the launch proposal', notes: 'Read the source email and confirm the next steps.', due: '2020-01-01T00:00:00Z', status: 'needsAction', etag: 'one', position: '0001' }, ...Array.from({ length: 8 }, (_, index) => ({ id: `task-${index}`, title: `Project milestone ${index + 1}`, status: 'needsAction', etag: 'one', position: `000${index + 2}` }))];
+  const tasks: FixtureTask[] = [{ id: 'review', title: 'Review the launch proposal', notes: 'Read the source email and confirm the next steps.', due: '2020-01-01T00:00:00Z', status: 'needsAction', etag: 'one', position: '0001', assignmentInfo: { surfaceType: 'DOCUMENT', linkToTask: 'https://tasks.google.com/task/review' } }, ...Array.from({ length: 8 }, (_, index) => ({ id: `task-${index}`, title: `Project milestone ${index + 1}`, status: 'needsAction', etag: 'one', position: `000${index + 2}` }))];
   await page.route('https://accounts.google.com/gsi/client', (route) => route.fulfill({ contentType: 'text/javascript', body: `window.google = { accounts: { oauth2: { initTokenClient: (config) => ({ requestAccessToken: () => config.callback({ access_token: "kanban-test-token", expires_in: 3600, scope: config.scope }) }), revoke: (_token, callback) => callback({}) } } };` }));
   await page.route('https://www.googleapis.com/oauth2/v2/userinfo*', (route) => route.fulfill({ json: { email: 'test@example.com', name: 'Kanban Test' } }));
   await page.route('https://tasks.googleapis.com/**', async (route) => {
@@ -192,6 +192,7 @@ test("reordering uses Google move, supports dragging and disables filtered reord
   await page.getByLabel("Search tasks").fill("");
   await page.getByRole("button", { name: "Review the launch proposal", exact: true }).click();
   await page.getByRole("button", { name: "Delete task", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Delete from Google?" })).toContainText("originating assignment");
   await page.getByLabel("Type DELETE to confirm").fill("DELETE");
   await page.getByRole("button", { name: "Confirm removal" }).click();
   await expect(page.getByRole("button", { name: "Review the launch proposal", exact: true })).toHaveCount(0);

@@ -330,6 +330,7 @@ describe("snapshot reconciliation", () => {
         pageToken: "tasks-2",
         showHidden: true,
         showCompleted: true,
+        showAssigned: true,
       }),
     );
   });

@@ -215,6 +215,11 @@ function KanbanWorkspace({
     setDragged(null);
     setDropTarget(null);
   }
+  const removalAffectsProviderAssignment = removal?.kind === "task"
+    ? Boolean(removal.task.assignmentInfo)
+    : removal?.kind === "list"
+      ? Boolean(board?.tasks.some((task) => task.listId === removal.list.id && task.assignmentInfo))
+      : false;
   function visible(task: BoardTask) {
     return (
       `${task.title} ${task.notes ?? ""}`
@@ -965,6 +970,11 @@ function KanbanWorkspace({
                   ? `Permanently delete “${removal.task.title}”. Its subtasks may also be deleted. This cannot be undone here.`
                   : `Remove “${removal.rule.name}” from the internal memo rules. Google tasks will not be changed.`}
             </p>
+            {removalAffectsProviderAssignment && (
+              <p className="kb-dialog-copy">
+                Assigned tasks can originate in another Google surface such as Docs or Chat. Deleting this {removal.kind === "list" ? "list" : "task"} may also remove the originating assignment.
+              </p>
+            )}
             <label>
               {removal.kind === "list"
                 ? "Type the list title to confirm"

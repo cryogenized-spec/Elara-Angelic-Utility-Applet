@@ -113,7 +113,7 @@ function normalizeValues(values: readonly (readonly unknown[])[]): readonly (rea
     if (!Array.isArray(row)) throw new Error('Google Sheets values must be an array of rows.');
     if (row.length > MAX_COLUMNS_PER_ROW) throw new Error(`Google Sheets rows are limited to ${MAX_COLUMNS_PER_ROW} cells.`);
     cells += row.length;
-    if (cells > MAX_CELLS) throw new Error(`Google Sheets writes are limited to ${MAX_CELLS} cells per operation.`);
+    if (cells > MAX_CELLS) throw new Error('Google Sheets writes are limited to 10,000 cells per operation.');
     return row.map(normalizeCellValue);
   });
   if (new TextEncoder().encode(JSON.stringify({ values: normalized })).byteLength > MAX_REQUEST_BODY_BYTES) {

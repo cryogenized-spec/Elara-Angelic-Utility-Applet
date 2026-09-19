@@ -85,10 +85,25 @@ describe('pairing store', () => {
     expect(window.localStorage.getItem('elara.autonomy.pairing.v1')).not.toContain(PAIRING.token);
   });
 
-  it('prefers a direct runtime token and then reuses the in-memory session token', async () => {
+  it('prefers a direct runtime token only while shared pairing metadata still names that installation', async () => {
     const direct = { ...PAIRING, token: '  direct-runtime-token  ' };
+    savePairing(direct);
     await expect(resolvePairingToken(direct)).resolves.toBe('direct-runtime-token');
     await expect(resolvePairingToken({ ...direct, token: '' })).resolves.toBe('direct-runtime-token');
+  });
+
+  it('refuses a stale sibling-tab pairing object after the shared installation is removed', async () => {
+    savePairing(PAIRING);
+    await expect(resolvePairingToken(PAIRING)).resolves.toBe(PAIRING.token);
+
+    window.localStorage.removeItem('elara.autonomy.pairing.v1');
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'elara.autonomy.pairing.v1',
+      oldValue: JSON.stringify({ workerUrl: PAIRING.workerUrl, installationId: PAIRING.installationId }),
+      newValue: null,
+    }));
+
+    await expect(resolvePairingToken(PAIRING)).resolves.toBe('');
   });
 });
 

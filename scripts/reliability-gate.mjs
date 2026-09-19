@@ -129,10 +129,12 @@ if (!googleBrokerSource.includes("warning.dataset.untrustedContext = 'true';") |
 const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
 if (!toolLoopSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google tool loop must route mutation batches through the shared confirmation broker.');
 if (!toolLoopSource.includes('containsUntrustedExternal') || !toolLoopSource.includes('isUntrustedExternalReadTool') || !toolLoopSource.includes('UNTRUSTED_EXTERNAL_READ_PREFIXES') || !toolLoopSource.includes('batchStartedTainted') || !toolLoopSource.includes('untrustedContext: true as const')) throw new Error('Reliability gate: external provider reads must intrinsically taint later mutation confirmations.');
+if (!toolLoopSource.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) throw new Error('Reliability gate: a mutation without a valid confirmation request must fail closed before execution.');
 if (!toolLoopSource.includes('results:')) throw new Error('Reliability gate: Google tool loop must return grouped tool results to Gemini.');
 const executorSource = readFileSync(join(root, 'src/google/tools/executor.ts'), 'utf8');
 if (!executorSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: direct Google tool execution must retain the shared confirmation broker.');
 if (!executorSource.includes('confirmationRequestForCall')) throw new Error('Reliability gate: Google executor must expose safe confirmation request derivation for batched mutations.');
+if (!executorSource.includes('writeConfirmationSchema.parse') || !executorSource.includes('MAX_CONFIRMATION_REVIEW_CHARS')) throw new Error('Reliability gate: confirmation payloads must be schema-validated and bounded.');
 const calendarServiceSource = readFileSync(join(root, 'src/google/calendar/service.ts'), 'utf8');
 if (!calendarServiceSource.includes("authorize('calendar.events.write')")) throw new Error('Reliability gate: Calendar writes must use the dedicated write capability.');
 const calendarHandlerSource = readFileSync(join(root, 'src/google/tools/service-handlers.ts'), 'utf8');

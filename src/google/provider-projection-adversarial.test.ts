@@ -55,6 +55,41 @@ describe('Workspace provider payload boundary', () => {
     expect(result.truncatedFields).toEqual(expect.arrayContaining(['summary', 'description', 'attendees', 'recurrence']));
   });
 
+  it('bounds Calendar settings and free/busy provider overrun', async () => {
+    const settingsPayload = {
+      items: Array.from({ length: 101 }, (_, index) => ({ id: `setting-${index}`, value: 'v'.repeat(2_100) })),
+    };
+    const settingsService = new GoogleCalendarService(oauthWith(() => new Response(JSON.stringify(settingsPayload), { status: 200 })));
+    const settings = await settingsService.getSettings();
+    expect(settings.trust).toBe('untrusted-external');
+    expect(settings.source).toBe('calendar');
+    expect(Object.keys(settings.settings)).toHaveLength(100);
+    expect(settings.settings['setting-0']).toHaveLength(2_000);
+    expect(settings.truncated).toBe(true);
+
+    const freeBusyPayload = {
+      timeMin: '2026-09-19T08:00:00+02:00',
+      timeMax: '2026-09-20T08:00:00+02:00',
+      calendars: {
+        primary: {
+          busy: Array.from({ length: 201 }, () => ({ start: '2026-09-19T08:00:00+02:00', end: '2026-09-19T08:30:00+02:00' })),
+          errors: Array.from({ length: 21 }, () => ({ reason: 'busy', domain: 'calendar' })),
+        },
+      },
+    };
+    const freeBusyService = new GoogleCalendarService(oauthWith(() => new Response(JSON.stringify(freeBusyPayload), { status: 200 })));
+    const freeBusy = await freeBusyService.queryFreeBusy(
+      '2026-09-19T08:00:00+02:00',
+      '2026-09-20T08:00:00+02:00',
+      ['primary'],
+    );
+    expect(freeBusy.calendars).toHaveLength(1);
+    expect(freeBusy.calendars[0]?.busy).toHaveLength(200);
+    expect(freeBusy.calendars[0]?.errors).toHaveLength(20);
+    expect(freeBusy.calendars[0]?.truncated).toBe(true);
+    expect(freeBusy.truncated).toBe(true);
+  });
+
   it('bounds Tasks notes and links with visible truncation metadata', async () => {
     const task = {
       id: 'task-1',

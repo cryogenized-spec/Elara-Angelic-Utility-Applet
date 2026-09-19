@@ -17,7 +17,7 @@ vi.mock('../../autonomy/cloud/pairing', () => ({
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 import { requestGoogleAuthorizationCode } from './code-flow';
 import { loadPairing, resolvePairingToken } from '../../autonomy/cloud/pairing';
-import { googleOAuthAuthority } from './authority';
+import { googleOAuthAuthority, reviewGoogleWorkspacePermissions } from './authority';
 import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE, GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES, googleWorkspaceOnboardingScopes } from './capability-policy';
 
 const CALENDAR_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
@@ -150,6 +150,22 @@ describe('direct Google OAuth authority', () => {
     expect(status.sessionReady).toBe(true);
     expect(status.grantedCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
   });
+
+  it('reopens the canonical Workspace bundle with explicit consent for permission review', async () => {
+    tokenMock.mockResolvedValueOnce(token('review-token', googleWorkspaceOnboardingScopes().join(' ')));
+
+    await reviewGoogleWorkspacePermissions();
+
+    expect(tokenMock).toHaveBeenCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: WORKSPACE_SCOPE,
+      prompt: 'consent',
+    });
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
+    expect(status.sessionReady).toBe(true);
+  });
+
 
   it('records GIS scopes and persists metadata without persisting the access token', async () => {
     tokenMock.mockResolvedValueOnce(token('secret-access-token', CALENDAR_READ_SCOPE));

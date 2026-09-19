@@ -11,6 +11,7 @@ vi.mock('@google/genai', () => ({ GoogleGenAI }));
 vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey, getGeminiLockboxStatus }));
 
 import { geminiTurnPort } from './provider';
+import { GEMINI_STREAM_LIMITS } from './stream-limits';
 
 async function* events(...items: unknown[]) {
   for (const item of items) yield item;
@@ -353,6 +354,55 @@ describe('Gemini provider stream fidelity', () => {
     expect(collected.at(-1)).toMatchObject({
       type: 'failed',
       error: { message: 'Gemini produced invalid function-call arguments.' },
+    });
+  });
+});
+
+
+describe('Gemini provider live stream resource ceilings', () => {
+  beforeEach(() => {
+    createInteraction.mockReset();
+    getGeminiApiKey.mockReset();
+    getGeminiLockboxStatus.mockReset();
+    GoogleGenAI.mockReset();
+    GoogleGenAI.mockImplementation(function MockGoogleGenAI(this: { interactions: { create: typeof createInteraction } }) {
+      this.interactions = { create: createInteraction };
+    });
+    getGeminiLockboxStatus.mockResolvedValue('unlocked');
+    getGeminiApiKey.mockResolvedValue('test-gemini-key');
+  });
+
+  it('fails closed before yielding an oversized streamed function-call payload', async () => {
+    createInteraction.mockResolvedValue(events(
+      { event_type: 'interaction.created', interaction: { id: 'interaction-limit', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-limit', name: 'calendar.listEvents' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: 'x'.repeat(GEMINI_STREAM_LIMITS.maxFunctionArgumentChars + 1) } },
+      { event_type: 'step.stop', index: 0 },
+    ));
+
+    const collected: Array<{ type?: string; error?: { message?: string } }> = [];
+    for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Check calendar.' })) collected.push(event);
+
+    expect(collected.some((event) => event.type === 'tool-call')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { message: 'Gemini function-call arguments exceeded the live safety limit.' },
+    });
+  });
+
+  it('fails closed when streamed assistant text exceeds the live character ceiling', async () => {
+    createInteraction.mockResolvedValue(events(
+      { event_type: 'interaction.created', interaction: { id: 'interaction-text-limit', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'text', text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxTextChars + 1) } },
+    ));
+
+    const collected: Array<{ type?: string; error?: { message?: string } }> = [];
+    for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Write.' })) collected.push(event);
+
+    expect(collected.some((event) => event.type === 'text-delta')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { message: 'Gemini response exceeded the live text safety limit.' },
     });
   });
 });

@@ -1,5 +1,7 @@
 import type { AuthorizedGoogleRequest, GoogleOAuthAuthority } from '../oauth/contracts';
+import { readBoundedProviderJson } from '../provider-json-boundary';
 
+const MAX_PROVIDER_JSON_BYTES = 4 * 1024 * 1024;
 const MAX_CALENDAR_ID_LENGTH = 500;
 const MAX_TIME_PARAMETER_LENGTH = 128;
 const MAX_EVENT_ID_LENGTH = 1024;
@@ -439,7 +441,7 @@ export class GoogleCalendarService {
     const response = await request.fetch(request.url);
     if (!response.ok) throw new Error(`Google Calendar request failed (${response.status}).`);
 
-    const payload = (await response.json()) as CalendarEventsResponse;
+    const payload = await readBoundedProviderJson<CalendarEventsResponse>(response, { operation: 'Google Calendar events request', maxBytes: MAX_PROVIDER_JSON_BYTES });
     const events = (payload.items ?? []).map(normalizeEventSummary).filter((event): event is CalendarEventSummary => event !== null);
     return { events, ...(payload.nextPageToken ? { nextPageToken: payload.nextPageToken } : {}) };
   }
@@ -465,7 +467,7 @@ export class GoogleCalendarService {
     if (input.showOwnOrganizationOnly !== undefined) url.searchParams.set('showOwnOrganizationOnly', String(input.showOwnOrganizationOnly));
     const response = await access.fetch(url);
     if (!response.ok) throw new Error(`Google Calendar list request failed (${response.status}).`);
-    const payload = (await response.json()) as CalendarListResponse;
+    const payload = await readBoundedProviderJson<CalendarListResponse>(response, { operation: 'Google Calendar list request', maxBytes: MAX_PROVIDER_JSON_BYTES });
     const calendars = (payload.items ?? [])
       .filter((entry): entry is typeof entry & { id: string } => Boolean(entry.id))
       .map((entry) => ({
@@ -484,7 +486,7 @@ export class GoogleCalendarService {
     const access = await this.oauth.authorize('calendar.settings.read');
     const response = await access.fetch(new URL('https://www.googleapis.com/calendar/v3/users/me/settings'));
     if (!response.ok) throw new Error(`Google Calendar settings request failed (${response.status}).`);
-    const payload = (await response.json()) as CalendarSettingsResponse;
+    const payload = await readBoundedProviderJson<CalendarSettingsResponse>(response, { operation: 'Google Calendar settings request', maxBytes: MAX_PROVIDER_JSON_BYTES });
     const settings: Record<string, string> = {};
     for (const item of payload.items ?? []) if (item.id && item.value !== undefined) settings[item.id] = item.value;
     return settings;
@@ -507,7 +509,7 @@ export class GoogleCalendarService {
       body: JSON.stringify({ timeMin: safeTimeMin, timeMax: safeTimeMax, ...(safeTimeZone ? { timeZone: safeTimeZone } : {}), items: safeCalendarIds.map((id) => ({ id })) }),
     });
     if (!response.ok) throw new Error(`Google Calendar free/busy request failed (${response.status}).`);
-    const payload = (await response.json()) as CalendarFreeBusyResponse;
+    const payload = await readBoundedProviderJson<CalendarFreeBusyResponse>(response, { operation: 'Google Calendar free/busy request', maxBytes: MAX_PROVIDER_JSON_BYTES });
     return {
       timeMin: payload.timeMin ?? safeTimeMin,
       timeMax: payload.timeMax ?? safeTimeMax,
@@ -555,7 +557,7 @@ export class GoogleCalendarService {
     const response = await access.fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(safeEvent) });
     if (response.status === 409 && generatedId) return this.getEventWithAccess(access, safeCalendarId, generatedId);
     if (!response.ok) throw new Error(`Google Calendar create request failed (${response.status}).`);
-    return normalizeEventDetail((await response.json()) as CalendarApiEvent);
+    return normalizeEventDetail(await readBoundedProviderJson<CalendarApiEvent>(response, { operation: 'Google Calendar event request', maxBytes: MAX_PROVIDER_JSON_BYTES }));
   }
 
   async updateSemanticEvent(input: CalendarEventSemanticUpdateInput): Promise<CalendarEventDetail> {
@@ -607,7 +609,7 @@ export class GoogleCalendarService {
     const url = withSendUpdates(new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(safeCalendarId)}/events/${encodeURIComponent(safeEventId)}`), sendUpdates);
     const response = await access.fetch(url, { method: 'PATCH', headers, body: JSON.stringify(safePatch) });
     if (!response.ok) throwMutationFailure(response, 'update');
-    return normalizeEventDetail((await response.json()) as CalendarApiEvent);
+    return normalizeEventDetail(await readBoundedProviderJson<CalendarApiEvent>(response, { operation: 'Google Calendar event request', maxBytes: MAX_PROVIDER_JSON_BYTES }));
   }
 
   async deleteEvent(calendarId = 'primary', eventId: string, etag: string, sendUpdates?: CalendarSendUpdates): Promise<{ deleted: true; calendarId: string; eventId: string }> {
@@ -627,7 +629,7 @@ export class GoogleCalendarService {
     if (timeZone) url.searchParams.set('timeZone', timeZone);
     const response = await access.fetch(url);
     if (!response.ok) throw new Error(`Google Calendar event request failed (${response.status}).`);
-    return normalizeEventDetail((await response.json()) as CalendarApiEvent);
+    return normalizeEventDetail(await readBoundedProviderJson<CalendarApiEvent>(response, { operation: 'Google Calendar event request', maxBytes: MAX_PROVIDER_JSON_BYTES }));
   }
 
   private buildEventsRequest(

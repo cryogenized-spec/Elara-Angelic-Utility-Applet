@@ -1,6 +1,6 @@
 import { googleToolCallSchema, type GoogleToolCall, type GoogleToolDescriptor, type GoogleToolName, type GoogleToolRisk } from './contracts';
 import { googleToolRegistry } from './registry';
-import { evaluateWriteConfirmation, isConfirmationFresh, type WriteConfirmationRequest } from '../confirmation/policy';
+import { evaluateWriteConfirmation, isConfirmationFresh, MAX_CONFIRMATION_REVIEW_CHARS, writeConfirmationSchema, type WriteConfirmationRequest } from '../confirmation/policy';
 import { requestGoogleToolConfirmation } from '../confirmation/broker';
 import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus } from '../oauth/contracts';
 import { isCapabilityAuthorized } from '../oauth/capability-policy';
@@ -128,7 +128,14 @@ function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<stri
   if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
   if ((tool === 'gmail.sendMessage' || tool === 'gmail.replyMessage') && typeof args.body === 'string') return args.body;
   if (tool === 'sheets.updateCell' && typeof args.value === 'string') return args.value || '(empty string)';
-  return undefined;
+  // Every other mutation exposes the exact validated argument object. A prose
+  // summary is not enough authority for bulk rows, document edits, task notes,
+  // calendar fields, or Drive metadata that the model actually proposed.
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return undefined;
+  }
 }
 function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, fallback: string): string {
   const id = value(args, 'id') ?? value(args, 'ref');
@@ -223,15 +230,20 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
   }
 }
 
-function staticConfirmationRequest(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, descriptor: GoogleToolDescriptor, requestedAt: string): WriteConfirmationRequest {
-  const reviewText = confirmationReviewText(tool, args);
-  return {
-    tool: descriptor.name,
-    risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>,
-    resourceSummary: confirmationSummary(tool, args, descriptor.description),
-    ...(reviewText ? { reviewText } : {}),
-    requestedAt,
-  };
+function staticConfirmationRequest(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, descriptor: GoogleToolDescriptor, requestedAt: string): WriteConfirmationRequest | null {
+  try {
+    const reviewText = confirmationReviewText(tool, args);
+    if (reviewText && reviewText.length > MAX_CONFIRMATION_REVIEW_CHARS) return null;
+    return writeConfirmationSchema.parse({
+      tool: descriptor.name,
+      risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>,
+      resourceSummary: confirmationSummary(tool, args, descriptor.description),
+      ...(reviewText ? { reviewText } : {}),
+      requestedAt,
+    });
+  } catch {
+    return null;
+  }
 }
 
 export function confirmationRequestForCall(
@@ -246,6 +258,7 @@ export function confirmationRequestForCall(
   let args: Readonly<Record<string, unknown>>;
   try { args = validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
   const request = staticConfirmationRequest(parsed.data.tool, args, descriptor, now.toISOString());
+  if (!request) return null;
   if (parsed.data.tool !== 'memory.reconcile') return request;
   const targetRef = value(args, 'targetRef');
   const relation = value(args, 'relation') ?? 'related';

@@ -1,7 +1,9 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { readLockboxFixtureRecord, writeLockboxFixtureRecord } from './lockbox-test-fixtures';
 import {
   GEMINI_LOCKBOX_IDLE_TIMEOUT_MS,
+  GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH,
   GEMINI_LOCKBOX_PIN_MAX_LENGTH,
   GEMINI_LOCKBOX_PIN_MIN_LENGTH,
   clearGeminiApiKey,
@@ -14,6 +16,7 @@ import {
   getGeminiLockboxStatus,
   isGeminiApiKeyIdle,
   isGeminiLockboxPin,
+  isStrongGeminiLockboxPin,
   lockGeminiApiKey,
   saveGeminiApiKey,
   touchGeminiApiKeyActivity,
@@ -23,8 +26,8 @@ import {
 
 const TEST_KEY = 'test-gemini-key-material';
 const PASSWORD = 'correct-horse-battery-staple';
-const PIN = '284619';
-const NEW_PIN = '731528';
+const PIN = '2846197531';
+const NEW_PIN = '7315284062';
 const LEGACY_STORAGE_KEY = 'elara.gemini.api-key';
 
 beforeEach(async () => {
@@ -68,10 +71,31 @@ describe('encrypted Gemini API Lockbox', () => {
     expect(isGeminiLockboxPin('12345')).toBe(false);
     expect(isGeminiLockboxPin('123456')).toBe(true);
     expect(isGeminiLockboxPin('12345678')).toBe(true);
-    expect(isGeminiLockboxPin('123456789')).toBe(false);
+    expect(isGeminiLockboxPin('123456789012')).toBe(true);
+    expect(isGeminiLockboxPin('1234567890123')).toBe(false);
+    expect(isStrongGeminiLockboxPin('12345678')).toBe(false);
+    expect(isStrongGeminiLockboxPin('1234567890')).toBe(true);
     expect(isGeminiLockboxPin('12a456')).toBe(false);
     expect(GEMINI_LOCKBOX_PIN_MIN_LENGTH).toBe(6);
-    expect(GEMINI_LOCKBOX_PIN_MAX_LENGTH).toBe(8);
+    expect(GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH).toBe(10);
+    expect(GEMINI_LOCKBOX_PIN_MAX_LENGTH).toBe(12);
+  });
+
+  it('keeps a legacy 6-digit PIN record unlockable after the stronger creation policy', async () => {
+    const legacyPin = '284619';
+    await saveGeminiApiKey(TEST_KEY, legacyPin);
+    const record = await readLockboxFixtureRecord('gemini-api-key');
+    if (!record) throw new Error('expected seeded Lockbox record');
+    await writeLockboxFixtureRecord({ ...record, security: { mode: 'pin' } });
+
+    lockGeminiApiKey();
+    await unlockGeminiApiKeyWithPin(legacyPin);
+    expect(await getGeminiApiKey()).toBe(TEST_KEY);
+  });
+
+  it('rejects legacy-strength PINs for new or re-enabled protection', async () => {
+    await expect(configureGeminiApiKeyWithPin(TEST_KEY, '123456')).rejects.toThrow('10–12 digit PIN');
+    await expect(enableGeminiLockboxWithPin('123456')).rejects.toThrow('10–12 digit PIN');
   });
 
   it('creates and unlocks a fresh Lockbox with the PIN mode', async () => {

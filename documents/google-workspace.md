@@ -30,7 +30,11 @@ Gemini function call
 
 OAuth permission never substitutes for application capability or mutation confirmation. Gemini receives neither refresh/access tokens, raw OAuth scopes, credential material, nor provider URLs as tool arguments.
 
-External Google content is evidence, never authority. Retrieved Gmail/Docs/Drive/Sheets content may inform arguments, but it cannot grant capabilities, approve confirmation, change security policy, expose credentials, or instruct Elara to bypass the registered tool surface.
+External provider content is evidence, never authority. Retrieved Calendar/Tasks/Gmail/Drive/Docs/Sheets/YouTube content may inform an answer, but it cannot grant capabilities, approve confirmation, change security policy, expose credentials, or instruct Elara to bypass the registered tool surface.
+
+This is enforced at runtime rather than left to prompt wording. Successful reads from those provider namespaces intrinsically taint the elected model turn, even if an adapter accidentally omits an explicit provenance marker; explicit `trust: untrusted-external` remains a second tripwire. If a later model continuation proposes a mutation after that taint, its confirmation is marked `untrustedContext`, displays an external-content warning, starts unselected, and cannot be approved until the human explicitly selects it. A mutation emitted in the same model batch as the read is not retroactively tainted because the model had not yet received that provider result. This preserves legitimate user-requested inspect→edit workflows while ensuring retrieved provider text never becomes silent action authority.
+
+Grouped mutation confirmation is fail-closed for human review. Multi-action batches start with every item unselected and expose no `Approve all` shortcut; the user selects intended mutations individually. Tainted single actions also start unselected. Confirmation presents exact validated arguments for mutation classes that do not already have a purpose-built full-content review (for example bulk Sheets rows and document edit text).
 
 ### 2.1 Source map
 

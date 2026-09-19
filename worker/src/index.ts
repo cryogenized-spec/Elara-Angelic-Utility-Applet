@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { z } from 'zod';
 import { googleToolNameSchema } from '../../src/google/tools/contracts';
 import { googleGeminiFunctionDeclarationsForPlane } from '../../src/google/tools/gemini-declarations';
-import { ELARA_INTERNAL_HEADER, deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
+import { ELARA_INTERNAL_HEADER, deriveInstallationId, internalWakeMarker, verifyBearerToken } from '../../src/autonomy/protocol';
 import { autonomyPreflight, handleAutonomyRoute } from './autonomy/routes';
 
 // The autonomy engine Durable Object (one per installation). Re-exported
@@ -41,7 +41,7 @@ const requestSchema = z.object({
   generationConfig: z.object({
     thinkingLevel: z.string().optional(),
     thinkingSummaries: z.enum(['auto', 'none']).optional(),
-    maxOutputTokens: z.number().int().min(1).optional(),
+    maxOutputTokens: z.number().int().min(1).max(65_536).optional(),
     seed: z.number().int().min(0).optional(),
     stopSequences: z.array(z.string().min(1).max(128)).max(5).optional(),
   }).optional(),
@@ -65,7 +65,7 @@ function allowedOrigin(request: Request, env: Env): string | null {
 function corsHeaders(request: Request, env: Env): Headers {
   const headers = new Headers({
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     Vary: 'Origin',
   });
   const origin = allowedOrigin(request, env);
@@ -83,15 +83,32 @@ function jsonResponse(request: Request, env: Env, body: unknown, status = 200): 
   return new Response(JSON.stringify(body), { status, headers });
 }
 
+function bearerOf(request: Request): string | null {
+  return request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? null;
+}
+
+async function requireProviderAdmission(request: Request, env: Env): Promise<Response | null> {
+  const token = env.ELARA_INSTALLATION_TOKEN?.trim() ?? '';
+  if (!token) return jsonResponse(request, env, { code: 'configuration', message: 'Worker installation admission is not configured.' }, 503);
+  if (!(await verifyBearerToken(bearerOf(request), token))) {
+    return jsonResponse(request, env, { code: 'auth', message: 'A valid installation token is required.' }, 401);
+  }
+  const origin = request.headers.get('Origin');
+  if (origin && !allowedOrigin(request, env)) return jsonResponse(request, env, { code: 'authz', message: 'Origin is not authorized.' }, 403);
+  return null;
+}
+
 function healthResponse(request: Request, env: Env): Response {
   const hasCredential = Boolean(env.GEMINI_API_KEY);
   const hasOriginPolicy = configuredOrigins(env).length > 0;
+  const hasAdmission = Boolean(env.ELARA_INSTALLATION_TOKEN?.trim());
   return jsonResponse(request, env, {
     service: 'elara-gemini',
-    status: hasCredential && hasOriginPolicy ? 'healthy' : 'degraded',
+    status: hasCredential && hasOriginPolicy && hasAdmission ? 'healthy' : 'degraded',
     api: true,
     credentialConfigured: hasCredential,
     originPolicyConfigured: hasOriginPolicy,
+    admissionConfigured: hasAdmission,
   }, 200);
 }
 
@@ -184,8 +201,8 @@ function toSafeEvent(raw: unknown): { name: string; data: SafeEvent } | null {
 
 async function handleGemini(request: Request, env: Env): Promise<Response> {
   if (!env.GEMINI_API_KEY) return jsonResponse(request, env, { code: 'configuration', message: 'Gemini Worker credential is not configured.' }, 503);
-  const origin = request.headers.get('Origin');
-  if (origin && !allowedOrigin(request, env)) return jsonResponse(request, env, { code: 'authz', message: 'Origin is not authorized.' }, 403);
+  const denied = await requireProviderAdmission(request, env);
+  if (denied) return denied;
   const contentType = request.headers.get('Content-Type') ?? '';
   if (!contentType.toLowerCase().includes('application/json')) return jsonResponse(request, env, { code: 'validation', message: 'Content-Type must be application/json.' }, 415);
   const payload: unknown = await request.json().catch(() => null);
@@ -280,8 +297,8 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
 
 async function handleTranscribe(request: Request, env: Env): Promise<Response> {
   if (!env.GEMINI_API_KEY) return jsonResponse(request, env, { code: 'configuration', message: 'Gemini Worker credential is not configured.' }, 503);
-  const origin = request.headers.get('Origin');
-  if (origin && !allowedOrigin(request, env)) return jsonResponse(request, env, { code: 'authz', message: 'Origin is not authorized.' }, 403);
+  const denied = await requireProviderAdmission(request, env);
+  if (denied) return denied;
   const contentType = (request.headers.get('Content-Type') ?? '').toLowerCase();
   if (!VTT_ALLOWED_MIME_TYPES.has(contentType)) return jsonResponse(request, env, { code: 'validation', message: 'Unsupported VTT audio type.' }, 415);
   const contentLength = Number(request.headers.get('Content-Length') ?? '0');

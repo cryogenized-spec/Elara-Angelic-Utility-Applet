@@ -48,8 +48,8 @@ async function unlockTestGemini(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
   await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
-  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
-  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('2468135790');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('2468135790');
   await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
@@ -141,7 +141,9 @@ test('Docs mobile flow carries tab and revision from inspect into confirmed writ
   await expect(dialog).toContainText('tab-1');
   await expect(dialog).toContainText('rev-1');
   expect(docsCalls.filter((call) => call.method === 'POST')).toHaveLength(0);
-  await dialog.getByRole('button', { name: '✓ Approve' }).click();
+  await expect(dialog.locator('[data-untrusted-context="true"]')).toBeVisible();
+  await dialog.getByRole('checkbox', { name: 'Approve docs.appendParagraph' }).check();
+  await dialog.getByRole('button', { name: '✓ Approve selected' }).click();
 
   await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('Updated the selected Doc tab safely.', { timeout: 15_000 });
   const write = docsCalls.find((call) => call.method === 'POST');

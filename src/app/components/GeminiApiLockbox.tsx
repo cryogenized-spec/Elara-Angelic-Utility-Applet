@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import {
+  GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH,
   GEMINI_LOCKBOX_PIN_MAX_LENGTH,
   GEMINI_LOCKBOX_PIN_MIN_LENGTH,
   clearGeminiApiKey,
@@ -13,6 +14,7 @@ import {
   clearYouTubeApiKey,
   saveYouTubeApiKey,
   isGeminiLockboxPin,
+  isStrongGeminiLockboxPin,
   lockGeminiApiKey,
   unlockGeminiApiKey,
   unlockGeminiApiKeyWithPin,
@@ -154,7 +156,7 @@ export function GeminiApiLockbox() {
     const pin = read(pinRef);
     const confirmation = read(confirmPinRef);
     if (!key) return setDetail('Enter the Gemini API key first.');
-    if (!isGeminiLockboxPin(pin)) return setDetail(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
+    if (!isStrongGeminiLockboxPin(pin)) return setDetail(`Use a ${GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN for new Lockbox protection.`);
     if (pin !== confirmation) return setDetail('The Lockbox PINs do not match.');
     try {
       await configureGeminiApiKeyWithPin(key, pin);
@@ -277,7 +279,7 @@ export function GeminiApiLockbox() {
   async function turnOnSecurity() {
     const pin = read(reenablePinRef);
     const confirmation = read(reenablePinConfirmRef);
-    if (!isGeminiLockboxPin(pin)) return setDetail(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
+    if (!isStrongGeminiLockboxPin(pin)) return setDetail(`Use a ${GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN for new Lockbox protection.`);
     if (pin !== confirmation) return setDetail('The new Lockbox PINs do not match.');
     try {
       await enableGeminiLockboxWithPin(pin);
@@ -367,7 +369,7 @@ export function GeminiApiLockbox() {
         <div>
           <span className="panel-kicker">LOCKBOX</span>
           <h2>Gemini API</h2>
-          <p>The API key is encrypted locally in Dexie. The unlock secret is never stored.</p>
+          <p>The API key is encrypted locally in Dexie. New PINs require 10–12 digits; passkey or a strong password provides better resistance to copied-profile attacks.</p>
         </div>
         <span className="worker-health__status" role="status" aria-label={`Gemini Lockbox status: ${status}`}>
           <span className="worker-health__dot" aria-hidden="true" />
@@ -378,7 +380,7 @@ export function GeminiApiLockbox() {
       {status === 'empty' && mode === 'pin' && (
         <>
           <label className="character-field"><span>Gemini API key</span><input ref={keyRef} type="password" aria-label="Gemini API key" placeholder="Paste your Gemini API key" autoComplete="off" spellCheck={false} /></label>
-          <label className="character-field"><span>Lockbox PIN</span><input ref={pinRef} type="password" aria-label="Lockbox PIN" placeholder="6–8 digits" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" onKeyDown={(event) => { if (event.key === 'Enter') void createPinLockbox(); }} /></label>
+          <label className="character-field"><span>Lockbox PIN</span><input ref={pinRef} type="password" aria-label="Lockbox PIN" placeholder="10–12 digits" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" onKeyDown={(event) => { if (event.key === 'Enter') void createPinLockbox(); }} /></label>
           <label className="character-field"><span>Confirm PIN</span><input ref={confirmPinRef} type="password" aria-label="Confirm Lockbox PIN" placeholder="Repeat the PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" onKeyDown={(event) => { if (event.key === 'Enter') void createPinLockbox(); }} /></label>
           <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={() => void createPinLockbox()}>Create PIN Lockbox</button></div>
         </>
@@ -388,7 +390,7 @@ export function GeminiApiLockbox() {
         <>
           <div className="worker-health__endpoint">Encrypted API key present · passkey is primary · PIN remains available as fallback</div>
           <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={() => void unlockWithPasskey()}>Unlock with Passkey</button></div>
-          <label className="character-field"><span>PIN fallback</span><input ref={pinRef} type="password" aria-label="Lockbox PIN" placeholder="Enter 6–8 digit PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="current-password" onKeyDown={(event) => { if (event.key === 'Enter') void unlockWithPin(); }} /></label>
+          <label className="character-field"><span>PIN fallback</span><input ref={pinRef} type="password" aria-label="Lockbox PIN" placeholder="Enter 6–12 digit PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="current-password" onKeyDown={(event) => { if (event.key === 'Enter') void unlockWithPin(); }} /></label>
           <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={() => void unlockWithPin()}>Unlock with PIN</button><button className="model-settings__button worker-health__button" type="button" onClick={() => void clear()}>Clear Lockbox</button></div>
         </>
       )}
@@ -396,7 +398,7 @@ export function GeminiApiLockbox() {
       {status === 'locked' && !hasPrimaryPasskey && pinCapable && (
         <>
           <div className="worker-health__endpoint">Encrypted API key present · key material unavailable until PIN unlock</div>
-          <label className="character-field"><span>Lockbox PIN</span><input ref={pinRef} type="password" aria-label="Lockbox PIN" placeholder="Enter 6–8 digit PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="current-password" onKeyDown={(event) => { if (event.key === 'Enter') void unlockWithPin(); }} /></label>
+          <label className="character-field"><span>Lockbox PIN</span><input ref={pinRef} type="password" aria-label="Lockbox PIN" placeholder="Enter 6–12 digit PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="current-password" onKeyDown={(event) => { if (event.key === 'Enter') void unlockWithPin(); }} /></label>
           <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={() => void unlockWithPin()}>Unlock</button><button className="model-settings__button worker-health__button" type="button" onClick={() => void clear()}>Forgot PIN? Clear Lockbox</button></div>
         </>
       )}
@@ -428,7 +430,7 @@ export function GeminiApiLockbox() {
           <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={lock}>Lock</button><button className="model-settings__button worker-health__button" type="button" onClick={() => void turnOffSecurity()}>Turn Security Off</button><button className="model-settings__button worker-health__button" type="button" onClick={() => void clear()}>Clear Lockbox</button></div>
           <div className="worker-health__endpoint"><strong>Change PIN</strong>
             <label className="character-field" style={{ marginTop: '0.6rem' }}><span>Current PIN</span><input ref={currentPinRef} type="password" aria-label="Current PIN" placeholder="Current PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="current-password" /></label>
-            <label className="character-field"><span>New PIN</span><input ref={newPinRef} type="password" aria-label="New PIN" placeholder="New 6–8 digit PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" /></label>
+            <label className="character-field"><span>New PIN</span><input ref={newPinRef} type="password" aria-label="New PIN" placeholder="New 10–12 digit PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" /></label>
             <label className="character-field"><span>Confirm new PIN</span><input ref={confirmNewPinRef} type="password" aria-label="Confirm new PIN" placeholder="Repeat new PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" onKeyDown={(event) => { if (event.key === 'Enter') void changePin(); }} /></label>
             <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={() => void changePin()}>Change PIN</button></div>
           </div>
@@ -445,7 +447,7 @@ export function GeminiApiLockbox() {
           </div>
           <div className="worker-health__endpoint"><strong>Change PIN</strong> · changing the PIN also removes the existing passkey because its wrapped secret is bound to the old PIN.
             <label className="character-field" style={{ marginTop: '0.6rem' }}><span>Current PIN</span><input ref={currentPinRef} type="password" aria-label="Current PIN for change" placeholder="Current PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="current-password" /></label>
-            <label className="character-field"><span>New PIN</span><input ref={newPinRef} type="password" aria-label="New PIN for change" placeholder="New 6–8 digit PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" /></label>
+            <label className="character-field"><span>New PIN</span><input ref={newPinRef} type="password" aria-label="New PIN for change" placeholder="New 10–12 digit PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" /></label>
             <label className="character-field"><span>Confirm new PIN</span><input ref={confirmNewPinRef} type="password" aria-label="Confirm new PIN for change" placeholder="Repeat new PIN" inputMode="numeric" maxLength={GEMINI_LOCKBOX_PIN_MAX_LENGTH} autoComplete="new-password" onKeyDown={(event) => { if (event.key === 'Enter') void changePin(); }} /></label>
             <div className="worker-health__actions"><button className="model-settings__button worker-health__button" type="button" onClick={() => void changePin()}>Change PIN</button></div>
           </div>
@@ -556,7 +558,7 @@ export function GeminiApiLockbox() {
         </>
       )}
 
-      <p className="worker-health__detail" aria-live="polite">{detail || (status === 'locked' ? `Unlock the encrypted API key before using Gemini. ${pinCapable ? 'The PIN field accepts 6–8 digits.' : 'Enter the Lockbox password.'}` : status === 'unlocked' ? mode === 'off' ? 'Security is off; the API key remains encrypted locally.' : 'The decrypted API key is held only in session memory.' : 'Create the Lockbox to encrypt and store your Gemini API key locally.')}</p>
+      <p className="worker-health__detail" aria-live="polite">{detail || (status === 'locked' ? `Unlock the encrypted API key before using Gemini. ${pinCapable ? 'Legacy PINs accept 6–12 digits; new PINs require 10–12 digits.' : 'Enter the Lockbox password.'}` : status === 'unlocked' ? mode === 'off' ? 'Security is off; the API key remains encrypted locally.' : 'The decrypted API key is held only in session memory.' : 'Create the Lockbox to encrypt and store your Gemini API key locally.')}</p>
     </div>
   );
 }

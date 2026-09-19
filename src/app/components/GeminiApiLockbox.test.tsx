@@ -23,7 +23,7 @@ import { writeUnopenableSecondaryRecord } from '../../persistence/lockbox-test-f
 const GEMINI_KEY = 'test-gemini-key-material';
 const YOUTUBE_KEY = 'AIzaSy-test-youtube-data-api-key';
 const PASSWORD = 'correct-horse-battery-staple';
-const PIN = '284619';
+const PIN = '2846197531';
 
 let container: HTMLDivElement;
 let root: Root;

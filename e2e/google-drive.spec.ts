@@ -127,8 +127,8 @@ async function unlockTestGemini(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
   await page.getByLabel('Gemini API key').fill('e2e-test-api-key');
-  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
-  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('2846197531');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('2846197531');
   await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
@@ -243,7 +243,9 @@ test.describe('Google Drive tool flow', () => {
     await expect(dialog).toContainText('matches the ETag read for it');
     expect(driveCalls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
 
-    await dialog.getByRole('button', { name: '✓ Approve' }).click();
+    await expect(dialog.locator('[data-untrusted-context="true"]')).toBeVisible();
+    await dialog.getByRole('checkbox', { name: 'Approve drive.updateFile' }).check();
+    await dialog.getByRole('button', { name: '✓ Approve selected' }).click();
 
     await expect.poll(() => driveCalls.filter((call) => call.method === 'PATCH').length).toBe(1);
     const rename = driveCalls.find((call) => call.method === 'PATCH');

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { executeGoogleTool, type GoogleToolExecutionContext } from './executor';
+import { confirmationRequestForCall, executeGoogleTool, type GoogleToolExecutionContext } from './executor';
 import type { GoogleCapabilityKey, GoogleOAuthAuthority } from '../oauth/contracts';
 
 function oauthFor(...capabilities: GoogleCapabilityKey[]): GoogleOAuthAuthority {
@@ -53,6 +53,17 @@ describe('executeGoogleTool', () => {
     expect(result.ok).toBe(true);
     expect(confirm).toHaveBeenCalledOnce();
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ risk: 'write' }));
+  });
+
+  it('shows exact validated Sheets rows before approval', () => {
+    const confirmation = confirmationRequestForCall(
+      { tool: 'sheets.writeRange', arguments: { spreadsheetId: 'sheet-1', range: 'Sheet1!A1:B2', values: [['item', 'count'], ['sample', 42]] } },
+      new Date('2026-09-04T06:00:00.000Z'),
+    );
+
+    expect(confirmation?.reviewText).toContain('"range": "Sheet1!A1:B2"');
+    expect(confirmation?.reviewText).toContain('"sample"');
+    expect(confirmation?.reviewText).toContain('42');
   });
 
   it('rejects invalid Drive/Sheets arguments at the trust boundary', async () => {

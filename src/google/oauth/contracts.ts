@@ -71,6 +71,11 @@ export interface GoogleOAuthStatus {
 
 export interface GoogleOAuthAuthority {
   authorize(capability: GoogleCapabilityKey): Promise<AuthorizedGoogleRequest>;
+  /**
+   * Obtain transport only from an already-enabled provider grant. This path
+   * must never initiate interactive consent; it is for timers/background UI.
+   */
+  authorizeExisting?(capability: GoogleCapabilityKey): Promise<AuthorizedGoogleRequest>;
   getStatus(): Promise<GoogleOAuthStatus>;
   disconnect(): Promise<void>;
 }

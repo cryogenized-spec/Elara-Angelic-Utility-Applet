@@ -60,14 +60,41 @@ export const boardStore = {
   },
   getSnapshot: () => state,
 };
-export async function currentAccount(): Promise<string | null> {
+async function boardAuthorization(): Promise<{ readyAccount: string | null; identityAccount: string | null; clearAllCaches: boolean }> {
   const status = await googleOAuthAuthority.getStatus();
-  return ["connected", "partially-authorized"].includes(status.state) &&
+  const identityAccount = status.account?.email?.trim().toLowerCase() || null;
+  const readyAccount = ["connected", "partially-authorized"].includes(status.state) &&
     status.grantedCapabilities.includes("tasks.read") &&
     status.sessionReady === true &&
-    status.account?.email
-    ? status.account.email.toLowerCase()
+    identityAccount
+    ? identityAccount
     : null;
+  return {
+    readyAccount,
+    identityAccount,
+    clearAllCaches: status.state === "disconnected" || status.state === "revoked",
+  };
+}
+
+async function pruneCachedAccounts(identityAccount: string | null, clearAll: boolean): Promise<void> {
+  await db.transaction('rw', db.boards, db.readSchedules, async () => {
+    if (clearAll) {
+      await db.boards.clear();
+      await db.readSchedules.clear();
+      return;
+    }
+    if (!identityAccount) return;
+    for (const account of await db.boards.toCollection().primaryKeys()) {
+      if (account !== identityAccount) await db.boards.delete(account);
+    }
+    for (const account of await db.readSchedules.toCollection().primaryKeys()) {
+      if (account !== identityAccount) await db.readSchedules.delete(account);
+    }
+  });
+}
+
+export async function currentAccount(): Promise<string | null> {
+  return (await boardAuthorization()).readyAccount;
 }
 
 /** Fetch all pages before publishing, so a failed page never looks like remote deletions. */
@@ -146,8 +173,10 @@ export function syncBoard(reason: 'manual' | 'automatic' | 'poll' | 'mutation' =
   let leasedAccount: string | null = null;
   inFlight = (async () => {
     try {
-      const account = await currentAccount();
+      const authorization = await boardAuthorization();
+      await pruneCachedAccounts(authorization.identityAccount, authorization.clearAllCaches);
       signal.throwIfAborted();
+      const account = authorization.readyAccount;
       if (account !== retryAccount) {
         retryAccount = account;
         publish({ failures: 0, nextRetryAt: null, phase: 'idle', error: null });
@@ -436,7 +465,13 @@ export function startBoardSync(): () => void {
     if (stopped || pageSuspended || observingIdentity || !navigator.onLine || document.visibilityState !== 'visible') return;
     observingIdentity = true;
     void currentAccount().then((account) => {
-      if (!stopped && retryAccount !== account) { cancelBoardSync(); retryAccount = null; publish({ board: null }); }
+      if (!stopped && retryAccount !== account) {
+        cancelBoardSync();
+        retryAccount = null;
+        publish({ board: null });
+        const restart = () => { if (!stopped) refresh('automatic'); };
+        if (inFlight) void inFlight.then(restart, restart); else restart();
+      }
     }).catch(() => undefined).finally(() => { observingIdentity = false; });
   }, 5000);
   return () => {

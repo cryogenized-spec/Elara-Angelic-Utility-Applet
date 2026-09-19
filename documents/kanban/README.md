@@ -44,9 +44,11 @@ On user request, the existing Gmail read and Tasks create tools can turn email i
 
 ## Identity and privacy
 
-OAuth identity, provider scopes, user-enabled capabilities, session readiness and durable refresh remain exclusively owned by `src/google/oauth/` and the existing paired-Worker implementation. The board does not replace or modify those authorities. It fails closed without an identified live account and scopes snapshots/rules by account email. Account changes disconnect the visible workspace; chat context also requires a matching live account. Cached data remains on the device for that account.
+OAuth identity, provider scopes, user-enabled capabilities, session readiness and durable refresh remain exclusively owned by `src/google/oauth/` and the existing paired-Worker implementation. The board does not replace or modify those authorities. It fails closed without an identified live account and scopes snapshots/rules by account email. Background reads use the OAuth authority's noninteractive existing-grant path only; a timer or visibility event cannot initiate consent.
 
-Snapshots and subroutines are browser-local, not encrypted or cross-device storage. Clearing site data removes them without deleting Google tasks. Real consent/API behavior still needs acceptance testing with the installation's own Google client and deployed origin.
+Cache retention is deliberate: when a different Google identity is observed, Kanban deletes snapshots, read schedules and local subroutines belonging to the previous identity before loading the new account. A provider-revoked or explicitly disconnected Google state clears the Kanban cache entirely. A merely unavailable/locked live session does not erase the identified account's cache; it stays hidden until that same account is live again. Chat context likewise requires a matching live account.
+
+Snapshots and subroutines are browser-local, not encrypted or cross-device storage. Clearing site data also removes them without deleting Google tasks. Real consent/API behavior still needs acceptance testing with the installation's own Google client and deployed origin.
 
 ## Verification and limits
 

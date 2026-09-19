@@ -24,7 +24,8 @@ export const taskService = new GoogleTasksService({
   ...googleOAuthAuthority,
   async authorize(capability) {
     const account = await admittedAccount(capability);
-    const access = await googleOAuthAuthority.authorize(capability);
+    if (!googleOAuthAuthority.authorizeExisting) throw new Error('Google background authorization is unavailable. Refresh the Google session in Settings.');
+    const access = await googleOAuthAuthority.authorizeExisting(capability);
     await admittedAccount(capability, account);
     return { capability, fetch: async (input, init) => {
       init?.signal?.throwIfAborted();

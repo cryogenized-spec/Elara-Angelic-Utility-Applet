@@ -515,13 +515,21 @@ export const googleDrivePickerAuthority = createGoogleDrivePickerAuthority(
   () => ensureToken('drive.files.app.read', false),
 );
 
+async function authorizeCapability(capability: GoogleCapabilityKey, allowInteraction: boolean): Promise<AuthorizedGoogleRequest> {
+  const parsed = googleCapabilityKeySchema.parse(capability);
+  const descriptor = getGoogleScope(parsed);
+  if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
+  await ensureToken(parsed, allowInteraction);
+  return { capability: parsed, fetch: (input, init, beforeProviderFetch) => authorizedFetch(parsed, input, init, beforeProviderFetch) } satisfies AuthorizedGoogleRequest;
+}
+
 export const googleOAuthAuthority: GoogleOAuthAuthority = {
-  async authorize(capability) {
-    const parsed = googleCapabilityKeySchema.parse(capability);
-    const descriptor = getGoogleScope(parsed);
-    if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
-    await ensureToken(parsed, true);
-    return { capability: parsed, fetch: (input, init, beforeProviderFetch) => authorizedFetch(parsed, input, init, beforeProviderFetch) } satisfies AuthorizedGoogleRequest;
+  authorize(capability) {
+    return authorizeCapability(capability, true);
+  },
+
+  authorizeExisting(capability) {
+    return authorizeCapability(capability, false);
   },
 
   async getStatus() {

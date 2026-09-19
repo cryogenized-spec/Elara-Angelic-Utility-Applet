@@ -386,6 +386,51 @@ describe("snapshot reconciliation", () => {
     await syncBoard();
     expect(boardStore.getSnapshot().board).toBeNull();
   });
+  it("purges prior-account cache on identity switch and clears Kanban cache on disconnect", async () => {
+    await syncBoard();
+    await saveRoutine(initial.routines[0], null);
+    const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
+    try {
+      expect(await peer.table<Board>('boards').get(initial.account)).toBeDefined();
+      mocks.status.mockResolvedValue({
+        state: "connected",
+        enabledCapabilities: ["tasks.read", "tasks.write"], grantedProviderScopes: [], sessionReady: true,
+        grantedCapabilities: ["tasks.read", "tasks.write"],
+        account: { email: "two@example.com" },
+      });
+      mocks.tasks.mockResolvedValue({ items: [{ ...task, id: "two-task", title: "Second account" }] });
+      await syncBoard();
+      expect(await peer.table<Board>('boards').get(initial.account)).toBeUndefined();
+      expect(await peer.table<Board>('boards').get("two@example.com")).toMatchObject({ account: "two@example.com" });
+
+      mocks.status.mockResolvedValue({
+        state: "disconnected",
+        enabledCapabilities: [], grantedProviderScopes: [], sessionReady: false,
+        grantedCapabilities: [],
+      });
+      await syncBoard();
+      expect(await peer.table('boards').count()).toBe(0);
+      expect(await peer.table('readSchedules').count()).toBe(0);
+      expect(boardStore.getSnapshot().board).toBeNull();
+    } finally { peer.close(); }
+  });
+  it("automatically refreshes the new identity after an in-app account switch", async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const stop = startBoardSync();
+    try {
+      await vi.waitFor(() => expect(boardStore.getSnapshot().board?.account).toBe(initial.account));
+      mocks.status.mockResolvedValue({
+        state: "connected",
+        enabledCapabilities: ["tasks.read", "tasks.write"], grantedProviderScopes: [], sessionReady: true,
+        grantedCapabilities: ["tasks.read", "tasks.write"],
+        account: { email: "two@example.com" },
+      });
+      mocks.tasks.mockResolvedValue({ items: [{ ...task, id: "two-task", title: "Second account" }] });
+      await vi.advanceTimersByTimeAsync(5000);
+      await vi.waitFor(() => expect(boardStore.getSnapshot().board?.account).toBe("two@example.com"));
+    } finally { stop(); await syncBoard(); }
+  });
   it("does not publish results after the Google account changes mid-sync", async () => {
     mocks.tasks.mockImplementationOnce(
       async () => {

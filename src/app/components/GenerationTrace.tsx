@@ -117,7 +117,7 @@ function ActivityGlyph({
   fallback: IconName;
 }) {
   const ready = useSyncExternalStore(subscribeNotoEmojiReady, getNotoEmojiReady, () => false);
-  if (!ready) return <Icon name={fallback} size={15.4} />;
+  if (!ready) return <Icon name={fallback} size={14} />;
   return (
     <span
       className="generation-activity__noto-glyph"

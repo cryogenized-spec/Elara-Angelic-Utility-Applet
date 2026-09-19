@@ -1,5 +1,7 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
+import { readBoundedProviderJson } from '../provider-json-boundary';
 
+const MAX_PROVIDER_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_TASK_LIST_ID_LENGTH = 500;
 const MAX_TASK_ID_LENGTH = 500;
 const MAX_PAGE_TOKEN_LENGTH = 5_000;
@@ -336,7 +338,7 @@ export class GoogleTasksService {
 
   private async readJson<T extends object>(response: Response): Promise<T> {
     if (!response.ok) throw new Error(`Google Tasks request failed (${response.status}).`);
-    return (await response.json()) as T;
+    return readBoundedProviderJson<T>(response, { operation: 'Google Tasks request', maxBytes: MAX_PROVIDER_JSON_BYTES });
   }
 
   private async assertOk(response: Response): Promise<void> {

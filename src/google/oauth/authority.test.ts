@@ -18,13 +18,14 @@ import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 import { requestGoogleAuthorizationCode } from './code-flow';
 import { loadPairing, resolvePairingToken } from '../../autonomy/cloud/pairing';
 import { googleOAuthAuthority } from './authority';
-import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE } from './capability-policy';
+import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE, GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES, googleWorkspaceOnboardingScopes } from './capability-policy';
 
 const CALENDAR_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const CALENDAR_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 const EMAIL_SCOPE = 'https://www.googleapis.com/auth/userinfo.email';
 const OPENID_SCOPE = 'openid';
 const EXPECTED_SCOPE = (scope: string) => `${scope} ${EMAIL_SCOPE} ${OPENID_SCOPE}`;
+const WORKSPACE_SCOPE = `${googleWorkspaceOnboardingScopes().join(' ')} ${OPENID_SCOPE}`;
 
 const tokenMock = vi.mocked(requestGoogleAccessToken);
 const revokeMock = vi.mocked(revokeGoogleAccessToken);
@@ -102,19 +103,20 @@ describe('direct Google OAuth authority', () => {
     });
   });
 
-  it('connects a Google account with identity-only scopes and a live browser session', async () => {
-    tokenMock.mockResolvedValueOnce(token('account-access-token', EMAIL_SCOPE));
+  it('connects Google Workspace with one bundled GIS consent request and a live browser session', async () => {
+    tokenMock.mockResolvedValueOnce(token('account-access-token', googleWorkspaceOnboardingScopes().join(' ')));
     const authorized = await googleOAuthAuthority.authorize('google.account');
 
     expect(tokenMock).toHaveBeenCalledWith({
       clientId: 'test-client.apps.googleusercontent.com',
-      scope: `${EMAIL_SCOPE} ${OPENID_SCOPE}`,
+      scope: WORKSPACE_SCOPE,
       prompt: '',
     });
     const status = await googleOAuthAuthority.getStatus();
-    expect(status.enabledCapabilities).toContain('google.account');
-    expect(status.grantedCapabilities).toContain('google.account');
+    expect(status.enabledCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
     expect(status.grantedProviderScopes).toContain(EMAIL_SCOPE);
+    expect(status.state).toBe('connected');
     expect(status.sessionReady).toBe(true);
     expect(status.account).toEqual({ email: 'test@example.com', displayName: 'Test User' });
     expect(authorized.capability).toBe('google.account');
@@ -122,11 +124,11 @@ describe('direct Google OAuth authority', () => {
     const stored = localStorage.getItem('elara.google.authorization.v2') ?? '';
     expect(stored).toContain('google.account');
     expect(stored).not.toContain('account-access-token');
-    expect(stored).not.toContain('gmail.');
-    expect(stored).not.toContain('calendar.');
+    expect(stored).toContain('gmail.modify');
+    expect(stored).toContain('calendar.events.write');
   });
 
-  it('refreshes the account session without dropping already-enabled Workspace scopes', async () => {
+  it('refreshes the account session by requesting the canonical Workspace bundle', async () => {
     localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
       version: 3,
       enabledCapabilities: ['google.account', 'calendar.events.read'],
@@ -134,19 +136,19 @@ describe('direct Google OAuth authority', () => {
       account: { email: 'test@example.com', displayName: 'Test User' },
       updatedAt: new Date().toISOString(),
     }));
-    tokenMock.mockResolvedValueOnce(token('fresh-session-token', `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE}`));
+    tokenMock.mockResolvedValueOnce(token('fresh-session-token', googleWorkspaceOnboardingScopes().join(' ')));
 
     expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(false);
     await googleOAuthAuthority.authorize('google.account');
 
     expect(tokenMock).toHaveBeenCalledWith({
       clientId: 'test-client.apps.googleusercontent.com',
-      scope: `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE} ${OPENID_SCOPE}`,
+      scope: WORKSPACE_SCOPE,
       prompt: '',
     });
     const status = await googleOAuthAuthority.getStatus();
     expect(status.sessionReady).toBe(true);
-    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES));
   });
 
   it('records GIS scopes and persists metadata without persisting the access token', async () => {

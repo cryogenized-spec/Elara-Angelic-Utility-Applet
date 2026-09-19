@@ -114,7 +114,7 @@ The protected mutation classes include executable DOM sinks and syntax evasions,
 
 Runtime adversarial tests complement those static mutations. In particular, mutation tool calls must not execute after the confirmation shown to the user expires, and a delayed OAuth grant must not revive an expired mutation confirmation. Encrypted credential tests intentionally corrupt sealed material and require fail-closed reads/unlock behavior rather than plaintext recovery or silent weakening.
 
-These tests certify application, credential, authority, test, CI and deployment boundaries. They do not claim to solve indirect prompt injection or hostile model context; provenance, taint propagation and untrusted-content tool authorization remain a separate future security programme.
+These tests certify application, credential, authority, test, CI and deployment boundaries. Workspace Pass 6 adds a concrete indirect-prompt-injection boundary rather than claiming that model obedience alone is a security control: provider reads are bounded and marked `trust: untrusted-external`; a fixed provenance instruction accompanies the full Gemini tool interaction; and independent application-owned declared-tool, capability, schema and confirmation gates still decide what may execute. Adversarial tests require hostile Workspace content that asks for unrelated mutations to remain unable to manufacture tool authority. This reduces hostile-context risk without pretending arbitrary untrusted natural language can be made intrinsically safe.
 
 ## 10. Completion rule
 

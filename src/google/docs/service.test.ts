@@ -149,4 +149,23 @@ describe('GoogleDocsService', () => {
     await expect(service.appendParagraph('doc-1', 'tab-1', 'rev-old', 'Hello')).rejects.toThrow(/changed since it was inspected/i);
     expect(providerCalls).toBe(1);
   });
+
+  it('exports only fixed Docs formats through the bounded Drive export endpoint', async () => {
+    let requestedUrl = '';
+    const oauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({
+        capability,
+        fetch: async (input) => {
+          requestedUrl = String(input);
+          return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'application/pdf', 'content-length': '3' } });
+        },
+      }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+      disconnect: async () => undefined,
+    };
+    const service = new GoogleDocsService(oauth);
+    await expect(service.exportDocument('doc-1', 'pdf')).resolves.toMatchObject({ format: 'pdf', mimeType: 'application/pdf', extension: '.pdf' });
+    expect(requestedUrl).toContain('/drive/v3/files/doc-1/export?');
+    expect(decodeURIComponent(requestedUrl)).toContain('mimeType=application/pdf');
+  });
 });

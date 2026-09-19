@@ -145,7 +145,7 @@ function containsUntrustedExternal(value: unknown, depth = 0): boolean {
 
 const UNTRUSTED_EXTERNAL_READ_PREFIXES = ['calendar.', 'tasks.', 'gmail.', 'drive.', 'docs.', 'sheets.', 'youtube.'] as const;
 
-function isUntrustedExternalReadTool(tool: GoogleToolName): boolean {
+function isUntrustedExternalReadTool(tool: string): boolean {
   return isRegistryReadTool(tool) && UNTRUSTED_EXTERNAL_READ_PREFIXES.some((prefix) => tool.startsWith(prefix));
 }
 

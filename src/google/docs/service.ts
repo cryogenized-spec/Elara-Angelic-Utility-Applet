@@ -1,4 +1,5 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
+import { boundedGoogleTransferLimit, readBoundedGoogleContent } from '../drive/transfer-boundary';
 
 const MAX_DOCUMENT_ID_LENGTH = 500;
 const MAX_TITLE_LENGTH = 500;
@@ -26,6 +27,15 @@ export interface GoogleDocumentSummary {
 export interface GoogleDocsMutationOptions {
   readonly signal?: AbortSignal;
   readonly isGenerationActive?: () => boolean;
+}
+
+export type GoogleDocsExportFormat = 'pdf' | 'docx';
+
+export interface GoogleDocsExportResult {
+  readonly format: GoogleDocsExportFormat;
+  readonly mimeType: string;
+  readonly extension: '.pdf' | '.docx';
+  readonly bytes: Uint8Array;
 }
 
 export interface GoogleDocumentTabInspection {
@@ -219,6 +229,30 @@ export class GoogleDocsService {
       { requiredRevisionId: safeRevisionId },
       options,
     );
+  }
+
+  async exportDocument(
+    documentId: string,
+    format: GoogleDocsExportFormat,
+    options: GoogleDocsMutationOptions & { readonly maxBytes?: number } = {},
+  ): Promise<GoogleDocsExportResult> {
+    const safeDocumentId = bounded(documentId, 'document ID', MAX_DOCUMENT_ID_LENGTH);
+    const target = format === 'pdf'
+      ? { mimeType: 'application/pdf', extension: '.pdf' as const }
+      : format === 'docx'
+        ? { mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', extension: '.docx' as const }
+        : undefined;
+    if (!target) throw new Error('Google Docs export format must be pdf or docx.');
+    requireMutationCurrent(options, 'Google Docs export');
+    const access = await this.oauth.authorize('docs.read');
+    requireMutationCurrent(options, 'Google Docs export');
+    const response = await access.fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(safeDocumentId)}/export?mimeType=${encodeURIComponent(target.mimeType)}`,
+      options.signal ? { signal: options.signal } : undefined,
+      () => requireMutationCurrent(options, 'Google Docs export'),
+    );
+    const content = await readBoundedGoogleContent(response, 'Google Docs export', boundedGoogleTransferLimit(options.maxBytes), options.signal);
+    return { format, mimeType: target.mimeType, extension: target.extension, bytes: content.bytes };
   }
 
   async createDocument(title: string, options: GoogleDocsMutationOptions = {}): Promise<GoogleDocumentSummary> {

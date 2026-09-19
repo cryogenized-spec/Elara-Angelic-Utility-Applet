@@ -14,6 +14,7 @@ import {
   turnDurationMs,
   type GenerationState,
 } from './generation-state';
+import { GEMINI_STREAM_LIMITS } from '../gemini/stream-limits';
 
 function drive(events: GeminiStreamEvent[], generationId = 'gen-1', startAt = 1000, stepMs = 100): GenerationState {
   let state = createGenerationState(generationId, { startedAt: startAt });
@@ -338,5 +339,31 @@ describe('generation-state reducer', () => {
       ],
     });
     expect(persistedThoughtSummaryOf(state)).toBe('Why we did it.');
+  });
+});
+
+
+describe('live generation resource ceilings', () => {
+  it('fails the reducer before retaining oversized assistant text', () => {
+    const state = createGenerationState('gen-limit', { startedAt: 0 });
+    const next = applyGenerationEvent(state, {
+      generationId: 'gen-limit',
+      receivedAt: 1,
+      event: { type: 'text-delta', index: 0, text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxTextChars + 1) },
+    });
+    expect(next.phase).toBe('failed');
+    expect(next.transcript).toBe('');
+    expect(next.error?.message).toBe('Gemini response exceeded the live text safety limit.');
+  });
+
+  it('fails the reducer before retaining an oversized thought summary', () => {
+    const state = createGenerationState('gen-thought-limit', { startedAt: 0 });
+    const next = applyGenerationEvent(state, {
+      generationId: 'gen-thought-limit',
+      receivedAt: 1,
+      event: { type: 'thought-summary-delta', index: 0, text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxThoughtChars + 1) },
+    });
+    expect(next.phase).toBe('failed');
+    expect(next.error?.message).toBe('Gemini thought summary exceeded the live safety limit.');
   });
 });

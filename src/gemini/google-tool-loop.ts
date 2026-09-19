@@ -217,6 +217,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     if (!interactionId) interactionId = pendingCalls[0].callId;
 
     const results: GeminiToolResult[] = [];
+    // Freeze whether the model had already consumed external provider content
+    // before it generated this batch. Reads in the current batch cannot
+    // retroactively taint mutations that were proposed before those reads ran.
+    const batchStartedTainted = untrustedExternalSeen;
     const allowedCount = Math.max(0, maxToolCalls - executedCalls);
     const allowedCalls = pendingCalls.slice(0, allowedCount);
     for (const call of pendingCalls.slice(allowedCalls.length)) results.push(errorToolResult(call, 'Google tool-call limit exceeded for this turn.'));
@@ -235,14 +239,6 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         // Read-only callers use the registry risk classification as the single
         // mutation oracle. Namespace prefixes and handler maps confer no power.
         results.push(errorToolResult(call, 'TOOL_NOT_PERMITTED'));
-        continue;
-      }
-      if (untrustedExternalSeen && !isRegistryReadTool(call.name)) {
-        // External provider content is evidence, never action authority. Once a
-        // turn has consumed explicitly tainted content, a mutation requires a
-        // fresh user turn so hostile email/document/sheet text cannot pivot
-        // directly from read -> write inside one model interaction.
-        results.push(errorToolResult(call, 'UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN'));
         continue;
       }
       if (!isRegisteredToolHandler(call.name as GoogleToolName, executeOptions.handlers)) {
@@ -303,11 +299,14 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
     const confirmationNow = executeOptions.now?.() ?? new Date();
     for (const call of admittedMutationCalls) {
-      const confirmation = confirmationRequestForCall(call, confirmationNow, {
+      const baseConfirmation = confirmationRequestForCall(call, confirmationNow, {
         conversationId: executeOptions.conversationId,
         messageId: executeOptions.messageId,
         generationId: executeOptions.generationId,
       });
+      const confirmation = baseConfirmation && batchStartedTainted
+        ? { ...baseConfirmation, untrustedContext: true as const }
+        : baseConfirmation;
       if (confirmation) mutationEntries.push({ call, confirmation });
       else immediateCalls.push(call);
     }
@@ -357,16 +356,6 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           if (media) yield media;
         } else results.push(errorToolResult(call, result.code));
       }
-    }
-
-    // A batch may contain both reads and writes. Reads execute first, so a
-    // tainted provider result discovered in this same batch must invalidate
-    // every already-admitted mutation before confirmation is ever shown.
-    if (untrustedExternalSeen && mutationEntries.length) {
-      for (const entry of mutationEntries) {
-        results.push(errorToolResult(entry.call, 'UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN'));
-      }
-      mutationEntries.length = 0;
     }
 
     let decisions: boolean[] = [];

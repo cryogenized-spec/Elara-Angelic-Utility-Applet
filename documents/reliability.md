@@ -114,7 +114,7 @@ The protected mutation classes include executable DOM sinks and syntax evasions,
 
 Runtime adversarial tests complement those static mutations. In particular, mutation tool calls must not execute after the confirmation shown to the user expires, and a delayed OAuth grant must not revive an expired mutation confirmation. Encrypted credential tests intentionally corrupt sealed material and require fail-closed reads/unlock behavior rather than plaintext recovery or silent weakening.
 
-These tests certify application, credential, authority, test, CI and deployment boundaries. They do not claim to solve indirect prompt injection or hostile model context; provenance, taint propagation and untrusted-content tool authorization remain a separate future security programme.
+These tests certify application, credential, authority, test, CI and deployment boundaries. Indirect prompt injection now has one application-enforced containment boundary: a tool result explicitly marked `trust: untrusted-external` cannot be followed by a mutation in the same model turn; acting requires a fresh user turn. The confirmation broker also defaults grouped items unselected and has no approve-all control. Broader cross-turn provenance/taint propagation and semantic information-flow analysis remain future security work rather than a solved claim.
 
 ## 10. Completion rule
 

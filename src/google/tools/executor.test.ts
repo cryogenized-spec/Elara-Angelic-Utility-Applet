@@ -106,3 +106,24 @@ describe('executeGoogleTool', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 });
+
+
+describe('kanban tool trust boundary', () => {
+  it('blocks malformed deletions before confirmation', async () => {
+    const handler = vi.fn(); const confirm = vi.fn(async () => true);
+    const result = await executeGoogleTool({ tool: 'tasks.deleteTaskList', arguments: { taskListId: '' } }, { oauth: oauthFor('tasks.write'), handlers: { 'tasks.deleteTaskList': handler }, confirm });
+    expect(result).toMatchObject({ ok: false, code: 'INVALID_TOOL_CALL' });
+    expect(confirm).not.toHaveBeenCalled(); expect(handler).not.toHaveBeenCalled();
+  });
+  it('makes the list-wide destructive effect explicit and honors rejection', async () => {
+    const handler = vi.fn(); const confirm = vi.fn(async () => false);
+    const result = await executeGoogleTool({ tool: 'tasks.deleteTaskList', arguments: { taskListId: 'work' } }, { oauth: oauthFor('tasks.write'), handlers: { 'tasks.deleteTaskList': handler }, confirm });
+    expect(result).toMatchObject({ ok: false, code: 'USER_DECLINED' });
+    expect(confirm.mock.calls).toHaveLength(1);
+    expect(handler).not.toHaveBeenCalled();
+  });
+  it('rejects obsolete raw-resource task updates', async () => {
+    const result = await executeGoogleTool({ tool: 'tasks.updateTask', arguments: { taskListId: 'work', taskId: 't', patch: { title: 'Next' } } }, { oauth: oauthFor('tasks.write'), handlers: {} });
+    expect(result).toMatchObject({ ok: false, code: 'INVALID_TOOL_CALL' });
+  });
+});

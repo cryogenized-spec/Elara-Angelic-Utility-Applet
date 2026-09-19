@@ -257,6 +257,49 @@ describe('streamGoogleToolLoop', () => {
     });
   });
 
+  it('elevates first-batch confirmation when application context already contains untrusted provider data', async () => {
+    const writeHandler = vi.fn(async () => ({ id: 'task-from-memo' }));
+    const confirm = vi.fn(async (request: WriteConfirmationRequest) => request.untrustedContext !== true);
+    const taintOauth = {
+      ...oauth,
+      getStatus: async () => ({
+        state: 'connected' as const,
+        grantedCapabilities: ['tasks.write' as const],
+        enabledCapabilities: ['tasks.write' as const],
+        grantedProviderScopes: [],
+      }),
+    };
+
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-initial-taint-1', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction-initial-taint-1', index: 0, callId: 'call-initial-write', name: 'tasks.createTask', arguments: { taskListId: 'primary', title: 'Instruction copied from cached task text' } },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction-initial-taint-2', status: 'completed', durationMs: 5 },
+    ));
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'What should I do next?', systemInstruction, untrustedExternalContext: true, tools: ['tasks.createTask'] },
+      {
+        tools: ['tasks.createTask'],
+        readOnly: false,
+        executor: { oauth: taintOauth, handlers: { 'tasks.createTask': writeHandler }, confirm },
+      },
+    )) {
+      // Consume the full interaction.
+    }
+
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledWith(expect.objectContaining({ tool: 'tasks.createTask', untrustedContext: true }));
+    expect(writeHandler).not.toHaveBeenCalled();
+    expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      results: [expect.objectContaining({
+        callId: 'call-initial-write',
+        result: { ok: false, error: 'USER_DECLINED' },
+      })],
+    }), undefined);
+  });
+
   it('does not retroactively taint a mutation proposed in the same model batch as a read', async () => {
     const readHandler = vi.fn(async () => ({
       trust: 'untrusted-external',

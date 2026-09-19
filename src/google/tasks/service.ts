@@ -72,6 +72,7 @@ export interface CreateSemanticTaskInput {
 }
 
 export interface UpdateSemanticTaskInput {
+  readonly etag?: string;
   readonly taskListId: string;
   readonly taskId: string;
   readonly title?: string;
@@ -195,14 +196,19 @@ function assignmentSurface(value: string | undefined): GoogleTaskAssignmentSurfa
 export class GoogleTasksService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
-  async listTaskLists(pageToken?: string, maxResults?: number): Promise<GoogleTaskListPage> {
+  private changed(): void {
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('elara:tasks-changed'));
+  }
+
+  async listTaskLists(pageToken?: string, maxResults?: number, signal?: AbortSignal): Promise<GoogleTaskListPage> {
+    signal?.throwIfAborted();
     const access = await this.oauth.authorize('tasks.read');
     const url = new URL('https://tasks.googleapis.com/tasks/v1/users/@me/lists');
     const safePageToken = boundedPageToken(pageToken);
     const safeMaxResults = boundedMaxResults(maxResults, MAX_TASK_LIST_RESULTS, 'task-list maxResults');
     if (safePageToken) url.searchParams.set('pageToken', safePageToken);
     if (safeMaxResults !== undefined) url.searchParams.set('maxResults', String(safeMaxResults));
-    const response = await access.fetch(url);
+    const response = await access.fetch(url, { signal });
     const payload = await this.readJson<TaskListsResponse>(response);
     return {
       items: (payload.items ?? []).flatMap((item) => {
@@ -220,32 +226,40 @@ export class GoogleTasksService {
   }
 
   async createTaskList(title: string): Promise<TaskListSummary> {
+    const safeTitle = boundedText(title, 'task list title', MAX_TITLE_LENGTH);
     const access = await this.oauth.authorize('tasks.write');
     const response = await access.fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: boundedText(title, 'task list title', MAX_TITLE_LENGTH) }),
+      body: JSON.stringify({ title: safeTitle }),
     });
-    return this.mapTaskList(await this.readJson<TaskListPayload>(response));
+    const result = this.mapTaskList(await this.readJson<TaskListPayload>(response));
+    this.changed();
+    return result;
   }
 
-  async updateTaskList(taskListId: string, title: string): Promise<TaskListSummary> {
+  async updateTaskList(taskListId: string, title: string, etag?: string): Promise<TaskListSummary> {
     const access = await this.oauth.authorize('tasks.write');
     const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(etag ? { 'If-Match': etag } : {}) },
       body: JSON.stringify({ title: boundedText(title, 'task list title', MAX_TITLE_LENGTH) }),
     });
-    return this.mapTaskList(await this.readJson<TaskListPayload>(response));
+    const result = this.mapTaskList(await this.readJson<TaskListPayload>(response));
+    this.changed();
+    return result;
   }
 
-  async deleteTaskList(taskListId: string): Promise<void> {
+  async deleteTaskList(taskListId: string, etag?: string): Promise<void> {
+    boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH);
     const access = await this.oauth.authorize('tasks.write');
-    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, { method: 'DELETE' });
+    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {} });
     await this.assertOk(response);
+    this.changed();
   }
 
-  async listTasks(taskListId: string, options: { pageToken?: string; showCompleted?: boolean; showDeleted?: boolean; showHidden?: boolean; showAssigned?: boolean; dueMin?: string; dueMax?: string; updatedMin?: string; completedMin?: string; completedMax?: string; maxResults?: number } = {}): Promise<GoogleTaskPage> {
+  async listTasks(taskListId: string, options: { signal?: AbortSignal; pageToken?: string; showCompleted?: boolean; showDeleted?: boolean; showHidden?: boolean; showAssigned?: boolean; dueMin?: string; dueMax?: string; updatedMin?: string; completedMin?: string; completedMax?: string; maxResults?: number } = {}): Promise<GoogleTaskPage> {
+    options.signal?.throwIfAborted();
     const access = await this.oauth.authorize('tasks.read');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks`);
     const safePageToken = boundedPageToken(options.pageToken);
@@ -264,7 +278,7 @@ export class GoogleTasksService {
       completedMax: boundedFilterTimestamp(options.completedMax, 'completedMax'),
     };
     this.applyParams(url, params);
-    const response = await access.fetch(url);
+    const response = await access.fetch(url, { signal: options.signal });
     const payload = await this.readJson<TasksResponse>(response);
     return { items: this.mapTasks(payload.items ?? []), nextPageToken: payload.nextPageToken };
   }
@@ -300,13 +314,15 @@ export class GoogleTasksService {
       'PATCH',
       `lists/${encodeURIComponent(boundedId(input.taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(input.taskId, 'task ID', MAX_TASK_ID_LENGTH))}`,
       body,
+      { etag: input.etag },
     );
   }
 
-  async deleteTask(taskListId: string, taskId: string): Promise<void> {
+  async deleteTask(taskListId: string, taskId: string, etag?: string): Promise<void> {
     const access = await this.oauth.authorize('tasks.write');
-    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}`, { method: 'DELETE' });
+    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {} });
     await this.assertOk(response);
+    this.changed();
   }
 
   async moveTask(taskListId: string, taskId: string, parent?: string, previous?: string, destinationTaskListId?: string): Promise<GoogleTask> {
@@ -316,30 +332,37 @@ export class GoogleTasksService {
     if (parent) url.searchParams.set('parent', boundedId(parent, 'parent ID', MAX_TASK_ID_LENGTH));
     if (previous) url.searchParams.set('previous', boundedId(previous, 'previous task ID', MAX_TASK_ID_LENGTH));
     const response = await access.fetch(url, { method: 'POST' });
-    return this.mapTask(await this.readJson<TaskPayload>(response));
+    const result = this.mapTask(await this.readJson<TaskPayload>(response));
+    this.changed();
+    return result;
   }
 
   async clearCompleted(taskListId: string): Promise<void> {
     const access = await this.oauth.authorize('tasks.write');
     const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/clear`, { method: 'POST' });
     await this.assertOk(response);
+    this.changed();
   }
 
-  private async writeTask(method: 'POST' | 'PATCH', path: string, body: Record<string, unknown>, params: { parent?: string; previous?: string } = {}): Promise<GoogleTask> {
+  private async writeTask(method: 'POST' | 'PATCH', path: string, body: Record<string, unknown>, params: { parent?: string; previous?: string; etag?: string } = {}): Promise<GoogleTask> {
     const access = await this.oauth.authorize('tasks.write');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/${path}`);
     if (params.parent) url.searchParams.set('parent', boundedId(params.parent, 'parent ID', MAX_TASK_ID_LENGTH));
     if (params.previous) url.searchParams.set('previous', boundedId(params.previous, 'previous task ID', MAX_TASK_ID_LENGTH));
-    const response = await access.fetch(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
-    return this.mapTask(await this.readJson<TaskPayload>(response));
+    const response = await access.fetch(url, { method, headers: { 'content-type': 'application/json', ...(params.etag ? { 'If-Match': params.etag } : {}) }, body: JSON.stringify(body) });
+    const result = this.mapTask(await this.readJson<TaskPayload>(response));
+    this.changed();
+    return result;
   }
 
   private async readJson<T extends object>(response: Response): Promise<T> {
+    if (response.status === 412) throw new Error('This item changed in Google. Sync and reopen it before saving.');
     if (!response.ok) throw new Error(`Google Tasks request failed (${response.status}).`);
     return (await response.json()) as T;
   }
 
   private async assertOk(response: Response): Promise<void> {
+    if (response.status === 412) throw new Error('This item changed in Google. Sync and reopen it before saving.');
     if (!response.ok) throw new Error(`Google Tasks request failed (${response.status}).`);
   }
 

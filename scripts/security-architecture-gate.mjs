@@ -126,6 +126,8 @@ for (const [path, marker] of reviewedWorkerAuthorities) {
 // durable store is always an explicit architecture review event.
 // ---------------------------------------------------------------------------
 const reviewedDexieAuthorities = new Set([
+  // Account-keyed task snapshots and local overdue rules; no credentials.
+  'src/kanban/store.ts',
   'src/autonomy/cloud/credential.ts',
   'src/media/storage.ts',
   'src/persistence/autonomy.ts',
@@ -317,6 +319,10 @@ for (const [path, endpoint] of [
 // loop/roleplay adapter. UI/domain code cannot quietly bypass those seams.
 // ---------------------------------------------------------------------------
 const reviewedGoogleServiceImporters = new Set([
+  // Human-operated board only: live-session/effective-scope/account admission,
+  // explicit Save actions and typed destructive confirmation in KanbanScreen.
+  // Model mutations continue through the existing tool executor/broker.
+  'src/kanban/google-port.ts',
   'src/google/tools/read-handlers.ts',
   'src/google/tools/service-handlers.ts',
 ]);
@@ -349,6 +355,12 @@ const toolLoop = read('src/gemini/google-tool-loop.ts');
 if (!toolLoop.includes('requestGoogleToolConfirmations')) fail('Gemini tool loop must retain grouped mutation confirmation');
 if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
 if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isUntrustedExternalReadTool') || !toolLoop.includes('UNTRUSTED_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must intrinsically taint later mutation confirmations after external reads');
+const geminiContracts = read('src/gemini/contracts.ts');
+const appSource = read('src/app/App.tsx');
+const kanbanStore = read('src/kanban/store.ts');
+if (appSource.includes('kanbanContext') && (!geminiContracts.includes('untrustedExternalContext?: boolean') || !appSource.includes('untrustedExternalContext: Boolean(kanbanInstruction)') || !toolLoop.includes('request.untrustedExternalContext === true'))) fail('Persisted Kanban provider context must enter the existing Gemini untrusted-context authority before the first model tool batch');
+if (appSource.includes('kanbanContext') && !kanbanStore.includes('if (!memo.length) return "";')) fail('Empty Kanban overdue memos must not taint unrelated model turns');
+if (appSource.includes('kanbanContext') && (!kanbanStore.includes('MAX_BOARD_LISTS = 500') || !kanbanStore.includes('MAX_BOARD_TASKS = 20_000') || !kanbanStore.includes('MAX_BOARD_PROVIDER_PAGES = 1_024'))) fail('Kanban provider traversal must retain explicit aggregate resource ceilings');
 
 const googleBroker = read('src/google/confirmation/broker.ts');
 if (googleBroker.includes("all.dataset.decision = 'all';") || googleBroker.includes('✓ Approve all')) fail('Google confirmation broker must not expose approve-all');

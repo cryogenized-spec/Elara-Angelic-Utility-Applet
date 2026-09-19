@@ -243,7 +243,9 @@ test.describe('Google Drive tool flow', () => {
     await expect(dialog).toContainText('matches the ETag read for it');
     expect(driveCalls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
 
-    await dialog.getByRole('button', { name: '✓ Approve' }).click();
+    await expect(dialog.locator('[data-untrusted-context="true"]')).toBeVisible();
+    await dialog.getByRole('checkbox', { name: 'Approve drive.updateFile' }).check();
+    await dialog.getByRole('button', { name: '✓ Approve selected' }).click();
 
     await expect.poll(() => driveCalls.filter((call) => call.method === 'PATCH').length).toBe(1);
     const rename = driveCalls.find((call) => call.method === 'PATCH');

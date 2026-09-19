@@ -308,7 +308,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         ? { ...baseConfirmation, untrustedContext: true as const }
         : baseConfirmation;
       if (confirmation) mutationEntries.push({ call, confirmation });
-      else immediateCalls.push(call);
+      else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));
     }
 
     if (immediateCalls.length > 0) {

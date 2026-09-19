@@ -1,4 +1,5 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
+import { boundedGoogleTransferLimit, readBoundedGoogleContent } from '../drive/transfer-boundary';
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
 const MAX_ID_LENGTH = 500;
@@ -35,6 +36,15 @@ export type GoogleSheetInputMode = 'literal' | 'userEntered';
 export interface GoogleSheetsMutationOptions {
   readonly signal?: AbortSignal;
   readonly isGenerationActive?: () => boolean;
+}
+
+export type GoogleSheetsExportFormat = 'pdf' | 'xlsx';
+
+export interface GoogleSheetsExportResult {
+  readonly format: GoogleSheetsExportFormat;
+  readonly mimeType: string;
+  readonly extension: '.pdf' | '.xlsx';
+  readonly bytes: Uint8Array;
 }
 
 export interface GoogleSpreadsheetSummary {
@@ -240,6 +250,30 @@ export class GoogleSheetsService {
     options: GoogleSheetsMutationOptions = {},
   ): Promise<GoogleSheetValuesResult> {
     return this.writeRange(spreadsheetIdValue, rangeValue, [[normalizeCellValue(value)]], mode, options);
+  }
+
+  async exportSpreadsheet(
+    spreadsheetIdValue: string,
+    format: GoogleSheetsExportFormat,
+    options: GoogleSheetsMutationOptions & { readonly maxBytes?: number } = {},
+  ): Promise<GoogleSheetsExportResult> {
+    const idValue = spreadsheetId(spreadsheetIdValue);
+    const target = format === 'pdf'
+      ? { mimeType: 'application/pdf', extension: '.pdf' as const }
+      : format === 'xlsx'
+        ? { mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', extension: '.xlsx' as const }
+        : undefined;
+    if (!target) throw new Error('Google Sheets export format must be pdf or xlsx.');
+    requireMutationCurrent(options, 'Google Sheets export');
+    const access = await this.oauth.authorize('sheets.read');
+    requireMutationCurrent(options, 'Google Sheets export');
+    const response = await access.fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(idValue)}/export?mimeType=${encodeURIComponent(target.mimeType)}`,
+      options.signal ? { signal: options.signal } : undefined,
+      () => requireMutationCurrent(options, 'Google Sheets export'),
+    );
+    const content = await readBoundedGoogleContent(response, 'Google Sheets export', boundedGoogleTransferLimit(options.maxBytes), options.signal);
+    return { format, mimeType: target.mimeType, extension: target.extension, bytes: content.bytes };
   }
 
   async createSpreadsheet(title: string, firstSheetTitle?: string, options: GoogleSheetsMutationOptions = {}): Promise<GoogleSpreadsheetSummary> {

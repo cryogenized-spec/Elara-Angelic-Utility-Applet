@@ -126,6 +126,15 @@ export function loadPairing(): AutonomyPairing | null {
 
 /** Resolve the runtime credential without ever putting it back into pairing JSON. */
 export async function resolvePairingToken(pairing: AutonomyPairing): Promise<string> {
+  // A stale object retained by another React tree/tab is never credential
+  // authority. The shared pairing metadata must still identify the same
+  // installation before any memory- or IndexedDB-held token may be returned.
+  const current = loadPairing();
+  if (!current || current.installationId !== pairing.installationId || current.workerUrl !== pairing.workerUrl) {
+    sessionToken = '';
+    return '';
+  }
+
   const direct = pairing.token.trim();
   if (direct) {
     sessionToken = direct;
@@ -133,6 +142,13 @@ export async function resolvePairingToken(pairing: AutonomyPairing): Promise<str
   }
   if (sessionToken) return sessionToken;
   await credentialQueue.catch(() => undefined);
+  // Recheck after the async credential boundary so an unpair racing the read
+  // cannot resurrect an installation token from protected storage.
+  const stillCurrent = loadPairing();
+  if (!stillCurrent || stillCurrent.installationId !== pairing.installationId || stillCurrent.workerUrl !== pairing.workerUrl) {
+    sessionToken = '';
+    return '';
+  }
   sessionToken = (await getAutonomyInstallationToken()).trim();
   return sessionToken;
 }
@@ -151,6 +167,15 @@ export function clearPairing(): void {
     // ignore
   }
 }
+
+function installPairingCrossTabInvalidation(): void {
+  if (typeof window === 'undefined') return;
+  window.addEventListener('storage', (event) => {
+    if (event.key === PAIRING_KEY) sessionToken = '';
+  });
+}
+
+installPairingCrossTabInvalidation();
 
 export function updatePairing(patch: Partial<AutonomyPairing>): AutonomyPairing | null {
   const current = loadPairing();

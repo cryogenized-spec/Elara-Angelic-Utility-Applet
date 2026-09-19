@@ -1,9 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../persistence/google-picker-admissions', () => ({
+  assertGooglePickerFileAllowed: vi.fn(async () => undefined),
+  filterRevokedGooglePickerFiles: vi.fn(async (files: readonly unknown[]) => [...files]),
+}));
+
 const driveMocks = vi.hoisted(() => ({
   updateFile: vi.fn(),
 }));
 const sheetsMocks = vi.hoisted(() => ({
+  createSpreadsheet: vi.fn(),
+  addSheet: vi.fn(),
   updateCell: vi.fn(),
   insertRows: vi.fn(),
 }));
@@ -16,6 +23,8 @@ vi.mock('../drive/service', () => ({
 
 vi.mock('../sheets/service', () => ({
   GoogleSheetsService: class {
+    createSpreadsheet = sheetsMocks.createSpreadsheet;
+    addSheet = sheetsMocks.addSheet;
     updateCell = sheetsMocks.updateCell;
     insertRows = sheetsMocks.insertRows;
   },
@@ -42,6 +51,8 @@ function context(tool: GoogleToolExecutionContext['tool'], arguments_: Record<st
 describe('Drive and Sheets executable parity', () => {
   beforeEach(() => {
     driveMocks.updateFile.mockReset();
+    sheetsMocks.createSpreadsheet.mockReset();
+    sheetsMocks.addSheet.mockReset();
     sheetsMocks.updateCell.mockReset();
     sheetsMocks.insertRows.mockReset();
   });
@@ -66,7 +77,7 @@ describe('Drive and Sheets executable parity', () => {
     expect(driveMocks.updateFile).toHaveBeenCalledWith('file-1', '"etag-1"', { name: 'Renamed', starred: true }, {});
   });
 
-  it('requires a bounded string cell input in both schema and Gemini declaration', () => {
+  it('rejects object cell input and keeps model-facing single-cell text bounded', () => {
     expect(() => validateDriveSheetsToolArguments('sheets.updateCell', {
       spreadsheetId: 'sheet-1', range: 'Sheet1!B2',
     })).toThrow();
@@ -114,7 +125,7 @@ describe('Drive and Sheets executable parity', () => {
 
     await handler!(context('sheets.updateCell', args));
 
-    expect(sheetsMocks.updateCell).toHaveBeenCalledWith('sheet-1', 'Sheet1!B2', 'ready');
+    expect(sheetsMocks.updateCell).toHaveBeenCalledWith('sheet-1', 'Sheet1!B2', 'ready', 'literal', {});
   });
 
   it('wires sheets.insertRows and returns only a bounded semantic result', async () => {
@@ -135,7 +146,45 @@ describe('Drive and Sheets executable parity', () => {
       startIndex: 3,
       count: 2,
     });
-    expect(sheetsMocks.insertRows).toHaveBeenCalledWith('sheet-1', 42, 3, 2);
+    expect(sheetsMocks.insertRows).toHaveBeenCalledWith('sheet-1', 42, 3, 2, {});
+  });
+
+  it('wires spreadsheet and sheet creation through bounded semantic handlers', async () => {
+    sheetsMocks.createSpreadsheet.mockResolvedValue({ spreadsheetId: 'sheet-1', driveFileId: 'sheet-1', title: 'Budget', sheets: [] });
+    sheetsMocks.addSheet.mockResolvedValue({ spreadsheetId: 'sheet-1', driveFileId: 'sheet-1', sheetId: 7, title: 'Summary', rowCount: 1000, columnCount: 26 });
+
+    const create = googleServiceToolHandlers['sheets.createSpreadsheet'];
+    const add = googleServiceToolHandlers['sheets.addSheet'];
+    expect(create).toBeTypeOf('function');
+    expect(add).toBeTypeOf('function');
+
+    await create!(context('sheets.createSpreadsheet', { title: 'Budget', firstSheetTitle: 'Sheet1' }));
+    await add!(context('sheets.addSheet', { spreadsheetId: 'sheet-1', title: 'Summary' }));
+
+    expect(sheetsMocks.createSpreadsheet).toHaveBeenCalledWith('Budget', 'Sheet1', {});
+    expect(sheetsMocks.addSheet).toHaveBeenCalledWith('sheet-1', 'Summary', 1000, 26, {});
+    const createDeclaration = googleGeminiFunctionDeclarations.find((entry) => entry.name === 'sheets.createSpreadsheet');
+    const addDeclaration = googleGeminiFunctionDeclarations.find((entry) => entry.name === 'sheets.addSheet');
+    expect(createDeclaration?.parameters.required).toContain('title');
+    expect(addDeclaration?.parameters.required).toEqual(expect.arrayContaining(['spreadsheetId', 'title']));
+  });
+
+  it('passes explicit USER_ENTERED mode only when requested', async () => {
+    sheetsMocks.updateCell.mockResolvedValue({ range: 'Sheet1!A1', values: [['=1+2']] });
+    const handler = googleServiceToolHandlers['sheets.updateCell'];
+    await handler!(context('sheets.updateCell', {
+      spreadsheetId: 'sheet-1',
+      range: 'Sheet1!A1',
+      value: '=1+2',
+      inputMode: 'userEntered',
+    }));
+    expect(sheetsMocks.updateCell).toHaveBeenCalledWith('sheet-1', 'Sheet1!A1', '=1+2', 'userEntered', {});
+    const confirmation = confirmationRequestForCall({
+      tool: 'sheets.updateCell',
+      arguments: { spreadsheetId: 'sheet-1', range: 'Sheet1!A1', value: '=1+2', inputMode: 'userEntered' },
+    });
+    expect(confirmation?.resourceSummary).toContain('USER_ENTERED');
+    expect(confirmation?.resourceSummary).toContain('formulas');
   });
 
   it('shows exact Sheets destinations and full single-cell input before approval', () => {

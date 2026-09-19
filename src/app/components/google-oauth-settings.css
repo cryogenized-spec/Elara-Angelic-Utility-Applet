@@ -50,3 +50,14 @@
 .google-oauth-settings__note strong { font-size: 12px; }
 .google-oauth-settings__note span { color: var(--muted); font-size: 10px; line-height: 1.5; }
 @media (min-width: 700px) { .google-oauth-account { grid-template-columns: minmax(0,1fr) auto; align-items: center; } .google-oauth-account__copy { grid-column: 1 / -1; } .google-oauth-account__primary, .google-oauth-account__ready { grid-column: 1 / -1; } .google-oauth-account__utility { justify-content: flex-end; } .google-oauth-settings__hero { grid-template-columns: minmax(0,1fr) auto; align-items: center; } .google-oauth-settings__grid { grid-template-columns: repeat(2, minmax(0,1fr)); } }
+
+.google-oauth-picker { display: grid; gap: 8px; padding-top: 2px; }
+.google-oauth-picker > small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.google-oauth-picker__files { display: grid; gap: 6px; }
+.google-oauth-picker__file { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 8px; align-items: center; padding: 8px 9px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.025); }
+.google-oauth-picker__file span { min-width: 0; }
+.google-oauth-picker__file strong, .google-oauth-picker__file small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.google-oauth-picker__file strong { font-size: 10px; }
+.google-oauth-picker__file small { margin-top: 2px; color: var(--muted); font-size: 8px; }
+.google-oauth-picker__file button { min-height: 30px; border: 1px solid rgba(240,123,220,.2); border-radius: 9px; padding: 0 9px; background: rgba(240,123,220,.06); color: var(--muted); font-size: 9px; }
+.google-oauth-picker__file button:disabled { opacity: .55; }

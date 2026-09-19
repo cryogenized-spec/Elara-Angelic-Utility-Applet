@@ -5,6 +5,7 @@ import { classifyGoogleOAuthFailure } from './diagnostics';
 import { getGoogleScope } from './scope-registry';
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 import { requestGoogleAuthorizationCode } from './code-flow';
+import { createGoogleDrivePickerAuthority } from '../picker/service';
 import {
   authorizationStateFor,
   computeEffectiveCapabilities,
@@ -505,6 +506,14 @@ async function authorizedFetch(
   }
   return response;
 }
+
+/**
+ * Picker token handoff stays inside this OAuth-owned closure. UI code receives
+ * only sanitized file selections and can never read or persist the access token.
+ */
+export const googleDrivePickerAuthority = createGoogleDrivePickerAuthority(
+  () => ensureToken('drive.files.app.read', false),
+);
 
 export const googleOAuthAuthority: GoogleOAuthAuthority = {
   async authorize(capability) {

@@ -1,5 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('../../persistence/google-picker-admissions', () => ({
+  assertGooglePickerFileAllowed: vi.fn(async () => undefined),
+  filterRevokedGooglePickerFiles: vi.fn(async (files: readonly unknown[]) => [...files]),
+}));
+
 const driveMocks = vi.hoisted(() => ({
   createFile: vi.fn(),
   updateFile: vi.fn(),

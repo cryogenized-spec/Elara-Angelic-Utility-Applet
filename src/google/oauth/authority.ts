@@ -475,7 +475,7 @@ async function authorizedFetch(
   capability: GoogleCapabilityKey,
   input: RequestInfo | URL,
   init?: RequestInit,
-  beforeProviderFetch?: () => void,
+  beforeProviderFetch?: () => void | Promise<void>,
 ): Promise<Response> {
   const target = assertGoogleApiTarget(input);
   const token = await ensureToken(capability, false);
@@ -488,7 +488,7 @@ async function authorizedFetch(
     return { method: request.method, headers, body, signal: request.signal };
   };
 
-  beforeProviderFetch?.();
+  await beforeProviderFetch?.();
   let response = await fetch(new Request(target, requestOptions(token)));
   if (response.status !== 401) return response;
 
@@ -502,7 +502,7 @@ async function authorizedFetch(
 
   const refreshedToken = currentAccessToken();
   if (!refreshedToken) throw new Error('Google authorization did not return a refreshed access token.');
-  beforeProviderFetch?.();
+  await beforeProviderFetch?.();
   response = await fetch(new Request(target, requestOptions(refreshedToken)));
   if (response.status === 401) {
     markReauthorizationRequired();

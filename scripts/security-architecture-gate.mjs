@@ -363,6 +363,7 @@ if (appSource.includes('kanbanContext') && !kanbanStore.includes('if (!memo.leng
 if (appSource.includes('kanbanContext') && (!kanbanStore.includes('MAX_BOARD_LISTS = 500') || !kanbanStore.includes('MAX_BOARD_TASKS = 20_000') || !kanbanStore.includes('MAX_BOARD_PROVIDER_PAGES = 1_024'))) fail('Kanban provider traversal must retain explicit aggregate resource ceilings');
 const kanbanPort = read('src/kanban/google-port.ts');
 if (!oauthAuthority.includes('authorizeExisting(capability)') || !kanbanPort.includes('googleOAuthAuthority.authorizeExisting(capability)') || kanbanPort.includes('googleOAuthAuthority.authorize(capability)')) fail('Kanban background Tasks access must remain on the noninteractive existing-grant OAuth path');
+if (!oauthAuthority.includes('await beforeProviderFetch?.();') || !kanbanPort.includes('await admittedAccount(capability, account);')) fail('Google provider requests must await caller authority revalidation at the actual fetch boundary');
 if (!kanbanStore.includes('pruneCachedAccounts') || !kanbanStore.includes('status.state === "disconnected"') || !kanbanStore.includes('status.state === "revoked"') || !kanbanStore.includes('status.state === "reauthorization-required" && identityAccount === null')) fail('Kanban account switching/disconnect must retain explicit cache-pruning semantics');
 
 const googleBroker = read('src/google/confirmation/broker.ts');

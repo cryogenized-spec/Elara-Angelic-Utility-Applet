@@ -35,7 +35,13 @@ export const taskService = new GoogleTasksService({
       // their original errors and must never be replayed by the board timer.
       const isRead = !init?.method || init.method.toUpperCase() === 'GET';
       let response: Response;
-      try { response = await access.fetch(input, init, () => init?.signal?.throwIfAborted()); }
+      try {
+        response = await access.fetch(input, init, async () => {
+          init?.signal?.throwIfAborted();
+          await admittedAccount(capability, account);
+          init?.signal?.throwIfAborted();
+        });
+      }
       catch (error) {
         if (isRead && !init?.signal?.aborted && error instanceof TypeError) throw new RetryableReadError('Google Tasks is temporarily unreachable.');
         throw error;

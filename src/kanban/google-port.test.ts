@@ -28,6 +28,18 @@ describe('human board authorization boundary', () => {
     await expect(taskService.listTaskLists()).rejects.toThrow('account changed');
     expect(fetch).not.toHaveBeenCalled();
   });
+  it('rechecks identity at the actual provider boundary after transport work', async () => {
+    const status = vi.spyOn(googleOAuthAuthority, 'getStatus').mockResolvedValue(ready);
+    const providerFetch = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit, beforeProviderFetch?: () => void | Promise<void>) => {
+      status.mockResolvedValue({ ...ready, account: { email: 'two@example.com' } });
+      await beforeProviderFetch?.();
+      return new Response(JSON.stringify({ items: [] }));
+    });
+    vi.spyOn(googleOAuthAuthority, 'authorizeExisting').mockImplementation(async (capability) => ({ capability, fetch: providerFetch }));
+
+    await expect(taskService.listTaskLists()).rejects.toThrow('account changed');
+    expect(providerFetch).toHaveBeenCalledOnce();
+  });
   it('uses only the noninteractive transport after live-session admission', async () => {
     vi.spyOn(googleOAuthAuthority, 'getStatus').mockResolvedValue(ready);
     const interactive = vi.spyOn(googleOAuthAuthority, 'authorize');

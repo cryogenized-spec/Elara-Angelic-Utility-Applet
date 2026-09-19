@@ -31,10 +31,10 @@ export interface AuthorizedGoogleRequest {
   readonly capability: GoogleCapabilityKey;
   /**
    * Optional guard runs immediately before each real provider fetch, including
-   * a retry after token refresh. It must throw when the caller has lost the
-   * authority to perform the request.
+   * a retry after token refresh. It may be asynchronous and must reject/throw
+   * when the caller has lost the authority to perform the request.
    */
-  readonly fetch: (input: RequestInfo | URL, init?: RequestInit, beforeProviderFetch?: () => void) => Promise<Response>;
+  readonly fetch: (input: RequestInfo | URL, init?: RequestInit, beforeProviderFetch?: () => void | Promise<void>) => Promise<Response>;
 }
 
 /**

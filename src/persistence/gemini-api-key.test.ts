@@ -1,5 +1,6 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
+import { readLockboxFixtureRecord, writeLockboxFixtureRecord } from './lockbox-test-fixtures';
 import {
   GEMINI_LOCKBOX_IDLE_TIMEOUT_MS,
   GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH,
@@ -78,6 +79,18 @@ describe('encrypted Gemini API Lockbox', () => {
     expect(GEMINI_LOCKBOX_PIN_MIN_LENGTH).toBe(6);
     expect(GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH).toBe(10);
     expect(GEMINI_LOCKBOX_PIN_MAX_LENGTH).toBe(12);
+  });
+
+  it('keeps a legacy 6-digit PIN record unlockable after the stronger creation policy', async () => {
+    const legacyPin = '284619';
+    await saveGeminiApiKey(TEST_KEY, legacyPin);
+    const record = await readLockboxFixtureRecord('gemini-api-key');
+    if (!record) throw new Error('expected seeded Lockbox record');
+    await writeLockboxFixtureRecord({ ...record, security: { mode: 'pin' } });
+
+    lockGeminiApiKey();
+    await unlockGeminiApiKeyWithPin(legacyPin);
+    expect(await getGeminiApiKey()).toBe(TEST_KEY);
   });
 
   it('creates and unlocks a fresh Lockbox with the PIN mode', async () => {

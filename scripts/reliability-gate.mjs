@@ -167,7 +167,7 @@ if (lockboxStorageWrites.length !== 1 || !lockboxSource.includes(approvedLockbox
 if (!lockboxSource.includes('removeLegacyPlaintextKey')) throw new Error('Reliability gate: legacy plaintext Gemini API storage must be explicitly removed.');
 if (!lockboxSource.includes('const unlockedSecrets = new Map<LockboxSecretId, string>();')) throw new Error('Reliability gate: decrypted credentials must remain session-memory-only.');
 if (!lockboxSource.includes("event.key === LOCKBOX_SESSION_REVOCATION_KEY") || !lockboxSource.includes('handleSiblingLockboxRevocation')) throw new Error('Reliability gate: protected Lockbox sessions must revoke across sibling tabs.');
-if (lockboxSource.split('unlockedSecrets.clear();').length - 1 < 2) throw new Error('Reliability gate: locking and clearing the Lockbox must both clear decrypted credentials from session memory.');
+if (!lockboxSource.includes('function clearPlaintextSession()') || !lockboxSource.includes('const wasUnlocked = clearPlaintextSession();') || !lockboxSource.includes('clearPlaintextSession();\n  securityMode = null;')) throw new Error('Reliability gate: locking and clearing the Lockbox must converge on the shared plaintext-session revocation boundary.');
 
 const lockboxTestSource = readFileSync(join(root, 'src/persistence/gemini-api-key.test.ts'), 'utf8');
 if (!lockboxTestSource.includes('Invalid Lockbox password.')) throw new Error('Reliability gate: Lockbox tests must cover wrong-password rejection.');

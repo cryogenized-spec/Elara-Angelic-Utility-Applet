@@ -23,6 +23,11 @@ export interface GoogleDocumentSummary {
   revisionId?: string;
 }
 
+export interface GoogleDocsMutationOptions {
+  readonly signal?: AbortSignal;
+  readonly isGenerationActive?: () => boolean;
+}
+
 export interface GoogleDocumentTabInspection {
   readonly tabId: string;
   readonly title: string;
@@ -61,6 +66,12 @@ function boundedText(value: string, field: string, maxLength = MAX_TEXT_LENGTH, 
 function boundedIndex(value: number): number {
   if (!Number.isInteger(value) || value < 1 || value > 5_000_000) throw new Error('Google Docs insert index is outside the application bounds.');
   return value;
+}
+
+function requireMutationCurrent(options: GoogleDocsMutationOptions, operation: string): void {
+  if (options.signal?.aborted || options.isGenerationActive?.() === false) {
+    throw new DOMException(`${operation} lost turn authority.`, 'AbortError');
+  }
 }
 
 function boundedRequests(requests: readonly Record<string, unknown>[]): readonly Record<string, unknown>[] {
@@ -167,7 +178,7 @@ export class GoogleDocsService {
     return inspectGoogleDocument(await this.getDocument(documentId));
   }
 
-  async insertText(documentId: string, tabId: string, revisionId: string, index: number, text: string): Promise<unknown> {
+  async insertText(documentId: string, tabId: string, revisionId: string, index: number, text: string, options: GoogleDocsMutationOptions = {}): Promise<unknown> {
     const safeTabId = bounded(tabId, 'tab ID', MAX_TAB_ID_LENGTH);
     const safeRevisionId = bounded(revisionId, 'revision ID', MAX_REVISION_ID_LENGTH);
     const safeText = boundedText(text, 'insert text');
@@ -175,10 +186,11 @@ export class GoogleDocsService {
       documentId,
       [{ insertText: { location: { index: boundedIndex(index), tabId: safeTabId }, text: safeText } }],
       { requiredRevisionId: safeRevisionId },
+      options,
     );
   }
 
-  async appendParagraph(documentId: string, tabId: string, revisionId: string, text: string): Promise<unknown> {
+  async appendParagraph(documentId: string, tabId: string, revisionId: string, text: string, options: GoogleDocsMutationOptions = {}): Promise<unknown> {
     const safeTabId = bounded(tabId, 'tab ID', MAX_TAB_ID_LENGTH);
     const safeRevisionId = bounded(revisionId, 'revision ID', MAX_REVISION_ID_LENGTH);
     const inspected = await this.inspectDocument(documentId);
@@ -192,10 +204,11 @@ export class GoogleDocsService {
       documentId,
       [{ insertText: { location: { index: Math.max(1, tab.endIndex - 1), tabId: safeTabId }, text: content.endsWith('\n') ? content : `${content}\n` } }],
       { requiredRevisionId: safeRevisionId },
+      options,
     );
   }
 
-  async replaceText(documentId: string, tabId: string, revisionId: string, findText: string, replaceText: string, matchCase = false): Promise<unknown> {
+  async replaceText(documentId: string, tabId: string, revisionId: string, findText: string, replaceText: string, matchCase = false, options: GoogleDocsMutationOptions = {}): Promise<unknown> {
     const safeTabId = bounded(tabId, 'tab ID', MAX_TAB_ID_LENGTH);
     const safeRevisionId = bounded(revisionId, 'revision ID', MAX_REVISION_ID_LENGTH);
     const safeFind = boundedText(findText, 'find text', MAX_FIND_TEXT_LENGTH);
@@ -204,33 +217,40 @@ export class GoogleDocsService {
       documentId,
       [{ replaceAllText: { containsText: { text: safeFind, matchCase }, replaceText: safeReplacement, tabsCriteria: { tabIds: [safeTabId] } } }],
       { requiredRevisionId: safeRevisionId },
+      options,
     );
   }
 
-  async createDocument(title: string): Promise<GoogleDocumentSummary> {
+  async createDocument(title: string, options: GoogleDocsMutationOptions = {}): Promise<GoogleDocumentSummary> {
     const safeTitle = bounded(title, 'document title', MAX_TITLE_LENGTH);
+    requireMutationCurrent(options, 'Google Docs create');
     const access = await this.oauth.authorize('docs.write');
+    requireMutationCurrent(options, 'Google Docs create');
     const response = await access.fetch('https://docs.googleapis.com/v1/documents', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: safeTitle }),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Docs create'));
     const payload = await this.readJson(response);
     if (!payload.documentId) throw new Error('Google Docs response did not contain a document ID.');
     return { documentId: payload.documentId, title: payload.title ?? safeTitle, revisionId: payload.revisionId };
   }
 
-  async batchUpdate(documentId: string, requests: readonly Record<string, unknown>[], writeControl?: Record<string, unknown>): Promise<unknown> {
+  async batchUpdate(documentId: string, requests: readonly Record<string, unknown>[], writeControl?: Record<string, unknown>, options: GoogleDocsMutationOptions = {}): Promise<unknown> {
     const safeDocumentId = bounded(documentId, 'document ID', MAX_DOCUMENT_ID_LENGTH);
     const safeRequests = boundedRequests(requests);
     const body = { requests: safeRequests, ...(writeControl ? { writeControl } : {}) };
     if (new TextEncoder().encode(JSON.stringify(body)).byteLength > MAX_REQUEST_BODY_BYTES) throw new Error('Google Docs batch update exceeds the application request limit.');
+    requireMutationCurrent(options, 'Google Docs update');
     const access = await this.oauth.authorize('docs.write');
+    requireMutationCurrent(options, 'Google Docs update');
     const response = await access.fetch(`https://docs.googleapis.com/v1/documents/${encodeURIComponent(safeDocumentId)}:batchUpdate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Docs update'));
     if (response.status === 400 && writeControl && Object.prototype.hasOwnProperty.call(writeControl, 'requiredRevisionId')) {
       throw new Error('Google Docs rejected the write revision. Re-read the document before editing.');
     }

@@ -177,9 +177,9 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'tasks.deleteTask': return `Delete Google Task ${value(args, 'taskId') ?? 'selected task'} from list ${value(args, 'taskListId') ?? 'selected list'}. If it is assigned from Google Docs or Chat, Google also deletes the originating assignment.`;
     case 'tasks.clearCompleted': return `Clear completed Google Tasks from list ${value(args, 'taskListId') ?? 'selected list'}; Google will hide those completed tasks from normal results.`;
     case 'docs.createDocument': return `Create the Google Doc “${value(args, 'title') ?? 'Untitled'}”.`;
-    case 'docs.insertText': return `Insert text at index ${String(args.index ?? '?')} in Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
-    case 'docs.appendParagraph': return `Append a paragraph to Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
-    case 'docs.replaceText': return `Replace “${value(args, 'findText') ?? 'selected text'}” in Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
+    case 'docs.insertText': return `Insert text at index ${String(args.index ?? '?')} in tab ${value(args, 'tabId') ?? 'selected tab'} of Google Doc ${value(args, 'documentId') ?? 'selected document'}, only if revision ${value(args, 'revisionId') ?? 'the inspected revision'} is still current.`;
+    case 'docs.appendParagraph': return `Append a paragraph to tab ${value(args, 'tabId') ?? 'selected tab'} of Google Doc ${value(args, 'documentId') ?? 'selected document'}, only if revision ${value(args, 'revisionId') ?? 'the inspected revision'} is still current.`;
+    case 'docs.replaceText': return `Replace “${value(args, 'findText') ?? 'selected text'}” only in tab ${value(args, 'tabId') ?? 'selected tab'} of Google Doc ${value(args, 'documentId') ?? 'selected document'}, only if revision ${value(args, 'revisionId') ?? 'the inspected revision'} is still current.`;
     case 'docs.batchUpdate': return `Apply the requested changes to Google Doc ${value(args, 'documentId') ?? 'selected document'}.`;
     case 'chat.createMessage': return `Post a Google Chat message to ${value(args, 'spaceName') ?? 'the selected space'}.`;
     case 'chat.updateMessage': return `Update Google Chat message ${value(args, 'messageName') ?? 'selected message'}.`;

@@ -16,6 +16,11 @@ const MAX_RECURRENCE_RULE_LENGTH = 2000;
 const MAX_RECURRENCE_RULES = 20;
 const MAX_ATTENDEES = 50;
 const MAX_FREEBUSY_CALENDARS = 50;
+const MAX_FREEBUSY_INTERVALS_PER_CALENDAR = 200;
+const MAX_FREEBUSY_ERRORS_PER_CALENDAR = 20;
+const MAX_SETTINGS_ITEMS = 100;
+const MAX_SETTING_ID_LENGTH = 200;
+const MAX_SETTING_VALUE_LENGTH = 2_000;
 const MAX_EVENT_BODY_BYTES = 1_000_000;
 const DEFAULT_PAGE_SIZE = 100;
 const MAX_PAGE_SIZE = 250;
@@ -100,6 +105,7 @@ export interface CalendarFreeBusyEntry {
   readonly calendarId: string;
   readonly busy: readonly CalendarFreeBusyInterval[];
   readonly errors?: readonly { readonly reason?: string; readonly domain?: string }[];
+  readonly truncated?: boolean;
 }
 
 export interface CalendarFreeBusyResult {
@@ -108,6 +114,14 @@ export interface CalendarFreeBusyResult {
   readonly timeMin: string;
   readonly timeMax: string;
   readonly calendars: readonly CalendarFreeBusyEntry[];
+  readonly truncated?: boolean;
+}
+
+export interface CalendarSettingsResult {
+  readonly trust: 'untrusted-external';
+  readonly source: 'calendar';
+  readonly settings: Readonly<Record<string, string>>;
+  readonly truncated?: boolean;
 }
 
 export interface CalendarEventCreateInput {
@@ -601,14 +615,29 @@ export class GoogleCalendarService {
     };
   }
 
-  async getSettings(): Promise<Readonly<Record<string, string>>> {
+  async getSettings(): Promise<CalendarSettingsResult> {
     const access = await this.oauth.authorize('calendar.settings.read');
     const response = await access.fetch(new URL('https://www.googleapis.com/calendar/v3/users/me/settings'));
     if (!response.ok) throw new Error(`Google Calendar settings request failed (${response.status}).`);
     const payload = await readBoundedProviderJson<CalendarSettingsResponse>(response, { operation: 'Google Calendar settings request', maxBytes: MAX_PROVIDER_JSON_BYTES });
     const settings: Record<string, string> = {};
-    for (const item of payload.items ?? []) if (item.id && item.value !== undefined) settings[item.id] = item.value;
-    return settings;
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    let truncated = rawItems.length > MAX_SETTINGS_ITEMS;
+    for (const item of rawItems.slice(0, MAX_SETTINGS_ITEMS)) {
+      const id = typeof item.id === 'string' ? item.id.trim() : '';
+      if (!id || id.length > MAX_SETTING_ID_LENGTH || typeof item.value !== 'string') {
+        truncated = true;
+        continue;
+      }
+      if (item.value.length > MAX_SETTING_VALUE_LENGTH) truncated = true;
+      settings[id] = item.value.slice(0, MAX_SETTING_VALUE_LENGTH);
+    }
+    return {
+      trust: 'untrusted-external',
+      source: 'calendar',
+      settings,
+      ...(truncated ? { truncated: true } : {}),
+    };
   }
 
   async queryFreeBusy(timeMin: string, timeMax: string, calendarIds: readonly string[], timeZone?: string): Promise<CalendarFreeBusyResult> {
@@ -629,18 +658,50 @@ export class GoogleCalendarService {
     });
     if (!response.ok) throw new Error(`Google Calendar free/busy request failed (${response.status}).`);
     const payload = await readBoundedProviderJson<CalendarFreeBusyResponse>(response, { operation: 'Google Calendar free/busy request', maxBytes: MAX_PROVIDER_JSON_BYTES });
+    const rawCalendars = Object.entries(payload.calendars ?? {});
+    let resultTruncated = rawCalendars.length > MAX_FREEBUSY_CALENDARS;
+    const calendars = rawCalendars.slice(0, MAX_FREEBUSY_CALENDARS).flatMap(([rawCalendarId, entry]) => {
+      const fields = new Set<string>();
+      const calendarId = projectedProviderId(rawCalendarId, MAX_CALENDAR_ID_LENGTH, 'calendarId', fields);
+      if (!calendarId) {
+        resultTruncated = true;
+        return [];
+      }
+      const rawBusy = Array.isArray(entry.busy) ? entry.busy : [];
+      const rawErrors = Array.isArray(entry.errors) ? entry.errors : [];
+      let entryTruncated = fields.size > 0
+        || rawBusy.length > MAX_FREEBUSY_INTERVALS_PER_CALENDAR
+        || rawErrors.length > MAX_FREEBUSY_ERRORS_PER_CALENDAR;
+      const busy = rawBusy.slice(0, MAX_FREEBUSY_INTERVALS_PER_CALENDAR).flatMap((interval) => {
+        const start = typeof interval.start === 'string' ? interval.start.trim() : '';
+        const end = typeof interval.end === 'string' ? interval.end.trim() : '';
+        if (!start || !end || start.length > MAX_TIME_PARAMETER_LENGTH || end.length > MAX_TIME_PARAMETER_LENGTH) {
+          entryTruncated = true;
+          return [];
+        }
+        return [{ start, end }];
+      });
+      const errors = rawErrors.slice(0, MAX_FREEBUSY_ERRORS_PER_CALENDAR).map((error) => {
+        const reason = typeof error.reason === 'string' ? error.reason.slice(0, 200) : undefined;
+        const domain = typeof error.domain === 'string' ? error.domain.slice(0, 200) : undefined;
+        if ((typeof error.reason === 'string' && error.reason.length > 200) || (typeof error.domain === 'string' && error.domain.length > 200)) entryTruncated = true;
+        return { ...(reason ? { reason } : {}), ...(domain ? { domain } : {}) };
+      });
+      if (entryTruncated) resultTruncated = true;
+      return [{
+        calendarId,
+        busy,
+        ...(errors.length ? { errors } : {}),
+        ...(entryTruncated ? { truncated: true } : {}),
+      }];
+    });
     return {
       trust: 'untrusted-external',
       source: 'calendar',
       timeMin: projectedProviderText(payload.timeMin, MAX_TIME_PARAMETER_LENGTH, 'timeMin', new Set()) ?? safeTimeMin,
       timeMax: projectedProviderText(payload.timeMax, MAX_TIME_PARAMETER_LENGTH, 'timeMax', new Set()) ?? safeTimeMax,
-      calendars: Object.entries(payload.calendars ?? {}).map(([calendarId, entry]) => ({
-        calendarId,
-        busy: (entry.busy ?? [])
-          .filter((interval): interval is { start: string; end: string } => Boolean(interval.start && interval.end))
-          .map((interval) => ({ start: interval.start, end: interval.end })),
-        ...(entry.errors?.length ? { errors: entry.errors } : {}),
-      })),
+      calendars,
+      ...(resultTruncated ? { truncated: true } : {}),
     };
   }
 

@@ -52,6 +52,17 @@ describe('Google confirmation broker', () => {
     await expect(next).resolves.toEqual([false]);
   });
 
+  it('leaves grouped mutations unselected and exposes no approve-all shortcut', async () => {
+    const pending = requestGoogleToolConfirmations([request(), request('calendar.createEvent')]);
+    const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>('[data-confirm-index]'));
+    expect(checkboxes).toHaveLength(2);
+    expect(checkboxes.every((checkbox) => checkbox.checked === false)).toBe(true);
+    expect(document.querySelector('[data-decision="all"]')).toBeNull();
+
+    document.querySelector<HTMLButtonElement>('[data-decision="selected"]')?.click();
+    await expect(pending).resolves.toEqual([false, false]);
+  });
+
   it('renders the entire durable-memory review text before approval', async () => {
     const fullBody = `Persist this exact durable content.\n${'z'.repeat(4_000)}`;
     const memoryRequest: WriteConfirmationRequest = {

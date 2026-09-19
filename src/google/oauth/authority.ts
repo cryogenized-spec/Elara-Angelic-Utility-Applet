@@ -9,6 +9,8 @@ import { createGoogleDrivePickerAuthority } from '../picker/service';
 import {
   authorizationStateFor,
   computeEffectiveCapabilities,
+  GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES,
+  googleWorkspaceOnboardingScopes,
   normalizeCapabilityKey,
   parseProviderScopes,
   resolveAuthorizingCapability,
@@ -332,14 +334,30 @@ async function fetchGoogleAccount(accessToken: string): Promise<{ email: string;
 }
 
 function requestedGoogleScopes(capability: GoogleCapabilityKey, enabledCapabilities: readonly GoogleCapabilityKey[]): string {
+  if (capability === 'google.account') {
+    const preservedScopes = enabledCapabilities.map((enabled) => getGoogleScope(enabled).scope).filter(Boolean);
+    return [...new Set([
+      ...googleWorkspaceOnboardingScopes(),
+      ...preservedScopes,
+      GOOGLE_USERINFO_EMAIL_SCOPE,
+      GOOGLE_OPENID_SCOPE,
+    ].filter(Boolean))].join(' ');
+  }
   const descriptor = getGoogleScope(capability);
-  const preservedScopes = capability === 'google.account'
-    ? enabledCapabilities.map((enabled) => getGoogleScope(enabled).scope).filter(Boolean)
-    : [];
-  return [...new Set([descriptor.scope, ...preservedScopes, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].filter(Boolean))].join(' ');
+  return [...new Set([descriptor.scope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].filter(Boolean))].join(' ');
 }
 
-async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' | 'none'): Promise<void> {
+function enabledCapabilitiesAfterConsent(
+  capability: GoogleCapabilityKey,
+  current: readonly GoogleCapabilityKey[],
+): GoogleCapabilityKey[] {
+  const requested = capability === 'google.account'
+    ? GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES
+    : [capability];
+  return uniqueCapabilities([...current, ...requested]);
+}
+
+async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' | 'none' | 'consent'): Promise<void> {
   const descriptor = getGoogleScope(capability);
   if (!descriptor.scope) throw new Error(`Google capability ${capability} does not require OAuth authorization.`);
   try {
@@ -351,7 +369,7 @@ async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' |
     const grantedProviderScopes = returnedScopes.length
       ? returnedScopes
       : [...new Set([...current.grantedProviderScopes, descriptor.scope])];
-    const enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
+    const enabledCapabilities = enabledCapabilitiesAfterConsent(capability, current.enabledCapabilities);
     session = {
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
@@ -360,9 +378,9 @@ async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' |
     try {
       const fetched = await fetchGoogleAccount(response.access_token);
       if (fetched) nextAccount = fetched;
-      else if (prompt === '') nextAccount = undefined;
+      else if (prompt !== 'none') nextAccount = undefined;
     } catch {
-      if (prompt === '') nextAccount = undefined;
+      if (prompt !== 'none') nextAccount = undefined;
     }
     legacyGrantedCapabilities = [];
     stored.enabledCapabilities = enabledCapabilities;
@@ -405,7 +423,7 @@ async function acquireDurableToken(capability: GoogleCapabilityKey, pairing: Aut
     vaultUpdatedAt: durableRevision(response.updatedAt),
   };
   legacyGrantedCapabilities = [];
-  stored.enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
+  stored.enabledCapabilities = enabledCapabilitiesAfterConsent(capability, current.enabledCapabilities);
   stored.grantedProviderScopes = providerScopes.length ? providerScopes : codeScopes;
   stored.needsReauthorization = false;
   if (response.account?.email) stored.account = response.account;
@@ -514,6 +532,20 @@ async function authorizedFetch(
 export const googleDrivePickerAuthority = createGoogleDrivePickerAuthority(
   () => ensureToken('drive.files.app.read', false),
 );
+
+/**
+ * Re-open Google's consent UI for the canonical Workspace scope bundle even
+ * when a usable session already exists. This is the only Settings-level
+ * "review permissions" path; it reuses the same OAuth authority and storage.
+ */
+export async function reviewGoogleWorkspacePermissions(): Promise<void> {
+  const pairing = activePairing();
+  if (pairing) {
+    await acquireDurableToken('google.account', pairing);
+    return;
+  }
+  await acquireBrowserToken('google.account', 'consent');
+}
 
 export const googleOAuthAuthority: GoogleOAuthAuthority = {
   async authorize(capability) {

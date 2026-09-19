@@ -72,6 +72,11 @@ function looksLikeCredential(evidence: string): boolean {
   return /\b(?:password|passcode|pin|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token)\b\s*(?:is|=|:)\s*\S+/i.test(evidence)
     || /\bBearer\s+[A-Za-z0-9._~+/-]{12,}/i.test(evidence)
     || /\bsk-[A-Za-z0-9_-]{16,}\b/.test(evidence)
+    || /\b(?:AKIA|ASIA)[A-Z0-9]{16}\b/.test(evidence)
+    || /\bAIza[0-9A-Za-z_-]{35}\b/.test(evidence)
+    || /\bgh[pousr]_[A-Za-z0-9]{36,}\b/.test(evidence)
+    || /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/.test(evidence)
+    || /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/.test(evidence)
     || /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(evidence);
 }
 

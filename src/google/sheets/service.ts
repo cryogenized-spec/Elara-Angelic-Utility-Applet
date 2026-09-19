@@ -1,7 +1,9 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
 import { boundedGoogleTransferLimit, readBoundedGoogleContent } from '../drive/transfer-boundary';
+import { readBoundedProviderJson } from '../provider-json-boundary';
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
+const MAX_PROVIDER_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_ID_LENGTH = 500;
 const MAX_RANGE_LENGTH = 500;
 const MAX_TITLE_LENGTH = 500;
@@ -401,6 +403,6 @@ export class GoogleSheetsService {
 
   private async readJson<T>(response: Response): Promise<T> {
     if (!response.ok) throw new Error(`Google Sheets request failed (${response.status}).`);
-    return response.json() as Promise<T>;
+    return readBoundedProviderJson<T>(response, { operation: 'Google Sheets request', maxBytes: MAX_PROVIDER_JSON_BYTES });
   }
 }

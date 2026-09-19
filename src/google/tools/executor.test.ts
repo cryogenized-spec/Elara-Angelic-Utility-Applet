@@ -88,7 +88,7 @@ describe('executeGoogleTool', () => {
   it('does not authorize a Docs write from a library-read grant', async () => {
     const handler = vi.fn(async () => ({}));
     const result = await executeGoogleTool(
-      { tool: 'docs.appendParagraph', arguments: { documentId: 'doc-1', text: 'Hello' } },
+      { tool: 'docs.appendParagraph', arguments: { documentId: 'doc-1', tabId: 'tab-1', revisionId: 'rev-1', text: 'Hello' } },
       { oauth: oauthFor('drive.library.read'), handlers: { 'docs.appendParagraph': handler }, confirm: async () => true },
     );
     expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'docs.write' });

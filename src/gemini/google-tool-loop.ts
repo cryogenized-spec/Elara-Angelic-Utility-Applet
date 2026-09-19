@@ -143,6 +143,12 @@ function containsUntrustedExternal(value: unknown, depth = 0): boolean {
   return Object.values(record).some((item) => containsUntrustedExternal(item, depth + 1));
 }
 
+const UNTRUSTED_EXTERNAL_READ_PREFIXES = ['calendar.', 'tasks.', 'gmail.', 'drive.', 'docs.', 'sheets.', 'youtube.'] as const;
+
+function isUntrustedExternalReadTool(tool: GoogleToolName): boolean {
+  return isRegistryReadTool(tool) && UNTRUSTED_EXTERNAL_READ_PREFIXES.some((prefix) => tool.startsWith(prefix));
+}
+
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
   const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools, options.allowEmptyTools === true);
@@ -344,7 +350,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         }
         if (result.ok) {
           results.push({ callId: call.callId, name: call.name, result: result.result });
-          if (containsUntrustedExternal(result.result)) untrustedExternalSeen = true;
+          if (isUntrustedExternalReadTool(call.name) || containsUntrustedExternal(result.result)) untrustedExternalSeen = true;
           const created = artifactEvent(call.name, result.result);
           if (created) yield created;
           const media = mediaEvent(result.result);

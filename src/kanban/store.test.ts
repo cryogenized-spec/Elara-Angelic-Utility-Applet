@@ -415,6 +415,22 @@ describe("snapshot reconciliation", () => {
       expect(boardStore.getSnapshot().board).toBeNull();
     } finally { peer.close(); }
   });
+  it("clears Kanban cache when durable authorization is gone and no account identity remains", async () => {
+    await syncBoard();
+    const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
+    try {
+      expect(await peer.table<Board>('boards').get(initial.account)).toBeDefined();
+      mocks.status.mockResolvedValue({
+        state: "reauthorization-required",
+        enabledCapabilities: ["tasks.read"], grantedProviderScopes: [], sessionReady: false,
+        grantedCapabilities: [],
+      });
+      await syncBoard();
+      expect(await peer.table('boards').count()).toBe(0);
+      expect(await peer.table('readSchedules').count()).toBe(0);
+      expect(boardStore.getSnapshot().board).toBeNull();
+    } finally { peer.close(); }
+  });
   it("automatically refreshes the new identity after an in-app account switch", async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');

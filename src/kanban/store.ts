@@ -72,7 +72,8 @@ async function boardAuthorization(): Promise<{ readyAccount: string | null; iden
   return {
     readyAccount,
     identityAccount,
-    clearAllCaches: status.state === "disconnected" || status.state === "revoked",
+    clearAllCaches: status.state === "disconnected" || status.state === "revoked" ||
+      (status.state === "reauthorization-required" && identityAccount === null),
   };
 }
 

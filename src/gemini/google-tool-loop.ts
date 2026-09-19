@@ -353,6 +353,16 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       }
     }
 
+    // A batch may contain both reads and writes. Reads execute first, so a
+    // tainted provider result discovered in this same batch must invalidate
+    // every already-admitted mutation before confirmation is ever shown.
+    if (untrustedExternalSeen && mutationEntries.length) {
+      for (const entry of mutationEntries) {
+        results.push(errorToolResult(entry.call, 'UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN'));
+      }
+      mutationEntries.length = 0;
+    }
+
     let decisions: boolean[] = [];
     if (mutationEntries.length) {
       if (executeOptions.confirm) {

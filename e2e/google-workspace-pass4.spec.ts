@@ -146,9 +146,12 @@ test('Docs mobile flow carries tab and revision from inspect into confirmed writ
   await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('Updated the selected Doc tab safely.', { timeout: 15_000 });
   const write = docsCalls.find((call) => call.method === 'POST');
   expect(write).toBeTruthy();
-  const body = JSON.parse(write?.body ?? '{}');
+  const body = JSON.parse(write?.body ?? '{}') as {
+    writeControl?: { requiredRevisionId?: string };
+    requests?: Array<{ insertText?: { location?: { tabId?: string } } }>;
+  };
   expect(body.writeControl).toEqual({ requiredRevisionId: 'rev-1' });
-  expect(body.requests[0].insertText.location.tabId).toBe('tab-1');
+  expect(body.requests?.[0]?.insertText?.location?.tabId).toBe('tab-1');
 });
 
 test('Sheets mobile flow writes formula-looking text literally unless parsing is explicit', async ({ page }) => {

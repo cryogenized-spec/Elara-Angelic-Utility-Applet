@@ -1,8 +1,10 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
 import { DriveTransferError } from './errors';
 import { DRIVE_LIMITS } from './limits';
+import { readBoundedProviderJson } from '../provider-json-boundary';
 
 const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const MAX_PROVIDER_JSON_BYTES = 2 * 1024 * 1024;
 const GOOGLE_NATIVE_MIME_PREFIX = 'application/vnd.google-apps.';
 
 /**
@@ -509,6 +511,6 @@ export class GoogleDriveService {
 
   private async readJson<T>(response: Response): Promise<T> {
     if (!response.ok) throw new Error(`Google Drive request failed (${response.status}).`);
-    return response.json() as Promise<T>;
+    return readBoundedProviderJson<T>(response, { operation: 'Google Drive request', maxBytes: MAX_PROVIDER_JSON_BYTES });
   }
 }

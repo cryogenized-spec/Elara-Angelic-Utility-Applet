@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   GOOGLE_V1_CORE_CAPABILITIES,
   GOOGLE_V1_OPTIONAL_CAPABILITIES,
+  GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES,
+  googleWorkspaceOnboardingScopes,
   DRIVE_APP_FILE_SCOPE,
   DRIVE_LIBRARY_SCOPE,
   alternativeReadCapabilities,
@@ -30,6 +32,25 @@ describe('Google capability policy', () => {
       DRIVE_LIBRARY_SCOPE,
     ]);
     expect(parseProviderScopes('openid email')).toEqual([]);
+  });
+
+  it('builds one minimized Workspace onboarding scope bundle without losing application capabilities', () => {
+    const scopes = googleWorkspaceOnboardingScopes();
+    expect(GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES).toEqual(expect.arrayContaining([
+      'google.account',
+      ...GOOGLE_V1_CORE_CAPABILITIES,
+      ...GOOGLE_V1_OPTIONAL_CAPABILITIES,
+    ]));
+    expect(scopes).toContain(getGoogleScope('google.account').scope);
+    expect(scopes).toContain(getGoogleScope('calendar.events.write').scope);
+    expect(scopes).not.toContain(getGoogleScope('calendar.events.read').scope);
+    expect(scopes).toContain(getGoogleScope('tasks.write').scope);
+    expect(scopes).not.toContain(getGoogleScope('tasks.read').scope);
+    expect(scopes).toContain(getGoogleScope('gmail.modify').scope);
+    expect(scopes).not.toContain(getGoogleScope('gmail.read').scope);
+    expect(scopes).toContain(DRIVE_APP_FILE_SCOPE);
+    expect(scopes).toContain(DRIVE_LIBRARY_SCOPE);
+    expect(new Set(scopes).size).toBe(scopes.length);
   });
 
   it('treats drive.file as technically sufficient for Docs/Sheets/Drive app-file reads and writes', () => {

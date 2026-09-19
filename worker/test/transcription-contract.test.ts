@@ -19,6 +19,7 @@ describe('VTT transcription Worker contract', () => {
   const env = {
     GEMINI_API_KEY: 'test-secret-key',
     ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io',
+    ELARA_INSTALLATION_TOKEN: 'test-installation-token',
   };
 
   beforeEach(() => {
@@ -34,7 +35,7 @@ describe('VTT transcription Worker contract', () => {
 
     const request = new Request('https://worker.example/api/transcribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/webm', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: new Uint8Array(3_000),
     });
 
@@ -50,7 +51,7 @@ describe('VTT transcription Worker contract', () => {
 
     const request = new Request('https://worker.example/api/transcribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/webm', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: new Uint8Array(3_000),
     });
 
@@ -70,7 +71,7 @@ describe('VTT transcription Worker contract', () => {
     const oversized = new Uint8Array((2 * 1024 * 1024) + 1);
     const request = new Request('https://worker.example/api/transcribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/webm', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: oversized,
     });
 

@@ -9,7 +9,7 @@ import {
 } from './gemini-passkey';
 
 const TEST_KEY = 'test-gemini-key-only';
-const PIN = '284619';
+const PIN = '2846197531';
 
 beforeEach(async () => {
   await clearGeminiApiKey();

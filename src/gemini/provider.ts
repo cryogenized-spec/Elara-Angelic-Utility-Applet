@@ -7,6 +7,7 @@ import { composeSystemInstructionWithStatus } from './memory-context';
 import { artifactRepository } from '../artifacts/repository';
 import { ArtifactError } from '../artifacts/errors';
 import { isAttachment } from '../domain/artifact';
+import { GEMINI_STREAM_LIMITS } from './stream-limits';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
@@ -35,11 +36,6 @@ function thoughtSummaryFrom(parts: Map<number, string>): string | undefined {
   const summary = [...parts.entries()].sort(([left], [right]) => left - right).map(([, text]) => text.trim()).filter(Boolean).join('\n\n').trim();
   return summary || undefined;
 }
-
-export const MAX_GEMINI_STREAM_EVENTS = 50_000;
-export const MAX_GEMINI_STREAM_TEXT_CHARS = 1_000_000;
-export const MAX_GEMINI_STREAM_THOUGHT_CHARS = 64_000;
-export const MAX_GEMINI_STREAM_FUNCTION_ARGUMENT_CHARS = 100_000;
 
 type PendingFunctionCall = { callId: string; name: string; arguments: string; initialArguments?: unknown };
 type InteractionRequest = { model: string; input: unknown; attachments?: readonly string[]; previousInteractionId?: string; generationConfig?: unknown; systemInstruction?: string; tools?: readonly string[]; memoryContext?: 'thread' | 'none'; conversationId?: string; generationId?: string; isGenerationActive?: () => boolean; signal?: AbortSignal };
@@ -224,7 +220,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         }
         if (next.done) break;
         streamEvents += 1;
-        if (streamEvents > MAX_GEMINI_STREAM_EVENTS) {
+        if (streamEvents > GEMINI_STREAM_LIMITS.maxEvents) {
           yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream exceeded the event safety limit.'), { requestId, interactionId }) };
           return;
         }
@@ -245,7 +241,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
               const text = readString(asRecord(summaryBlock), 'text');
               if (text) {
                 streamedThoughtChars += text.length;
-                if (streamedThoughtChars > MAX_GEMINI_STREAM_THOUGHT_CHARS) {
+                if (streamedThoughtChars > GEMINI_STREAM_LIMITS.maxThoughtChars) {
                   yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini thought summary exceeded the live safety limit.'), { requestId, interactionId }) };
                   return;
                 }
@@ -265,7 +261,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           else if (deltaType === 'thought_summary') {
             if (deltaText) {
               streamedThoughtChars += deltaText.length;
-              if (streamedThoughtChars > MAX_GEMINI_STREAM_THOUGHT_CHARS) {
+              if (streamedThoughtChars > GEMINI_STREAM_LIMITS.maxThoughtChars) {
                 yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini thought summary exceeded the live safety limit.'), { requestId, interactionId }) };
                 return;
               }
@@ -275,7 +271,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           }
           else if (deltaType === 'text' && deltaText) {
             streamedTextChars += deltaText.length;
-            if (streamedTextChars > MAX_GEMINI_STREAM_TEXT_CHARS) {
+            if (streamedTextChars > GEMINI_STREAM_LIMITS.maxTextChars) {
               yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini response exceeded the live text safety limit.'), { requestId, interactionId }) };
               return;
             }
@@ -285,7 +281,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
             const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments');
             if (partialArguments) {
               const pending = pendingFunctions.get(index)!;
-              if (pending.arguments.length + partialArguments.length > MAX_GEMINI_STREAM_FUNCTION_ARGUMENT_CHARS) {
+              if (pending.arguments.length + partialArguments.length > GEMINI_STREAM_LIMITS.maxFunctionArgumentChars) {
                 yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini function-call arguments exceeded the live safety limit.'), { requestId, interactionId }) };
                 return;
               }

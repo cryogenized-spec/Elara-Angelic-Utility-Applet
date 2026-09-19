@@ -149,6 +149,42 @@ describe('direct Google OAuth authority', () => {
     expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
   });
 
+  it('uses prompt none only to refresh an already-effective grant on the noninteractive path', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE],
+      account: { email: 'test@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+    tokenMock.mockResolvedValueOnce(token('silent-refresh', CALENDAR_READ_SCOPE));
+
+    const authorized = await googleOAuthAuthority.authorizeExisting?.('calendar.events.read');
+
+    expect(authorized?.capability).toBe('calendar.events.read');
+    expect(tokenMock).toHaveBeenCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
+      prompt: 'none',
+    });
+    expect(codeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not silently enable a missing application capability on the noninteractive path', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE],
+      account: { email: 'test@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+
+    await expect(googleOAuthAuthority.authorizeExisting?.('tasks.read')).rejects.toThrow('explicit consent');
+    expect(tokenMock).not.toHaveBeenCalled();
+    expect(codeMock).not.toHaveBeenCalled();
+    expect((await googleOAuthAuthority.getStatus()).enabledCapabilities).toEqual(['calendar.events.read']);
+  });
+
   it('records GIS scopes and persists metadata without persisting the access token', async () => {
     tokenMock.mockResolvedValueOnce(token('secret-access-token', CALENDAR_READ_SCOPE));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');

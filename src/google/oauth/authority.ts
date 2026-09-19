@@ -461,8 +461,12 @@ async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = f
 
   const status = currentStatus();
   const authorizing = resolveAuthorizingCapability(capability, status.grantedCapabilities);
-  const target = authorizing ?? capability;
-  if (!authorizing || !tokenStillValid()) await acquireBrowserToken(target, allowInteraction ? '' : 'none');
+  if (!authorizing) {
+    if (!allowInteraction) throw new Error('Google authorization requires explicit consent in Settings.');
+    await acquireBrowserToken(capability, '');
+  } else if (!tokenStillValid()) {
+    await acquireBrowserToken(authorizing, allowInteraction ? '' : 'none');
+  }
   if (!tokenStillValid() || !session) throw new Error('Google authorization did not return a usable access token.');
   return session.accessToken;
 }

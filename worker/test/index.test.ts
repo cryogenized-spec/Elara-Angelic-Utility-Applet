@@ -45,6 +45,7 @@ describe('Gemini Worker boundary', () => {
       api: true,
       credentialConfigured: true,
       originPolicyConfigured: true,
+      admissionConfigured: true,
     });
     expect(JSON.stringify(body)).not.toContain('test-secret-key');
     expect(createInteraction).not.toHaveBeenCalled();
@@ -63,7 +64,13 @@ describe('Gemini Worker boundary', () => {
       api: true,
       credentialConfigured: true,
       originPolicyConfigured: false,
+      admissionConfigured: true,
     });
+  });
+
+  it('reports degraded health when provider admission is not configured', async () => {
+    const response = await worker.fetch(new Request('https://worker.example/health'), { ...baseEnv, ELARA_INSTALLATION_TOKEN: '' });
+    await expect(response.json()).resolves.toMatchObject({ status: 'degraded', admissionConfigured: false });
   });
 
   it('rejects a missing Worker credential before invoking Gemini', async () => {
@@ -203,7 +210,7 @@ describe('Gemini Worker boundary', () => {
   it('rejects an unauthorized origin at the VTT boundary', async () => {
     const request = new Request('https://worker.example/api/transcribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/webm', Origin: 'https://attacker.example' },
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://attacker.example' },
       body: new Uint8Array(3_000),
     });
 

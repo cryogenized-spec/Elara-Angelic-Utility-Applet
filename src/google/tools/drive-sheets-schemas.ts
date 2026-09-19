@@ -100,6 +100,11 @@ export const driveSheetsToolArgumentSchemas = {
   }).strict(),
   'sheets.getSpreadsheet': z.object({ spreadsheetId: fileIdSchema }).strict(),
   'sheets.readRange': z.object({ spreadsheetId: fileIdSchema, range: a1RangeSchema }).strict(),
+  'sheets.exportSpreadsheet': z.object({
+    spreadsheetId: fileIdSchema,
+    format: z.enum(['pdf', 'xlsx']),
+    maxBytes: z.number().int().min(1).max(10 * 1024 * 1024).optional(),
+  }).strict(),
   'sheets.createSpreadsheet': z.object({
     title: z.string().trim().min(1).max(500),
     firstSheetTitle: z.string().trim().min(1).max(100).optional(),

@@ -8,7 +8,7 @@ export const googleToolNameSchema = z.enum([
   'chat.listMessages', 'chat.getMessage', 'chat.createMessage', 'chat.updateMessage', 'chat.deleteMessage',
   'gmail.listMessages', 'gmail.getMessage', 'gmail.listThreads', 'gmail.getThread', 'gmail.listLabels', 'gmail.getLabel', 'gmail.modifyMessage', 'gmail.modifyThread', 'gmail.trashMessage', 'gmail.untrashMessage', 'gmail.trashThread', 'gmail.untrashThread', 'gmail.createLabel', 'gmail.updateLabel', 'gmail.deleteLabel', 'gmail.sendMessage', 'gmail.replyMessage',
   'drive.searchFiles', 'drive.searchLibrary', 'drive.getFile', 'drive.downloadFile', 'drive.createFile', 'drive.updateFile', 'drive.moveFile', 'drive.trashFile',
-  'sheets.getSpreadsheet', 'sheets.readRange', 'sheets.writeRange', 'sheets.appendRows', 'sheets.updateCell', 'sheets.insertRows', 'sheets.batchUpdate',
+  'sheets.getSpreadsheet', 'sheets.readRange', 'sheets.createSpreadsheet', 'sheets.addSheet', 'sheets.writeRange', 'sheets.appendRows', 'sheets.updateCell', 'sheets.insertRows', 'sheets.batchUpdate',
   'roleplay_setting.list', 'roleplay_setting.inspect', 'roleplay_setting.create', 'roleplay_setting.update', 'roleplay_setting.move', 'roleplay_setting.delete',
   'memory.lookup', 'memory.save', 'memory.reconcile',
   'youtube.search',

@@ -38,7 +38,7 @@ main.tsx -> App.tsx
 | Conversation rendering | `src/app/components/ConversationSurface.tsx` |
 | Viewport/IME | `src/ui/useVisualViewport.ts` |
 | Fonts | `src/ui/fontRegistry.ts`, `src/ui/fonts.css`, `src/ui/generated-fonts/` |
-| Icons | `src/ui/icons.tsx` |
+| Icons | `src/ui/icons.tsx`, `src/ui/activity-glyphs.ts`, `src/ui/noto-emoji.ts` |
 | Appearance | `src/app/components/ChatAppearanceSettings.tsx` |
 
 ## 4. Data and contracts
@@ -46,6 +46,10 @@ main.tsx -> App.tsx
 Canonical shell width is capped at `520px`; the 9:16 Android portrait composition is the reference geometry. Touch controls use a `44px` minimum shell control token. The composer is a four-track row: attachment, flexible editor, VTT and send. The editor grows to roughly ten visible lines, then scrolls internally; conversation space shrinks instead of being pushed outside the shell.
 
 Built-in fonts are Inter, Manrope and Outfit as local Latin WOFF2 assets with system fallbacks. Custom Google Fonts are opt-in and accepted only from validated HTTPS `fonts.googleapis.com/css2` URLs.
+
+Generation Activity has a separate icon-font presentation contract. Twelve semantic activity slots are user-configurable as one Unicode grapheme each. They render through monochrome `Noto Emoji` weight 300 and inherit the existing Generation Activity accent colour; `Noto Color Emoji` is not part of the rendering stack. `src/ui/activity-glyphs.ts` owns slot names, normalization, defaults and suggestions. `src/ui/noto-emoji.ts` owns the reviewed Google Fonts subset fetch, in-memory preview face, committed face and disposable CacheStorage subset.
+
+Glyph editing is transactional at the Settings boundary: Appearance holds a local draft, preview fetches are `no-store`, and only leaving Settings returns the final glyph map to `App.tsx` for durable preference save plus cache promotion. Generation rendering consumes the existing appearance preference explicitly; the font/cache module never owns the selected glyph values.
 
 ## 5. Invariants
 
@@ -55,6 +59,8 @@ Built-in fonts are Inter, Manrope and Outfit as local Latin WOFF2 assets with sy
 - Conversation scrolling, composer growth and latest-message visibility must remain stable together.
 - Core controls retain visible focus states, reduced-motion support and usable touch targets.
 - Character artwork is presentation data, not the app's canvas or provider context by default.
+- Generation Activity glyph choices remain preference state; CacheStorage is only reconstructible font acceleration.
+- A missing, stale or failed Noto subset must fall back to the existing Lucide activity icon rather than platform colour emoji.
 
 ## 6. Security and failure semantics
 

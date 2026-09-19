@@ -170,6 +170,8 @@ describe('Generation Activity live lifecycle', () => {
     expect(rowTimes()).toEqual(['80 ms', '130 ms']);
     expect(container.textContent).toContain('Tool invocations (1)');
     expect(container.textContent).toContain('calendar.listEvents');
+    expect(container.querySelectorAll('[data-activity-glyph="calendar"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-activity-glyph="confirmation"]')).toHaveLength(1);
 
     state = send(state, { type: 'interaction-created', interactionId: 'i-2', model: 'm' }, 300);
     state = send(state, { type: 'step-start', index: 0, stepType: 'thought' }, 320);
@@ -193,6 +195,22 @@ describe('Generation Activity live lifecycle', () => {
     expect(headline()).toBe('Writing · 950 ms');
     expect(primaryRows()).toEqual(['Reasoning', 'Google Workspace · Calendar · List Events', 'Reasoning', 'Writing response']);
     expect(rowTimes()).toEqual(['80 ms', '180 ms', '280 ms', '250 ms']);
+  });
+
+  it('derives authorization instrumentation from the live provider status without creating a fake step', () => {
+    let state = createGenerationState('gen-auth-status', { startedAt: 0 });
+    state = send(state, { type: 'interaction-created', interactionId: 'i-auth', model: 'm' }, 10);
+    state = send(state, { type: 'step-start', index: 0, stepType: 'function_call' }, 20);
+    state = send(state, { type: 'tool-call', interactionId: 'i-auth', index: 0, callId: 'c-auth', name: 'drive.getFile', arguments: {} }, 30);
+    state = send(state, { type: 'interaction-status', interactionId: 'i-auth', status: 'awaiting_authorization' }, 40);
+
+    now = 80;
+    renderLive(state);
+
+    expect(headline()).toBe('Waiting for authorization · 80 ms');
+    expect(container.querySelectorAll('[data-activity-glyph="authorization"]')).toHaveLength(1);
+    expect(container.querySelectorAll('[data-activity-glyph="drive"]')).toHaveLength(1);
+    expect(primaryRows()).toEqual(['Google Workspace · Drive · Get File']);
   });
 
   it('shows truthful terminal labels and freezes failed/cancelled steps', () => {

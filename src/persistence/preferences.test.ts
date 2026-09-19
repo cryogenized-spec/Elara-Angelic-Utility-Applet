@@ -81,6 +81,19 @@ describe('preference normalization', () => {
     expect(normalizeChatAppearance({ generationActivityAccent: '#1234567' }).generationActivityAccent).toBe(DEFAULT_CHAT_APPEARANCE.generationActivityAccent);
   });
 
+  it('normalizes Generation Activity glyphs while preserving missing defaults', () => {
+    const value = normalizeChatAppearance({
+      generationActivityGlyphs: {
+        ...DEFAULT_CHAT_APPEARANCE.generationActivityGlyphs,
+        memory: '♥️',
+        calendar: 'two icons',
+      },
+    });
+    expect(value.generationActivityGlyphs.memory).toBe('♥');
+    expect(value.generationActivityGlyphs.calendar).toBe(DEFAULT_CHAT_APPEARANCE.generationActivityGlyphs.calendar);
+    expect(normalizeChatAppearance({}).generationActivityGlyphs).toEqual(DEFAULT_CHAT_APPEARANCE.generationActivityGlyphs);
+  });
+
   it('normalizes roleplay text and rejects unknown environment presets', () => {
     const value = normalizeRoleplay({
       enabled: 1 as never,
@@ -110,6 +123,18 @@ describe('Generation Activity appearance persistence', () => {
     expect(loaded.generationActivityAccent).toBe('#34D399');
     expect(loaded.assistantTextColor).toBe(DEFAULT_CHAT_APPEARANCE.assistantTextColor);
     expect(loaded.userSurfaceColor).toBe(DEFAULT_CHAT_APPEARANCE.userSurfaceColor);
+  });
+
+  it('stores customized glyphs in the existing chat-appearance record', async () => {
+    const saved = await saveChatAppearance({
+      ...DEFAULT_CHAT_APPEARANCE,
+      generationActivityGlyphs: { ...DEFAULT_CHAT_APPEARANCE.generationActivityGlyphs, memory: '♥️' },
+    });
+    expect(saved.generationActivityGlyphs.memory).toBe('♥');
+
+    const loaded = await loadChatAppearance();
+    expect(loaded.generationActivityGlyphs.memory).toBe('♥');
+    expect(loaded.generationActivityGlyphs.reasoning).toBe(DEFAULT_CHAT_APPEARANCE.generationActivityGlyphs.reasoning);
   });
 
   it('persists the player surface preset in that same appearance record', async () => {

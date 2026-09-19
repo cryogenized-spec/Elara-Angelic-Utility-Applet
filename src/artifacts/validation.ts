@@ -65,7 +65,8 @@ function normalizedName(name: string): string {
   return (cleaned || 'untitled-file').slice(0, ARTIFACT_LIMITS.maxFilenameLength);
 }
 
-function kindForMime(mimeType: string): AttachmentKind {
+/** Shared intake classification: MIME type is authority, filename extension is not. */
+export function kindForMime(mimeType: string): AttachmentKind {
   if (mimeType.startsWith('image/')) return 'image';
   if (mimeType.startsWith('text/') || mimeType === 'application/json' || mimeType === 'application/javascript') return 'text';
   if (mimeType === 'application/pdf' || mimeType.startsWith('application/')) return 'document';

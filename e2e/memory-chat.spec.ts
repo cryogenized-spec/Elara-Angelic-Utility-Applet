@@ -92,7 +92,7 @@ async function openMemoryBank(page: Page): Promise<void> {
   await expect(page.getByText('One human-facing view over the canonical durable-memory store.', { exact: false })).toBeVisible();
 }
 
-test('chat exposes memory tools and persists organic capture with the paging-book trace', async ({ page }) => {
+test('chat exposes memory tools and persists organic capture with the memory activity glyph', async ({ page }) => {
   test.setTimeout(25_000);
   const chatRequests: InteractionPayload[] = [];
   const observerRequests: InteractionPayload[] = [];
@@ -145,7 +145,7 @@ test('chat exposes memory tools and persists organic capture with the paging-boo
   const savedRow = activity.locator('.generation-activity__step').filter({ hasText: 'Saved to memory' });
   await expect(savedRow).toHaveCount(1);
   await expect(savedRow).toContainText('Recorded 1 durable observation.');
-  await expect(savedRow.locator('svg.lucide-book-open')).toHaveCount(1);
+  await expect(savedRow.locator('[data-activity-glyph="memory"]')).toHaveCount(1);
 
   await openMemoryBank(page);
   const observed = page.locator('.memory-card').filter({ hasText: 'Observed preference' });
@@ -163,5 +163,5 @@ test('chat exposes memory tools and persists organic capture with the paging-boo
   await rehydrated.getByRole('button').click();
   const rehydratedSavedRow = rehydrated.locator('.generation-activity__step').filter({ hasText: 'Saved to memory' });
   await expect(rehydratedSavedRow).toHaveCount(1);
-  await expect(rehydratedSavedRow.locator('svg.lucide-book-open')).toHaveCount(1);
+  await expect(rehydratedSavedRow.locator('[data-activity-glyph="memory"]')).toHaveCount(1);
 });

@@ -145,7 +145,7 @@ New mail and replies are separate semantic tools.
 
 `gmail.sendMessage` accepts bounded validated `to`, optional `cc`, `subject`, and plain-text `body`. Elara limits a single call to 50 total To+Cc recipients. Recipient and subject validation is repeated at the direct service boundary; CR/LF header injection is rejected.
 
-`gmail.replyMessage` requires explicit `threadId`, recipient, subject, body, and the prior RFC `Message-ID` as `inReplyTo`. The model does not supply a `References` chain. Its tool descriptor declares `gmail.read` as an executor-visible prerequisite in addition to the primary `gmail.send` capability. The Gemini tool loop runs the same OAuth admission probe before a mutation enters the confirmation batch. All declared OAuth requirements must therefore be effective before any reply approval is shown. The Gemini tool loop repeatedly probes and admits missing capabilities until the descriptor is fully satisfied or the user declines; if interactive authorization is unavailable, the call returns `AUTHORIZATION_REQUIRED`. The confirmation object is constructed only after authorization completes, so OAuth time never consumes the confirmation freshness window. An approval is never collected first and then reused after granting a missing capability.
+`gmail.replyMessage` requires explicit `threadId`, recipient, subject, body, and the prior RFC `Message-ID` as `inReplyTo`. The model does not supply a `References` chain. Its tool descriptor declares `gmail.read` as an executor-visible prerequisite in addition to the primary `gmail.send` capability. The Gemini tool loop runs the same OAuth admission probe before a mutation enters the confirmation batch. All declared OAuth requirements must therefore be effective before any reply approval is shown. The Gemini tool loop repeatedly probes and admits missing capabilities until the descriptor is fully satisfied or the user declines; if interactive authorization is unavailable, the call returns `AUTHORIZATION_REQUIRED`. The confirmation batch is constructed only after OAuth admission completes for the entire mutation batch, so a later consent flow cannot age an earlier confirmation before the user sees it. An approval is never collected first and then reused after granting a missing capability.
 
 After admission, Elara reads the selected thread's bounded metadata, verifies that `inReplyTo` identifies a message in that thread, compares the supplied subject with the provider conversation subject using locale-independent case folding modulo normal reply/forward prefixes, and derives `References` from provider metadata. Only after that verification does it obtain the already-enabled `gmail.send` request authority and construct/send RFC mail carrying the provider thread id plus `In-Reply-To` and provider-derived `References`. A mismatched thread, Message-ID, or subject fails before `messages.send`.
 
@@ -155,17 +155,29 @@ Both send/reply are `send` risk. Confirmation identifies the target/thread and s
 
 Gmail does not expose a Calendar-style client-chosen message resource id for deterministic reconciliation. Elara therefore uses a same-call replay fence keyed by tool + conversation + user message + generation + Gemini call id + validated payload hash, with replay state isolated per elected turn. A stale or slower generation cannot clear another live turn's replay entries; inactive turn buckets are pruned opportunistically and active buckets are never evicted to make room. Replaying the exact same send/reply in the same live turn returns the same promise/result or retained ambiguous failure and does not issue a second `messages.send`. Reusing the call id with changed arguments fails closed. Distinct calls remain distinct. After a full page/runtime restart, an ambiguous provider acceptance remains an explicit limitation rather than a fabricated exactly-once guarantee.
 
-## 7. Drive / Docs / Sheets current boundary
+## 7. Drive parity; Docs / Sheets current boundary
 
-These services remain pre-Pass-4 groundwork plus audited hardening, not final parity.
+Drive remains Google's file authority; Elara keeps no second Drive catalogue. Gemini exposes `drive.searchFiles` under the app-file boundary, `drive.searchLibrary` behind separate deliberate broader-library read consent, `drive.getFile`, guarded `drive.downloadFile`, and confirmed create/update/move/trash mutations.
 
-Drive model access uses app-file boundaries by default, with broader library read as separate deliberate consent. `drive.updateFile` has one nested semantic `patch`; the model-visible patch permits only `name`, `description`, and `starred`. `trashed` is deliberately absent from this ordinary-write tool.
+Every Drive read uses one bounded projection: id, name, MIME type, modified/created time, web-view link, parents, size, starred, description, trashed state, provider ETag, and `capabilities.canDownload`. Provider size is parsed conservatively. Oversized/non-HTTPS links are dropped rather than truncated into broken URLs, and implausible MIME types fall back to `application/octet-stream` rather than becoming a false classification.
 
-Docs model operations are semantic create/inspect/edit helpers. Raw unrestricted batch update remains internal.
+Search excludes trashed files by default. `showTrashed` is explicit; a caller-written `trashed` predicate is honored, but a quoted file name that merely contains the word never suppresses the default boundary. Query text, page tokens, page sizes, IDs, validators and provider-facing metadata are bounded at both schema and service boundaries.
 
-Sheets exposes bounded reads/writes plus semantic helpers. `sheets.updateCell` requires one true single-cell A1 target, including safely parsed quoted sheet names, and one bounded string input; ranges/whole rows/columns/named ranges are rejected before confirmation. Confirmation identifies spreadsheet + exact cell and exposes the full cell input. `sheets.insertRows` confirms spreadsheet/sheet/index/count and returns a bounded semantic success summary rather than raw batch-update provider output. General unrestricted `sheets.batchUpdate` remains internal.
+`drive.downloadFile` never returns bytes to Gemini. Google-native editor files that require export, provider-nondownloadable files, declared oversize files, and streams that cross the 10 MiB application ceiling are refused. Transfers carry the elected turn's abort signal. Successful bytes become a conversation-scoped local attachment artifact; the tool returns bounded artifact metadata only. A cancelled/superseded generation cannot publish a stale ready artifact, and unattended runs without a conversation cannot create an orphaned download artifact.
 
-Broader Drive/Docs/Sheets parity, Picker admission, revision-aware edit controls, formula-safe write modes, and complete provider-response budgeting belong to the dedicated later Workspace pass.
+Drive mutations are conditional. `drive.updateFile`, `drive.moveFile`, and `drive.trashFile` require one concrete strong provider ETag from a prior read and send it as `If-Match`. Weak, wildcard, multi-value, empty or oversized validators fail before provider execution; a provider `412` becomes an explicit re-read requirement. `drive.updateFile` accepts only nested `patch:{name?,description?,starred?}`; trash cannot be smuggled through ordinary metadata update. `drive.trashFile` is the recoverable destructive end state; permanent file deletion is absent from the model surface.
+
+Moves state their parent consequence before confirmation. Supplying `previousParentId` removes that prior parent while adding the destination; omitting it adds another parent and leaves the prior location intact. Contradictory remove/add of the same parent fails before provider access.
+
+`drive.createFile` uses a same-call replay fence isolated by elected turn and call id, signed by the validated create payload. Identical live replays share the first result/ambiguous failure; changed arguments under the same call id fail closed; stale generations cannot clear a newer live turn's fence. Drive has no client-chosen file id in this contract, so cross-restart ambiguous acceptance is not disguised as exactly-once.
+
+Every Drive mutation carries the turn abort/activity guard through OAuth and to the authorized fetch boundary. Ownership is checked before provider execution and again before a post-401 retry, so token refresh cannot resurrect a stale generation's write.
+
+Drive tools are browser-plane only; the Worker never advertises Drive handlers it does not own. `drive.exportFile` remains an internal service primitive until Docs/Sheets export semantics are deliberately contracted.
+
+Docs model operations remain semantic create/inspect/edit helpers. Raw unrestricted Docs batch update stays internal. Complete tab-aware structure/anchor/revision parity and Picker-driven admission remain unfinished Pass-4 work.
+
+Sheets exposes bounded reads/writes plus semantic helpers. `sheets.updateCell` requires one true single-cell A1 target and one bounded string input; range/row/column/named-range misuse is rejected before confirmation. `sheets.insertRows` confirms spreadsheet/sheet/index/count and returns a bounded semantic result. General unrestricted `sheets.batchUpdate` remains internal. Spreadsheet/sheet creation, formula-safe modes, structural-operation parity, and Picker/Drive identity integration remain unfinished.
 
 ## 8. Security and failure semantics
 
@@ -174,6 +186,9 @@ Validation precedes execution. Confirmation is separate from OAuth. If confirmat
 Gmail-specific hostile-content rule: text such as “ignore previous instructions”, “send secrets”, or “enable another tool” found inside an email is external content, not user authorization. The retrieved payload cannot widen application capabilities or skip confirmation. The semantic Gmail service also constrains provider payload shape before the continuation reaches Gemini, reducing both prompt-injection surface and unbounded-context risk.
 
 Gmail send/reply uses fixed provider endpoints and locally generated RFC headers from validated semantic fields. Raw RFC822 is not a Gemini argument. Permanent delete is absent. Custom-label mutation verifies USER type. Invalid ids/query/page sizes/recipient/header/body inputs fail before the corresponding provider mutation and, where possible, before OAuth authorization.
+
+
+Drive-specific failure semantics are likewise fail-closed. Invalid validators and contradictory moves fail before provider mutation; transfer ceilings are enforced before and during reads; a stream failure becomes a typed transfer failure rather than a partial artifact. Drive file writes carry the same provider-boundary turn guard used by Gmail so OAuth/token refresh cannot turn an expired approval or stale generation into a provider mutation. Permanent file DELETE is absent.
 
 ## 9. Verification
 
@@ -189,7 +204,17 @@ Gmail-specific regressions live in:
 
 Important assertions include: raw provider mutation shapes rejected; reads normalized as `untrusted-external`; arbitrary HTML/custom headers do not cross the semantic projection; metadata-first bounded full-thread retrieval; raw Gmail JSON byte ceilings before parsing; exact-budget MIME truncation visibility; USER-label verification; semantic system-label mapping; CR/LF injection rejection; complete multi-capability authorization-before-confirmation with confirmation freshness starting after OAuth; provider-verified thread/Message-ID/locale-independent subject with provider-derived RFC References; bounded write acknowledgements; provider-boundary stale-turn rejection across token refresh/retry; full send-body confirmation; and per-turn same-call replay suppression without content-deduplicating legitimate distinct sends or allowing stale turns to clear newer replay state.
 
-`verified_commit` must not be advanced to the Gmail branch head until the reviewed exact PR head passes full CI, merges, and the resulting `main` commit passes post-merge certification.
+Drive regressions additionally live in `src/google/drive/*test.ts`, `src/google/tools/drive-parity.test.ts`, `src/google/tools/drive-write-parity.test.ts`, `src/google/tools/drive-sheets-parity.test.ts`, and `e2e/google-drive.spec.ts`. They pin trash-default search, bounded provider projection, guarded artifact downloads, transfer overflow/cancellation, strong-ETag conditional writes, recoverable trash with no DELETE, move-parent semantics, replay isolation across live/stale generations, browser execution-plane filtering, schema/declaration/handler parity, and provider-boundary stale-turn rejection.
+
+## 10. Known gaps
+
+Pass 4 is not complete after Drive parity. Google Picker admission/revocation is still absent. Library search remains discovery-only: files visible only through the broader library-read capability do not yet gain a deliberate library-boundary `get/download` contract. Docs still needs complete tab-aware inspection, stable semantic anchors/ranges, revision-aware edits, deliberate create/export behavior, and mobile/E2E coverage. Sheets still needs spreadsheet/sheet creation, stronger structural-operation contracts, formula-safe write behavior, Drive identity/export integration, and dedicated mobile/E2E coverage.
+
+Pass 5 orchestration/Kanban must consume these provider/tool contracts rather than become a competing authority. Pass 6 still owns cross-Workspace hostile provider-payload budgets/truncation metadata, prompt-injection certification across Gmail/Docs/Drive/Sheets, stale-read/write race matrices, replay/idempotency edge cases, and final end-to-end handover.
+
+`verified_commit` advances only after an exact reviewed PR head passes full CI, merges, and the resulting `main` commit passes post-merge certification.
+
+## 11. Kanban projections and synchronization
 
 ### Kanban large-board projections
 

@@ -7,7 +7,7 @@ import { artifactRepository } from '../artifacts/repository';
 import { createAttachmentFromFile } from '../artifacts/intake';
 import { ARTIFACT_LIMITS } from '../artifacts/limits';
 import { DEFAULT_CHARACTER_PROFILE, type CharacterProfile } from '../domain/character';
-import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
+import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_ROLEPLAY, type AppUiPreferences, type ChatAppearancePreferences, type GenerationActivityGlyphs, type RoleplayPreferences } from '../domain/preferences';
 import { archiveThread, createThread, deleteThread, loadConversation, loadGeminiSettings, loadThreads, renameThread, saveConversation, saveGeminiSettings, type StoredGeminiSettings } from '../persistence/conversation';
 import { ensureWorkspaceShortcuts, storedShortcutFromDefinition, type StoredWorkspaceShortcut } from '../persistence/workspace-shortcuts';
 import { loadCharacterProfile, saveCharacterProfile } from '../persistence/character';
@@ -39,6 +39,7 @@ import { getGeminiModel } from '../gemini/model-registry';
 import { resolveMasterCharacterInstruction } from '../character/system-instruction';
 import { Icon } from '../ui/icons';
 import { fontFamilyForCss } from '../ui/fontRegistry';
+import { commitNotoEmoji, restoreNotoEmoji, suspendNotoEmojiRendering } from '../ui/noto-emoji';
 import { useVisualViewport } from '../ui/useVisualViewport';
 import { applyPwaUpdate, initPwaUpdater } from '../pwa';
 import { Sidebar } from './components/Sidebar';
@@ -110,6 +111,7 @@ export function App() {
   const activeConversationIdRef = useRef('primary');
   const generationArbiterRef = useRef(createGenerationArbiter());
   const uiSaveQueueRef = useRef(Promise.resolve());
+  const chatAppearanceSaveQueueRef = useRef(Promise.resolve());
 
   useVisualViewport();
 
@@ -127,6 +129,7 @@ export function App() {
         if (cancelled || activeConversationIdRef.current !== initialActiveConversationId) return;
         activeConversationIdRef.current = activeId;
         setThreads(loadedThreads); setConversation(loadedConversation); setGeminiModel(savedGeminiSettings.model); setGeminiPerModelSettings(savedGeminiSettings.perModel); setCharacter(loadedCharacter); setChatAppearance(loadedAppearance); setRoleplay(loadedRoleplay); setWorkspaceShortcuts(loadedShortcuts); setUiSettings(loadedUi);
+        void restoreNotoEmoji(loadedAppearance.generationActivityGlyphs);
         setFirstRunWelcomeOpen(!onboardingComplete);
         window.localStorage.setItem(ACTIVE_THREAD_KEY, activeId);
       } catch { if (!cancelled) setError('Could not load the local application settings.'); }
@@ -485,7 +488,40 @@ export function App() {
   async function handleGeminiSettingsChange(settings: GeminiSettings) { const normalized = normalizeGeminiSettings(geminiModel, settings); const nextMap = { ...geminiPerModelSettings, [geminiModel]: normalized }; setGeminiPerModelSettings(nextMap); try { const saved = await saveGeminiSettings(geminiModel, normalized, nextMap); setGeminiPerModelSettings(saved.perModel); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save Gemini settings.'); } }
   async function handleResetGeminiSettings() { await handleGeminiSettingsChange(defaultsForModel(geminiModel)); }
   async function handleCharacterChange(next: CharacterProfile) { setCharacter(next); try { const saved = await saveCharacterProfile(next); setCharacter(saved); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save character settings.'); } }
-  async function handleChatAppearanceChange(next: ChatAppearancePreferences) { const safe = { ...DEFAULT_CHAT_APPEARANCE, ...next, chatBackgroundOpacity: Math.max(0, Math.min(1, next.chatBackgroundOpacity)), chatBackgroundOverlay: Math.max(0, Math.min(.9, next.chatBackgroundOverlay)), chatBackgroundBlur: Math.max(0, Math.min(24, next.chatBackgroundBlur)), userSurfaceOpacity: Math.max(.2, Math.min(1, next.userSurfaceOpacity)) }; setChatAppearance(safe); try { setChatAppearance(await saveChatAppearance(safe)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save chat appearance.'); } }
+  function normalizedChatAppearance(next: ChatAppearancePreferences): ChatAppearancePreferences {
+    return {
+      ...DEFAULT_CHAT_APPEARANCE,
+      ...next,
+      chatBackgroundOpacity: Math.max(0, Math.min(1, next.chatBackgroundOpacity)),
+      chatBackgroundOverlay: Math.max(0, Math.min(.9, next.chatBackgroundOverlay)),
+      chatBackgroundBlur: Math.max(0, Math.min(24, next.chatBackgroundBlur)),
+      userSurfaceOpacity: Math.max(.2, Math.min(1, next.userSurfaceOpacity)),
+    };
+  }
+  function queueChatAppearanceSave(next: ChatAppearancePreferences): Promise<ChatAppearancePreferences> {
+    const safe = normalizedChatAppearance(next);
+    setChatAppearance(safe);
+    const task = chatAppearanceSaveQueueRef.current.catch(() => undefined).then(() => saveChatAppearance(safe));
+    chatAppearanceSaveQueueRef.current = task.then(() => undefined, () => undefined);
+    return task.then((saved) => {
+      setChatAppearance(saved);
+      return saved;
+    });
+  }
+  async function handleChatAppearanceChange(next: ChatAppearancePreferences) {
+    try { await queueChatAppearanceSave(next); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save chat appearance.'); }
+  }
+  async function handleSettingsBack(activityGlyphs: GenerationActivityGlyphs): Promise<void> {
+    suspendNotoEmojiRendering();
+    setSettingsOpen(false);
+    try {
+      const saved = await queueChatAppearanceSave({ ...chatAppearance, generationActivityGlyphs: activityGlyphs });
+      await commitNotoEmoji(saved.generationActivityGlyphs);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save the Generation Activity icons.');
+    }
+  }
   async function handleRoleplayChange(next: RoleplayPreferences) { setRoleplay(next); try { setRoleplay(await saveRoleplayPreferences(next)); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save roleplay settings.'); } }
   function handleUiSettingsChange(patch: Partial<AppUiPreferences>): void {
     const next = { ...uiSettings, ...patch };
@@ -505,7 +541,7 @@ export function App() {
   const visibleMessages = useMemo(() => conversation.messages.filter((message) => message.conversationId === conversation.id), [conversation]);
   const canRetry = canRetryFailedTurn(status, failedAttempt, conversation.id);
   const showLockboxAction = structuredError !== null && (structuredError.category === 'configuration' || structuredError.category === 'authentication' || structuredError.category === 'authorization' || structuredError.code === 'GEMINI_LOCKBOX_LOCKED');
-  if (settingsOpen) return <SettingsScreen initialSection={settingsSection} font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value: ChatAppearancePreferences) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value: RoleplayPreferences) => void handleRoleplayChange(value)} enterToSend={uiSettings.enterToSend} onEnterToSendChange={(value) => handleUiSettingsChange({ enterToSend: value })} onBack={() => setSettingsOpen(false)} />;
+  if (settingsOpen) return <SettingsScreen initialSection={settingsSection} font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value: ChatAppearancePreferences) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value: RoleplayPreferences) => void handleRoleplayChange(value)} enterToSend={uiSettings.enterToSend} onEnterToSendChange={(value) => handleUiSettingsChange({ enterToSend: value })} onBack={(activityGlyphs) => void handleSettingsBack(activityGlyphs)} />;
   if (kanbanOpen) return <main style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}><KanbanScreen onBack={() => setKanbanOpen(false)} onSettings={() => { setSettingsSection('google'); setSettingsOpen(true); }} /></main>;
   return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}>
     <div className="app-shell__background" aria-hidden="true" />
@@ -518,7 +554,7 @@ export function App() {
     <button type="button" className="kanban-launcher" onClick={() => setKanbanOpen(true)}>Kanban</button>
     <MasterPromptWarning systemInstruction={character.systemInstruction} />
     <PortraitBanner collapsed={sidebarOpen} scale={uiSettings.portraitScale} background={uiSettings.portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
-    <ConversationSurface key={conversation.id} messages={visibleMessages} generation={generation} onRegenerate={handleRegenerate} />
+    <ConversationSurface key={conversation.id} messages={visibleMessages} generation={generation} onRegenerate={handleRegenerate} activityGlyphs={chatAppearance.generationActivityGlyphs} />
     {error && <GenerationError message={error} structured={structuredError} onRetry={canRetry ? () => void retryLastTurn() : null} onOpenLockbox={showLockboxAction ? () => openLockbox() : null} />}
     <Composer draft={draft} status={status} geminiModel={geminiModel} systemInstruction={resolveMasterCharacterInstruction(character.systemInstruction)} onDraftChange={setDraft} onSend={() => void send()} onCancel={cancel} attachments={draftAttachments} onFilesSelected={(files) => void handleFilesSelected(files)} onRemoveAttachment={(id) => void removeDraftAttachment(id)} enterToSend={uiSettings.enterToSend} />
     {pwaUpdateAvailable && <UpdateToast onRefresh={() => applyPwaUpdate()} onDismiss={() => setPwaUpdateAvailable(false)} />}

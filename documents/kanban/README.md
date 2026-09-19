@@ -20,6 +20,8 @@ Desktop dragging places a task before a sibling in the same list and parent grou
 
 Gemini uses the existing registry, semantic schemas, grouped confirmations and handler replay protection. No parallel `tasks.patchTask` or `tasks.renameTaskList` tool exists: `tasks.updateTask` and `tasks.updateTaskList` are authoritative. `tasks.updateTask` accepts an optional current ETag and propagates it to `If-Match`. The UI supplies cached ETags for task edits, list renames and deletion when present; HTTP 412 surfaces as a conflict rather than triggering an overwrite/retry.
 
+Settings opened from the board use the existing SettingsScreen exit callback in App, including transactional Generation Activity glyph preference saving and Noto font-cache commit/fallback. The board does not own or replace those appearance authorities. Workspace Drive operations retain the existing Drive registry, execution-plane and replay boundaries.
+
 ## Synchronization
 
 1. App mount and board opening request reconciliation, but only an identified, currently live Tasks-authorized session can read Google. Metadata-only/reloaded sessions require explicit reconnection in Settings.
@@ -48,6 +50,6 @@ Snapshots and subroutines are browser-local, not encrypted or cross-device stora
 
 ## Verification and limits
 
-Tests cover pagination/repeated-token protection, last-good snapshots, coalescing, local calendar days, hierarchy/order, memo deduplication/resolution, account/session admission, persistence, timer visibility/cleanup, abort/resume, read timeouts, provider cooldown/retry budgets, cross-tab rule conflicts, conditional writes and strict model arguments. Browser tests use real UI/OAuth state transitions with mocked external Google boundaries; they do not import application modules or seed internal task stores.
+Tests cover pagination/repeated-token protection, last-good snapshots, coalescing, local calendar days, hierarchy/order, memo deduplication/resolution, account/session admission, persistence, timer visibility/cleanup, abort/resume, read timeouts, provider cooldown/retry budgets, cross-tab rule conflicts, conditional writes and strict model arguments. The integration regressions exercise the canonical Settings glyph commit on board exit and board navigation under an active PWA service worker. Provider-mocked smoke/VTT suites isolate their external API fixtures from service-worker interception; they do not certify the worker lifecycle. Browser tests use real UI/OAuth state transitions with mocked external Google boundaries; they do not import application modules or seed internal task stores.
 
 Remaining work: physical Android/installed-PWA lifecycle acceptance; aggregate sync telemetry; large-account incremental reads; cache management/export; authenticated cross-device rules; cross-list drag UX with hierarchy/assignment safeguards; and deployed-account acceptance checks. Do not claim offline writes, cross-device memos or background push alerts.

@@ -147,7 +147,8 @@ function normalizeReadValues(value: unknown): {
     }
     if (rawRow.length > MAX_COLUMNS_PER_ROW) reasons.add('columns');
     const row: GoogleSheetCellValue[] = [];
-    for (const rawCell of rawRow.slice(0, MAX_COLUMNS_PER_ROW)) {
+    for (const rawCellValue of rawRow.slice(0, MAX_COLUMNS_PER_ROW)) {
+      const rawCell: unknown = rawCellValue;
       if (cells >= MAX_CELLS) {
         reasons.add('cells');
         break;

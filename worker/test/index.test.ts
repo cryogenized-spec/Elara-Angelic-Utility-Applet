@@ -196,7 +196,7 @@ describe('Gemini Worker boundary', () => {
       headers: {
         Origin: 'https://cryogenized-spec.github.io',
         'Access-Control-Request-Method': 'POST',
-        'Access-Control-Request-Headers': 'content-type',
+        'Access-Control-Request-Headers': 'content-type, authorization',
       },
     });
 
@@ -204,6 +204,7 @@ describe('Gemini Worker boundary', () => {
 
     expect(response.status).toBe(204);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://cryogenized-spec.github.io');
+    expect(response.headers.get('Access-Control-Allow-Headers')?.toLowerCase()).toContain('authorization');
     expect(createInteraction).not.toHaveBeenCalled();
   });
 

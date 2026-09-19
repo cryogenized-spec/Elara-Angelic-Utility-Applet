@@ -4,6 +4,7 @@ import { googleToolNameSchema } from '../../src/google/tools/contracts';
 import { googleGeminiFunctionDeclarationsForPlane } from '../../src/google/tools/gemini-declarations';
 import { ELARA_INTERNAL_HEADER, deriveInstallationId, internalWakeMarker, verifyBearerToken } from '../../src/autonomy/protocol';
 import { autonomyPreflight, handleAutonomyRoute } from './autonomy/routes';
+import { GEMINI_STREAM_LIMITS } from '../../src/gemini/stream-limits';
 
 // The autonomy engine Durable Object (one per installation). Re-exported
 // so the AUTONOMY binding can construct it.
@@ -50,8 +51,54 @@ const requestSchema = z.object({
 type SafeEvent = Record<string, unknown>;
 type PendingFunctionCall = { callId: string; name: string; arguments: string };
 
+const GEMINI_MAX_REQUEST_BYTES = 2 * 1024 * 1024;
+const GEMINI_MAX_RELAY_BYTES = 4 * 1024 * 1024;
 const VTT_MAX_AUDIO_BYTES = 2 * 1024 * 1024;
 const VTT_ALLOWED_MIME_TYPES = new Set(['audio/webm', 'audio/webm;codecs=opus', 'audio/ogg', 'audio/ogg;codecs=opus']);
+
+type BoundedJsonRead =
+  | { ok: true; value: unknown }
+  | { ok: false; tooLarge: boolean };
+
+async function readBoundedJson(request: Request, maxBytes: number): Promise<BoundedJsonRead> {
+  const lengthHeader = request.headers.get('Content-Length');
+  if (lengthHeader) {
+    const declared = Number(lengthHeader);
+    if (Number.isFinite(declared) && declared > maxBytes) return { ok: false, tooLarge: true };
+  }
+  if (!request.body) return { ok: false, tooLarge: false };
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const next = await reader.read();
+      if (next.done) break;
+      if (!next.value?.byteLength) continue;
+      total += next.value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        return { ok: false, tooLarge: true };
+      }
+      chunks.push(next.value);
+    }
+  } catch {
+    return { ok: false, tooLarge: false };
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  try {
+    return { ok: true, value: JSON.parse(new TextDecoder().decode(bytes)) as unknown };
+  } catch {
+    return { ok: false, tooLarge: false };
+  }
+}
 
 function configuredOrigins(env: Env): string[] {
   return (env.ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean);
@@ -205,8 +252,13 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
   if (denied) return denied;
   const contentType = request.headers.get('Content-Type') ?? '';
   if (!contentType.toLowerCase().includes('application/json')) return jsonResponse(request, env, { code: 'validation', message: 'Content-Type must be application/json.' }, 415);
-  const payload: unknown = await request.json().catch(() => null);
-  const parsed = requestSchema.safeParse(payload);
+  const payloadRead = await readBoundedJson(request, GEMINI_MAX_REQUEST_BYTES);
+  if (!payloadRead.ok) {
+    return payloadRead.tooLarge
+      ? jsonResponse(request, env, { code: 'validation', message: 'Gemini request body is too large.' }, 413)
+      : jsonResponse(request, env, { code: 'validation', message: 'Request body must be valid JSON.' }, 400);
+  }
+  const parsed = requestSchema.safeParse(payloadRead.value);
   if (!parsed.success) return jsonResponse(request, env, { code: 'validation', message: 'Request did not satisfy the approved Gemini contract.' }, 400);
 
   const requestedTools = parsed.data.tools;
@@ -225,8 +277,32 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
       const pendingFunctions = new Map<number, PendingFunctionCall>();
       let waitingForToolResult = false;
       let currentInteractionId: string | undefined = parsed.data.previousInteractionId;
+      let streamEvents = 0;
+      let relayedBytes = 0;
+      let streamedTextChars = 0;
+      let streamedThoughtChars = 0;
+      const enqueue = (name: string, data: SafeEvent): boolean => {
+        const encoded = encoder.encode(sse(name, data));
+        if (relayedBytes + encoded.byteLength > GEMINI_MAX_RELAY_BYTES) return false;
+        relayedBytes += encoded.byteLength;
+        controller.enqueue(encoded);
+        return true;
+      };
+      const failLimit = (message: string) => {
+        const error = { event_type: 'error', error: { message } };
+        if (!enqueue('error', error)) {
+          // The relay budget is already exhausted; close without allocating
+          // another oversized payload. Browser callers treat missing terminal
+          // completion as protocol failure.
+        }
+      };
       try {
         for await (const rawEvent of stream) {
+          streamEvents += 1;
+          if (streamEvents > GEMINI_STREAM_LIMITS.maxEvents) {
+            failLimit('Gemini stream exceeded the event safety limit.');
+            break;
+          }
           const raw = asRecord(rawEvent);
           const eventInteractionId = interactionId(raw);
           if (eventInteractionId) currentInteractionId = eventInteractionId;
@@ -248,14 +324,37 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
           }
 
           const safe = toSafeEvent(rawEvent);
-          if (safe) controller.enqueue(encoder.encode(sse(safe.name, safe.data)));
+          if (safe) {
+            if (safe.name === 'step.delta') {
+              const safeDelta = asRecord((safe.data as Record<string, unknown>).delta);
+              const safeType = stringValue(safeDelta, 'type');
+              const safeText = stringValue(safeDelta, 'text') ?? '';
+              if (safeType === 'text') {
+                streamedTextChars += safeText.length;
+                if (streamedTextChars > GEMINI_STREAM_LIMITS.maxTextChars) {
+                  failLimit('Gemini response exceeded the live text safety limit.');
+                  break;
+                }
+              } else if (safeType === 'thought_summary') {
+                streamedThoughtChars += safeText.length;
+                if (streamedThoughtChars > GEMINI_STREAM_LIMITS.maxThoughtChars) {
+                  failLimit('Gemini thought summary exceeded the live safety limit.');
+                  break;
+                }
+              }
+            }
+            if (!enqueue(safe.name, safe.data)) {
+              failLimit('Gemini stream exceeded the relay byte safety limit.');
+              break;
+            }
+          }
 
           if (eventType === 'step.stop') {
             const pending = pendingFunctions.get(stepIndex);
             if (pending) {
               pendingFunctions.delete(stepIndex);
               if (!pending.arguments) {
-                controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini produced an invalid or oversized function-call argument stream.' } })));
+                enqueue('error', { event_type: 'error', error: { message: 'Gemini produced an invalid or oversized function-call argument stream.' } });
                 waitingForToolResult = false;
                 break;
               }
@@ -264,10 +363,10 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
                 if (!args || typeof args !== 'object' || Array.isArray(args)) throw new Error('Function arguments must be an object.');
                 const toolName = googleToolNameSchema.parse(pending.name);
                 if (!currentInteractionId) throw new Error('Function call has no interaction identity.');
-                controller.enqueue(encoder.encode(sse('tool-call', { event_type: 'tool-call', interaction_id: currentInteractionId, index: stepIndex, call_id: pending.callId, name: toolName, arguments: args })));
+                if (!enqueue('tool-call', { event_type: 'tool-call', interaction_id: currentInteractionId, index: stepIndex, call_id: pending.callId, name: toolName, arguments: args })) { failLimit('Gemini stream exceeded the relay byte safety limit.'); break; }
                 waitingForToolResult = true;
               } catch {
-                controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini produced invalid registered function arguments.' } })));
+                enqueue('error', { event_type: 'error', error: { message: 'Gemini produced invalid registered function arguments.' } });
                 waitingForToolResult = false;
                 break;
               }
@@ -282,7 +381,7 @@ async function handleGemini(request: Request, env: Env): Promise<Response> {
         controller.close();
         void waitingForToolResult;
       } catch {
-        controller.enqueue(encoder.encode(sse('error', { event_type: 'error', error: { message: 'Gemini streaming failed.' } })));
+        enqueue('error', { event_type: 'error', error: { message: 'Gemini streaming failed.' } });
         controller.close();
       }
     },

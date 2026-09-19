@@ -128,7 +128,14 @@ function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<stri
   if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
   if ((tool === 'gmail.sendMessage' || tool === 'gmail.replyMessage') && typeof args.body === 'string') return args.body;
   if (tool === 'sheets.updateCell' && typeof args.value === 'string') return args.value || '(empty string)';
-  return undefined;
+  // Every other mutation exposes the exact validated argument object. A prose
+  // summary is not enough authority for bulk rows, document edits, task notes,
+  // calendar fields, or Drive metadata that the model actually proposed.
+  try {
+    return JSON.stringify(args, null, 2);
+  } catch {
+    return undefined;
+  }
 }
 function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, fallback: string): string {
   const id = value(args, 'id') ?? value(args, 'ref');

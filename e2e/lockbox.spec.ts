@@ -29,8 +29,8 @@ test('PIN Lockbox locks the session, keeps the numeric unlock path, and does not
   await openLockbox(page);
 
   await page.getByLabel('Gemini API key').fill('e2e-' + 'pin-lockbox-key');
-  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('2846197531');
-  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('2846197531');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('28461975317531');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('28461975317531');
   await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
 
@@ -46,7 +46,7 @@ test('PIN Lockbox locks the session, keeps the numeric unlock path, and does not
   await expect(page.getByRole('button', { name: 'Unlock with Passkey' })).toHaveCount(0);
   await expect(unlockPin).toBeFocused();
 
-  await unlockPin.fill('2846197531');
+  await unlockPin.fill('28461975317531');
   await page.getByRole('button', { name: 'Unlock' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
 });

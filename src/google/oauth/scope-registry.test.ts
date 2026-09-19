@@ -57,7 +57,7 @@ describe('Google OAuth scope registry', () => {
     for (const capability of REQUIRED_CAPABILITIES) expect(getGoogleScope(capability).scope).toBe(EXPECTED_SCOPES[capability]);
   });
 
-  it('keeps account connection identity-only and outside Workspace data scopes', () => {
+  it('keeps the account capability itself identity-only while Settings composes the Workspace bundle separately', () => {
     const account = getGoogleScope('google.account');
     expect(account.scope).toBe('https://www.googleapis.com/auth/userinfo.email');
     expect(account.sensitivity).toBe('non-sensitive');

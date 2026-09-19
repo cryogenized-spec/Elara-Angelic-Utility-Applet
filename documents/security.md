@@ -65,7 +65,7 @@ Google refresh credential
 
 ## 4. Data and cryptography
 
-The Lockbox database is `elara-gemini-lockbox`, with secrets keyed by secret ID. Protected passphrase/PIN records use PBKDF2-SHA-256 to derive an AES-GCM key with random salt/IV. Unlocked plaintext lives only in the in-memory session map. `off` mode still uses a device-local non-extractable Web Crypto key rather than plaintext persistence.
+The Lockbox database is `elara-gemini-lockbox`, with secrets keyed by secret ID. Protected passphrase/PIN records use PBKDF2-SHA-256 to derive an AES-GCM key with random salt/IV. New encrypted writes use 600,000 PBKDF2 iterations. Existing records retain their stored iteration count so upgrades do not strand credentials. New or rotated PIN protection requires 10–12 numeric digits; legacy 6–8 digit PIN records remain unlockable and may be upgraded in place. Passkey or a strong password is the preferred posture when copied-profile/offline guessing resistance matters. Unlocked plaintext lives only in the in-memory session map. `off` mode still uses a device-local non-extractable Web Crypto key rather than plaintext persistence.
 
 The Worker installation token uses a dedicated Dexie store, AES-GCM-256 and a non-extractable device-local CryptoKey. `elara.autonomy.pairing.v1` stores pairing metadata only. Legacy pairing records containing plaintext token material migrate loss-safely: plaintext is removed only after the protected write succeeds.
 
@@ -115,7 +115,7 @@ For a paired installation, the same authority may contact only the paired self-h
 
 A mutation confirmation is time-bounded application authority, not an OAuth grant. Google scopes do not bypass the shared confirmation policy. Confirmation freshness is rechecked around delayed OAuth or grouped-approval flows.
 
-The Worker CORS allowlist is deployment-owned configuration. A fork must configure its own exact PWA origin; it must not rely on another deployment's allowlist.
+The optional Worker's Gemini/transcription provider routes require the deployment installation bearer credential on every request; CORS is an additional browser boundary, never authentication. Originless or spoofed-origin HTTP clients cannot consume the deployment's Gemini credential without the installation token. The Worker CORS allowlist is deployment-owned configuration. A fork must configure its own exact PWA origin; it must not rely on another deployment's allowlist.
 
 ## 8. Verification
 

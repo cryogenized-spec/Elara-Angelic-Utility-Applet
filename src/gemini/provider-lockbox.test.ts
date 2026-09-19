@@ -11,7 +11,7 @@ vi.mock('@google/genai', () => ({ GoogleGenAI }));
 import { geminiTurnPort } from './provider';
 import { clearGeminiApiKey, configureGeminiApiKeyWithPin, lockGeminiApiKey } from '../persistence/gemini-api-key';
 
-const PIN = '284619';
+const PIN = '2846197531';
 
 async function collectReply(): Promise<unknown[]> {
   const collected: unknown[] = [];

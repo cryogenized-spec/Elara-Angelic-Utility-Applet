@@ -124,11 +124,10 @@ test('Picker admits a Drive file and local removal blocks later tool access', as
   await unlockTestGemini(page);
   await openGoogleSettings(page);
 
-  await page.getByRole('button', { name: 'Connect Google account' }).click();
+  await page.getByRole('button', { name: 'Connect Google Workspace' }).click();
   await expect(page.getByText('Session ready')).toBeVisible();
   const driveRow = page.locator('.google-oauth-service').filter({ hasText: 'Google Drive' });
-  await driveRow.getByRole('button', { name: 'Enable read access' }).click();
-  await expect(driveRow.getByText('Read ready')).toBeVisible();
+  await expect(driveRow.getByLabel('Read permission granted')).toBeVisible();
 
   await driveRow.getByRole('button', { name: 'Choose files with Google Picker' }).click();
   await expect(driveRow.getByText('Picked plan')).toBeVisible();

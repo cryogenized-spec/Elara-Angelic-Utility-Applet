@@ -139,16 +139,15 @@ async function connectGoogleDrive(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Google' }).click();
 
-  // Workspace permissions are intentionally hidden until the account-first
-  // OAuth flow establishes a live session.
-  await page.getByRole('button', { name: 'Connect Google account' }).click();
+  // One explicit Google gesture requests the reviewed Workspace scope bundle.
+  // The service card reflects the scopes Google actually grants.
+  await page.getByRole('button', { name: 'Connect Google Workspace' }).click();
   await expect(page.getByText('Session ready')).toBeVisible();
 
   const driveRow = page.locator('.google-oauth-service').filter({ hasText: 'Google Drive' });
-  await driveRow.getByRole('button', { name: 'Enable read access' }).click();
-  await expect(driveRow.getByText('Read ready')).toBeVisible();
-  await driveRow.getByRole('button', { name: 'Enable writes' }).click();
-  await expect(driveRow.getByText('Writes ready')).toBeVisible();
+  await expect(driveRow.getByLabel('Read permission granted')).toBeVisible();
+  await expect(driveRow.getByLabel('Write permission granted')).toBeVisible();
+  await expect(driveRow.getByText('Ready', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 

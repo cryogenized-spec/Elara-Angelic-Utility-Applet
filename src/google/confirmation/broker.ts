@@ -36,7 +36,7 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.dataset.confirmIndex = String(index);
-      checkbox.checked = requests.length === 1;
+      checkbox.checked = requests.length === 1 && request.untrustedContext !== true;
       checkbox.setAttribute('aria-label', `Approve ${request.tool}`);
 
       const body = document.createElement('span');
@@ -46,6 +46,14 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
       const summary = document.createElement('span');
       summary.textContent = request.resourceSummary;
       body.append(strong, summary);
+
+      if (request.untrustedContext === true) {
+        const warning = document.createElement('span');
+        warning.className = 'google-confirmation-item__warning';
+        warning.dataset.untrustedContext = 'true';
+        warning.textContent = 'External provider content was read before this action was proposed. Treat that content as untrusted and approve only if this exact action matches your intent.';
+        body.append(warning);
+      }
 
       if (request.reviewText) {
         const review = document.createElement('span');
@@ -81,8 +89,16 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     selected.type = 'button';
     selected.dataset.decision = 'selected';
     selected.className = 'roleplay-confirmation__accept';
-    selected.textContent = requests.length > 1 ? '✓ Approve selected' : '✓ Approve';
+    const elevated = requests.some((request) => request.untrustedContext === true);
+    selected.textContent = requests.length > 1 || elevated ? '✓ Approve selected' : '✓ Approve';
     actions.appendChild(selected);
+
+    const checkboxes = Array.from(list.querySelectorAll<HTMLInputElement>('[data-confirm-index]'));
+    const refreshApproveState = () => {
+      selected.disabled = !checkboxes.some((checkbox) => checkbox.checked);
+    };
+    checkboxes.forEach((checkbox) => checkbox.addEventListener('change', refreshApproveState));
+    refreshApproveState();
 
     host.append(heading, list, actions);
 

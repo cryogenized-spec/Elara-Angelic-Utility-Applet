@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { googleOAuthAuthority } from '../../google/oauth/authority';
+import { googleDrivePickerAuthority, googleOAuthAuthority } from '../../google/oauth/authority';
+import { admitGooglePickerFiles, clearGooglePickerAdmissions, loadGooglePickerAdmissions, revokeGooglePickerFile } from '../../persistence/google-picker-admissions';
+import type { GooglePickerAdmission } from '../../google/picker/contracts';
 import type { GoogleCapabilityKey, GoogleOAuthStatus } from '../../google/oauth/contracts';
 import './google-oauth-settings.css';
 
@@ -59,6 +61,8 @@ export function GoogleOAuthSettings() {
   const [loading, setLoading] = useState(true);
   const [busyCapability, setBusyCapability] = useState<GoogleCapabilityKey | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pickerFiles, setPickerFiles] = useState<readonly GooglePickerAdmission[]>([]);
+  const [pickerBusy, setPickerBusy] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -74,9 +78,10 @@ export function GoogleOAuthSettings() {
 
   useEffect(() => {
     let active = true;
-    void googleOAuthAuthority.getStatus().then((nextStatus) => {
+    void Promise.all([googleOAuthAuthority.getStatus(), loadGooglePickerAdmissions()]).then(([nextStatus, admissions]) => {
       if (!active) return;
       setStatus(nextStatus);
+      setPickerFiles(admissions.files);
     }).catch(() => {
       if (active) setError('The Google authorization state could not be read.');
     }).finally(() => {
@@ -103,9 +108,39 @@ export function GoogleOAuthSettings() {
     setError(null);
     try {
       await googleOAuthAuthority.disconnect();
+      const admissions = await clearGooglePickerAdmissions();
+      setPickerFiles(admissions.files);
       await refresh();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Google could not be disconnected.');
+    }
+  }
+
+  async function chooseDriveFiles() {
+    setPickerBusy(true);
+    setError(null);
+    try {
+      const selected = await googleDrivePickerAuthority.pick({ multiselect: true });
+      if (!selected.length) return;
+      const admissions = await admitGooglePickerFiles(selected);
+      setPickerFiles(admissions.files);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Google Picker could not be opened.');
+    } finally {
+      setPickerBusy(false);
+    }
+  }
+
+  async function revokeDriveFile(fileId: string) {
+    setPickerBusy(true);
+    setError(null);
+    try {
+      const admissions = await revokeGooglePickerFile(fileId);
+      setPickerFiles(admissions.files);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The selected Drive file could not be removed from Elara.');
+    } finally {
+      setPickerBusy(false);
     }
   }
 
@@ -228,6 +263,30 @@ export function GoogleOAuthSettings() {
                   {service.extraCapabilities?.map((extra) => !hasCapability(status.grantedCapabilities, extra.capability)
                     ? <button className="google-oauth-settings__button google-oauth-settings__button--secondary" key={extra.capability} type="button" onClick={() => void connect(extra.capability)} disabled={loading || !!busyCapability}>{busyCapability === extra.capability ? 'Authorizing…' : extra.label}</button>
                     : null)}
+                  {service.id === 'drive' && readReady && (
+                    <div className="google-oauth-picker" aria-label="Google Picker admissions">
+                      <button
+                        className="google-oauth-settings__button google-oauth-settings__button--secondary"
+                        type="button"
+                        onClick={() => void chooseDriveFiles()}
+                        disabled={loading || !!busyCapability || pickerBusy || !googleDrivePickerAuthority.configured}
+                      >
+                        {pickerBusy ? 'Opening Picker…' : 'Choose files with Google Picker'}
+                      </button>
+                      {!googleDrivePickerAuthority.configured && <small>Picker needs this installation’s public, origin-restricted API key and Cloud project number.</small>}
+                      {pickerFiles.length > 0 && (
+                        <div className="google-oauth-picker__files">
+                          {pickerFiles.map((file) => (
+                            <div className="google-oauth-picker__file" key={file.id}>
+                              <span><strong>{file.name}</strong>{file.mimeType && <small>{file.mimeType}</small>}</span>
+                              <button type="button" onClick={() => void revokeDriveFile(file.id)} disabled={pickerBusy}>Remove from Elara</button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <small>Removing a file blocks Elara’s Drive, Docs, and Sheets tools locally. Choose it again to re-admit it.</small>
+                    </div>
+                  )}
                 </article>
               );
             })}

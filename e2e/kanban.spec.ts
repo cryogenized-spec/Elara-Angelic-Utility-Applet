@@ -286,3 +286,72 @@ test('two tabs share local rules and stale editors cannot overwrite each other',
     await expect(page.getByRole('button', { name: 'Edit subroutine Changed in another tab' })).toBeVisible();
   } finally { await peer.close(); }
 });
+
+
+test('mobile tabs share provider cooldowns without replaying reads', async ({ page, context }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.goto(''); await seedWorkspace(page);
+  await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+  const peer = await context.newPage();
+  try {
+    await peer.setViewportSize({ width: 412, height: 915 });
+    await peer.goto(''); await seedWorkspace(peer, true);
+    await peer.getByRole('button', { name: 'Kanban', exact: true }).click();
+    await expect(peer.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+    await expect(peer.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+    let reads = 0;
+    for (const tab of [page, peer]) await tab.route('https://tasks.googleapis.com/tasks/v1/users/@me/lists*', async (route) => {
+      reads++;
+      await route.fulfill({ status: 429, headers: { 'retry-after': '60' }, json: { error: 'rate limited' } });
+    });
+    await page.getByRole('button', { name: 'Sync now' }).click();
+    await expect(page.getByRole('button', { name: 'Cooling down' })).toBeDisabled();
+    await expect(peer.getByRole('button', { name: 'Cooling down' })).toBeDisabled();
+    await expect(peer.getByRole('alert')).toContainText('429');
+    expect(reads).toBe(1);
+    const touchTarget = await peer.getByRole('button', { name: 'Cooling down' }).boundingBox();
+    expect(touchTarget!.width).toBeGreaterThanOrEqual(44);
+    expect(touchTarget!.height).toBeGreaterThanOrEqual(44);
+    expect(await peer.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  } finally { await peer.close(); }
+});
+
+
+test('a suspended reader loses its lease and cannot overwrite a replacement read', async ({ page, context }) => {
+  await page.goto(''); await seedWorkspace(page);
+  await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+  const peer = await context.newPage();
+  let release: (() => void) | undefined;
+  try {
+    await peer.goto(''); await seedWorkspace(peer, true);
+    await peer.getByRole('button', { name: 'Kanban', exact: true }).click();
+    await expect(peer.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+    await expect(peer.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+    let oldStarted = false;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    await page.route('https://tasks.googleapis.com/tasks/v1/users/@me/lists*', async (route) => {
+      oldStarted = true; await held;
+      await route.fulfill({ json: { items: [{ id: 'studio', title: 'Stale suspended reader' }] } }).catch(() => undefined);
+    });
+    let replacementReads = 0;
+    await peer.route('https://tasks.googleapis.com/tasks/v1/users/@me/lists*', async (route) => { replacementReads++; await route.fallback(); });
+    await page.getByRole('button', { name: 'Sync now' }).click();
+    await expect.poll(() => oldStarted).toBe(true);
+    await peer.clock.install();
+    await peer.getByRole('button', { name: 'Sync now' }).click();
+    await expect(peer.getByRole('status').filter({ hasText: 'Another tab is refreshing' })).toBeVisible();
+    expect(replacementReads).toBe(0);
+    // The old tab's clock is frozen relative to the resumed tab: emulate Android suspension.
+    await peer.clock.fastForward(126000);
+    await expect(peer.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+    expect(replacementReads).toBe(1);
+    release!();
+    await expect(page.getByRole('button', { name: 'Sync now' })).toBeEnabled();
+    await expect(page.getByRole('heading', { name: 'Stale suspended reader' })).toHaveCount(0);
+    await expect(peer.getByRole('heading', { name: 'Studio projects', exact: true })).toBeVisible();
+  } finally { release?.(); await peer.close(); }
+});

@@ -1,5 +1,6 @@
 import "fake-indexeddb/auto";
 import Dexie from 'dexie';
+import { claimRead, releaseRead, type ReadSchedule } from './read-coordination';
 import { READ_TIMEOUT_MS, RetryableReadError } from './sync-policy';
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { googleOAuthAuthority } from "../google/oauth/authority";
@@ -125,8 +126,8 @@ describe("kanban due-date and memo semantics", () => {
 describe("snapshot reconciliation", () => {
   beforeEach(async () => {
     vi.restoreAllMocks();
-    const database = new Dexie('elara-kanban'); database.version(1).stores({ boards: '&account' });
-    try { await database.table('boards').clear(); } finally { database.close(); }
+    const database = new Dexie('elara-kanban'); database.version(2).stores({ boards: '&account', readSchedules: '&account' });
+    try { await database.table('boards').clear(); await database.table('readSchedules').clear(); } finally { database.close(); }
     mocks.lists.mockReset(); mocks.tasks.mockReset(); mocks.status.mockReset();
     vi.spyOn(googleOAuthAuthority, "getStatus").mockImplementation(mocks.status);
     vi.spyOn(GoogleTasksService.prototype, "listTaskLists").mockImplementation(mocks.lists);
@@ -145,12 +146,62 @@ describe("snapshot reconciliation", () => {
     });
   });
   afterEach(() => { vi.useRealTimers(); });
+  it('adopts a completed peer snapshot without a duplicate automatic provider read', async () => {
+    const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
+    const schedules = peer.table<ReadSchedule, string>('readSchedules');
+    await claimRead(schedules, initial.account, 'peer', Infinity, false);
+    const pending = syncBoard('automatic');
+    try {
+      await vi.waitFor(() => expect(boardStore.getSnapshot().phase).toBe('waiting'));
+      expect(mocks.lists).not.toHaveBeenCalled();
+      const syncedAt = Date.now();
+      await peer.table('boards').put({ ...initial, tasks: [task], syncedAt });
+      await releaseRead(schedules, initial.account, 'peer', { lastSuccessAt: syncedAt });
+      await pending;
+      expect(boardStore.getSnapshot().board?.tasks).toEqual([task]);
+      expect(mocks.lists).not.toHaveBeenCalled();
+      await syncBoard();
+      expect(mocks.lists).toHaveBeenCalledOnce();
+    } finally { cancelBoardSync(); await pending; peer.close(); }
+  });
+  it('cannot commit a stale read after another connection takes over an expired lease', async () => {
+    await syncBoard();
+    const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
+    const schedules = peer.table<ReadSchedule, string>('readSchedules');
+    let finish: ((value: { items: BoardTask[] }) => void) | undefined;
+    mocks.tasks.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const pending = syncBoard();
+    try {
+      await vi.waitFor(() => expect(finish).toBeDefined());
+      await schedules.update(initial.account, { leaseUntil: Date.now() - 1 });
+      await claimRead(schedules, initial.account, 'replacement', Infinity, false);
+      const replacement = { ...initial, tasks: [{ ...task, title: 'Current peer snapshot' }], syncedAt: Date.now() };
+      await peer.table('boards').put(replacement);
+      finish!({ items: [{ ...task, title: 'Stale result' }] });
+      await pending;
+      expect((await peer.table<Board>('boards').get(initial.account))?.tasks[0].title).toBe('Current peer snapshot');
+      expect((await schedules.get(initial.account))?.owner).toBe('replacement');
+      expect(boardStore.getSnapshot().board?.tasks[0].title).not.toBe('Stale result');
+    } finally { finish?.({ items: [] }); cancelBoardSync(); await pending; peer.close(); }
+  });
+  it('shares another connection’s cooldown even without a cached board', async () => {
+    const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
+    const schedules = peer.table<ReadSchedule, string>('readSchedules');
+    try {
+      await claimRead(schedules, initial.account, 'peer', Infinity, false);
+      const nextRetryAt = Date.now() + 60000;
+      await releaseRead(schedules, initial.account, 'peer', { failures: 1, nextRetryAt, error: 'Google 429' });
+      await syncBoard();
+      expect(mocks.lists).not.toHaveBeenCalled();
+      expect(boardStore.getSnapshot()).toMatchObject({ failures: 1, nextRetryAt, phase: 'backoff' });
+    } finally { peer.close(); }
+  });
   it('preserves unrelated rules and rejects a stale editor after another database connection updates a rule', async () => {
     await syncBoard();
     const first = { ...initial.routines[0], id: 'cross-tab-a' };
     const second = { ...first, id: 'cross-tab-b' };
     await Promise.all([saveRoutine(first, null), saveRoutine(second, null)]);
-    const peer = new Dexie('elara-kanban'); peer.version(1).stores({ boards: '&account' });
+    const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
     try {
       await peer.transaction('rw', peer.table('boards'), async () => {
         const board = await peer.table<Board>('boards').get(initial.account);

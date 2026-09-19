@@ -586,6 +586,8 @@
     font-size: 9px;
   }
   .kb-header-actions button {
+    min-width: 44px;
+    min-height: 44px;
     padding: 9px;
   }
   .kb-header-actions button > span {

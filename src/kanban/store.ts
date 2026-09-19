@@ -1,3 +1,4 @@
+import { claimRead, ownsRead, releaseRead, waitForReader, type ReadSchedule } from './read-coordination';
 import { MAX_READ_FAILURES, READ_TIMEOUT_MS, RetryableReadError, readRetryDelay } from './sync-policy';
 import Dexie, { liveQuery, type Table } from "dexie";
 import { googleOAuthAuthority } from "../google/oauth/authority";
@@ -25,15 +26,17 @@ export interface BoardState {
   board: Board | null;
   busy: boolean;
   error: string | null;
-  phase: "idle" | "syncing" | "backoff" | "paused" | "offline";
+  phase: "idle" | "waiting" | "syncing" | "backoff" | "paused" | "offline";
   nextRetryAt: number | null;
   failures: number;
 }
 class BoardDatabase extends Dexie {
   boards!: Table<Board, string>;
+  readSchedules!: Table<ReadSchedule, string>;
   constructor() {
     super("elara-kanban");
     this.version(1).stores({ boards: "&account" });
+    this.version(2).stores({ boards: "&account", readSchedules: "&account" });
   }
 }
 const db = new BoardDatabase();
@@ -119,13 +122,16 @@ export function cancelBoardSync(): void {
   if (activeRead) { needsRefresh = true; activeRead.abort(); }
 }
 
-export function syncBoard(reason: 'manual' | 'automatic' | 'mutation' = 'manual'): Promise<void> {
+export function syncBoard(reason: 'manual' | 'automatic' | 'poll' | 'mutation' = 'manual'): Promise<void> {
   if (inFlight) return inFlight;
   const controller = new AbortController();
   activeRead = controller;
   const signal = controller.signal;
   let timedOut = false;
-  const timeout = setTimeout(() => { timedOut = true; controller.abort(); }, READ_TIMEOUT_MS);
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const requestedAt = Date.now();
+  const owner = crypto.randomUUID();
+  let leasedAccount: string | null = null;
   inFlight = (async () => {
     try {
       const account = await currentAccount();
@@ -139,11 +145,7 @@ export function syncBoard(reason: 'manual' | 'automatic' | 'mutation' = 'manual'
         return;
       }
       if (state.board?.account !== account) publish({ board: null });
-      if (state.nextRetryAt !== null && Date.now() < state.nextRetryAt) return;
-      if (reason === 'automatic' && state.phase === 'paused') return;
       if (typeof navigator !== 'undefined' && !navigator.onLine) { publish({ phase: 'offline' }); return; }
-      if (reason === 'manual' && state.phase === 'paused') publish({ failures: 0 });
-      publish({ busy: true, error: null, phase: 'syncing', nextRetryAt: null });
       const stillCurrent = async () => {
         signal.throwIfAborted();
         if (await currentAccount() !== account) {
@@ -155,6 +157,32 @@ export function syncBoard(reason: 'manual' | 'automatic' | 'mutation' = 'manual'
       const cached = await db.boards.get(account);
       await stillCurrent();
       if (!state.board && cached) publish({ board: cached });
+      const freshAfter = reason === 'poll' ? requestedAt - SYNC_INTERVAL + 1 : reason === 'mutation' ? Infinity : requestedAt;
+      for (;;) {
+        await stillCurrent();
+        const claim = await claimRead(db.readSchedules, account, owner, freshAfter, reason === 'manual');
+        // Record ownership before checking cancellation so finally releases it.
+        if (claim.kind === 'acquired') leasedAccount = account;
+        await stillCurrent();
+        if (claim.kind === 'waiting') {
+          publish({ busy: true, phase: 'waiting', error: null });
+          await waitForReader(db.readSchedules, claim.schedule, signal);
+          continue;
+        }
+        const { failures, nextRetryAt, error, paused } = claim.schedule;
+        publish({ failures, nextRetryAt, error, phase: paused ? 'paused' : nextRetryAt ? 'backoff' : 'idle' });
+        if (claim.kind === 'blocked') return;
+        if (claim.kind === 'fresh') {
+          const latest = await db.boards.get(account);
+          await stillCurrent();
+          if (latest) publish({ board: latest });
+          needsRefresh = false;
+          return;
+        }
+        break;
+      }
+      publish({ busy: true, error: null, phase: 'syncing', nextRetryAt: null });
+      timeout = setTimeout(() => { timedOut = true; controller.abort(); }, READ_TIMEOUT_MS);
       const remote = await fetchBoard(taskService, signal);
       await stillCurrent();
       const board: Board = { account, ...remote, routines: [], syncedAt: Date.now() };
@@ -163,14 +191,16 @@ export function syncBoard(reason: 'manual' | 'automatic' | 'mutation' = 'manual'
       }
       let removeAbortListener: (() => void) | undefined;
       try {
-        await db.transaction('rw', db.boards, async (transaction) => {
+        await db.transaction('rw', db.boards, db.readSchedules, async (transaction) => {
           const abort = () => transaction.abort();
           signal.addEventListener('abort', abort, { once: true });
           removeAbortListener = () => signal.removeEventListener('abort', abort);
           signal.throwIfAborted();
+          if (!await ownsRead(db.readSchedules, account, owner)) { controller.abort(); signal.throwIfAborted(); }
           board.routines = (await db.boards.get(account))?.routines ?? [];
           signal.throwIfAborted();
           await db.boards.put(board);
+          await db.readSchedules.update(account, { owner: null, leaseUntil: 0, lastSuccessAt: board.syncedAt, failures: 0, nextRetryAt: null, paused: false, error: null });
           signal.throwIfAborted();
         });
       } finally { removeAbortListener?.(); }
@@ -189,10 +219,16 @@ export function syncBoard(reason: 'manual' | 'automatic' | 'mutation' = 'manual'
       // retry budget is exhausted. Manual clicks cannot bypass Retry-After.
       const delay = retryable ? readRetryDelay(failures, failure.retryAfterMs) : 0;
       const nextRetryAt = delay ? Math.min(8_640_000_000_000_000, Date.now() + delay) : null;
-      publish({ failures, nextRetryAt, phase: retryable && failures < MAX_READ_FAILURES ? 'backoff' : 'paused',
-        error: failure instanceof Error ? failure.message : 'Could not refresh the task workspace.' });
+      const paused = !retryable || failures >= MAX_READ_FAILURES;
+      const message = failure instanceof Error ? failure.message : 'Could not refresh the task workspace.';
+      if (leasedAccount) {
+        const released = await releaseRead(db.readSchedules, leasedAccount, owner, { failures, nextRetryAt, paused, error: message }).catch(() => true);
+        if (!released) { publish({ phase: 'idle' }); return; }
+      }
+      publish({ failures, nextRetryAt, phase: paused ? 'paused' : 'backoff', error: message });
     } finally {
       clearTimeout(timeout);
+      if (leasedAccount) await releaseRead(db.readSchedules, leasedAccount, owner).catch(() => undefined);
       if (state.busy) publish({ busy: false });
       activeRead = null;
     }
@@ -323,7 +359,7 @@ export function startBoardSync(): () => void {
   let cacheSubscription: { unsubscribe(): void } | undefined;
   let observedAccount: string | undefined;
   let observingIdentity = false;
-  const refresh = (reason: 'automatic' | 'mutation' = 'automatic') => {
+  const refresh = (reason: 'automatic' | 'poll' | 'mutation' = 'poll') => {
     if (stopped || document.visibilityState !== 'visible' || !navigator.onLine) return;
     // StrictMode remounts and rapid visibility changes can resume while the
     // prior read is still unwinding its abort. Wait, then recheck this owner.
@@ -332,18 +368,27 @@ export function startBoardSync(): () => void {
   };
   const observe = () => {
     clearTimeout(retryTimer);
-    if (!stopped && state.phase === 'backoff' && state.nextRetryAt !== null && document.visibilityState === 'visible' && navigator.onLine) {
-      retryTimer = setTimeout(() => refresh(), Math.min(2_147_483_647, Math.max(0, state.nextRetryAt - Date.now())));
+    const due = state.phase === 'backoff' ? state.nextRetryAt : state.phase === 'idle' && state.board ? state.board.syncedAt + SYNC_INTERVAL : null;
+    if (!stopped && !state.busy && due !== null && document.visibilityState === 'visible' && navigator.onLine) {
+      retryTimer = setTimeout(() => refresh(), Math.min(2_147_483_647, Math.max(0, due - Date.now())));
     }
-    const account = state.board?.account;
+    const account = retryAccount ?? undefined;
     if (observedAccount === account) return;
     observedAccount = account; cacheSubscription?.unsubscribe();
     if (!account) return;
-    cacheSubscription = liveQuery(() => db.boards.get(account)).subscribe({
-      next: (board) => {
-        if (!stopped && board && state.board?.account === account && board.syncedAt >= state.board.syncedAt) publish({ board });
+    cacheSubscription = liveQuery(async () => ({ board: await db.boards.get(account), schedule: await db.readSchedules.get(account) })).subscribe({
+      next: ({ board, schedule }) => {
+        if (stopped || retryAccount !== account) return;
+        const update: Partial<BoardState> = {};
+        if (board && (!state.board || (state.board.account === account && board.syncedAt >= state.board.syncedAt))) update.board = board;
+        // Active reads/waiters recheck shared metadata themselves under the lease.
+        if (schedule && !inFlight && navigator.onLine) {
+          update.failures = schedule.failures; update.nextRetryAt = schedule.nextRetryAt; update.error = schedule.error;
+          update.phase = schedule.paused ? 'paused' : schedule.nextRetryAt ? 'backoff' : 'idle';
+        }
+        publish(update);
       },
-      error: () => { /* A cache observer failure must not trigger provider writes or erase the last snapshot. */ },
+      error: () => { /* Observer failures never authorize reads or erase snapshots. */ },
     });
   };
   const stopObserving = boardStore.subscribe(observe);
@@ -354,29 +399,33 @@ export function startBoardSync(): () => void {
       return;
     }
     observe();
-    if (needsRefresh || !state.board || state.phase === 'offline' || Date.now() - state.board.syncedAt >= SYNC_INTERVAL) refresh();
+    if (needsRefresh || !state.board || state.phase === 'offline' || Date.now() - state.board.syncedAt >= SYNC_INTERVAL) refresh(needsRefresh ? 'mutation' : 'poll');
   };
   const changed = () => {
     needsRefresh = true;
     if (inFlight) void inFlight.then(() => refresh('mutation')); else refresh('mutation');
   };
-  observe(); refresh();
+  observe(); refresh('automatic');
   const timer = window.setInterval(() => refresh(), SYNC_INTERVAL);
+  const pageHidden = () => { clearTimeout(retryTimer); cancelBoardSync(); };
+  window.addEventListener('pagehide', pageHidden);
+  window.addEventListener('pageshow', resume);
   document.addEventListener('visibilitychange', resume);
   window.addEventListener('online', resume);
   window.addEventListener('offline', resume);
   window.addEventListener('elara:tasks-changed', changed);
   const accountTimer = window.setInterval(() => {
     // Avoid overlapping or hidden-tab Worker status requests.
-    if (stopped || observingIdentity || document.visibilityState !== 'visible') return;
+    if (stopped || observingIdentity || !navigator.onLine || document.visibilityState !== 'visible') return;
     observingIdentity = true;
     void currentAccount().then((account) => {
-      if (!stopped && state.board && state.board.account !== account) { cancelBoardSync(); publish({ board: null }); }
+      if (!stopped && retryAccount !== account) { cancelBoardSync(); retryAccount = null; publish({ board: null }); }
     }).catch(() => undefined).finally(() => { observingIdentity = false; });
   }, 5000);
   return () => {
     stopped = true; cancelBoardSync(); clearTimeout(retryTimer); clearInterval(timer); clearInterval(accountTimer);
     stopObserving(); cacheSubscription?.unsubscribe();
+    window.removeEventListener('pagehide', pageHidden); window.removeEventListener('pageshow', resume);
     document.removeEventListener('visibilitychange', resume);
     window.removeEventListener('online', resume); window.removeEventListener('offline', resume);
     window.removeEventListener('elara:tasks-changed', changed);

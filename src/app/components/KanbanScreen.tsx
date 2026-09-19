@@ -247,6 +247,7 @@ function KanbanWorkspace({
           <button
             onClick={() => setMemoOpen(!memoOpen)}
             aria-expanded={memoOpen}
+            aria-label={`Internal memo ${memo.length}`}
           >
             <Bell size={16} /> <span>Internal memo</span>
             <b>{memo.length}</b>
@@ -255,6 +256,7 @@ function KanbanWorkspace({
             onClick={() => void syncBoard()}
             disabled={busy || saving || (nextRetryAt !== null && nextRetryAt > clock)}
             title="Reconcile with Google Tasks"
+            aria-label={busy ? "Syncing" : nextRetryAt !== null && nextRetryAt > clock ? "Cooling down" : "Sync now"}
           >
             <RefreshCw size={16} className={busy ? "kb-spinning" : ""} />
             <span>{busy ? "Syncing" : nextRetryAt !== null && nextRetryAt > clock ? "Cooling down" : "Sync now"}</span>
@@ -282,7 +284,7 @@ function KanbanWorkspace({
           <option value="done">Completed</option>
         </select>
         <div className="kb-sync-label" role="status">
-          {phase === 'backoff' && nextRetryAt !== null ? `Retrying read in ${Math.max(0, Math.ceil((nextRetryAt - clock) / 1000))}s · ` : phase === 'offline' ? 'Offline · ' : phase === 'paused' ? 'Auto-sync paused · ' : ''}
+          {phase === 'waiting' ? 'Another tab is refreshing · ' : phase === 'backoff' && nextRetryAt !== null ? `Retrying read in ${Math.max(0, Math.ceil((nextRetryAt - clock) / 1000))}s · ` : phase === 'offline' ? 'Offline · ' : phase === 'paused' ? 'Auto-sync paused · ' : ''}
           {board
             ? `${openCount} open · Synced ${new Date(board.syncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
             : "Your tasks, one workspace"}

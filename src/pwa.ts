@@ -35,7 +35,7 @@ export function initPwaUpdater(onNeedRefresh: PwaUpdateCallback): void {
   // controllerchange means new service-worker code has claimed an old JS
   // runtime. Reload to prevent mixed-version lazy chunks/protocol code. A
   // first-ever installation has no prior controller and remains non-disruptive.
-  if ('serviceWorker' in navigator) {
+  if ('serviceWorker' in navigator && navigator.serviceWorker) {
     let hadController = Boolean(navigator.serviceWorker.controller);
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (!hadController) {

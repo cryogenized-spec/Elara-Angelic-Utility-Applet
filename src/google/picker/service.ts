@@ -195,7 +195,7 @@ export function createGoogleDrivePickerAuthority(
           if (options.multiselect !== false) builder = builder.enableFeature(picker.Feature.MULTISELECT_ENABLED);
           builder.build().setVisible(true);
         } catch (error) {
-          reject(error);
+          reject(error instanceof Error ? error : new Error('Google Picker could not be opened.'));
         }
       });
     },

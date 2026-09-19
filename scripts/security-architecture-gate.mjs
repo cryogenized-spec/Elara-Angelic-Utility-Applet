@@ -353,6 +353,10 @@ const googleBroker = read('src/google/confirmation/broker.ts');
 if (googleBroker.includes("all.dataset.decision = 'all';") || googleBroker.includes('✓ Approve all')) fail('Google confirmation broker must not expose approve-all');
 if (!googleBroker.includes('checkbox.checked = requests.length === 1;')) fail('Grouped Google confirmations must default unselected');
 
+const lockboxAuthority = read('src/persistence/gemini-api-key.ts');
+if (!lockboxAuthority.includes('const PBKDF2_ITERATIONS = 600_000;')) fail('Lockbox new-write PBKDF2 work factor must remain hardened');
+if (!lockboxAuthority.includes('GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10')) fail('Fresh Lockbox PIN minimum must remain hardened');
+
 const workerProvider = read('worker/src/index.ts');
 if (!workerProvider.includes('verifyBearerToken') || !workerProvider.includes('requireProviderAdmission') || !workerProvider.includes('admissionConfigured')) fail('Worker provider routes and health contract must retain installation bearer admission');
 if (!workerProvider.includes("maxOutputTokens: z.number().int().min(1).max(65_536)")) fail('Worker provider output budget must remain bounded');

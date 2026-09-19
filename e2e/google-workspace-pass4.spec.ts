@@ -141,7 +141,9 @@ test('Docs mobile flow carries tab and revision from inspect into confirmed writ
   await expect(dialog).toContainText('tab-1');
   await expect(dialog).toContainText('rev-1');
   expect(docsCalls.filter((call) => call.method === 'POST')).toHaveLength(0);
-  await dialog.getByRole('button', { name: '✓ Approve' }).click();
+  await expect(dialog.locator('[data-untrusted-context="true"]')).toBeVisible();
+  await dialog.getByRole('checkbox', { name: 'Approve docs.appendParagraph' }).check();
+  await dialog.getByRole('button', { name: '✓ Approve selected' }).click();
 
   await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('Updated the selected Doc tab safely.', { timeout: 15_000 });
   const write = docsCalls.find((call) => call.method === 'POST');

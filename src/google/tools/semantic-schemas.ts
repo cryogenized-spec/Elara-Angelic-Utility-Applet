@@ -247,6 +247,11 @@ export const semanticToolArgumentSchemas = {
     taskListId: idSchema,
   }).strict(),
   'docs.inspectDocument': z.object({ documentId: idSchema }).strict(),
+  'docs.exportDocument': z.object({
+    documentId: idSchema,
+    format: z.enum(['pdf', 'docx']),
+    maxBytes: z.number().int().min(1).max(10 * 1024 * 1024).optional(),
+  }).strict(),
   'docs.createDocument': z.object({
     title: z.string().trim().min(1).max(500),
   }).strict(),

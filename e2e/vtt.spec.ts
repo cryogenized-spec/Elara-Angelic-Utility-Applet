@@ -1,9 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 
-// Provider mocks must remain deterministic after the dev PWA activates.
-// These are provider/UI tests, not service-worker lifecycle certification.
-test.use({ serviceWorkers: 'block' });
-
 function transformationSse(text: string, interactionId = 'transform-int-1'): string {
   return [
     `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: interactionId, status: 'in_progress', model: 'gemini-3.8-flash' } })}`,

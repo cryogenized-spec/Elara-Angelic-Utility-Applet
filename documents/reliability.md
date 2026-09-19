@@ -121,3 +121,7 @@ These tests certify application, credential, authority, test, CI and deployment 
 Never inherit green status across SHAs. Temporary bootstrap/write-capable workflows or jobs are not certification evidence and must be removed before the candidate run. Focused tests are useful for iteration but do not replace the ordered full matrix.
 
 Phase completion requires: exact PR-head certification, merge locked to that head, successful post-merge `main` certification, and successful certified Pages deployment when deployment is part of the change.
+
+### Browser fixture isolation
+
+Provider-mocked Playwright UI suites use `serviceWorkers: 'block'` in the test context: an activated dev worker can otherwise bypass page-level provider routes and send fixture traffic to the network. This does not alter production PWA registration or runtime caching. Tests that verify service-worker behavior explicitly opt into `serviceWorkers: 'allow'`; the kanban PWA integration group waits for readiness, reloads under a controller, and verifies board/chat navigation on desktop and Android portrait. Mocked-provider tests must not be presented as offline/installed-PWA certification.

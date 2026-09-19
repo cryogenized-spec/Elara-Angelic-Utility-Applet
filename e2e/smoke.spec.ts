@@ -1,9 +1,5 @@
 import { expect, test } from '@playwright/test';
 
-// Provider mocks must remain deterministic after the dev PWA activates.
-// These are provider/UI tests, not service-worker lifecycle certification.
-test.use({ serviceWorkers: 'block' });
-
 const tinyPng = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const pngFile = (name: string) => ({ name, mimeType: 'image/png', buffer: tinyPng });
 

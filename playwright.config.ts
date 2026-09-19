@@ -36,6 +36,9 @@ export default defineConfig({
     },
   ],
   use: {
+    // Provider-mocked UI suites must not let an activated worker bypass page routes.
+    // Dedicated PWA lifecycle tests opt back in; production registration is unchanged.
+    serviceWorkers: 'block',
     baseURL: 'http://127.0.0.1:5173/Elara-Angelic-Utility-Applet/',
     storageState: 'e2e/.auth/legacy.json',
     trace: 'retain-on-failure',

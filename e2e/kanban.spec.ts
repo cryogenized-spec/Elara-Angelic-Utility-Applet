@@ -379,14 +379,17 @@ test('kanban Settings exit preserves the canonical activity-glyph save path', as
 });
 
 
-test('keeps the kanban shell usable under the existing PWA service worker', async ({ page }) => {
-  await page.goto('');
-  await page.evaluate(async () => { await navigator.serviceWorker.ready; });
-  await page.reload();
-  await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
-  await page.getByRole('button', { name: 'Kanban', exact: true }).click();
-  await expect(page.getByRole('region', { name: 'Task orchestration workspace' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Connect Google Tasks', exact: true })).toBeEnabled();
-  await page.getByRole('button', { name: 'Back to chat', exact: true }).click();
-  await expect(page.getByRole('textbox', { name: 'Message Elara' })).toBeVisible();
+test.describe('PWA integration', () => {
+  test.use({ serviceWorkers: 'allow' });
+  test('keeps the kanban shell usable under the existing PWA service worker', async ({ page }) => {
+    await page.goto('');
+    await page.evaluate(async () => { await navigator.serviceWorker.ready; });
+    await page.reload();
+    await expect.poll(() => page.evaluate(() => navigator.serviceWorker.controller !== null)).toBe(true);
+    await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+    await expect(page.getByRole('region', { name: 'Task orchestration workspace' })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Connect Google Tasks', exact: true })).toBeEnabled();
+    await page.getByRole('button', { name: 'Back to chat', exact: true }).click();
+    await expect(page.getByRole('textbox', { name: 'Message Elara' })).toBeVisible();
+  });
 });

@@ -5,7 +5,7 @@ vi.mock('@google/genai', () => ({ GoogleGenAI: class { interactions = { create: 
 
 import worker from '../src/index';
 
-const env = { GEMINI_API_KEY: 'test-key', ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io' };
+const env = { GEMINI_API_KEY: 'test-key', ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io', ELARA_INSTALLATION_TOKEN: 'test-installation-token' };
 const systemInstruction = 'You are Elara, an angelic synthetic cybernetic woman and consort.';
 
 async function* eventStream(...items: unknown[]) { for (const item of items) yield item; }
@@ -35,7 +35,7 @@ describe('Gemini registered tool loop', () => {
 
     const response = await worker.fetch(new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: JSON.stringify({ model: 'gemini-3.8-flash', input: 'Show my calendar today.', systemInstruction, tools: ['calendar.listEvents'] }),
     }), env);
 
@@ -58,7 +58,7 @@ describe('Gemini registered tool loop', () => {
 
     const response = await worker.fetch(new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: JSON.stringify({
         model: 'gemini-3.8-flash',
         previousInteractionId: 'interaction-1',
@@ -84,7 +84,7 @@ describe('Gemini registered tool loop', () => {
   it('rejects an unregistered tool before Gemini is called', async () => {
     const response = await worker.fetch(new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: JSON.stringify({ model: 'gemini-3.8-flash', input: 'Do it.', tools: ['not.a.real.tool'] }),
     }), env);
 

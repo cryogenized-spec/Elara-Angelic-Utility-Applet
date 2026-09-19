@@ -129,4 +129,27 @@ describe('GoogleSheetsService', () => {
     await expect(service.updateCell('sheet-1', 'A1', 'x', 'literal', { isGenerationActive: () => active })).rejects.toThrow(/lost turn authority/i);
     expect(providerCalls).toBe(0);
   });
+
+  it('exports only fixed Sheets formats through the bounded Drive export endpoint', async () => {
+    let requestedUrl = '';
+    const oauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({
+        capability,
+        fetch: async (input) => {
+          requestedUrl = String(input);
+          return new Response(new Uint8Array([1, 2, 3]), { status: 200, headers: { 'content-type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'content-length': '3' } });
+        },
+      }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+      disconnect: async () => undefined,
+    };
+    const service = new GoogleSheetsService(oauth);
+    await expect(service.exportSpreadsheet('sheet-1', 'xlsx')).resolves.toMatchObject({
+      format: 'xlsx',
+      mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      extension: '.xlsx',
+    });
+    expect(requestedUrl).toContain('/drive/v3/files/sheet-1/export?');
+    expect(decodeURIComponent(requestedUrl)).toContain('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  });
 });

@@ -529,8 +529,19 @@ export class GoogleCalendarService {
     if (!response.ok) throw new Error(`Google Calendar request failed (${response.status}).`);
 
     const payload = await readBoundedProviderJson<CalendarEventsResponse>(response, { operation: 'Google Calendar events request', maxBytes: MAX_PROVIDER_JSON_BYTES });
-    const events = (payload.items ?? []).map(normalizeEventSummary).filter((event): event is CalendarEventSummary => event !== null);
-    return { events, ...(payload.nextPageToken ? { nextPageToken: payload.nextPageToken } : {}) };
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    const events = rawItems.slice(0, maxResults).map(normalizeEventSummary).filter((event): event is CalendarEventSummary => event !== null);
+    const nextPageToken = typeof payload.nextPageToken === 'string' && payload.nextPageToken.length <= MAX_PAGE_TOKEN_LENGTH
+      ? payload.nextPageToken
+      : undefined;
+    const truncated = rawItems.length > maxResults || (typeof payload.nextPageToken === 'string' && !nextPageToken);
+    return {
+      trust: 'untrusted-external',
+      source: 'calendar',
+      events,
+      ...(nextPageToken ? { nextPageToken } : {}),
+      ...(truncated ? { truncated: true } : {}),
+    };
   }
 
   async getEvent(calendarId = 'primary', eventId: string, timeZone?: string): Promise<CalendarEventDetail> {
@@ -555,18 +566,39 @@ export class GoogleCalendarService {
     const response = await access.fetch(url);
     if (!response.ok) throw new Error(`Google Calendar list request failed (${response.status}).`);
     const payload = await readBoundedProviderJson<CalendarListResponse>(response, { operation: 'Google Calendar list request', maxBytes: MAX_PROVIDER_JSON_BYTES });
-    const calendars = (payload.items ?? [])
-      .filter((entry): entry is typeof entry & { id: string } => Boolean(entry.id))
-      .map((entry) => ({
-        id: entry.id,
-        summary: entry.summary ?? '(untitled calendar)',
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    const calendars = rawItems.slice(0, pageSize).flatMap((entry) => {
+      const truncatedFields = new Set<string>();
+      const id = projectedProviderId(entry.id, MAX_CALENDAR_ID_LENGTH, 'id', truncatedFields);
+      if (!id) return [];
+      const summary = projectedProviderText(entry.summary, MAX_EVENT_SUMMARY_LENGTH, 'summary', truncatedFields) ?? '(untitled calendar)';
+      const accessRole = projectedProviderText(entry.accessRole, 128, 'accessRole', truncatedFields, true);
+      const timeZone = projectedProviderText(entry.timeZone, MAX_TIME_ZONE_LENGTH, 'timeZone', truncatedFields, true);
+      const backgroundColor = projectedProviderText(entry.backgroundColor, 64, 'backgroundColor', truncatedFields, true);
+      return [{
+        trust: 'untrusted-external' as const,
+        source: 'calendar' as const,
+        id,
+        summary,
         primary: entry.primary ?? false,
         selected: entry.selected ?? false,
-        ...(entry.accessRole ? { accessRole: entry.accessRole } : {}),
-        ...(entry.timeZone ? { timeZone: entry.timeZone } : {}),
-        ...(entry.backgroundColor ? { backgroundColor: entry.backgroundColor } : {}),
-      }));
-    return { calendars, ...(payload.nextPageToken ? { nextPageToken: payload.nextPageToken } : {}) };
+        ...(accessRole ? { accessRole } : {}),
+        ...(timeZone ? { timeZone } : {}),
+        ...(backgroundColor ? { backgroundColor } : {}),
+        ...(truncatedFields.size ? { truncatedFields: [...truncatedFields].sort() } : {}),
+      }];
+    });
+    const nextPageToken = typeof payload.nextPageToken === 'string' && payload.nextPageToken.length <= MAX_PAGE_TOKEN_LENGTH
+      ? payload.nextPageToken
+      : undefined;
+    const truncated = rawItems.length > pageSize || (typeof payload.nextPageToken === 'string' && !nextPageToken);
+    return {
+      trust: 'untrusted-external',
+      source: 'calendar',
+      calendars,
+      ...(nextPageToken ? { nextPageToken } : {}),
+      ...(truncated ? { truncated: true } : {}),
+    };
   }
 
   async getSettings(): Promise<Readonly<Record<string, string>>> {
@@ -598,8 +630,10 @@ export class GoogleCalendarService {
     if (!response.ok) throw new Error(`Google Calendar free/busy request failed (${response.status}).`);
     const payload = await readBoundedProviderJson<CalendarFreeBusyResponse>(response, { operation: 'Google Calendar free/busy request', maxBytes: MAX_PROVIDER_JSON_BYTES });
     return {
-      timeMin: payload.timeMin ?? safeTimeMin,
-      timeMax: payload.timeMax ?? safeTimeMax,
+      trust: 'untrusted-external',
+      source: 'calendar',
+      timeMin: projectedProviderText(payload.timeMin, MAX_TIME_PARAMETER_LENGTH, 'timeMin', new Set()) ?? safeTimeMin,
+      timeMax: projectedProviderText(payload.timeMax, MAX_TIME_PARAMETER_LENGTH, 'timeMax', new Set()) ?? safeTimeMax,
       calendars: Object.entries(payload.calendars ?? {}).map(([calendarId, entry]) => ({
         calendarId,
         busy: (entry.busy ?? [])

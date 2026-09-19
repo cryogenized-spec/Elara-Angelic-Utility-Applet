@@ -201,15 +201,33 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   'docs.createDocument': async ({ arguments: raw }) => docs.createDocument(stringArg(objectArgs(raw), 'title')!),
   'docs.insertText': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return docs.insertText(stringArg(args, 'documentId')!, optionalNumber(args, 'index') ?? 1, stringArg(args, 'text')!);
+    return docs.insertText(
+      stringArg(args, 'documentId')!,
+      stringArg(args, 'tabId')!,
+      stringArg(args, 'revisionId')!,
+      optionalNumber(args, 'index') ?? 1,
+      stringArg(args, 'text')!,
+    );
   },
   'docs.appendParagraph': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return docs.appendParagraph(stringArg(args, 'documentId')!, stringArg(args, 'text')!);
+    return docs.appendParagraph(
+      stringArg(args, 'documentId')!,
+      stringArg(args, 'tabId')!,
+      stringArg(args, 'revisionId')!,
+      stringArg(args, 'text')!,
+    );
   },
   'docs.replaceText': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return docs.replaceText(stringArg(args, 'documentId')!, stringArg(args, 'findText')!, stringArg(args, 'replaceText')!, optionalBoolean(args, 'matchCase') ?? false);
+    return docs.replaceText(
+      stringArg(args, 'documentId')!,
+      stringArg(args, 'tabId')!,
+      stringArg(args, 'revisionId')!,
+      stringArg(args, 'findText')!,
+      stringArg(args, 'replaceText')!,
+      optionalBoolean(args, 'matchCase') ?? false,
+    );
   },
   'docs.batchUpdate': async ({ arguments: raw }) => {
     const args = objectArgs(raw);

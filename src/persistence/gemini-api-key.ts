@@ -22,7 +22,7 @@ const DB_NAME = 'elara-gemini-lockbox';
 const GEMINI_RECORD_ID = 'gemini-api-key';
 const YOUTUBE_RECORD_ID = 'youtube-api-key';
 const LEGACY_STORAGE_KEY = 'elara.gemini.api-key';
-const PBKDF2_ITERATIONS = 310_000;
+const PBKDF2_ITERATIONS = 600_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const KEY_LENGTH = 256;
@@ -37,8 +37,11 @@ const ALL_SECRET_IDS: readonly LockboxSecretId[] = [GEMINI_RECORD_ID, YOUTUBE_RE
 const SECONDARY_SECRET_IDS: readonly LockboxSecretId[] = [YOUTUBE_RECORD_ID];
 
 export const GEMINI_LOCKBOX_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+/** Legacy PINs remain accepted for unlock so existing encrypted records are not stranded. */
 export const GEMINI_LOCKBOX_PIN_MIN_LENGTH = 6;
-export const GEMINI_LOCKBOX_PIN_MAX_LENGTH = 8;
+export const GEMINI_LOCKBOX_PIN_MAX_LENGTH = 12;
+/** Fresh/rotated PINs require materially more entropy than the legacy 6–8 digit format. */
+export const GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10;
 export type GeminiLockboxSecurityMode = 'password' | 'pin' | 'passkey' | 'off';
 
 export interface GeminiLockboxSecurityMetadata {
@@ -384,7 +387,11 @@ export async function getGeminiLockboxMetadata(): Promise<GeminiLockboxSecurityM
 }
 
 export function isGeminiLockboxPin(value: string): boolean {
-  return new RegExp(`^\\d{${GEMINI_LOCKBOX_PIN_MIN_LENGTH},${GEMINI_LOCKBOX_PIN_MAX_LENGTH}}$`).test(value);
+  return /^\d+$/.test(value) && value.length >= GEMINI_LOCKBOX_PIN_MIN_LENGTH && value.length <= GEMINI_LOCKBOX_PIN_MAX_LENGTH;
+}
+
+export function isStrongGeminiLockboxPin(value: string): boolean {
+  return /^\d+$/.test(value) && value.length >= GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH && value.length <= GEMINI_LOCKBOX_PIN_MAX_LENGTH;
 }
 
 /** Modes whose authorization secret is a short PIN rather than a passphrase. */
@@ -559,6 +566,9 @@ export async function saveGeminiApiKey(value: string, passphrase: string): Promi
 }
 
 export async function configureGeminiApiKeyWithPin(value: string, pin: string): Promise<void> {
+  if (!isStrongGeminiLockboxPin(pin)) {
+    throw new Error(`Use a ${GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN for new Lockbox protection.`);
+  }
   await saveSecretWithMode(GEMINI_RECORD_ID, value, pin, 'pin');
   // A PIN change rotates the Lockbox credential, so every other stored secret
   // must be re-encrypted with the new one or it becomes permanently unreadable.
@@ -654,7 +664,7 @@ export async function disableGeminiLockboxSecurity(): Promise<void> {
 }
 
 export async function enableGeminiLockboxWithPin(pin: string): Promise<void> {
-  if (!isGeminiLockboxPin(pin)) throw new Error(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
+  if (!isStrongGeminiLockboxPin(pin)) throw new Error(`Use a ${GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN for new Lockbox protection.`);
   const apiKey = await getGeminiApiKey();
   if (!apiKey) throw new Error('The Gemini API Lockbox is not configured.');
   await saveSecretWithMode(GEMINI_RECORD_ID, apiKey, pin, 'pin');

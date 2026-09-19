@@ -20,8 +20,8 @@ const GEMINI_KEY = 'test-gemini-key-material';
 const YOUTUBE_KEY = 'AIzaSy-test-youtube-data-api-key';
 const PASSWORD = 'correct-horse-battery-staple';
 const OTHER_PASSWORD = 'a-completely-different-passphrase';
-const PIN = '284619';
-const NEW_PIN = '731528';
+const PIN = '2846197531';
+const NEW_PIN = '7315284062';
 const DB_NAME = 'elara-gemini-lockbox';
 
 beforeEach(async () => {

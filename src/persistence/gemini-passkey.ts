@@ -115,7 +115,7 @@ function createChallenge(): ArrayBuffer {
 }
 
 export async function registerGeminiPasskey(pin: string): Promise<void> {
-  if (!isGeminiLockboxPin(pin)) throw new Error('Enter your valid 6–8 digit PIN before enabling the passkey.');
+  if (!isGeminiLockboxPin(pin)) throw new Error('Enter your valid 6–12 digit PIN before enabling the passkey.');
   if (!isGeminiPasskeySupported()) throw new Error('Passkeys require a secure HTTPS browser context.');
   if (!(await isGeminiPlatformAuthenticatorAvailable())) {
     throw new Error('This browser or device does not expose a user-verifying platform authenticator.');

@@ -55,7 +55,7 @@ Google authorization semantics are canonical in `SYS-GAUTH / google-auth.md`.
 
 ## 4. Data and contracts
 
-The Worker owns deployment-supplied secrets. Existing cloud Gemini execution uses `GEMINI_API_KEY`. Durable Google OAuth uses `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and `GOOGLE_OAUTH_VAULT_KEY`; browser admission to protected routes uses the deployment's `ELARA_INSTALLATION_TOKEN`.
+The Worker owns deployment-supplied secrets. Existing cloud Gemini execution uses `GEMINI_API_KEY`, but public provider routes never expose that credential as anonymous compute. `/api/gemini` and `/api/transcribe` require `Authorization: Bearer <ELARA_INSTALLATION_TOKEN>` on every request; an allowed browser Origin is additional CORS policy, not admission. The Worker-side Gemini request contract also caps `maxOutputTokens` at 65,536. Durable Google OAuth uses `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and `GOOGLE_OAUTH_VAULT_KEY`; browser admission to protected routes uses the deployment's `ELARA_INSTALLATION_TOKEN`.
 
 `GOOGLE_OAUTH_CLIENT_ID` must match the browser `VITE_GOOGLE_CLIENT_ID` for the same Google Web OAuth client. `ALLOWED_ORIGINS` identifies the deployment owner's exact PWA origin. Forks must replace the repository owner's default origin rather than inheriting it.
 
@@ -75,6 +75,7 @@ Autonomy uses its own installation-scoped state, configuration generation and bo
 - Existing non-OAuth Worker traffic delegates unchanged through the composition root.
 - Worker tool exposure remains execution-plane filtered; a stored refresh grant alone is not tool execution authority.
 - Health/status endpoints do not disclose secrets.
+- Worker Gemini/transcription requests fail closed when the installation token is missing or wrong, including originless server-side requests.
 
 ## 6. Security and failure semantics
 

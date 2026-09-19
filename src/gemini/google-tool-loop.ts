@@ -135,6 +135,20 @@ function isRegisteredToolHandler(tool: GoogleToolName, handlers: GoogleToolHandl
   return Object.prototype.hasOwnProperty.call(handlers, tool);
 }
 
+function containsUntrustedExternal(value: unknown, depth = 0): boolean {
+  if (depth > 8 || value === null || typeof value !== 'object') return false;
+  if (Array.isArray(value)) return value.some((item) => containsUntrustedExternal(item, depth + 1));
+  const record = value as Record<string, unknown>;
+  if (record.trust === 'untrusted-external') return true;
+  return Object.values(record).some((item) => containsUntrustedExternal(item, depth + 1));
+}
+
+const UNTRUSTED_EXTERNAL_READ_PREFIXES = ['calendar.', 'tasks.', 'gmail.', 'drive.', 'docs.', 'sheets.', 'youtube.'] as const;
+
+function isUntrustedExternalReadTool(tool: string): boolean {
+  return isRegistryReadTool(tool) && UNTRUSTED_EXTERNAL_READ_PREFIXES.some((prefix) => tool.startsWith(prefix));
+}
+
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
   const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools, options.allowEmptyTools === true);
@@ -179,6 +193,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction, memoryContext: 'none' }, signal);
   let executedCalls = 0;
   let toolBudgetExhausted = false;
+  let untrustedExternalSeen = false;
 
   while (true) {
     const pendingCalls: PendingToolCall[] = [];
@@ -202,6 +217,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     if (!interactionId) interactionId = pendingCalls[0].callId;
 
     const results: GeminiToolResult[] = [];
+    // Freeze whether the model had already consumed external provider content
+    // before it generated this batch. Reads in the current batch cannot
+    // retroactively taint mutations that were proposed before those reads ran.
+    const batchStartedTainted = untrustedExternalSeen;
     const allowedCount = Math.max(0, maxToolCalls - executedCalls);
     const allowedCalls = pendingCalls.slice(0, allowedCount);
     for (const call of pendingCalls.slice(allowedCalls.length)) results.push(errorToolResult(call, 'Google tool-call limit exceeded for this turn.'));
@@ -280,13 +299,16 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
     const confirmationNow = executeOptions.now?.() ?? new Date();
     for (const call of admittedMutationCalls) {
-      const confirmation = confirmationRequestForCall(call, confirmationNow, {
+      const baseConfirmation = confirmationRequestForCall(call, confirmationNow, {
         conversationId: executeOptions.conversationId,
         messageId: executeOptions.messageId,
         generationId: executeOptions.generationId,
       });
+      const confirmation = baseConfirmation && batchStartedTainted
+        ? { ...baseConfirmation, untrustedContext: true as const }
+        : baseConfirmation;
       if (confirmation) mutationEntries.push({ call, confirmation });
-      else immediateCalls.push(call);
+      else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));
     }
 
     if (immediateCalls.length > 0) {
@@ -327,6 +349,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         }
         if (result.ok) {
           results.push({ callId: call.callId, name: call.name, result: result.result });
+          if (isUntrustedExternalReadTool(call.name) || containsUntrustedExternal(result.result)) untrustedExternalSeen = true;
           const created = artifactEvent(call.name, result.result);
           if (created) yield created;
           const media = mediaEvent(result.result);

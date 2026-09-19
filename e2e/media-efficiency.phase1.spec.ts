@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 const VIDEO_ID = 'phase1EfficiencyVid';
 const TITLE = 'Phase 1 Efficiency Track';
-const TEST_PIN = `284${619}`;
+const TEST_PIN = '2846197531';
 const TEST_GEMINI_KEY = ['phase1', 'e2e', 'gemini', 'key'].join('-');
 const TEST_YOUTUBE_KEY = ['phase1', 'e2e', 'youtube', 'key'].join('-');
 
@@ -95,12 +95,6 @@ async function dailyBudgetRow(page: Page): Promise<{ quotaDay: string; spent: nu
 
 test.describe('Phase 1 media efficiency', () => {
   test('Gemini gets a lean result while the browser retains full card metadata', async ({ page }) => {
-    // The provider fixture uses a synthetic video ID. Mock its image boundary
-    // as well as its API metadata, rather than relying on a real CDN response.
-    await page.route(`https://i.ytimg.com/vi/${VIDEO_ID}/hqdefault.jpg`, (route) => route.fulfill({
-      contentType: 'image/png',
-      body: Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64'),
-    }));
     const modelRequests: Array<Record<string, unknown>> = [];
     let providerCalls = 0;
 

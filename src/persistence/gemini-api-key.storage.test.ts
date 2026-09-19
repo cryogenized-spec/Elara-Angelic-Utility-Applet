@@ -7,7 +7,7 @@ import {
 } from './gemini-api-key';
 
 const TEST_KEY = 'test-gemini-key-material';
-const PIN = '284619';
+const PIN = '2846197531';
 const DB_NAME = 'elara-gemini-lockbox';
 
 beforeEach(async () => {

@@ -114,14 +114,10 @@ The protected mutation classes include executable DOM sinks and syntax evasions,
 
 Runtime adversarial tests complement those static mutations. In particular, mutation tool calls must not execute after the confirmation shown to the user expires, and a delayed OAuth grant must not revive an expired mutation confirmation. Encrypted credential tests intentionally corrupt sealed material and require fail-closed reads/unlock behavior rather than plaintext recovery or silent weakening.
 
-These tests certify application, credential, authority, test, CI and deployment boundaries. They do not claim to solve indirect prompt injection or hostile model context; provenance, taint propagation and untrusted-content tool authorization remain a separate future security programme.
+These tests certify application, credential, authority, test, CI and deployment boundaries. Indirect prompt injection now has an application-enforced containment boundary: successful Calendar/Tasks/Gmail/Drive/Docs/Sheets/YouTube reads intrinsically taint the model turn (with explicit `trust: untrusted-external` as a second tripwire). A mutation proposed by a later model continuation after that taint is marked `untrustedContext`; the confirmation broker displays an external-content warning, leaves the action unselected, and disables approval until the human explicitly selects it. Mutations emitted in the same model batch as a read are not retroactively tainted because the model had not yet received that read result. Grouped items likewise start unselected and there is no approve-all control. Broader cross-turn provenance/taint propagation and semantic information-flow analysis remain future security work rather than a solved claim.
 
 ## 10. Completion rule
 
 Never inherit green status across SHAs. Temporary bootstrap/write-capable workflows or jobs are not certification evidence and must be removed before the candidate run. Focused tests are useful for iteration but do not replace the ordered full matrix.
 
 Phase completion requires: exact PR-head certification, merge locked to that head, successful post-merge `main` certification, and successful certified Pages deployment when deployment is part of the change.
-
-### Browser fixture isolation
-
-Provider-mocked Playwright UI suites use `serviceWorkers: 'block'` in the test context: an activated dev worker can otherwise bypass page-level provider routes and send fixture traffic to the network. This does not alter production PWA registration or runtime caching. Tests that verify service-worker behavior explicitly opt into `serviceWorkers: 'allow'`; the kanban PWA integration group waits for readiness, reloads under a controller, and verifies board/chat navigation on desktop and Android portrait. Mocked-provider tests must not be presented as offline/installed-PWA certification.

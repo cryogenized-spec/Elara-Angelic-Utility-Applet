@@ -14,7 +14,7 @@
  */
 
 const DB_NAME = 'elara-gemini-lockbox';
-const PBKDF2_ITERATIONS = 310_000;
+const PBKDF2_ITERATIONS = 600_000;
 const IV_BYTES = 12;
 
 export type LockboxFixtureRecordId = 'gemini-api-key' | 'youtube-api-key';

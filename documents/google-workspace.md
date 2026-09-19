@@ -3,7 +3,7 @@ id: SYS-GWS
 status: active
 verified_commit: 92e69c0cf30e5abd705e5ce28a77c4757939e2d5
 scope: Google Workspace service adapters and model tool execution
-paths: [src/google/calendar, src/google/tasks, src/google/gmail, src/google/docs, src/google/drive, src/google/sheets, src/google/chat, src/google/tools, src/google/confirmation, src/kanban]
+paths: [src/google/calendar, src/google/tasks, src/google/gmail, src/google/docs, src/google/drive, src/google/sheets, src/google/chat, src/google/tools, src/google/confirmation]
 keywords: [workspace, calendar, tasks, gmail, docs, drive, sheets, tools, confirmation]
 ---
 
@@ -30,7 +30,11 @@ Gemini function call
 
 OAuth permission never substitutes for application capability or mutation confirmation. Gemini receives neither refresh/access tokens, raw OAuth scopes, credential material, nor provider URLs as tool arguments.
 
-External Google content is evidence, never authority. Retrieved Gmail/Docs/Drive/Sheets content may inform arguments, but it cannot grant capabilities, approve confirmation, change security policy, expose credentials, or instruct Elara to bypass the registered tool surface.
+External provider content is evidence, never authority. Retrieved Calendar/Tasks/Gmail/Drive/Docs/Sheets/YouTube content may inform an answer, but it cannot grant capabilities, approve confirmation, change security policy, expose credentials, or instruct Elara to bypass the registered tool surface.
+
+This is enforced at runtime rather than left to prompt wording. Successful reads from those provider namespaces intrinsically taint the elected model turn, even if an adapter accidentally omits an explicit provenance marker; explicit `trust: untrusted-external` remains a second tripwire. If a later model continuation proposes a mutation after that taint, its confirmation is marked `untrustedContext`, displays an external-content warning, starts unselected, and cannot be approved until the human explicitly selects it. A mutation emitted in the same model batch as the read is not retroactively tainted because the model had not yet received that provider result. This preserves legitimate user-requested inspect→edit workflows while ensuring retrieved provider text never becomes silent action authority.
+
+Grouped mutation confirmation is fail-closed for human review. Multi-action batches start with every item unselected and expose no `Approve all` shortcut; the user selects intended mutations individually. Tainted single actions also start unselected. Confirmation presents exact validated arguments for mutation classes that do not already have a purpose-built full-content review (for example bulk Sheets rows and document edit text).
 
 ### 2.1 Source map
 
@@ -72,10 +76,6 @@ Creates/updates support timed or all-day events, location, description, attendee
 Guest notification exposes only `sendUpdates=all|externalOnly`; `none` is intentionally not model-visible. Calendar create retry identity derives from the Gemini function-call id and maps to a deterministic provider event id; a retry receiving `409` reads that exact event instead of intentionally creating a duplicate.
 
 ## 5. Tasks contract
-
-The human [Kanban workspace](./kanban/README.md) is a separate UI over the same semantic Tasks service, not another model-tool registry. Its reviewed `src/kanban/google-port.ts` boundary requires effective capabilities, an identified account and a live session before access; background reconciliation never initiates consent. Account-keyed snapshots/rules in `src/kanban/store.ts` are a cache/local memo authority only. Explicit Save actions admit human writes, and typed confirmation admits destructive human actions. Model writes retain the existing executor and grouped broker.
-
-`tasks.updateTask` optionally accepts the current task ETag and propagates `If-Match` for conditional PATCH. Successful Tasks mutations emit board invalidation; failed/412 writes never emit success. An enabled local subroutine can surface earlier scheduled dates as overdue memo context without changing or moving the provider task. See the supporting guide for refresh cadence, browser-local privacy and limitations.
 
 Google Tasks remains task-data authority. Gemini exposes bounded task-list discovery/read/create/rename/delete and task list/read/create/update/move/delete/clear operations.
 
@@ -212,22 +212,8 @@ Drive regressions additionally live in `src/google/drive/*test.ts`, `src/google/
 
 Pass 4 implementation now covers the planned Drive/Docs/Sheets/Picker contract. The deliberately broader `drive.library.read` surface remains discovery-only: a file found solely through that optional restricted scope must be deliberately admitted through Picker before Elara’s ordinary file/document/spreadsheet operations may use it. This preserves `drive.file` as the normal action boundary instead of turning library search into an implicit whole-Drive mutation authority.
 
-Kanban consumes these provider/tool contracts rather than becoming a competing authority; its cache and synchronization boundaries are described below. Pass 6 still owns cross-Workspace hostile provider-payload budgets/truncation metadata, prompt-injection certification across Gmail/Docs/Drive/Sheets, stale-read/write race matrices, replay/idempotency edge cases, and final end-to-end handover.
+Pass 5 orchestration/Kanban must consume these provider/tool contracts rather than become a competing authority; PR #79 remains a separate WIP and is not part of this branch. Pass 6 still owns cross-Workspace hostile provider-payload budgets/truncation metadata, prompt-injection certification across Gmail/Docs/Drive/Sheets, stale-read/write race matrices, replay/idempotency edge cases, and final end-to-end handover.
 
 Pass 4 is not declared certified until this PR’s exact head passes the complete CI matrix and the resulting merged `main` receives post-merge certification.
 
 `verified_commit` advances only after an exact reviewed PR head passes full CI, merges, and the resulting `main` commit passes post-merge certification.
-
-## 11. Kanban projections and synchronization
-
-### Kanban large-board projections
-
-The browser-local kanban view groups tasks once per task-array change and reuses ordered columns across UI updates. Ordering uses an indexed, iterative hierarchy traversal after stable provider-position sorting: it preserves parents, siblings, orphans and cyclic imports without recursive stack growth. Overdue rules reduce to minimum enabled thresholds per list/all-lists before a single task scan. Neither projection mutates imported task data or issues provider writes. The cooldown clock does not trigger whole-board updates during ordinary idle seconds; memo date rollover remains based on local calendar days. This is computation optimization, not DOM virtualization or incremental Google import.
-
-### Same-origin kanban read coordination
-
-The existing `elara-kanban` cache upgrades to version 2 with account-keyed `readSchedules` (no credentials or mutation payloads). IndexedDB transactions elect one reader per account with a 125-second expiring lease around the existing 120-second read timeout. Snapshot commits and lease success are atomic; an expired or replaced reader cannot overwrite the cache or clear its successor. Normal cancellation releases the lease. Crashed/suspended readers require no background heartbeat: visible waiters wake on local database changes or lease expiry, and recheck identity before reading.
-
-Cooldown timestamps, consecutive failure counts and paused retry budgets are shared across same-origin tabs/PWA windows. Even explicit manual refresh respects a provider cooldown; after expiry it may reset a paused budget. Fresh 20-minute polls and overlapping automatic opens reuse peer results. Manual refresh and mutation-triggered reconciliation still request explicit fresh reads; no mutations are queued or replayed by this mechanism. Each tab retains live OAuth admission; sharing a cache/lease does not grant authorization.
-
-Visibility/offline/page-hide cancel reads and waits; page-show/resume rechecks the account and schedule. Page-hide independently suspends background read scheduling and periodic identity checks until page-show, even if visibility or online events arrive out of order. Scheduling does not depend on Android keeping a hidden PWA alive. Coordination is limited to the same origin and browser storage partition, not other profiles or devices. Compact mobile sync/memo controls retain accessible labels and minimum 44px targets. Headless Android viewport tests are not physical-device installed-PWA acceptance.

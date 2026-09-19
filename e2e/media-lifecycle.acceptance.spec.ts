@@ -76,13 +76,13 @@ async function unlockTestLockbox(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox' }).click();
   await page.getByLabel('Gemini API key').fill('closeout-e2e-gemini-key');
-  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
-  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('2468135790');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('2468135790');
   await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
 
   await page.getByLabel('YouTube API key').fill('closeout-e2e-youtube-key');
-  await page.getByLabel('Current Lockbox credential for the YouTube key').fill('284619');
+  await page.getByLabel('Current Lockbox credential for the YouTube key').fill('2468135790');
   await page.getByRole('button', { name: 'Save YouTube Key' }).click();
   await expect(page.getByText(/YouTube Data API · configured · unlocked/)).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();

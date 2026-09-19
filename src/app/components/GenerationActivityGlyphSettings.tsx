@@ -120,9 +120,14 @@ export function GenerationActivityGlyphSettings({
               <span
                 className="generation-glyph-setting__preview"
                 aria-hidden="true"
-                style={{ fontFamily: `'${NOTO_EMOJI_PREVIEW_FAMILY}'` }}
               >
-                {previewState === 'ready' ? value[key] : '·'}
+                <span
+                  className="generation-glyph-setting__preview-glyph"
+                  data-ready={previewState === 'ready' ? 'true' : 'false'}
+                  style={{ fontFamily: `'${NOTO_EMOJI_PREVIEW_FAMILY}'` }}
+                >
+                  {previewState === 'ready' ? value[key] : '·'}
+                </span>
               </span>
               <label htmlFor={`activity-glyph-${key}`}>{GENERATION_ACTIVITY_GLYPH_LABELS[key]}</label>
               <select
@@ -156,7 +161,7 @@ export function GenerationActivityGlyphSettings({
 
       <small className="generation-glyph-settings__status" role="status">
         {previewState === 'loading' && 'Loading monochrome preview…'}
-        {previewState === 'ready' && 'Preview uses the exact 14 px activity rendering size.'}
+        {previewState === 'ready' && 'Preview renders glyphs at 14 px; chat activity icons display 10% larger (15.4 px).'}
         {previewState === 'unavailable' && 'Noto preview is unavailable; the current Lucide fallback remains safe.'}
       </small>
       {invalidKey && <small className="generation-glyph-settings__error" role="alert">Use exactly one visible symbol or emoji.</small>}

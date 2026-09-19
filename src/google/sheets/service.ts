@@ -32,6 +32,11 @@ export interface GoogleSheetValuesResult {
 export type GoogleSheetCellValue = string | number | boolean | null;
 export type GoogleSheetInputMode = 'literal' | 'userEntered';
 
+export interface GoogleSheetsMutationOptions {
+  readonly signal?: AbortSignal;
+  readonly isGenerationActive?: () => boolean;
+}
+
 export interface GoogleSpreadsheetSummary {
   spreadsheetId: string;
   driveFileId: string;
@@ -59,6 +64,12 @@ function spreadsheetId(id: string): string {
 
 function a1Range(range: string): string {
   return requireText(range, 'A1 range', MAX_RANGE_LENGTH);
+}
+
+function requireMutationCurrent(options: GoogleSheetsMutationOptions, operation: string): void {
+  if (options.signal?.aborted || options.isGenerationActive?.() === false) {
+    throw new DOMException(`${operation} lost turn authority.`, 'AbortError');
+  }
 }
 
 function inputOption(mode: GoogleSheetInputMode): 'RAW' | 'USER_ENTERED' {
@@ -161,19 +172,23 @@ export class GoogleSheetsService {
     rangeValue: string,
     values: readonly (readonly unknown[])[],
     mode: GoogleSheetInputMode = 'literal',
+    options: GoogleSheetsMutationOptions = {},
   ): Promise<GoogleSheetValuesResult> {
     const idValue = spreadsheetId(spreadsheetIdValue);
     const rangeText = a1Range(rangeValue);
     const safeValues = normalizeValues(values);
     const option = inputOption(mode);
+    requireMutationCurrent(options, 'Google Sheets write');
     const access = await this.oauth.authorize('sheets.write');
+    requireMutationCurrent(options, 'Google Sheets write');
     const id = encodeURIComponent(idValue);
     const range = encodeURIComponent(rangeText);
     const response = await access.fetch(`${SHEETS_API}/${id}/values/${range}?valueInputOption=${option}&includeValuesInResponse=true&responseValueRenderOption=UNFORMATTED_VALUE`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ range: rangeText, majorDimension: 'ROWS', values: safeValues }),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Sheets write'));
     const payload = await this.readJson<{ updatedData?: { range?: unknown; majorDimension?: unknown; values?: unknown } }>(response);
     const updatedValues = Array.isArray(payload.updatedData?.values)
       ? normalizeValues(payload.updatedData.values.filter(Array.isArray) as readonly (readonly unknown[])[])
@@ -190,19 +205,23 @@ export class GoogleSheetsService {
     rangeValue: string,
     values: readonly (readonly unknown[])[],
     mode: GoogleSheetInputMode = 'literal',
+    options: GoogleSheetsMutationOptions = {},
   ): Promise<GoogleSheetValuesResult> {
     const idValue = spreadsheetId(spreadsheetIdValue);
     const rangeText = a1Range(rangeValue);
     const safeValues = normalizeValues(values);
     const option = inputOption(mode);
+    requireMutationCurrent(options, 'Google Sheets append');
     const access = await this.oauth.authorize('sheets.write');
+    requireMutationCurrent(options, 'Google Sheets append');
     const id = encodeURIComponent(idValue);
     const range = encodeURIComponent(rangeText);
     const response = await access.fetch(`${SHEETS_API}/${id}/values/${range}:append?valueInputOption=${option}&insertDataOption=INSERT_ROWS&includeValuesInResponse=true&responseValueRenderOption=UNFORMATTED_VALUE`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ majorDimension: 'ROWS', values: safeValues }),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Sheets append'));
     const payload = await this.readJson<{ updates?: { updatedRange?: unknown; updatedData?: { values?: unknown } } }>(response);
     const updatedValues = Array.isArray(payload.updates?.updatedData?.values)
       ? normalizeValues(payload.updates.updatedData.values.filter(Array.isArray) as readonly (readonly unknown[])[])
@@ -218,23 +237,27 @@ export class GoogleSheetsService {
     rangeValue: string,
     value: unknown,
     mode: GoogleSheetInputMode = 'literal',
+    options: GoogleSheetsMutationOptions = {},
   ): Promise<GoogleSheetValuesResult> {
-    return this.writeRange(spreadsheetIdValue, rangeValue, [[normalizeCellValue(value)]], mode);
+    return this.writeRange(spreadsheetIdValue, rangeValue, [[normalizeCellValue(value)]], mode, options);
   }
 
-  async createSpreadsheet(title: string, firstSheetTitle?: string): Promise<GoogleSpreadsheetSummary> {
+  async createSpreadsheet(title: string, firstSheetTitle?: string, options: GoogleSheetsMutationOptions = {}): Promise<GoogleSpreadsheetSummary> {
     const safeTitle = requireText(title, 'spreadsheet title', MAX_TITLE_LENGTH);
     const safeFirstSheetTitle = firstSheetTitle === undefined ? undefined : requireText(firstSheetTitle, 'sheet title', MAX_SHEET_TITLE_LENGTH);
     const body = {
       properties: { title: safeTitle },
       ...(safeFirstSheetTitle ? { sheets: [{ properties: { title: safeFirstSheetTitle } }] } : {}),
     };
+    requireMutationCurrent(options, 'Google Sheets create spreadsheet');
     const access = await this.oauth.authorize('sheets.write');
+    requireMutationCurrent(options, 'Google Sheets create spreadsheet');
     const response = await access.fetch(SHEETS_API, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Sheets create spreadsheet'));
     const payload = await this.readJson<SpreadsheetResponse>(response);
     if (typeof payload.spreadsheetId !== 'string' || !payload.spreadsheetId.trim()) {
       throw new Error('Google Sheets response did not contain a spreadsheet ID.');
@@ -259,19 +282,23 @@ export class GoogleSheetsService {
     title: string,
     rowCount = 1000,
     columnCount = 26,
+    options: GoogleSheetsMutationOptions = {},
   ): Promise<{ spreadsheetId: string; driveFileId: string; sheetId: number; title: string; rowCount: number; columnCount: number }> {
     const idValue = spreadsheetId(spreadsheetIdValue);
     const safeTitle = requireText(title, 'sheet title', MAX_SHEET_TITLE_LENGTH);
     if (!Number.isInteger(rowCount) || rowCount < 1 || rowCount > 100_000) throw new Error('Google Sheets row count is outside the application bounds.');
     if (!Number.isInteger(columnCount) || columnCount < 1 || columnCount > 1_000) throw new Error('Google Sheets column count is outside the application bounds.');
+    requireMutationCurrent(options, 'Google Sheets add sheet');
     const access = await this.oauth.authorize('sheets.write');
+    requireMutationCurrent(options, 'Google Sheets add sheet');
     const response = await access.fetch(`${SHEETS_API}/${encodeURIComponent(idValue)}:batchUpdate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         requests: [{ addSheet: { properties: { title: safeTitle, gridProperties: { rowCount, columnCount } } } }],
       }),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Sheets add sheet'));
     const payload = await this.readJson<{ replies?: unknown }>(response);
     const replies = Array.isArray(payload.replies) ? payload.replies : [];
     const first = replies[0] && typeof replies[0] === 'object' && !Array.isArray(replies[0]) ? replies[0] as Record<string, unknown> : {};
@@ -290,7 +317,7 @@ export class GoogleSheetsService {
     };
   }
 
-  async insertRows(spreadsheetIdValue: string, sheetId: number, startIndex: number, count: number): Promise<unknown> {
+  async insertRows(spreadsheetIdValue: string, sheetId: number, startIndex: number, count: number, options: GoogleSheetsMutationOptions = {}): Promise<unknown> {
     if (!Number.isInteger(sheetId) || sheetId < 0) throw new Error('Google Sheets sheet ID must be a non-negative integer.');
     if (!Number.isInteger(startIndex) || startIndex < 0 || startIndex > 100_000) throw new Error('Google Sheets row start index is outside the application bounds.');
     if (!Number.isInteger(count) || count < 1 || count > 100) throw new Error('Google Sheets row insert count is outside the application bounds.');
@@ -299,19 +326,22 @@ export class GoogleSheetsService {
         range: { sheetId, dimension: 'ROWS', startIndex, endIndex: startIndex + count },
         inheritFromBefore: startIndex > 0,
       },
-    }]);
+    }], options);
   }
 
-  async batchUpdate(spreadsheetIdValue: string, requests: readonly Record<string, unknown>[]): Promise<unknown> {
+  async batchUpdate(spreadsheetIdValue: string, requests: readonly Record<string, unknown>[], options: GoogleSheetsMutationOptions = {}): Promise<unknown> {
     const idValue = spreadsheetId(spreadsheetIdValue);
     const safeRequests = boundedBatchRequests(requests);
+    requireMutationCurrent(options, 'Google Sheets structural update');
     const access = await this.oauth.authorize('sheets.write');
+    requireMutationCurrent(options, 'Google Sheets structural update');
     const id = encodeURIComponent(idValue);
     const response = await access.fetch(`${SHEETS_API}/${id}:batchUpdate`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ requests: safeRequests }),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, () => requireMutationCurrent(options, 'Google Sheets structural update'));
     return this.readJson(response);
   }
 

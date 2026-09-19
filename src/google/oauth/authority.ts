@@ -11,6 +11,7 @@ import {
   computeEffectiveCapabilities,
   GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES,
   googleWorkspaceOnboardingScopes,
+  minimizeGoogleProviderScopes,
   normalizeCapabilityKey,
   parseProviderScopes,
   resolveAuthorizingCapability,
@@ -336,12 +337,13 @@ async function fetchGoogleAccount(accessToken: string): Promise<{ email: string;
 function requestedGoogleScopes(capability: GoogleCapabilityKey, enabledCapabilities: readonly GoogleCapabilityKey[]): string {
   if (capability === 'google.account') {
     const preservedScopes = enabledCapabilities.map((enabled) => getGoogleScope(enabled).scope).filter(Boolean);
-    return [...new Set([
-      ...googleWorkspaceOnboardingScopes(),
-      ...preservedScopes,
-      GOOGLE_USERINFO_EMAIL_SCOPE,
+    return [
+      ...minimizeGoogleProviderScopes([
+        ...googleWorkspaceOnboardingScopes(),
+        ...preservedScopes,
+      ]),
       GOOGLE_OPENID_SCOPE,
-    ].filter(Boolean))].join(' ');
+    ].join(' ');
   }
   const descriptor = getGoogleScope(capability);
   return [...new Set([descriptor.scope, GOOGLE_USERINFO_EMAIL_SCOPE, GOOGLE_OPENID_SCOPE].filter(Boolean))].join(' ');

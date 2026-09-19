@@ -6,6 +6,7 @@ import {
   getGeminiApiKey,
   isGeminiLockboxPin,
   isStrongGeminiLockboxPin,
+  setGeminiLockboxSecurityMode,
   unlockGeminiApiKeyWithPin,
 } from './gemini-api-key';
 
@@ -43,6 +44,8 @@ export async function changeGeminiLockboxPin(currentPin: string, newPin: string)
 
 export async function switchGeminiLockboxToPin(currentPin: string): Promise<void> {
   const current = validateExistingPin(currentPin);
-  const apiKey = await getUnlockedApiKeyWithPin(current);
-  await configureGeminiApiKeyWithPin(apiKey, current);
+  await getUnlockedApiKeyWithPin(current);
+  // Passkey mode wraps the existing PIN; switching modes does not create new
+  // PIN protection and therefore must not strand a legacy 6–8 digit record.
+  await setGeminiLockboxSecurityMode('pin');
 }

@@ -1,6 +1,6 @@
 import { googleToolCallSchema, type GoogleToolCall, type GoogleToolDescriptor, type GoogleToolName, type GoogleToolRisk } from './contracts';
 import { googleToolRegistry } from './registry';
-import { evaluateWriteConfirmation, isConfirmationFresh, type WriteConfirmationRequest } from '../confirmation/policy';
+import { evaluateWriteConfirmation, isConfirmationFresh, MAX_CONFIRMATION_REVIEW_CHARS, writeConfirmationSchema, type WriteConfirmationRequest } from '../confirmation/policy';
 import { requestGoogleToolConfirmation } from '../confirmation/broker';
 import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus } from '../oauth/contracts';
 import { isCapabilityAuthorized } from '../oauth/capability-policy';
@@ -230,15 +230,20 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
   }
 }
 
-function staticConfirmationRequest(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, descriptor: GoogleToolDescriptor, requestedAt: string): WriteConfirmationRequest {
-  const reviewText = confirmationReviewText(tool, args);
-  return {
-    tool: descriptor.name,
-    risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>,
-    resourceSummary: confirmationSummary(tool, args, descriptor.description),
-    ...(reviewText ? { reviewText } : {}),
-    requestedAt,
-  };
+function staticConfirmationRequest(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, descriptor: GoogleToolDescriptor, requestedAt: string): WriteConfirmationRequest | null {
+  try {
+    const reviewText = confirmationReviewText(tool, args);
+    if (reviewText && reviewText.length > MAX_CONFIRMATION_REVIEW_CHARS) return null;
+    return writeConfirmationSchema.parse({
+      tool: descriptor.name,
+      risk: descriptor.risk as Exclude<GoogleToolRisk, 'read'>,
+      resourceSummary: confirmationSummary(tool, args, descriptor.description),
+      ...(reviewText ? { reviewText } : {}),
+      requestedAt,
+    });
+  } catch {
+    return null;
+  }
 }
 
 export function confirmationRequestForCall(
@@ -253,6 +258,7 @@ export function confirmationRequestForCall(
   let args: Readonly<Record<string, unknown>>;
   try { args = validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
   const request = staticConfirmationRequest(parsed.data.tool, args, descriptor, now.toISOString());
+  if (!request) return null;
   if (parsed.data.tool !== 'memory.reconcile') return request;
   const targetRef = value(args, 'targetRef');
   const relation = value(args, 'relation') ?? 'related';

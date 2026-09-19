@@ -61,18 +61,22 @@ export const GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES = [
   ...GOOGLE_V1_OPTIONAL_CAPABILITIES,
 ] as const satisfies readonly GoogleCapabilityKey[];
 
-export function googleWorkspaceOnboardingScopes(): string[] {
-  const ordered = [...new Set(
-    GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES
-      .map((capability) => getGoogleScope(capability).scope)
-      .filter((scope): scope is string => Boolean(scope)),
-  )];
+export function minimizeGoogleProviderScopes(scopes: readonly string[]): string[] {
+  const ordered = [...new Set(scopes.filter(Boolean))];
   const retained = new Set(ordered);
   for (const [broaderScope, impliedScopes] of Object.entries(PROVIDER_SCOPE_IMPLICATIONS)) {
     if (!retained.has(broaderScope)) continue;
     for (const impliedScope of impliedScopes) retained.delete(impliedScope);
   }
   return ordered.filter((scope) => retained.has(scope));
+}
+
+export function googleWorkspaceOnboardingScopes(): string[] {
+  return minimizeGoogleProviderScopes(
+    GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES
+      .map((capability) => getGoogleScope(capability).scope)
+      .filter((scope): scope is string => Boolean(scope)),
+  );
 }
 
 const FILE_READ_CAPABILITIES = new Set<GoogleCapabilityKey>([

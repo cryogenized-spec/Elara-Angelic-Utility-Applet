@@ -193,7 +193,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction, memoryContext: 'none' }, signal);
   let executedCalls = 0;
   let toolBudgetExhausted = false;
-  let untrustedExternalSeen = false;
+  let untrustedExternalSeen = request.untrustedExternalContext === true;
 
   while (true) {
     const pendingCalls: PendingToolCall[] = [];

@@ -219,8 +219,8 @@ test('overdue memo reaches an ordinary Gemini turn without a hidden user message
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Lockbox', exact: true }).click();
   await page.getByLabel('Gemini API key').fill(['kanban', 'test', 'key'].join('-'));
-  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('284619');
-  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('284619');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('2846197531');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('2846197531');
   await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();

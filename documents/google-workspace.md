@@ -196,6 +196,10 @@ Gmail send/reply uses fixed provider endpoints and locally generated RFC headers
 
 Drive-specific failure semantics are likewise fail-closed. Invalid validators and contradictory moves fail before provider mutation; transfer ceilings are enforced before and during reads; a stream failure becomes a typed transfer failure rather than a partial artifact. Drive file writes carry the same provider-boundary turn guard used by Gmail so OAuth/token refresh cannot turn an expired approval or stale generation into a provider mutation. Permanent file DELETE is absent.
 
+Untrusted-content isolation is an application-enforced information-flow rule, not only prompt guidance. Once a model continuation has consumed an external Workspace or YouTube result, newly proposed external read calls are refused with UNTRUSTED_CONTEXT_REQUIRES_FRESH_USER_TURN and require a fresh user turn. Reads proposed together in the same pre-taint model batch remain valid because the model had not yet consumed any returned content when it chose them.
+
+Uploaded attachments are considered untrusted contextual input before the first tool batch, so attachment-authored instructions cannot silently fan out into Workspace or YouTube reads. Durable-memory context is also non-authoritative: recalled memory and explicit memory.lookup evidence elevate any later mutation confirmation, while ordinary user-requested reads are not disabled merely because benign memory context was recalled. External content, attachments, and memory can inform answers; none can expand tool authority.
+
 ## 9. Verification
 
 Relevant verification includes service contract tests, schema tests, Gemini declaration parity, executor/confirmation tests, replay-fence tests, provider-boundary tests, Worker tests, build, and the Android/Chromium/onboarding Playwright matrix.

@@ -6,6 +6,7 @@ import { getGoogleScope } from './scope-registry';
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 import { requestGoogleAuthorizationCode } from './code-flow';
 import { createGoogleDrivePickerAuthority } from '../picker/service';
+import { clearGooglePickerAdmissions } from '../../persistence/google-picker-admissions';
 import {
   authorizationStateFor,
   computeEffectiveCapabilities,
@@ -159,6 +160,34 @@ function clearStored(): void {
   stored = emptyStored();
   legacyGrantedCapabilities = [];
   if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+}
+
+function sameGoogleAccount(
+  left: { email: string } | undefined,
+  right: { email: string } | undefined,
+): boolean {
+  return Boolean(left && right && left.email.trim().toLocaleLowerCase() === right.email.trim().toLocaleLowerCase());
+}
+
+function authorizationStorageRevision(): string {
+  if (typeof localStorage === 'undefined') return stored.updatedAt;
+  try {
+    return localStorage.getItem(STORAGE_KEY) ?? '';
+  } catch {
+    return stored.updatedAt;
+  }
+}
+
+function installGoogleAuthorizationCrossTabInvalidation(): void {
+  if (typeof window === 'undefined') return;
+  window.addEventListener('storage', (event) => {
+    if (event.key !== STORAGE_KEY) return;
+    // Access tokens are intentionally tab-memory-only. Any sibling-tab
+    // authorization change therefore deauthorizes this tab's live token until
+    // the next ordinary ensureToken() re-establishes current authority.
+    session = null;
+    loadStored();
+  });
 }
 
 function ensureClientId(): string {
@@ -347,30 +376,48 @@ async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' |
     const requestedScope = requestedGoogleScopes(capability, current.enabledCapabilities);
     const response = await requestGoogleAccessToken({ clientId: ensureClientId(), scope: requestedScope, prompt });
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
+
     const returnedScopes = parseProviderScopes(response.scope);
+    let fetchedAccount: { email: string; displayName?: string } | null = null;
+    try {
+      fetchedAccount = await fetchGoogleAccount(response.access_token);
+    } catch {
+      fetchedAccount = null;
+    }
+
+    if (prompt === 'none' && current.account) {
+      if (!fetchedAccount || !sameGoogleAccount(current.account, fetchedAccount)) {
+        session = null;
+        stored.needsReauthorization = true;
+        saveStored();
+        throw new Error('Google account continuity could not be verified. Reauthorize explicitly in Settings.');
+      }
+    }
+
+    const explicitIdentityReset = prompt === ''
+      && Boolean(current.account)
+      && (!fetchedAccount || !sameGoogleAccount(current.account, fetchedAccount));
+    const enabledCapabilities = explicitIdentityReset
+      ? uniqueCapabilities([capability])
+      : uniqueCapabilities([...current.enabledCapabilities, capability]);
     const grantedProviderScopes = returnedScopes.length
       ? returnedScopes
-      : [...new Set([...current.grantedProviderScopes, descriptor.scope])];
-    const enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
+      : explicitIdentityReset
+        ? [descriptor.scope]
+        : [...new Set([...current.grantedProviderScopes, descriptor.scope])];
+
     session = {
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
     };
-    let nextAccount = current.account;
-    try {
-      const fetched = await fetchGoogleAccount(response.access_token);
-      if (fetched) nextAccount = fetched;
-      else if (prompt === '') nextAccount = undefined;
-    } catch {
-      if (prompt === '') nextAccount = undefined;
-    }
     legacyGrantedCapabilities = [];
     stored.enabledCapabilities = enabledCapabilities;
     stored.grantedProviderScopes = grantedProviderScopes;
     stored.needsReauthorization = false;
-    if (nextAccount) stored.account = nextAccount;
+    if (fetchedAccount) stored.account = fetchedAccount;
     else delete (stored as { account?: unknown }).account;
     saveStored();
+    if (explicitIdentityReset) await clearGooglePickerAdmissions().catch(() => undefined);
   } catch (error) {
     const raw = error instanceof Error ? error.message : undefined;
     if (prompt === 'none') {
@@ -404,13 +451,17 @@ async function acquireDurableToken(capability: GoogleCapabilityKey, pairing: Aut
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
     vaultUpdatedAt: durableRevision(response.updatedAt),
   };
+  const accountSwitched = Boolean(current.account && response.account?.email && !sameGoogleAccount(current.account, response.account));
   legacyGrantedCapabilities = [];
-  stored.enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
+  stored.enabledCapabilities = accountSwitched
+    ? uniqueCapabilities([capability])
+    : uniqueCapabilities([...current.enabledCapabilities, capability]);
   stored.grantedProviderScopes = providerScopes.length ? providerScopes : codeScopes;
   stored.needsReauthorization = false;
   if (response.account?.email) stored.account = response.account;
   else delete (stored as { account?: unknown }).account;
   saveStored();
+  if (accountSwitched) await clearGooglePickerAdmissions().catch(() => undefined);
 }
 
 async function refreshDurableToken(pairing: AutonomyPairing): Promise<void> {
@@ -475,6 +526,7 @@ async function authorizedFetch(
 ): Promise<Response> {
   const target = assertGoogleApiTarget(input);
   const token = await ensureToken(capability, false);
+  const admittedRevision = authorizationStorageRevision();
   const request = new Request(target, init);
   const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
   const requestOptions = (accessToken: string): RequestInit => {
@@ -483,8 +535,15 @@ async function authorizedFetch(
     headers.set('Accept', headers.get('Accept') ?? 'application/json');
     return { method: request.method, headers, body, signal: request.signal };
   };
+  const assertAdmissionStillCurrent = (accessToken: string, revision: string) => {
+    if (!session || session.accessToken !== accessToken || authorizationStorageRevision() !== revision) {
+      session = null;
+      throw new Error('Google authorization changed before the provider request. Retry after the current account state is refreshed.');
+    }
+  };
 
   beforeProviderFetch?.();
+  assertAdmissionStillCurrent(token, admittedRevision);
   let response = await fetch(new Request(target, requestOptions(token)));
   if (response.status !== 401) return response;
 
@@ -497,8 +556,10 @@ async function authorizedFetch(
   }
 
   const refreshedToken = currentAccessToken();
+  const refreshedRevision = authorizationStorageRevision();
   if (!refreshedToken) throw new Error('Google authorization did not return a refreshed access token.');
   beforeProviderFetch?.();
+  assertAdmissionStillCurrent(refreshedToken, refreshedRevision);
   response = await fetch(new Request(target, requestOptions(refreshedToken)));
   if (response.status === 401) {
     markReauthorizationRequired();
@@ -556,6 +617,8 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
     clearStored();
   },
 };
+
+installGoogleAuthorizationCrossTabInvalidation();
 
 export function normalizeGoogleOAuthError(input: { error?: string; errorDescription?: string; status?: number }): Error {
   const result = classifyGoogleOAuthFailure(input);

@@ -161,7 +161,7 @@ export function GenerationActivityGlyphSettings({
 
       <small className="generation-glyph-settings__status" role="status">
         {previewState === 'loading' && 'Loading monochrome preview…'}
-        {previewState === 'ready' && 'Preview renders glyphs at 14 px; chat activity icons display 10% larger (15.4 px).'}
+        {previewState === 'ready' && 'Preview renders glyphs at 14 px; chat activity icons use the same compact 14 px fit.'}
         {previewState === 'unavailable' && 'Noto preview is unavailable; the current Lucide fallback remains safe.'}
       </small>
       {invalidKey && <small className="generation-glyph-settings__error" role="alert">Use exactly one visible symbol or emoji.</small>}

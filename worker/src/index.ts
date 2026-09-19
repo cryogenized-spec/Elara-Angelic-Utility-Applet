@@ -101,12 +101,14 @@ async function requireProviderAdmission(request: Request, env: Env): Promise<Res
 function healthResponse(request: Request, env: Env): Response {
   const hasCredential = Boolean(env.GEMINI_API_KEY);
   const hasOriginPolicy = configuredOrigins(env).length > 0;
+  const hasAdmission = Boolean(env.ELARA_INSTALLATION_TOKEN?.trim());
   return jsonResponse(request, env, {
     service: 'elara-gemini',
-    status: hasCredential && hasOriginPolicy ? 'healthy' : 'degraded',
+    status: hasCredential && hasOriginPolicy && hasAdmission ? 'healthy' : 'degraded',
     api: true,
     credentialConfigured: hasCredential,
     originPolicyConfigured: hasOriginPolicy,
+    admissionConfigured: hasAdmission,
   }, 200);
 }
 

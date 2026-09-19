@@ -19,6 +19,7 @@ describe('Gemini Worker boundary', () => {
   const baseEnv = {
     GEMINI_API_KEY: 'test-secret-key',
     ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io',
+    ELARA_INSTALLATION_TOKEN: 'test-installation-token',
   };
 
   beforeEach(() => {
@@ -68,7 +69,7 @@ describe('Gemini Worker boundary', () => {
   it('rejects a missing Worker credential before invoking Gemini', async () => {
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
       body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
     });
 
@@ -82,11 +83,25 @@ describe('Gemini Worker boundary', () => {
     expect(createInteraction).not.toHaveBeenCalled();
   });
 
+  it('rejects an originless provider request without the installation credential', async () => {
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ code: 'auth', message: 'A valid installation token is required.' });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
   it('rejects an origin that is outside the configured allowlist', async () => {
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token',
         Origin: 'https://attacker.example',
       },
       body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
@@ -102,7 +117,7 @@ describe('Gemini Worker boundary', () => {
   it('rejects malformed requests before they reach Gemini', async () => {
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
       body: JSON.stringify({ model: 'gemini-3-flash-preview' }),
     });
 
@@ -117,7 +132,7 @@ describe('Gemini Worker boundary', () => {
     createInteraction.mockResolvedValue({});
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
       body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello' }),
     });
 
@@ -132,7 +147,7 @@ describe('Gemini Worker boundary', () => {
     const customInstruction = 'PERSONA PROTOCOL: ELARA\nRemain in character and follow this exact instruction.';
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
       body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: customInstruction }),
     });
 
@@ -154,7 +169,7 @@ describe('Gemini Worker boundary', () => {
     createInteraction.mockResolvedValue((async function* () { for (const event of events) yield event; })());
     const request = new Request('https://worker.example/api/gemini', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
       body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
     });
 
@@ -203,7 +218,7 @@ describe('Gemini Worker boundary', () => {
   it('rejects unsupported VTT MIME types before invoking Gemini', async () => {
     const request = new Request('https://worker.example/api/transcribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/mp4', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'audio/mp4', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: new Uint8Array(3_000),
     });
 
@@ -221,6 +236,7 @@ describe('Gemini Worker boundary', () => {
       headers: {
         'Content-Type': 'audio/webm',
         'Content-Length': String((2 * 1024 * 1024) + 1),
+        Authorization: 'Bearer test-installation-token',
         Origin: 'https://cryogenized-spec.github.io',
       },
       body: new Uint8Array(10),
@@ -240,7 +256,7 @@ describe('Gemini Worker boundary', () => {
   it('rejects a tiny VTT capture without uploading audio to Gemini', async () => {
     const request = new Request('https://worker.example/api/transcribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/webm', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: new Uint8Array(100),
     });
 
@@ -257,7 +273,7 @@ describe('Gemini Worker boundary', () => {
     createInteraction.mockResolvedValue({ output_text: 'hello from voice' });
     const request = new Request('https://worker.example/api/transcribe', {
       method: 'POST',
-      headers: { 'Content-Type': 'audio/webm', Origin: 'https://cryogenized-spec.github.io' },
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
       body: new Uint8Array(3_000),
     });
 

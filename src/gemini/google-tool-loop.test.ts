@@ -266,6 +266,15 @@ describe('streamGoogleToolLoop', () => {
     }));
     const writeHandler = vi.fn(async () => ({ id: 'task-pwned' }));
     const confirm = vi.fn(async () => true);
+    const taintOauth = {
+      ...oauth,
+      getStatus: async () => ({
+        state: 'connected' as const,
+        grantedCapabilities: ['gmail.read' as const, 'tasks.write' as const],
+        enabledCapabilities: ['gmail.read' as const, 'tasks.write' as const],
+        grantedProviderScopes: [],
+      }),
+    };
 
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-taint-batch-1', model: 'gemini-3.8-flash' },
@@ -281,7 +290,7 @@ describe('streamGoogleToolLoop', () => {
       {
         tools: ['gmail.getMessage', 'tasks.createTask'],
         readOnly: false,
-        executor: { oauth, handlers: { 'gmail.getMessage': readHandler, 'tasks.createTask': writeHandler }, confirm },
+        executor: { oauth: taintOauth, handlers: { 'gmail.getMessage': readHandler, 'tasks.createTask': writeHandler }, confirm },
       },
     )) {
       // Consume the full interaction.

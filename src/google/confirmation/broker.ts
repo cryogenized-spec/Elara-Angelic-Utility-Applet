@@ -36,7 +36,7 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
       const checkbox = document.createElement('input');
       checkbox.type = 'checkbox';
       checkbox.dataset.confirmIndex = String(index);
-      checkbox.checked = true;
+      checkbox.checked = requests.length === 1;
       checkbox.setAttribute('aria-label', `Approve ${request.tool}`);
 
       const body = document.createElement('span');
@@ -84,15 +84,6 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     selected.textContent = requests.length > 1 ? '✓ Approve selected' : '✓ Approve';
     actions.appendChild(selected);
 
-    if (requests.length > 1) {
-      const all = document.createElement('button');
-      all.type = 'button';
-      all.dataset.decision = 'all';
-      all.className = 'roleplay-confirmation__accept';
-      all.textContent = '✓ Approve all';
-      actions.appendChild(all);
-    }
-
     host.append(heading, list, actions);
 
     let settled = false;
@@ -110,7 +101,6 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     decisionButtons.forEach((button) => button.addEventListener('click', () => {
       const decision = button.dataset.decision;
       if (decision === 'decline') finish(requests.map(() => false));
-      else if (decision === 'all') finish(requests.map(() => true));
       else {
         const decisions = requests.map((_, index) => host.querySelector<HTMLInputElement>(`[data-confirm-index="${index}"]`)?.checked ?? false);
         finish(decisions);

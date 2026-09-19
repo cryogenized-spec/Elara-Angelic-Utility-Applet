@@ -116,6 +116,10 @@ The Google settings UI separates account/session readiness from stored permissio
 
 Consequential Google mutations still require the separate `SYS-GWS / google-workspace.md` confirmation boundary after OAuth authorization succeeds.
 
+Browser-only GIS mode now treats account identity as a continuity invariant rather than display metadata. Silent token recovery with prompt=none must obtain userinfo matching the previously stored account; failure to prove the identity or a mismatch fails closed into explicit reauthorization. An explicit interactive account change starts a new local account boundary instead of inheriting the previous account's enabled capability set, and account-scoped Google Picker admissions are cleared.
+
+The shared authorization record is also a cross-tab revocation epoch. A sibling-tab update or disconnect invalidates this tab's in-memory access token. Each authorized Google request captures the admitted authorization revision and rechecks both that revision and the exact in-memory access token immediately before provider egress, including the post-401 retry path. A concurrent disconnect or account change therefore cannot reuse an already-admitted stale token for one final request.
+
 ## 7. Verification and tests
 
 Browser tests cover both authorities: the legacy interactive-only token path and paired durable code exchange/refresh. `code-flow.test.ts` pins popup behavior so an arbitrary `redirect_uri` cannot be reintroduced. Worker tests cover encrypted persistence, refresh without browser interaction, replay rejection, origin mismatch, popup CSRF admission, CORS/authentication and disconnect/revocation.

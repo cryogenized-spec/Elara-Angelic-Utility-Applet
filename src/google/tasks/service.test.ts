@@ -151,7 +151,12 @@ describe('GoogleTasksService', () => {
       maxResults: 100,
       dueMin: '2026-09-01T00:00:00+02:00',
       dueMax: '2026-09-30T23:59:59+02:00',
-    })).resolves.toEqual({ items: [], nextPageToken: 'next' });
+    })).resolves.toEqual({
+      trust: 'untrusted-external',
+      source: 'tasks',
+      items: [],
+      nextPageToken: 'next',
+    });
 
     const url = new URL(calls[0]!.url);
     expect(url.searchParams.get('showAssigned')).toBe('true');

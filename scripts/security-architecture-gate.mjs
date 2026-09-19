@@ -360,6 +360,7 @@ const appSource = read('src/app/App.tsx');
 const kanbanStore = read('src/kanban/store.ts');
 if (appSource.includes('kanbanContext') && (!geminiContracts.includes('untrustedExternalContext?: boolean') || !appSource.includes('untrustedExternalContext: Boolean(kanbanInstruction)') || !toolLoop.includes('request.untrustedExternalContext === true'))) fail('Persisted Kanban provider context must enter the existing Gemini untrusted-context authority before the first model tool batch');
 if (appSource.includes('kanbanContext') && !kanbanStore.includes('if (!memo.length) return "";')) fail('Empty Kanban overdue memos must not taint unrelated model turns');
+if (appSource.includes('kanbanContext') && (!kanbanStore.includes('MAX_BOARD_LISTS = 500') || !kanbanStore.includes('MAX_BOARD_TASKS = 20_000') || !kanbanStore.includes('MAX_BOARD_PROVIDER_PAGES = 1_024'))) fail('Kanban provider traversal must retain explicit aggregate resource ceilings');
 
 const googleBroker = read('src/google/confirmation/broker.ts');
 if (googleBroker.includes("all.dataset.decision = 'all';") || googleBroker.includes('✓ Approve all')) fail('Google confirmation broker must not expose approve-all');

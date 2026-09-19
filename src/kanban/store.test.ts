@@ -333,6 +333,19 @@ describe("snapshot reconciliation", () => {
       }),
     );
   });
+  it("fails closed on excessive provider pagination instead of traversing forever", async () => {
+    let pages = 0;
+    mocks.lists.mockImplementation(async () => ({ items: [], nextPageToken: `unique-${++pages}` }));
+    await expect(fetchBoard(new GoogleTasksService(googleOAuthAuthority))).rejects.toThrow("safe sync limit");
+    expect(pages).toBeLessThan(1_100);
+  });
+  it("rejects oversized aggregate task snapshots before persisting them", async () => {
+    mocks.lists.mockResolvedValue({ items: initial.lists });
+    mocks.tasks.mockResolvedValue({
+      items: Array.from({ length: 20_001 }, (_, index) => ({ ...task, id: `bulk-${index}` })),
+    });
+    await expect(fetchBoard(new GoogleTasksService(googleOAuthAuthority))).rejects.toThrow("safe sync limit");
+  });
   it("rejects repeated page tokens rather than looping indefinitely", async () => {
     mocks.lists.mockResolvedValue({
       items: [],

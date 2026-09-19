@@ -5,6 +5,10 @@ import { googleOAuthAuthority } from "../google/oauth/authority";
 import { taskService, type GoogleTask, type TaskListSummary, type TaskReader } from './google-port';
 export { taskService } from './google-port';
 
+const MAX_BOARD_LISTS = 500;
+const MAX_BOARD_TASKS = 20_000;
+const MAX_BOARD_PROVIDER_PAGES = 1_024;
+
 export interface BoardTask extends GoogleTask {
   listId: string;
 }
@@ -73,13 +77,20 @@ export async function fetchBoard(
 ): Promise<Pick<Board, "lists" | "tasks">> {
   const lists: TaskListSummary[] = [];
   const tasks: BoardTask[] = [];
+  let providerPages = 0;
+  const recordProviderPage = () => {
+    providerPages += 1;
+    if (providerPages > MAX_BOARD_PROVIDER_PAGES) throw new Error("Google Tasks board exceeds Elara's safe sync limit.");
+  };
   let pageToken: string | undefined;
   const listTokens = new Set<string>();
   do {
     signal?.throwIfAborted();
-    const page = await service.listTaskLists(pageToken, undefined, signal);
+    const page = await service.listTaskLists(pageToken, 100, signal);
+    recordProviderPage();
     signal?.throwIfAborted();
     lists.push(...page.items);
+    if (lists.length > MAX_BOARD_LISTS) throw new Error("Google Tasks board exceeds Elara's safe sync limit.");
     pageToken = page.nextPageToken;
     if (pageToken && listTokens.has(pageToken))
       throw new Error("Google returned a repeated list page.");
@@ -98,12 +109,13 @@ export async function fetchBoard(
         showDeleted: false,
         maxResults: 100,
       });
+      recordProviderPage();
       signal?.throwIfAborted();
-      tasks.push(
-        ...page.items
-          .filter((task) => !task.deleted)
-          .map((task) => ({ ...task, listId: list.id })),
-      );
+      const incoming = page.items
+        .filter((task) => !task.deleted)
+        .map((task) => ({ ...task, listId: list.id }));
+      if (tasks.length + incoming.length > MAX_BOARD_TASKS) throw new Error("Google Tasks board exceeds Elara's safe sync limit.");
+      tasks.push(...incoming);
       pageToken = page.nextPageToken;
       if (pageToken && tokens.has(pageToken))
         throw new Error("Google returned a repeated task page.");

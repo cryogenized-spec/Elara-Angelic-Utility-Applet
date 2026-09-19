@@ -117,12 +117,18 @@ function KanbanWorkspace({
     void syncBoard("automatic");
   }, []);
   useEffect(() => {
-    const timer = window.setInterval(() => {
-      const now = Date.now();
-      setClock((previous) => nextRetryAt !== null || new Date(previous).toDateString() !== new Date(now).toDateString() ? now : previous);
-    }, 1000);
-    return () => clearInterval(timer);
-  }, [nextRetryAt]);
+    const now = Date.now();
+    const nextDay = new Date(now);
+    nextDay.setHours(24, 0, 0, 50);
+    const wakeAt = nextRetryAt !== null && nextRetryAt > now
+      ? Math.min(nextRetryAt, nextDay.getTime())
+      : nextDay.getTime();
+    const timer = window.setTimeout(
+      () => setClock(Date.now()),
+      Math.min(2_147_483_647, Math.max(1_000, wakeAt - now)),
+    );
+    return () => clearTimeout(timer);
+  }, [nextRetryAt, clock]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if (
@@ -284,7 +290,7 @@ function KanbanWorkspace({
           <option value="done">Completed</option>
         </select>
         <div className="kb-sync-label" role="status">
-          {phase === 'waiting' ? 'Another tab is refreshing · ' : phase === 'backoff' && nextRetryAt !== null ? `Retrying read in ${Math.max(0, Math.ceil((nextRetryAt - clock) / 1000))}s · ` : phase === 'offline' ? 'Offline · ' : phase === 'paused' ? 'Auto-sync paused · ' : ''}
+          {phase === 'waiting' ? 'Another tab is refreshing · ' : phase === 'backoff' && nextRetryAt !== null && nextRetryAt > clock ? 'Provider cooldown · ' : phase === 'offline' ? 'Offline · ' : phase === 'paused' ? 'Auto-sync paused · ' : ''}
           {board
             ? `${openCount} open · Synced ${new Date(board.syncedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
             : "Your tasks, one workspace"}

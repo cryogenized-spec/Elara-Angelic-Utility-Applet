@@ -1,6 +1,8 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
 import { boundedGoogleTransferLimit, readBoundedGoogleContent } from '../drive/transfer-boundary';
+import { readBoundedProviderJson } from '../provider-json-boundary';
 
+const MAX_PROVIDER_JSON_BYTES = 8 * 1024 * 1024;
 const MAX_DOCUMENT_ID_LENGTH = 500;
 const MAX_TITLE_LENGTH = 500;
 const MAX_TAB_ID_LENGTH = 500;
@@ -293,7 +295,7 @@ export class GoogleDocsService {
 
   private async readJson(response: Response): Promise<DocumentPayload> {
     if (!response.ok) throw new Error(`Google Docs request failed (${response.status}).`);
-    return (await response.json()) as DocumentPayload;
+    return readBoundedProviderJson<DocumentPayload>(response, { operation: 'Google Docs request', maxBytes: MAX_PROVIDER_JSON_BYTES });
   }
 }
 

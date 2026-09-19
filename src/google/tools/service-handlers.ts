@@ -9,6 +9,7 @@ import { GoogleGmailSemanticService, type GmailTurnGuard } from '../gmail/semant
 import { googleOAuthAuthority } from '../oauth/authority';
 import { GoogleSheetsService, type GoogleSheetInputMode } from '../sheets/service';
 import { runTaskCreateOnce } from '../tasks/create-replay';
+import { assertGooglePickerFileAllowed, filterRevokedGooglePickerFiles } from '../../persistence/google-picker-admissions';
 import { GoogleTasksService, type GoogleTaskStatus } from '../tasks/service';
 import type { GoogleToolHandlers } from './executor';
 import type { GmailOrganizeAction } from './gmail-schemas';
@@ -206,8 +207,16 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'tasks.clearCompleted': async ({ arguments: raw }) => tasks.clearCompleted(stringArg(objectArgs(raw), 'taskListId')!),
 
-  'docs.getDocument': async ({ arguments: raw }) => docs.getDocument(stringArg(objectArgs(raw), 'documentId')!),
-  'docs.inspectDocument': async ({ arguments: raw }) => docs.inspectDocument(stringArg(objectArgs(raw), 'documentId')!),
+  'docs.getDocument': async ({ arguments: raw }) => {
+    const documentId = stringArg(objectArgs(raw), 'documentId')!;
+    await assertGooglePickerFileAllowed(documentId);
+    return docs.getDocument(documentId);
+  },
+  'docs.inspectDocument': async ({ arguments: raw }) => {
+    const documentId = stringArg(objectArgs(raw), 'documentId')!;
+    await assertGooglePickerFileAllowed(documentId);
+    return docs.inspectDocument(documentId);
+  },
   'docs.createDocument': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const title = stringArg(objectArgs(raw), 'title')!;
     const payload = { title };
@@ -220,6 +229,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'docs.insertText': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'documentId')!);
     return docs.insertText(
       stringArg(args, 'documentId')!,
       stringArg(args, 'tabId')!,
@@ -231,6 +241,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'docs.appendParagraph': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'documentId')!);
     return docs.appendParagraph(
       stringArg(args, 'documentId')!,
       stringArg(args, 'tabId')!,
@@ -241,6 +252,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'docs.replaceText': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'documentId')!);
     return docs.replaceText(
       stringArg(args, 'documentId')!,
       stringArg(args, 'tabId')!,
@@ -253,6 +265,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'docs.batchUpdate': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'documentId')!);
     return docs.batchUpdate(stringArg(args, 'documentId')!, recordArrayArg(args, 'requests'), recordArg(args, 'writeControl', false), mutationGuard(signal, isGenerationActive));
   },
 
@@ -355,25 +368,32 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
 
   'drive.searchFiles': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return drive.listFiles({
+    const result = await drive.listFiles({
       query: stringArg(args, 'query', false),
       pageToken: stringArg(args, 'pageToken', false),
       pageSize: optionalNumber(args, 'pageSize'),
       showTrashed: optionalBoolean(args, 'showTrashed'),
     });
+    return { ...result, files: await filterRevokedGooglePickerFiles(result.files) };
   },
   'drive.searchLibrary': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
-    return drive.searchLibrary({
+    const result = await drive.searchLibrary({
       query: stringArg(args, 'query', false),
       pageToken: stringArg(args, 'pageToken', false),
       pageSize: optionalNumber(args, 'pageSize'),
       showTrashed: optionalBoolean(args, 'showTrashed'),
     });
+    return { ...result, files: await filterRevokedGooglePickerFiles(result.files) };
   },
-  'drive.getFile': async ({ arguments: raw }) => drive.getFile(stringArg(objectArgs(raw), 'fileId')!),
+  'drive.getFile': async ({ arguments: raw }) => {
+    const fileId = stringArg(objectArgs(raw), 'fileId')!;
+    await assertGooglePickerFileAllowed(fileId);
+    return drive.getFile(fileId);
+  },
   'drive.downloadFile': async ({ arguments: raw, signal, generationId, isGenerationActive, conversationId }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'fileId')!);
     return downloadDriveFileArtifact({
       fileId: stringArg(args, 'fileId')!,
       maxBytes: optionalNumber(args, 'maxBytes'),
@@ -399,6 +419,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'drive.updateFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'fileId')!);
     const patch = recordArg(args, 'patch')!;
     const name = stringArg(patch, 'name', false);
     const description = stringArg(patch, 'description', false);
@@ -411,6 +432,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'drive.moveFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'fileId')!);
     return drive.moveFile(
       stringArg(args, 'fileId')!,
       stringArg(args, 'etag')!,
@@ -421,12 +443,18 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'drive.trashFile': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'fileId')!);
     return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
   },
 
-  'sheets.getSpreadsheet': async ({ arguments: raw }) => sheets.getSpreadsheet(stringArg(objectArgs(raw), 'spreadsheetId')!),
+  'sheets.getSpreadsheet': async ({ arguments: raw }) => {
+    const spreadsheetId = stringArg(objectArgs(raw), 'spreadsheetId')!;
+    await assertGooglePickerFileAllowed(spreadsheetId);
+    return sheets.getSpreadsheet(spreadsheetId);
+  },
   'sheets.readRange': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     return sheets.readRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!);
   },
   'sheets.createSpreadsheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
@@ -443,6 +471,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'sheets.addSheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     const spreadsheetId = stringArg(args, 'spreadsheetId')!;
     const title = stringArg(args, 'title')!;
     const rowCount = optionalNumber(args, 'rowCount') ?? 1000;
@@ -457,18 +486,22 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'sheets.writeRange': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     return sheets.writeRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args), sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
   },
   'sheets.appendRows': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     return sheets.appendRows(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args), sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
   },
   'sheets.updateCell': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     return sheets.updateCell(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, args.value, sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
   },
   'sheets.insertRows': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     const spreadsheetId = stringArg(args, 'spreadsheetId')!;
     const sheetId = optionalNumber(args, 'sheetId')!;
     const startIndex = optionalNumber(args, 'startIndex')!;
@@ -478,6 +511,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   },
   'sheets.batchUpdate': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
+    await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     return sheets.batchUpdate(stringArg(args, 'spreadsheetId')!, recordArrayArg(args, 'requests'), mutationGuard(signal, isGenerationActive));
   },
 };

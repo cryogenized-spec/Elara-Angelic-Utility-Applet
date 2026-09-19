@@ -252,18 +252,30 @@ export function GoogleOAuthSettings() {
               <strong>Google Workspace permissions</strong>
               <span>Permissions are requested together through Google Identity Services rather than activated one by one in Elara. Google’s granular consent screen lets you approve the full set or leave individual permissions ungranted.</span>
             </div>
-            <div className="google-oauth-settings__state" data-state={status.state}>
-              <span className="google-oauth-settings__dot" aria-hidden="true" />
-              <span role="status" aria-live="polite">{summary}</span>
+            <div className="google-oauth-settings__hero-status">
+              <div className="google-oauth-settings__state" data-state={status.state}>
+                <span className="google-oauth-settings__dot" aria-hidden="true" />
+                <span role="status" aria-live="polite">{summary}</span>
+              </div>
+              {!workspaceComplete && (
+                <button
+                  className="google-oauth-settings__button google-oauth-settings__button--review"
+                  type="button"
+                  onClick={() => void reviewPermissions()}
+                  disabled={loading || !!busyCapability}
+                >
+                  {busyCapability === 'google.account' ? 'Opening Google…' : `Review Google permissions · ${missingWorkspaceCapabilities.length} missing`}
+                </button>
+              )}
             </div>
           </div>
 
           <div className="google-oauth-settings__grid" aria-label="Google Workspace capabilities">
             {SERVICES.map((service) => {
+              const capabilities = serviceCapabilities(service);
+              const grantedCount = capabilities.filter((entry) => hasCapability(status.grantedCapabilities, entry.capability)).length;
               const readReady = hasCapability(status.grantedCapabilities, service.readCapability);
-              const writeReady = hasCapability(status.grantedCapabilities, service.writeCapability);
-              const activeCapability = !readReady ? service.readCapability : (service.writeCapability && !writeReady ? service.writeCapability : null);
-              const actionLabel = !readReady ? 'Enable read access' : service.writeCapability && !writeReady ? 'Enable writes' : 'Authorized';
+              const serviceState = grantedCount === capabilities.length ? 'ready' : grantedCount > 0 ? 'limited' : 'missing';
 
               return (
                 <article className="google-oauth-service setting-card" key={service.id}>
@@ -271,23 +283,23 @@ export function GoogleOAuthSettings() {
                     <strong>{service.name}</strong>
                     <span>{service.description}</span>
                   </div>
-                  <div className="google-oauth-service__status">
-                    <span className={`google-oauth-service__badge${readReady ? ' is-ready' : ''}`}>{readReady ? 'Read ready' : 'Not authorized'}</span>
-                    {writeReady && <span className="google-oauth-service__badge is-ready">Writes ready</span>}
-                    {service.extraCapabilities?.map((extra) => hasCapability(status.grantedCapabilities, extra.capability)
-                      ? <span className="google-oauth-service__badge is-ready" key={extra.capability}>{extra.readyLabel}</span>
-                      : null)}
+                  <div className="google-oauth-service__status" aria-label={`${service.name} permission status`}>
+                    {capabilities.map((entry) => {
+                      const granted = hasCapability(status.grantedCapabilities, entry.capability);
+                      return (
+                        <span
+                          className={`google-oauth-service__badge${granted ? ' is-ready' : ' is-missing'}`}
+                          aria-label={`${entry.label} permission ${granted ? 'granted' : 'not granted'}`}
+                          key={entry.capability}
+                        >
+                          {entry.label}
+                        </span>
+                      );
+                    })}
                   </div>
-                  {activeCapability ? (
-                    <button className="google-oauth-settings__button" type="button" onClick={() => void connect(activeCapability)} disabled={loading || !!busyCapability}>
-                      {busyCapability === activeCapability ? 'Authorizing…' : actionLabel}
-                    </button>
-                  ) : (
-                    <span className="google-oauth-service__authorized" aria-label={`${service.name} base access authorized`}>Ready</span>
-                  )}
-                  {service.extraCapabilities?.map((extra) => !hasCapability(status.grantedCapabilities, extra.capability)
-                    ? <button className="google-oauth-settings__button google-oauth-settings__button--secondary" key={extra.capability} type="button" onClick={() => void connect(extra.capability)} disabled={loading || !!busyCapability}>{busyCapability === extra.capability ? 'Authorizing…' : extra.label}</button>
-                    : null)}
+                  <span className="google-oauth-service__authorized" data-state={serviceState}>
+                    {serviceState === 'ready' ? 'Ready' : serviceState === 'limited' ? 'Limited access' : 'Not granted'}
+                  </span>
                   {service.id === 'drive' && readReady && (
                     <div className="google-oauth-picker" aria-label="Google Picker admissions">
                       <button

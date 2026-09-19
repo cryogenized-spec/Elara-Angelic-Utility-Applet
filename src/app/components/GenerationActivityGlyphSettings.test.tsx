@@ -51,7 +51,7 @@ describe('Generation Activity glyph settings', () => {
     await act(async () => { vi.advanceTimersByTime(300); });
     expect(previewNotoEmoji).toHaveBeenCalledTimes(1);
     expect(container.querySelectorAll('.generation-glyph-setting__preview-glyph[data-ready="true"]')).toHaveLength(12);
-    expect(container.textContent).toContain('Preview renders glyphs at 14 px; chat activity icons display 10% larger (15.4 px).');
+    expect(container.textContent).toContain('Preview renders glyphs at 14 px; chat activity icons use the same compact 14 px fit.');
   });
 
   it('supports a custom one-grapheme memory icon without persisting from the editor', () => {

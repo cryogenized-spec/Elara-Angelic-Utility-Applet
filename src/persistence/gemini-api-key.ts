@@ -387,11 +387,11 @@ export async function getGeminiLockboxMetadata(): Promise<GeminiLockboxSecurityM
 }
 
 export function isGeminiLockboxPin(value: string): boolean {
-  return /^\\d+$/.test(value) && value.length >= GEMINI_LOCKBOX_PIN_MIN_LENGTH && value.length <= GEMINI_LOCKBOX_PIN_MAX_LENGTH;
+  return /^\d+$/.test(value) && value.length >= GEMINI_LOCKBOX_PIN_MIN_LENGTH && value.length <= GEMINI_LOCKBOX_PIN_MAX_LENGTH;
 }
 
 export function isStrongGeminiLockboxPin(value: string): boolean {
-  return /^\\d+$/.test(value) && value.length >= GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH && value.length <= GEMINI_LOCKBOX_PIN_MAX_LENGTH;
+  return /^\d+$/.test(value) && value.length >= GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH && value.length <= GEMINI_LOCKBOX_PIN_MAX_LENGTH;
 }
 
 /** Modes whose authorization secret is a short PIN rather than a passphrase. */

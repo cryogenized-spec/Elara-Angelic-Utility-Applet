@@ -31,8 +31,8 @@ const GEMINI_KEY = 'authority-probe-gemini-key';
 const YOUTUBE_KEY = 'AIzaSy-authority-probe-youtube';
 const PASSWORD = 'correct-horse-battery-staple';
 const WRONG_PASSWORD = 'a-completely-different-passphrase';
-const PIN = '284619';
-const REARM_PIN = '731528';
+const PIN = '2846197531';
+const REARM_PIN = '7315284062';
 
 beforeEach(async () => {
   await clearGeminiApiKey();

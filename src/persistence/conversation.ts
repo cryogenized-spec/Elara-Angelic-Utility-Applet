@@ -20,6 +20,13 @@ export interface StoredGeminiSettings {
   updatedAt: number;
 }
 
+export interface StoredGooglePickerAdmissions {
+  id: 'google-picker-admissions';
+  files: Array<{ id: string; name: string; mimeType?: string; url?: string; admittedAt: number }>;
+  revokedFileIds: string[];
+  updatedAt: number;
+}
+
 export interface StoredConversationFolder {
   id: string;
   name: string;
@@ -54,7 +61,7 @@ function stripLegacyEmbedUrls(value: unknown): { value: unknown; changed: boolea
 export class ElaraDatabase extends Dexie {
   messages!: Table<ChatMessage, string>;
   threads!: Table<StoredThread, string>;
-  settings!: Table<StoredGeminiSettings, string>;
+  settings!: Table<StoredGeminiSettings | StoredGooglePickerAdmissions, string>;
   workspaceShortcuts!: Table<StoredWorkspaceShortcut, string>;
   folders!: Table<StoredConversationFolder, string>;
   folderAssignments!: Table<StoredFolderAssignment, string>;
@@ -308,7 +315,7 @@ export async function searchThreads(query: string): Promise<ConversationThread[]
 
 export async function loadGeminiSettings(): Promise<StoredGeminiSettings> {
   const existing = await db.settings.get(GEMINI_SETTINGS_ID);
-  if (existing && getGeminiModel(existing.model)) return existing;
+  if (existing?.id === GEMINI_SETTINGS_ID && getGeminiModel(existing.model)) return existing;
   const now = Date.now();
   const initial: StoredGeminiSettings = {
     id: GEMINI_SETTINGS_ID,

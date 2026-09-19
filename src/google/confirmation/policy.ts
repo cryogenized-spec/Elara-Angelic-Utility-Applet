@@ -7,6 +7,12 @@ export const writeConfirmationSchema = z.object({
   resourceSummary: z.string().min(1),
   /** Optional full text that the human must be able to inspect before approving the mutation. */
   reviewText: z.string().min(1).max(10_000).optional(),
+  /**
+   * True when external provider content was observed before the model proposed
+   * this mutation. Such content is evidence, never authority, so the broker
+   * must require an explicit human selection rather than preselecting it.
+   */
+  untrustedContext: z.boolean().optional(),
   requestedAt: z.string().datetime(),
 });
 

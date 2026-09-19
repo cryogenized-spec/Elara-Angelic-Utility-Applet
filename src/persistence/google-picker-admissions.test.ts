@@ -35,10 +35,9 @@ describe('Google Picker admissions', () => {
     await admitGooglePickerFiles([{ id: 'file-1', name: 'One' }, { id: 'file-2', name: 'Two' }], 100);
     await clearGooglePickerAdmissions(200);
 
-    await expect(loadGooglePickerAdmissions()).resolves.toMatchObject({
-      files: [],
-      revokedFileIds: expect.arrayContaining(['file-1', 'file-2']),
-    });
+    const state = await loadGooglePickerAdmissions();
+    expect(state.files).toEqual([]);
+    expect(state.revokedFileIds).toEqual(expect.arrayContaining(['file-1', 'file-2']));
     await expect(assertGooglePickerFileAllowed('file-2')).rejects.toThrow(/removed from Elara/i);
   });
 });

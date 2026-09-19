@@ -57,4 +57,96 @@ describe('GoogleDocsService', () => {
     await expect(service.batchUpdate('doc-1', requests)).rejects.toThrow('limited to 100 requests');
     expect(authorizeCalls).toBe(0);
   });
+
+  it('requests all tab content with inline suggestions and returns revision-aware tab projections', async () => {
+    let requestedUrl = '';
+    const oauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({
+        capability,
+        fetch: async (input) => {
+          requestedUrl = String(input);
+          return new Response(JSON.stringify({
+            documentId: 'doc-1',
+            title: 'Plan',
+            revisionId: 'rev-7',
+            tabs: [{
+              tabProperties: { tabId: 'tab-root', title: 'Overview', index: 0, nestingLevel: 0 },
+              documentTab: { body: { content: [{ startIndex: 1, endIndex: 7, paragraph: { paragraphStyle: { namedStyleType: 'HEADING_1' }, elements: [{ textRun: { content: 'Hello\\n' } }] } }] } },
+              childTabs: [{
+                tabProperties: { tabId: 'tab-child', title: 'Details', parentTabId: 'tab-root', index: 0, nestingLevel: 1 },
+                documentTab: { body: { content: [{ startIndex: 1, endIndex: 5, paragraph: { elements: [{ textRun: { content: 'More\\n' } }] } }] } },
+              }],
+            }],
+          }), { status: 200 });
+        },
+      }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+      disconnect: async () => undefined,
+    };
+
+    const service = new GoogleDocsService(oauth);
+    await expect(service.inspectDocument('doc-1')).resolves.toMatchObject({
+      documentId: 'doc-1',
+      revisionId: 'rev-7',
+      trust: 'untrusted-external',
+      source: 'docs',
+      tabs: [
+        { tabId: 'tab-root', title: 'Overview', endIndex: 7 },
+        { tabId: 'tab-child', title: 'Details', parentTabId: 'tab-root', endIndex: 5 },
+      ],
+    });
+    expect(requestedUrl).toContain('includeTabsContent=true');
+    expect(requestedUrl).toContain('suggestionsViewMode=SUGGESTIONS_INLINE');
+  });
+
+  it('guards semantic insert writes with both tab identity and required revision', async () => {
+    const requests: Array<{ url: string; body: unknown }> = [];
+    const oauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({
+        capability,
+        fetch: async (input, init) => {
+          requests.push({ url: String(input), body: init?.body ? JSON.parse(String(init.body)) : null });
+          return new Response(JSON.stringify({ documentId: 'doc-1', writeControl: { requiredRevisionId: 'rev-2' } }), { status: 200 });
+        },
+      }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+      disconnect: async () => undefined,
+    };
+
+    const service = new GoogleDocsService(oauth);
+    await service.insertText('doc-1', 'tab-2', 'rev-1', 4, 'Hello');
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]?.body).toEqual({
+      requests: [{ insertText: { location: { index: 4, tabId: 'tab-2' }, text: 'Hello' } }],
+      writeControl: { requiredRevisionId: 'rev-1' },
+    });
+  });
+
+  it('fails append before mutation when the inspected revision changed', async () => {
+    let providerCalls = 0;
+    const oauth: GoogleOAuthAuthority = {
+      authorize: async (capability) => ({
+        capability,
+        fetch: async () => {
+          providerCalls += 1;
+          return new Response(JSON.stringify({
+            documentId: 'doc-1',
+            title: 'Plan',
+            revisionId: 'rev-new',
+            tabs: [{
+              tabProperties: { tabId: 'tab-1', title: 'Body' },
+              documentTab: { body: { content: [{ startIndex: 1, endIndex: 2, paragraph: { elements: [{ textRun: { content: '\\n' } }] } }] } },
+            }],
+          }), { status: 200 });
+        },
+      }),
+      getStatus: async () => ({ state: 'connected', grantedCapabilities: [], enabledCapabilities: [], grantedProviderScopes: [] }),
+      disconnect: async () => undefined,
+    };
+
+    const service = new GoogleDocsService(oauth);
+    await expect(service.appendParagraph('doc-1', 'tab-1', 'rev-old', 'Hello')).rejects.toThrow(/changed since it was inspected/i);
+    expect(providerCalls).toBe(1);
+  });
 });

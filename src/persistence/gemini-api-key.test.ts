@@ -93,6 +93,11 @@ describe('encrypted Gemini API Lockbox', () => {
     expect(await getGeminiApiKey()).toBe(TEST_KEY);
   });
 
+  it('rejects legacy-strength PINs for new or re-enabled protection', async () => {
+    await expect(configureGeminiApiKeyWithPin(TEST_KEY, '123456')).rejects.toThrow('10–12 digit PIN');
+    await expect(enableGeminiLockboxWithPin('123456')).rejects.toThrow('10–12 digit PIN');
+  });
+
   it('creates and unlocks a fresh Lockbox with the PIN mode', async () => {
     await configureGeminiApiKeyWithPin(TEST_KEY, PIN);
     expect(await getGeminiLockboxMetadata()).toMatchObject({ mode: 'pin', authVersion: 1, failedAttempts: 0, lockedUntil: null });

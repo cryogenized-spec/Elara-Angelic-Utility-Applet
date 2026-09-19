@@ -40,6 +40,8 @@ interface DriveListResponse {
 }
 
 export interface GoogleDriveFileSummary {
+  readonly trust: 'untrusted-external';
+  readonly source: 'drive';
   id: string;
   name: string;
   mimeType: string;
@@ -54,11 +56,15 @@ export interface GoogleDriveFileSummary {
   /** Strong provider validator used later as a conditional-write precondition. */
   etag?: string;
   canDownload?: boolean;
+  readonly truncatedFields?: readonly string[];
 }
 
 export interface GoogleDriveListResult {
+  readonly trust: 'untrusted-external';
+  readonly source: 'drive';
   files: readonly GoogleDriveFileSummary[];
   nextPageToken?: string;
+  readonly truncated?: boolean;
 }
 
 export interface GoogleDriveListOptions {
@@ -150,36 +156,66 @@ function asProviderSize(value: unknown): number | undefined {
 
 function asFileSummary(value: unknown): GoogleDriveFileSummary {
   const file = value as DriveFileResponse;
+  const truncated = new Set<string>();
   const capabilities = typeof file.capabilities === 'object' && file.capabilities !== null ? file.capabilities as Record<string, unknown> : null;
   const canDownload = typeof capabilities?.canDownload === 'boolean' ? capabilities.canDownload : undefined;
-  // Every provider-supplied field that reaches a tool result is bounded here:
-  // a malformed or hostile response must not grow the model-visible payload.
-  const parents = Array.isArray(file.parents)
-    ? file.parents
-      .filter((parent): parent is string => typeof parent === 'string')
-      .slice(0, DRIVE_LIMITS.maxParents)
-      .map((parent) => parent.slice(0, DRIVE_LIMITS.maxFileIdLength))
-    : undefined;
+
+  const rawParents = Array.isArray(file.parents) ? file.parents.filter((parent): parent is string => typeof parent === 'string') : [];
+  if (rawParents.length > DRIVE_LIMITS.maxParents) truncated.add('parents');
+  const parents = rawParents.slice(0, DRIVE_LIMITS.maxParents).flatMap((parent) => {
+    const normalized = parent.trim();
+    if (!normalized || normalized.length > DRIVE_LIMITS.maxFileIdLength) {
+      truncated.add('parents');
+      return [];
+    }
+    return [normalized];
+  });
+
   const size = asProviderSize(file.size);
+  if (file.size !== undefined && size === undefined) truncated.add('size');
+
   const description = boundedText(file.description, DRIVE_LIMITS.maxDescriptionLength);
+  if (typeof file.description === 'string' && file.description.length > DRIVE_LIMITS.maxDescriptionLength) truncated.add('description');
+
   const createdTime = boundedText(file.createdTime);
-  const etag = boundedText(file.etag);
+  if (typeof file.createdTime === 'string' && file.createdTime.length > DRIVE_LIMITS.maxProviderTextLength) truncated.add('createdTime');
+
   const modifiedTime = boundedText(file.modifiedTime);
+  if (typeof file.modifiedTime === 'string' && file.modifiedTime.length > DRIVE_LIMITS.maxProviderTextLength) truncated.add('modifiedTime');
+
+  const etag = typeof file.etag === 'string' && file.etag.trim().length <= DRIVE_LIMITS.maxEtagLength
+    ? file.etag.trim()
+    : undefined;
+  if (typeof file.etag === 'string' && file.etag.trim() && !etag) truncated.add('etag');
+
   const webViewLink = boundedWebViewLink(file.webViewLink);
+  if (typeof file.webViewLink === 'string' && file.webViewLink && !webViewLink) truncated.add('webViewLink');
+
+  const mimeType = boundedMimeType(file.mimeType);
+  if (typeof file.mimeType === 'string' && file.mimeType.trim() && mimeType === 'application/octet-stream' && file.mimeType.trim() !== mimeType) {
+    truncated.add('mimeType');
+  }
+
+  const name = boundedText(file.name, DRIVE_LIMITS.maxNameLength) ?? '';
+  if (typeof file.name === 'string' && file.name.length > DRIVE_LIMITS.maxNameLength) truncated.add('name');
+
   return {
+    trust: 'untrusted-external',
+    source: 'drive',
     id: requireText(String(file.id ?? ''), 'file ID', DRIVE_LIMITS.maxFileIdLength),
-    name: boundedText(file.name, DRIVE_LIMITS.maxNameLength) ?? '',
-    mimeType: boundedMimeType(file.mimeType),
+    name,
+    mimeType,
     ...(modifiedTime !== undefined ? { modifiedTime } : {}),
     ...(createdTime !== undefined ? { createdTime } : {}),
     ...(webViewLink !== undefined ? { webViewLink } : {}),
-    ...(parents?.length ? { parents } : {}),
+    ...(parents.length ? { parents } : {}),
     ...(size !== undefined ? { size } : {}),
     ...(typeof file.starred === 'boolean' ? { starred: file.starred } : {}),
     ...(description !== undefined ? { description } : {}),
     ...(typeof file.trashed === 'boolean' ? { trashed: file.trashed } : {}),
     ...(etag !== undefined ? { etag } : {}),
     ...(canDownload !== undefined ? { canDownload } : {}),
+    ...(truncated.size ? { truncatedFields: [...truncated].sort() } : {}),
   };
 }
 
@@ -471,8 +507,9 @@ export class GoogleDriveService {
     library: boolean,
   ): Promise<GoogleDriveListResult> {
     const access = await this.oauth.authorize(capability);
+    const pageSize = Math.max(1, Math.min(DRIVE_LIMITS.maxPageSize, Math.trunc(options.pageSize ?? 25)));
     const params = new URLSearchParams({
-      pageSize: String(Math.max(1, Math.min(DRIVE_LIMITS.maxPageSize, Math.trunc(options.pageSize ?? 25)))),
+      pageSize: String(pageSize),
       fields: `nextPageToken,files(${DRIVE_FILE_FIELDS})`,
       spaces: 'drive',
     });
@@ -484,8 +521,27 @@ export class GoogleDriveService {
 
     const response = await access.fetch(`${DRIVE_API}/files?${params.toString()}`);
     const payload = await this.readJson<DriveListResponse>(response);
-    const files = Array.isArray(payload.files) ? payload.files.map(asFileSummary) : [];
-    return { files, ...(typeof payload.nextPageToken === 'string' ? { nextPageToken: payload.nextPageToken } : {}) };
+    const rawFiles = Array.isArray(payload.files) ? payload.files : [];
+    const files = rawFiles.slice(0, pageSize).flatMap((file) => {
+      try {
+        return [asFileSummary(file)];
+      } catch {
+        return [];
+      }
+    });
+    const nextPageToken = typeof payload.nextPageToken === 'string' && payload.nextPageToken.length <= DRIVE_LIMITS.maxPageTokenLength
+      ? payload.nextPageToken
+      : undefined;
+    const truncated = rawFiles.length > pageSize
+      || files.length < Math.min(rawFiles.length, pageSize)
+      || (typeof payload.nextPageToken === 'string' && !nextPageToken);
+    return {
+      trust: 'untrusted-external',
+      source: 'drive',
+      files,
+      ...(nextPageToken ? { nextPageToken } : {}),
+      ...(truncated ? { truncated: true } : {}),
+    };
   }
 
   private async fetchMetadata(access: Awaited<ReturnType<GoogleOAuthAuthority['authorize']>>, fileId: string): Promise<GoogleDriveFileSummary> {

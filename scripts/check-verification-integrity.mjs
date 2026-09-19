@@ -203,7 +203,7 @@ for (const marker of ['coverage/coverage-summary.json', 'coverage-baseline.json'
   if (!coverageGate.includes(marker)) fail(`coverage gate lost required ratchet check: ${marker}`);
 }
 const coverageSentinel = read('scripts/verify-coverage-gate.mjs');
-for (const marker of ['spawnSync', 'check-coverage.mjs', 'deliberately regressed branch metric', 'source-inventory disappearance', 'Pass 5 adversarial certification failed', 'bracket-notation raw HTML assignment', 'runtime job gains repository write authority']) {
+for (const marker of ['spawnSync', 'check-coverage.mjs', 'deliberately regressed branch metric', 'source-inventory disappearance', 'Pass 6 adversarial certification failed', 'bracket-notation raw HTML assignment', 'runtime job gains repository write authority', 'Workspace provider JSON boundary removed', 'Workspace hostile-content provenance weakened']) {
   if (!coverageSentinel.includes(marker)) fail(`coverage adversarial sentinel lost required proof: ${marker}`);
 }
 try {

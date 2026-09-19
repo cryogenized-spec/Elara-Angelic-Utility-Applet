@@ -55,12 +55,41 @@ describe('Google confirmation broker', () => {
   it('leaves grouped mutations unselected and exposes no approve-all shortcut', async () => {
     const pending = requestGoogleToolConfirmations([request(), request('calendar.createEvent')]);
     const checkboxes = Array.from(document.querySelectorAll<HTMLInputElement>('[data-confirm-index]'));
+    const approve = document.querySelector<HTMLButtonElement>('[data-decision="selected"]');
     expect(checkboxes).toHaveLength(2);
     expect(checkboxes.every((checkbox) => checkbox.checked === false)).toBe(true);
     expect(document.querySelector('[data-decision="all"]')).toBeNull();
+    expect(approve?.disabled).toBe(true);
 
-    document.querySelector<HTMLButtonElement>('[data-decision="selected"]')?.click();
-    await expect(pending).resolves.toEqual([false, false]);
+    checkboxes[0].checked = true;
+    checkboxes[0].dispatchEvent(new Event('change'));
+    expect(approve?.disabled).toBe(false);
+    approve?.click();
+    await expect(pending).resolves.toEqual([true, false]);
+  });
+
+  it('requires explicit selection when external content influenced a single proposed mutation', async () => {
+    const elevated: WriteConfirmationRequest = {
+      ...request('tasks.createTask'),
+      untrustedContext: true,
+      reviewText: '{ "title": "Review me carefully" }',
+    };
+    const pending = requestGoogleToolConfirmations([elevated]);
+    const checkbox = document.querySelector<HTMLInputElement>('[data-confirm-index="0"]');
+    const approve = document.querySelector<HTMLButtonElement>('[data-decision="selected"]');
+    const warning = document.querySelector<HTMLElement>('[data-untrusted-context="true"]');
+
+    expect(checkbox?.checked).toBe(false);
+    expect(approve?.disabled).toBe(true);
+    expect(approve?.textContent).toContain('Approve selected');
+    expect(warning?.textContent).toContain('External provider content was read');
+
+    if (!checkbox) throw new Error('expected elevated confirmation checkbox');
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    expect(approve?.disabled).toBe(false);
+    approve?.click();
+    await expect(pending).resolves.toEqual([true]);
   });
 
   it('renders the entire durable-memory review text before approval', async () => {

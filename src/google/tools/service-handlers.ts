@@ -15,6 +15,7 @@ import type { GoogleToolHandlers } from './executor';
 import type { GmailOrganizeAction } from './gmail-schemas';
 import { googleReadToolHandlers } from './read-handlers';
 import { runWorkspaceCreateOnce } from './workspace-create-replay';
+import { saveGoogleWorkspaceExportArtifact } from './workspace-export-artifact';
 
 const calendar = new GoogleCalendarService(googleOAuthAuthority);
 const chat = new GoogleChatService(googleOAuthAuthority);
@@ -216,6 +217,27 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     const documentId = stringArg(objectArgs(raw), 'documentId')!;
     await assertGooglePickerFileAllowed(documentId);
     return docs.inspectDocument(documentId);
+  },
+  'docs.exportDocument': async ({ arguments: raw, conversationId, generationId, signal, isGenerationActive }) => {
+    const args = objectArgs(raw);
+    const documentId = stringArg(args, 'documentId')!;
+    await assertGooglePickerFileAllowed(documentId);
+    const inspected = await docs.inspectDocument(documentId);
+    const format = stringArg(args, 'format') as 'pdf' | 'docx';
+    const maxBytes = optionalNumber(args, 'maxBytes');
+    const guard = mutationGuard(signal, isGenerationActive);
+    return saveGoogleWorkspaceExportArtifact({
+      fileId: documentId,
+      baseName: inspected.title,
+      conversationId,
+      generationId,
+      signal,
+      isGenerationActive,
+      exportContent: async () => {
+        const exported = await docs.exportDocument(documentId, format, { ...guard, ...(maxBytes !== undefined ? { maxBytes } : {}) });
+        return exported;
+      },
+    });
   },
   'docs.createDocument': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const title = stringArg(objectArgs(raw), 'title')!;
@@ -456,6 +478,27 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     return sheets.readRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!);
+  },
+  'sheets.exportSpreadsheet': async ({ arguments: raw, conversationId, generationId, signal, isGenerationActive }) => {
+    const args = objectArgs(raw);
+    const spreadsheetId = stringArg(args, 'spreadsheetId')!;
+    await assertGooglePickerFileAllowed(spreadsheetId);
+    const inspected = await sheets.getSpreadsheet(spreadsheetId);
+    const format = stringArg(args, 'format') as 'pdf' | 'xlsx';
+    const maxBytes = optionalNumber(args, 'maxBytes');
+    const guard = mutationGuard(signal, isGenerationActive);
+    return saveGoogleWorkspaceExportArtifact({
+      fileId: spreadsheetId,
+      baseName: inspected.title,
+      conversationId,
+      generationId,
+      signal,
+      isGenerationActive,
+      exportContent: async () => {
+        const exported = await sheets.exportSpreadsheet(spreadsheetId, format, { ...guard, ...(maxBytes !== undefined ? { maxBytes } : {}) });
+        return exported;
+      },
+    });
   },
   'sheets.createSpreadsheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const args = objectArgs(raw);

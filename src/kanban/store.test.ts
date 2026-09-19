@@ -394,6 +394,51 @@ describe("snapshot reconciliation", () => {
       saveRoutine({ ...initial.routines[0], days: 0 }, null),
     ).rejects.toThrow("Invalid");
   });
+  it('keeps polling and account checks suspended after pagehide until pageshow', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
+    vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');
+    const stop = startBoardSync();
+    try {
+      await syncBoard();
+      const reads = mocks.tasks.mock.calls.length;
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      mocks.status.mockClear();
+      window.dispatchEvent(new Event('elara:tasks-changed'));
+      window.dispatchEvent(new Event('online'));
+      document.dispatchEvent(new Event('visibilitychange'));
+      await vi.advanceTimersByTimeAsync(SYNC_INTERVAL);
+      expect(mocks.status).not.toHaveBeenCalled();
+      expect(mocks.tasks).toHaveBeenCalledTimes(reads);
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      await vi.waitFor(() => {
+        expect(mocks.tasks).toHaveBeenCalledTimes(reads + 1);
+        expect(boardStore.getSnapshot().busy).toBe(false);
+      });
+    } finally { stop(); await syncBoard(); }
+  });
+  it('releases an in-flight read lease on pagehide and reads again on pageshow', async () => {
+    let signal: AbortSignal | undefined;
+    mocks.tasks.mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+      signal = options?.signal;
+      signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+    }));
+    const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
+    const stop = startBoardSync();
+    try {
+      await vi.waitFor(() => expect(signal).toBeDefined());
+      const pending = syncBoard();
+      window.dispatchEvent(new PageTransitionEvent('pagehide', { persisted: true }));
+      await pending;
+      expect(signal?.aborted).toBe(true);
+      expect((await peer.table<ReadSchedule>('readSchedules').get(initial.account))?.owner).toBeNull();
+      expect(boardStore.getSnapshot()).toMatchObject({ busy: false, error: null });
+      window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }));
+      await vi.waitFor(() => {
+        expect(mocks.tasks).toHaveBeenCalledTimes(2);
+        expect(boardStore.getSnapshot().phase).toBe('idle');
+      });
+    } finally { stop(); await syncBoard(); peer.close(); }
+  });
   it('schedules only while visible and removes timers on cleanup', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'Date'] });
     const visibility = vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('visible');

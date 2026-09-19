@@ -355,12 +355,13 @@ export async function kanbanContext(): Promise<string> {
 /** No service worker/background timer. All scheduling and observation has one lifecycle owner. */
 export function startBoardSync(): () => void {
   let stopped = false;
+  let pageSuspended = false;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   let cacheSubscription: { unsubscribe(): void } | undefined;
   let observedAccount: string | undefined;
   let observingIdentity = false;
   const refresh = (reason: 'automatic' | 'poll' | 'mutation' = 'poll') => {
-    if (stopped || document.visibilityState !== 'visible' || !navigator.onLine) return;
+    if (stopped || pageSuspended || document.visibilityState !== 'visible' || !navigator.onLine) return;
     // StrictMode remounts and rapid visibility changes can resume while the
     // prior read is still unwinding its abort. Wait, then recheck this owner.
     if (inFlight && activeRead?.signal.aborted) { void inFlight.then(() => refresh(reason)); return; }
@@ -369,7 +370,7 @@ export function startBoardSync(): () => void {
   const observe = () => {
     clearTimeout(retryTimer);
     const due = state.phase === 'backoff' ? state.nextRetryAt : state.phase === 'idle' && state.board ? state.board.syncedAt + SYNC_INTERVAL : null;
-    if (!stopped && !state.busy && due !== null && document.visibilityState === 'visible' && navigator.onLine) {
+    if (!stopped && !pageSuspended && !state.busy && due !== null && document.visibilityState === 'visible' && navigator.onLine) {
       retryTimer = setTimeout(() => refresh(), Math.min(2_147_483_647, Math.max(0, due - Date.now())));
     }
     const account = retryAccount ?? undefined;
@@ -393,7 +394,7 @@ export function startBoardSync(): () => void {
   };
   const stopObserving = boardStore.subscribe(observe);
   const resume = () => {
-    if (document.visibilityState !== 'visible' || !navigator.onLine) {
+    if (pageSuspended || document.visibilityState !== 'visible' || !navigator.onLine) {
       clearTimeout(retryTimer); cancelBoardSync();
       if (!navigator.onLine) publish({ phase: 'offline' });
       return;
@@ -407,16 +408,19 @@ export function startBoardSync(): () => void {
   };
   observe(); refresh('automatic');
   const timer = window.setInterval(() => refresh(), SYNC_INTERVAL);
-  const pageHidden = () => { clearTimeout(retryTimer); cancelBoardSync(); };
+  // pagehide is an independent suspension boundary: visibility notifications
+  // may be delayed/reordered while entering or restoring the back-forward cache.
+  const pageHidden = () => { pageSuspended = true; clearTimeout(retryTimer); cancelBoardSync(); };
+  const pageShown = () => { pageSuspended = false; resume(); };
   window.addEventListener('pagehide', pageHidden);
-  window.addEventListener('pageshow', resume);
+  window.addEventListener('pageshow', pageShown);
   document.addEventListener('visibilitychange', resume);
   window.addEventListener('online', resume);
   window.addEventListener('offline', resume);
   window.addEventListener('elara:tasks-changed', changed);
   const accountTimer = window.setInterval(() => {
     // Avoid overlapping or hidden-tab Worker status requests.
-    if (stopped || observingIdentity || !navigator.onLine || document.visibilityState !== 'visible') return;
+    if (stopped || pageSuspended || observingIdentity || !navigator.onLine || document.visibilityState !== 'visible') return;
     observingIdentity = true;
     void currentAccount().then((account) => {
       if (!stopped && retryAccount !== account) { cancelBoardSync(); retryAccount = null; publish({ board: null }); }
@@ -425,7 +429,7 @@ export function startBoardSync(): () => void {
   return () => {
     stopped = true; cancelBoardSync(); clearTimeout(retryTimer); clearInterval(timer); clearInterval(accountTimer);
     stopObserving(); cacheSubscription?.unsubscribe();
-    window.removeEventListener('pagehide', pageHidden); window.removeEventListener('pageshow', resume);
+    window.removeEventListener('pagehide', pageHidden); window.removeEventListener('pageshow', pageShown);
     document.removeEventListener('visibilitychange', resume);
     window.removeEventListener('online', resume); window.removeEventListener('offline', resume);
     window.removeEventListener('elara:tasks-changed', changed);

@@ -127,7 +127,7 @@ if (googleBrokerSource.includes('innerHTML')) throw new Error('Reliability gate:
 if (!googleBrokerSource.includes('aria-label')) throw new Error('Reliability gate: Google confirmation controls must be accessible.');
 const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
 if (!toolLoopSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google tool loop must route mutation batches through the shared confirmation broker.');
-if (!toolLoopSource.includes('containsUntrustedExternal') || !toolLoopSource.includes('UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN')) throw new Error('Reliability gate: untrusted external tool results must block same-turn mutations.');
+if (!toolLoopSource.includes('containsUntrustedExternal') || !toolLoopSource.includes('isUntrustedExternalReadTool') || !toolLoopSource.includes('UNTRUSTED_EXTERNAL_READ_PREFIXES') || !toolLoopSource.includes('UNTRUSTED_CONTEXT_WRITE_REQUIRES_NEW_USER_TURN')) throw new Error('Reliability gate: external provider reads must intrinsically taint the turn and block same-turn mutations.');
 if (!toolLoopSource.includes('results:')) throw new Error('Reliability gate: Google tool loop must return grouped tool results to Gemini.');
 const executorSource = readFileSync(join(root, 'src/google/tools/executor.ts'), 'utf8');
 if (!executorSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: direct Google tool execution must retain the shared confirmation broker.');
@@ -154,6 +154,8 @@ const lockboxSource = readFileSync(join(root, 'src/persistence/gemini-api-key.ts
 if (!lockboxSource.includes('import Dexie')) throw new Error('Reliability gate: Gemini API credential must use Dexie persistence.');
 if (!lockboxSource.includes("this.version(1).stores({ secrets: 'id, updatedAt' })")) throw new Error('Reliability gate: Gemini API credential must use a dedicated Dexie Lockbox store.');
 if (!lockboxSource.includes("name: 'PBKDF2'")) throw new Error('Reliability gate: Lockbox password must derive its encryption key with PBKDF2.');
+if (!lockboxSource.includes('const PBKDF2_ITERATIONS = 600_000;')) throw new Error('Reliability gate: new Lockbox encryption must retain the hardened PBKDF2 work factor.');
+if (!lockboxSource.includes('GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10')) throw new Error('Reliability gate: fresh Lockbox PINs must retain the stronger minimum length.');
 if (!lockboxSource.includes("name: 'AES-GCM'")) throw new Error('Reliability gate: Gemini API credential must be encrypted with AES-GCM.');
 if (!lockboxSource.includes('crypto.getRandomValues')) throw new Error('Reliability gate: Lockbox encryption must use random salt and IV material.');
 if (lockboxSource.includes('localStorage.setItem')) throw new Error('Reliability gate: Gemini API credential must never be written to localStorage.');

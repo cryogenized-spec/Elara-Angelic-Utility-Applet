@@ -22,7 +22,7 @@ const DB_NAME = 'elara-gemini-lockbox';
 const GEMINI_RECORD_ID = 'gemini-api-key';
 const YOUTUBE_RECORD_ID = 'youtube-api-key';
 const LEGACY_STORAGE_KEY = 'elara.gemini.api-key';
-const PBKDF2_ITERATIONS = 310_000;
+const PBKDF2_ITERATIONS = 600_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
 const KEY_LENGTH = 256;
@@ -37,8 +37,11 @@ const ALL_SECRET_IDS: readonly LockboxSecretId[] = [GEMINI_RECORD_ID, YOUTUBE_RE
 const SECONDARY_SECRET_IDS: readonly LockboxSecretId[] = [YOUTUBE_RECORD_ID];
 
 export const GEMINI_LOCKBOX_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+/** Legacy PINs remain accepted for unlock so existing encrypted records are not stranded. */
 export const GEMINI_LOCKBOX_PIN_MIN_LENGTH = 6;
-export const GEMINI_LOCKBOX_PIN_MAX_LENGTH = 8;
+export const GEMINI_LOCKBOX_PIN_MAX_LENGTH = 12;
+/** Fresh/rotated PINs require materially more entropy than the legacy 6–8 digit format. */
+export const GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10;
 export type GeminiLockboxSecurityMode = 'password' | 'pin' | 'passkey' | 'off';
 
 export interface GeminiLockboxSecurityMetadata {
@@ -384,7 +387,787 @@ export async function getGeminiLockboxMetadata(): Promise<GeminiLockboxSecurityM
 }
 
 export function isGeminiLockboxPin(value: string): boolean {
-  return new RegExp(`^\\d{${GEMINI_LOCKBOX_PIN_MIN_LENGTH},${GEMINI_LOCKBOX_PIN_MAX_LENGTH}}$`).test(value);
+  return new RegExp(`^\\d{${GEMINI_LOCKBOX_PIN_MIN_LENGTH},${GEMINI_LOCKBOX_PIN_MAX_LENGTH}}import Dexie, { type Table } from 'dexie';
+
+/**
+ * Elara API Lockbox — the single encrypted credential store.
+ *
+ * The store is keyed by secret id, so it holds more than one protected
+ * credential while keeping ONE unlock session and ONE security configuration.
+ * The Gemini record is the security authority: it carries the mode, the failed
+ * attempt counter and the backoff deadline. Secondary records (YouTube) are
+ * encrypted with the same credential and are unlocked alongside it.
+ *
+ * No Dexie version bump is required for a second credential: the `secrets`
+ * store has been keyed by `id` since version 1, so a new id is simply a new
+ * record. Only the TypeScript record type widened.
+ *
+ * Nothing here exposes a general-purpose getSecret(). Each credential has a
+ * named, narrow accessor, matching the boundary described in
+ * docs/API_LOCKBOX.md.
+ */
+
+const DB_NAME = 'elara-gemini-lockbox';
+const GEMINI_RECORD_ID = 'gemini-api-key';
+const YOUTUBE_RECORD_ID = 'youtube-api-key';
+const LEGACY_STORAGE_KEY = 'elara.gemini.api-key';
+const PBKDF2_ITERATIONS = 600_000;
+const SALT_BYTES = 16;
+const IV_BYTES = 12;
+const KEY_LENGTH = 256;
+
+/**
+ * Every credential the Lockbox can hold. The Gemini record is first because it
+ * is the security authority; the rest are unlocked with the same credential.
+ */
+export type LockboxSecretId = 'gemini-api-key' | 'youtube-api-key';
+
+const ALL_SECRET_IDS: readonly LockboxSecretId[] = [GEMINI_RECORD_ID, YOUTUBE_RECORD_ID];
+const SECONDARY_SECRET_IDS: readonly LockboxSecretId[] = [YOUTUBE_RECORD_ID];
+
+export const GEMINI_LOCKBOX_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+/** Legacy PINs remain accepted for unlock so existing encrypted records are not stranded. */
+export const GEMINI_LOCKBOX_PIN_MIN_LENGTH = 6;
+export const GEMINI_LOCKBOX_PIN_MAX_LENGTH = 12;
+/** Fresh/rotated PINs require materially more entropy than the legacy 6–8 digit format. */
+export const GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10;
+export type GeminiLockboxSecurityMode = 'password' | 'pin' | 'passkey' | 'off';
+
+export interface GeminiLockboxSecurityMetadata {
+  mode: GeminiLockboxSecurityMode;
+  authVersion: 1;
+  configuredAt: number;
+  failedAttempts: number;
+  lockedUntil: number | null;
+}
+
+type EncryptedLockboxSecret = {
+  id: LockboxSecretId;
+  version: 2;
+  salt: string;
+  iv: string;
+  ciphertext: string;
+  iterations: number;
+  updatedAt: number;
+  security: GeminiLockboxSecurityMetadata;
+  localKey?: CryptoKey;
+};
+
+/**
+ * @deprecated Retained for existing imports; the record type is now keyed by
+ * `LockboxSecretId` rather than fixed to the Gemini credential.
+ */
+export type EncryptedGeminiApiKey = EncryptedLockboxSecret;
+
+class LockboxDatabase extends Dexie {
+  secrets!: Table<EncryptedLockboxSecret, string>;
+
+  constructor() {
+    super(DB_NAME);
+    this.version(1).stores({ secrets: 'id, updatedAt' });
+    this.version(2).stores({ secrets: 'id, updatedAt' }).upgrade(async (tx) => {
+      await tx.table<EncryptedLockboxSecret, string>('secrets').toCollection().modify((record) => {
+        record.version = 2;
+        record.security = {
+          mode: 'password',
+          authVersion: 1,
+          configuredAt: record.updatedAt,
+          failedAttempts: 0,
+          lockedUntil: null,
+        };
+      });
+    });
+  }
+}
+
+const db = new LockboxDatabase();
+
+/** The single unlocked session: every credential the current unlock yielded. */
+const unlockedSecrets = new Map<LockboxSecretId, string>();
+/** Secondary records whose stored credential did not match the last unlock. */
+const mismatchedSecrets = new Set<LockboxSecretId>();
+let lastActivityAt: number | null = null;
+let idleTimer: number | null = null;
+let securityMode: GeminiLockboxSecurityMode | null = null;
+let legacyMigrationPromise: Promise<void> | null = null;
+
+function unlocked(id: LockboxSecretId): string | null {
+  return unlockedSecrets.get(id) ?? null;
+}
+
+function sessionUnlocked(): boolean {
+  return unlockedSecrets.size > 0;
+}
+
+/**
+ * Reads a record together with the security mode that actually governs access
+ * to it. For the Gemini record that is its own mode; for a secondary it is the
+ * Gemini authority's, because the stored copy is only ever a copy.
+ *
+ * A secondary record stores a mode stamp of its own, but that stamp is only
+ * ever a copy of the authority's. It goes stale whenever the authority changes
+ * through a path the secondary was not migrated by, and honoring the copy is
+ * what previously let a secondary stay readable with a device-local key after
+ * the Lockbox had been re-armed with a PIN. Read paths therefore resolve the
+ * *effective* mode from the authority and treat a disagreement as a record that
+ * needs repair, never as permission to use the weaker protection.
+ *
+ * With no primary record at all there is no authority to inherit, so a lone
+ * record falls back to its own stamp; new secondary records cannot be created
+ * in that state.
+ */
+async function recordWithGoverningMode(id: LockboxSecretId): Promise<{ record: EncryptedLockboxSecret; mode: GeminiLockboxSecurityMode } | null> {
+  const record = await db.secrets.get(id);
+  if (!record) return null;
+  const stamped = normalizeSecurityMetadata(record).mode;
+  if (id === GEMINI_RECORD_ID) return { record, mode: stamped };
+  const authority = await db.secrets.get(GEMINI_RECORD_ID);
+  return { record, mode: authority ? normalizeSecurityMetadata(authority).mode : stamped };
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 8_192;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+}
+
+function fromBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function textEncoder(): TextEncoder { return new TextEncoder(); }
+function textDecoder(): TextDecoder { return new TextDecoder(); }
+
+async function deriveEncryptionKey(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
+  if (!passphrase) throw new Error('A Lockbox password is required.');
+  const material = await crypto.subtle.importKey(
+    'raw',
+    toArrayBuffer(textEncoder().encode(passphrase)),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: toArrayBuffer(salt), iterations, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: KEY_LENGTH },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+function defaultSecurityMetadata(now = Date.now()): GeminiLockboxSecurityMetadata {
+  return { mode: 'password', authVersion: 1, configuredAt: now, failedAttempts: 0, lockedUntil: null };
+}
+
+function normalizeSecurityMetadata(record: Partial<EncryptedLockboxSecret> | undefined, now = Date.now()): GeminiLockboxSecurityMetadata {
+  const security = record?.security;
+  if (!security) return defaultSecurityMetadata(now);
+  const mode: GeminiLockboxSecurityMode = security.mode === 'pin' || security.mode === 'passkey' || security.mode === 'off' ? security.mode : 'password';
+  const updatedAt = record?.updatedAt;
+  const configuredAt = Number.isFinite(security.configuredAt)
+    ? security.configuredAt
+    : (updatedAt !== undefined && Number.isFinite(updatedAt) ? updatedAt : now);
+  const failedAttempts = Number.isInteger(security.failedAttempts) && security.failedAttempts >= 0 ? security.failedAttempts : 0;
+  const lockedUntil = typeof security.lockedUntil === 'number' && Number.isFinite(security.lockedUntil) ? security.lockedUntil : null;
+  return { mode, authVersion: 1, configuredAt, failedAttempts, lockedUntil };
+}
+
+async function encryptSecret(id: LockboxSecretId, value: string, passphrase: string, security?: GeminiLockboxSecurityMetadata): Promise<EncryptedLockboxSecret> {
+  const now = Date.now();
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const key = await deriveEncryptionKey(passphrase, salt, PBKDF2_ITERATIONS);
+  const plaintext = textEncoder().encode(value);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, toArrayBuffer(plaintext));
+  return {
+    id,
+    version: 2,
+    salt: toBase64(salt),
+    iv: toBase64(iv),
+    ciphertext: toBase64(new Uint8Array(ciphertext)),
+    iterations: PBKDF2_ITERATIONS,
+    updatedAt: now,
+    security: security ?? defaultSecurityMetadata(now),
+  };
+}
+
+async function encryptWithLocalKey(value: string, localKey: CryptoKey): Promise<Pick<EncryptedLockboxSecret, 'iv' | 'ciphertext'>> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const plaintext = textEncoder().encode(value);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, localKey, toArrayBuffer(plaintext));
+  return { iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(ciphertext)) };
+}
+
+async function decryptSecret(record: EncryptedLockboxSecret, passphrase: string): Promise<string> {
+  try {
+    const salt = fromBase64(record.salt);
+    const iv = fromBase64(record.iv);
+    const ciphertext = fromBase64(record.ciphertext);
+    const key = await deriveEncryptionKey(passphrase, salt, record.iterations);
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, toArrayBuffer(ciphertext));
+    return textDecoder().decode(plaintext);
+  } catch {
+    throw new Error('Invalid Lockbox password.');
+  }
+}
+
+async function decryptWithLocalKey(record: EncryptedLockboxSecret): Promise<string> {
+  if (!record.localKey) throw new Error('The local Lockbox key is unavailable. Re-enable Lockbox security.');
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: toArrayBuffer(fromBase64(record.iv)) },
+      record.localKey,
+      toArrayBuffer(fromBase64(record.ciphertext)),
+    );
+    return textDecoder().decode(plaintext);
+  } catch {
+    throw new Error('The local Lockbox key could not decrypt the stored credential.');
+  }
+}
+
+function readLegacyPlaintextKey(): string {
+  try {
+    return window.localStorage.getItem(LEGACY_STORAGE_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function removeLegacyPlaintextKey(): void {
+  try {
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // Ignore unavailable localStorage; the encrypted Lockbox remains authoritative.
+  }
+}
+
+async function migrateLegacyPlaintextKey(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (legacyMigrationPromise) return legacyMigrationPromise;
+  legacyMigrationPromise = (async () => {
+    const existing = await db.secrets.get(GEMINI_RECORD_ID);
+    if (existing) {
+      removeLegacyPlaintextKey();
+      return;
+    }
+
+    const legacyKey = readLegacyPlaintextKey();
+    if (!legacyKey) return;
+
+    const localKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: KEY_LENGTH }, false, ['encrypt', 'decrypt']);
+    const encrypted = await encryptWithLocalKey(legacyKey, localKey);
+    const now = Date.now();
+    await db.secrets.put({
+      id: GEMINI_RECORD_ID,
+      version: 2,
+      salt: '',
+      iv: encrypted.iv,
+      ciphertext: encrypted.ciphertext,
+      iterations: PBKDF2_ITERATIONS,
+      updatedAt: now,
+      security: { mode: 'off', authVersion: 1, configuredAt: now, failedAttempts: 0, lockedUntil: null },
+      localKey,
+    });
+    securityMode = 'off';
+    unlockedSecrets.set(GEMINI_RECORD_ID, legacyKey);
+    lastActivityAt = null;
+    clearIdleTimer();
+    removeLegacyPlaintextKey();
+    notifyChanged();
+  })().catch(() => {
+    // Keep the legacy value intact if migration cannot be completed; retry on the next access.
+  }).finally(() => {
+    legacyMigrationPromise = null;
+  });
+  return legacyMigrationPromise;
+}
+
+function clearIdleTimer(): void {
+  if (idleTimer !== null && typeof window !== 'undefined') window.clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+function notifyChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('elara-gemini-lockbox-changed'));
+}
+
+function scheduleIdleLock(): void {
+  clearIdleTimer();
+  if (securityMode === 'off' || !sessionUnlocked() || typeof window === 'undefined' || lastActivityAt === null) return;
+  const remaining = Math.max(0, GEMINI_LOCKBOX_IDLE_TIMEOUT_MS - (Date.now() - lastActivityAt));
+  idleTimer = window.setTimeout(() => {
+    idleTimer = null;
+    enforceGeminiApiKeyIdleTimeout();
+  }, remaining);
+}
+
+export function isGeminiApiKeyIdle(now = Date.now()): boolean {
+  return securityMode !== 'off' && sessionUnlocked() && lastActivityAt !== null && now - lastActivityAt >= GEMINI_LOCKBOX_IDLE_TIMEOUT_MS;
+}
+
+export function enforceGeminiApiKeyIdleTimeout(now = Date.now()): boolean {
+  if (!isGeminiApiKeyIdle(now)) return false;
+  lockGeminiApiKey();
+  return true;
+}
+
+export function touchGeminiApiKeyActivity(now = Date.now()): void {
+  if (!sessionUnlocked() || securityMode === 'off') return;
+  lastActivityAt = now;
+  scheduleIdleLock();
+}
+
+export function getGeminiLockboxLastActivityAt(): number | null {
+  return lastActivityAt;
+}
+
+export type GeminiLockboxStatus = 'empty' | 'locked' | 'unlocked';
+
+/**
+ * A secondary credential can additionally be `mismatched`: the record exists
+ * but was stored under a different Lockbox credential, so the current unlock
+ * could not open it. Surfacing this is what stops a silently unusable key.
+ */
+export type LockboxSecretStatus = GeminiLockboxStatus | 'mismatch';
+
+async function getSecretStatus(id: LockboxSecretId): Promise<LockboxSecretStatus> {
+  enforceGeminiApiKeyIdleTimeout();
+  if (unlocked(id) !== null) return 'unlocked';
+  const entry = await recordWithGoverningMode(id);
+  if (!entry) return 'empty';
+  if (entry.mode === 'off') {
+    try {
+      unlockedSecrets.set(id, await decryptWithLocalKey(entry.record));
+      mismatchedSecrets.delete(id);
+      return 'unlocked';
+    } catch {
+      return 'locked';
+    }
+  }
+  return mismatchedSecrets.has(id) ? 'mismatch' : 'locked';
+}
+
+export async function getGeminiLockboxStatus(): Promise<GeminiLockboxStatus> {
+  await migrateLegacyPlaintextKey();
+  const status = await getSecretStatus(GEMINI_RECORD_ID);
+  if (status === 'unlocked') return 'unlocked';
+  if (status === 'empty') return 'empty';
+  const record = await db.secrets.get(GEMINI_RECORD_ID);
+  if (record) securityMode = normalizeSecurityMetadata(record).mode;
+  return 'locked';
+}
+
+export async function getGeminiLockboxMetadata(): Promise<GeminiLockboxSecurityMetadata | null> {
+  const record = await db.secrets.get(GEMINI_RECORD_ID);
+  return record ? normalizeSecurityMetadata(record) : null;
+}
+
+).test(value);
+}
+
+export function isStrongGeminiLockboxPin(value: string): boolean {
+  return new RegExp(`^\\d{${GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH},${GEMINI_LOCKBOX_PIN_MAX_LENGTH}}import Dexie, { type Table } from 'dexie';
+
+/**
+ * Elara API Lockbox — the single encrypted credential store.
+ *
+ * The store is keyed by secret id, so it holds more than one protected
+ * credential while keeping ONE unlock session and ONE security configuration.
+ * The Gemini record is the security authority: it carries the mode, the failed
+ * attempt counter and the backoff deadline. Secondary records (YouTube) are
+ * encrypted with the same credential and are unlocked alongside it.
+ *
+ * No Dexie version bump is required for a second credential: the `secrets`
+ * store has been keyed by `id` since version 1, so a new id is simply a new
+ * record. Only the TypeScript record type widened.
+ *
+ * Nothing here exposes a general-purpose getSecret(). Each credential has a
+ * named, narrow accessor, matching the boundary described in
+ * docs/API_LOCKBOX.md.
+ */
+
+const DB_NAME = 'elara-gemini-lockbox';
+const GEMINI_RECORD_ID = 'gemini-api-key';
+const YOUTUBE_RECORD_ID = 'youtube-api-key';
+const LEGACY_STORAGE_KEY = 'elara.gemini.api-key';
+const PBKDF2_ITERATIONS = 600_000;
+const SALT_BYTES = 16;
+const IV_BYTES = 12;
+const KEY_LENGTH = 256;
+
+/**
+ * Every credential the Lockbox can hold. The Gemini record is first because it
+ * is the security authority; the rest are unlocked with the same credential.
+ */
+export type LockboxSecretId = 'gemini-api-key' | 'youtube-api-key';
+
+const ALL_SECRET_IDS: readonly LockboxSecretId[] = [GEMINI_RECORD_ID, YOUTUBE_RECORD_ID];
+const SECONDARY_SECRET_IDS: readonly LockboxSecretId[] = [YOUTUBE_RECORD_ID];
+
+export const GEMINI_LOCKBOX_IDLE_TIMEOUT_MS = 15 * 60 * 1000;
+/** Legacy PINs remain accepted for unlock so existing encrypted records are not stranded. */
+export const GEMINI_LOCKBOX_PIN_MIN_LENGTH = 6;
+export const GEMINI_LOCKBOX_PIN_MAX_LENGTH = 12;
+/** Fresh/rotated PINs require materially more entropy than the legacy 6–8 digit format. */
+export const GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10;
+export type GeminiLockboxSecurityMode = 'password' | 'pin' | 'passkey' | 'off';
+
+export interface GeminiLockboxSecurityMetadata {
+  mode: GeminiLockboxSecurityMode;
+  authVersion: 1;
+  configuredAt: number;
+  failedAttempts: number;
+  lockedUntil: number | null;
+}
+
+type EncryptedLockboxSecret = {
+  id: LockboxSecretId;
+  version: 2;
+  salt: string;
+  iv: string;
+  ciphertext: string;
+  iterations: number;
+  updatedAt: number;
+  security: GeminiLockboxSecurityMetadata;
+  localKey?: CryptoKey;
+};
+
+/**
+ * @deprecated Retained for existing imports; the record type is now keyed by
+ * `LockboxSecretId` rather than fixed to the Gemini credential.
+ */
+export type EncryptedGeminiApiKey = EncryptedLockboxSecret;
+
+class LockboxDatabase extends Dexie {
+  secrets!: Table<EncryptedLockboxSecret, string>;
+
+  constructor() {
+    super(DB_NAME);
+    this.version(1).stores({ secrets: 'id, updatedAt' });
+    this.version(2).stores({ secrets: 'id, updatedAt' }).upgrade(async (tx) => {
+      await tx.table<EncryptedLockboxSecret, string>('secrets').toCollection().modify((record) => {
+        record.version = 2;
+        record.security = {
+          mode: 'password',
+          authVersion: 1,
+          configuredAt: record.updatedAt,
+          failedAttempts: 0,
+          lockedUntil: null,
+        };
+      });
+    });
+  }
+}
+
+const db = new LockboxDatabase();
+
+/** The single unlocked session: every credential the current unlock yielded. */
+const unlockedSecrets = new Map<LockboxSecretId, string>();
+/** Secondary records whose stored credential did not match the last unlock. */
+const mismatchedSecrets = new Set<LockboxSecretId>();
+let lastActivityAt: number | null = null;
+let idleTimer: number | null = null;
+let securityMode: GeminiLockboxSecurityMode | null = null;
+let legacyMigrationPromise: Promise<void> | null = null;
+
+function unlocked(id: LockboxSecretId): string | null {
+  return unlockedSecrets.get(id) ?? null;
+}
+
+function sessionUnlocked(): boolean {
+  return unlockedSecrets.size > 0;
+}
+
+/**
+ * Reads a record together with the security mode that actually governs access
+ * to it. For the Gemini record that is its own mode; for a secondary it is the
+ * Gemini authority's, because the stored copy is only ever a copy.
+ *
+ * A secondary record stores a mode stamp of its own, but that stamp is only
+ * ever a copy of the authority's. It goes stale whenever the authority changes
+ * through a path the secondary was not migrated by, and honoring the copy is
+ * what previously let a secondary stay readable with a device-local key after
+ * the Lockbox had been re-armed with a PIN. Read paths therefore resolve the
+ * *effective* mode from the authority and treat a disagreement as a record that
+ * needs repair, never as permission to use the weaker protection.
+ *
+ * With no primary record at all there is no authority to inherit, so a lone
+ * record falls back to its own stamp; new secondary records cannot be created
+ * in that state.
+ */
+async function recordWithGoverningMode(id: LockboxSecretId): Promise<{ record: EncryptedLockboxSecret; mode: GeminiLockboxSecurityMode } | null> {
+  const record = await db.secrets.get(id);
+  if (!record) return null;
+  const stamped = normalizeSecurityMetadata(record).mode;
+  if (id === GEMINI_RECORD_ID) return { record, mode: stamped };
+  const authority = await db.secrets.get(GEMINI_RECORD_ID);
+  return { record, mode: authority ? normalizeSecurityMetadata(authority).mode : stamped };
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let binary = '';
+  const chunkSize = 8_192;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length)));
+  }
+  return btoa(binary);
+}
+
+function fromBase64(value: string): Uint8Array {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
+}
+
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+  return copy.buffer;
+}
+
+function textEncoder(): TextEncoder { return new TextEncoder(); }
+function textDecoder(): TextDecoder { return new TextDecoder(); }
+
+async function deriveEncryptionKey(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
+  if (!passphrase) throw new Error('A Lockbox password is required.');
+  const material = await crypto.subtle.importKey(
+    'raw',
+    toArrayBuffer(textEncoder().encode(passphrase)),
+    'PBKDF2',
+    false,
+    ['deriveKey'],
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: toArrayBuffer(salt), iterations, hash: 'SHA-256' },
+    material,
+    { name: 'AES-GCM', length: KEY_LENGTH },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+function defaultSecurityMetadata(now = Date.now()): GeminiLockboxSecurityMetadata {
+  return { mode: 'password', authVersion: 1, configuredAt: now, failedAttempts: 0, lockedUntil: null };
+}
+
+function normalizeSecurityMetadata(record: Partial<EncryptedLockboxSecret> | undefined, now = Date.now()): GeminiLockboxSecurityMetadata {
+  const security = record?.security;
+  if (!security) return defaultSecurityMetadata(now);
+  const mode: GeminiLockboxSecurityMode = security.mode === 'pin' || security.mode === 'passkey' || security.mode === 'off' ? security.mode : 'password';
+  const updatedAt = record?.updatedAt;
+  const configuredAt = Number.isFinite(security.configuredAt)
+    ? security.configuredAt
+    : (updatedAt !== undefined && Number.isFinite(updatedAt) ? updatedAt : now);
+  const failedAttempts = Number.isInteger(security.failedAttempts) && security.failedAttempts >= 0 ? security.failedAttempts : 0;
+  const lockedUntil = typeof security.lockedUntil === 'number' && Number.isFinite(security.lockedUntil) ? security.lockedUntil : null;
+  return { mode, authVersion: 1, configuredAt, failedAttempts, lockedUntil };
+}
+
+async function encryptSecret(id: LockboxSecretId, value: string, passphrase: string, security?: GeminiLockboxSecurityMetadata): Promise<EncryptedLockboxSecret> {
+  const now = Date.now();
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const key = await deriveEncryptionKey(passphrase, salt, PBKDF2_ITERATIONS);
+  const plaintext = textEncoder().encode(value);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, toArrayBuffer(plaintext));
+  return {
+    id,
+    version: 2,
+    salt: toBase64(salt),
+    iv: toBase64(iv),
+    ciphertext: toBase64(new Uint8Array(ciphertext)),
+    iterations: PBKDF2_ITERATIONS,
+    updatedAt: now,
+    security: security ?? defaultSecurityMetadata(now),
+  };
+}
+
+async function encryptWithLocalKey(value: string, localKey: CryptoKey): Promise<Pick<EncryptedLockboxSecret, 'iv' | 'ciphertext'>> {
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const plaintext = textEncoder().encode(value);
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, localKey, toArrayBuffer(plaintext));
+  return { iv: toBase64(iv), ciphertext: toBase64(new Uint8Array(ciphertext)) };
+}
+
+async function decryptSecret(record: EncryptedLockboxSecret, passphrase: string): Promise<string> {
+  try {
+    const salt = fromBase64(record.salt);
+    const iv = fromBase64(record.iv);
+    const ciphertext = fromBase64(record.ciphertext);
+    const key = await deriveEncryptionKey(passphrase, salt, record.iterations);
+    const plaintext = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: toArrayBuffer(iv) }, key, toArrayBuffer(ciphertext));
+    return textDecoder().decode(plaintext);
+  } catch {
+    throw new Error('Invalid Lockbox password.');
+  }
+}
+
+async function decryptWithLocalKey(record: EncryptedLockboxSecret): Promise<string> {
+  if (!record.localKey) throw new Error('The local Lockbox key is unavailable. Re-enable Lockbox security.');
+  try {
+    const plaintext = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: toArrayBuffer(fromBase64(record.iv)) },
+      record.localKey,
+      toArrayBuffer(fromBase64(record.ciphertext)),
+    );
+    return textDecoder().decode(plaintext);
+  } catch {
+    throw new Error('The local Lockbox key could not decrypt the stored credential.');
+  }
+}
+
+function readLegacyPlaintextKey(): string {
+  try {
+    return window.localStorage.getItem(LEGACY_STORAGE_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+function removeLegacyPlaintextKey(): void {
+  try {
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // Ignore unavailable localStorage; the encrypted Lockbox remains authoritative.
+  }
+}
+
+async function migrateLegacyPlaintextKey(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (legacyMigrationPromise) return legacyMigrationPromise;
+  legacyMigrationPromise = (async () => {
+    const existing = await db.secrets.get(GEMINI_RECORD_ID);
+    if (existing) {
+      removeLegacyPlaintextKey();
+      return;
+    }
+
+    const legacyKey = readLegacyPlaintextKey();
+    if (!legacyKey) return;
+
+    const localKey = await crypto.subtle.generateKey({ name: 'AES-GCM', length: KEY_LENGTH }, false, ['encrypt', 'decrypt']);
+    const encrypted = await encryptWithLocalKey(legacyKey, localKey);
+    const now = Date.now();
+    await db.secrets.put({
+      id: GEMINI_RECORD_ID,
+      version: 2,
+      salt: '',
+      iv: encrypted.iv,
+      ciphertext: encrypted.ciphertext,
+      iterations: PBKDF2_ITERATIONS,
+      updatedAt: now,
+      security: { mode: 'off', authVersion: 1, configuredAt: now, failedAttempts: 0, lockedUntil: null },
+      localKey,
+    });
+    securityMode = 'off';
+    unlockedSecrets.set(GEMINI_RECORD_ID, legacyKey);
+    lastActivityAt = null;
+    clearIdleTimer();
+    removeLegacyPlaintextKey();
+    notifyChanged();
+  })().catch(() => {
+    // Keep the legacy value intact if migration cannot be completed; retry on the next access.
+  }).finally(() => {
+    legacyMigrationPromise = null;
+  });
+  return legacyMigrationPromise;
+}
+
+function clearIdleTimer(): void {
+  if (idleTimer !== null && typeof window !== 'undefined') window.clearTimeout(idleTimer);
+  idleTimer = null;
+}
+
+function notifyChanged(): void {
+  if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('elara-gemini-lockbox-changed'));
+}
+
+function scheduleIdleLock(): void {
+  clearIdleTimer();
+  if (securityMode === 'off' || !sessionUnlocked() || typeof window === 'undefined' || lastActivityAt === null) return;
+  const remaining = Math.max(0, GEMINI_LOCKBOX_IDLE_TIMEOUT_MS - (Date.now() - lastActivityAt));
+  idleTimer = window.setTimeout(() => {
+    idleTimer = null;
+    enforceGeminiApiKeyIdleTimeout();
+  }, remaining);
+}
+
+export function isGeminiApiKeyIdle(now = Date.now()): boolean {
+  return securityMode !== 'off' && sessionUnlocked() && lastActivityAt !== null && now - lastActivityAt >= GEMINI_LOCKBOX_IDLE_TIMEOUT_MS;
+}
+
+export function enforceGeminiApiKeyIdleTimeout(now = Date.now()): boolean {
+  if (!isGeminiApiKeyIdle(now)) return false;
+  lockGeminiApiKey();
+  return true;
+}
+
+export function touchGeminiApiKeyActivity(now = Date.now()): void {
+  if (!sessionUnlocked() || securityMode === 'off') return;
+  lastActivityAt = now;
+  scheduleIdleLock();
+}
+
+export function getGeminiLockboxLastActivityAt(): number | null {
+  return lastActivityAt;
+}
+
+export type GeminiLockboxStatus = 'empty' | 'locked' | 'unlocked';
+
+/**
+ * A secondary credential can additionally be `mismatched`: the record exists
+ * but was stored under a different Lockbox credential, so the current unlock
+ * could not open it. Surfacing this is what stops a silently unusable key.
+ */
+export type LockboxSecretStatus = GeminiLockboxStatus | 'mismatch';
+
+async function getSecretStatus(id: LockboxSecretId): Promise<LockboxSecretStatus> {
+  enforceGeminiApiKeyIdleTimeout();
+  if (unlocked(id) !== null) return 'unlocked';
+  const entry = await recordWithGoverningMode(id);
+  if (!entry) return 'empty';
+  if (entry.mode === 'off') {
+    try {
+      unlockedSecrets.set(id, await decryptWithLocalKey(entry.record));
+      mismatchedSecrets.delete(id);
+      return 'unlocked';
+    } catch {
+      return 'locked';
+    }
+  }
+  return mismatchedSecrets.has(id) ? 'mismatch' : 'locked';
+}
+
+export async function getGeminiLockboxStatus(): Promise<GeminiLockboxStatus> {
+  await migrateLegacyPlaintextKey();
+  const status = await getSecretStatus(GEMINI_RECORD_ID);
+  if (status === 'unlocked') return 'unlocked';
+  if (status === 'empty') return 'empty';
+  const record = await db.secrets.get(GEMINI_RECORD_ID);
+  if (record) securityMode = normalizeSecurityMetadata(record).mode;
+  return 'locked';
+}
+
+export async function getGeminiLockboxMetadata(): Promise<GeminiLockboxSecurityMetadata | null> {
+  const record = await db.secrets.get(GEMINI_RECORD_ID);
+  return record ? normalizeSecurityMetadata(record) : null;
+}
+
+).test(value);
 }
 
 /** Modes whose authorization secret is a short PIN rather than a passphrase. */
@@ -559,6 +1342,9 @@ export async function saveGeminiApiKey(value: string, passphrase: string): Promi
 }
 
 export async function configureGeminiApiKeyWithPin(value: string, pin: string): Promise<void> {
+  if (!isStrongGeminiLockboxPin(pin)) {
+    throw new Error(`Use a ${GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN for new Lockbox protection.`);
+  }
   await saveSecretWithMode(GEMINI_RECORD_ID, value, pin, 'pin');
   // A PIN change rotates the Lockbox credential, so every other stored secret
   // must be re-encrypted with the new one or it becomes permanently unreadable.
@@ -654,7 +1440,7 @@ export async function disableGeminiLockboxSecurity(): Promise<void> {
 }
 
 export async function enableGeminiLockboxWithPin(pin: string): Promise<void> {
-  if (!isGeminiLockboxPin(pin)) throw new Error(`Use a ${GEMINI_LOCKBOX_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN.`);
+  if (!isStrongGeminiLockboxPin(pin)) throw new Error(`Use a ${GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH}–${GEMINI_LOCKBOX_PIN_MAX_LENGTH} digit PIN for new Lockbox protection.`);
   const apiKey = await getGeminiApiKey();
   if (!apiKey) throw new Error('The Gemini API Lockbox is not configured.');
   await saveSecretWithMode(GEMINI_RECORD_ID, apiKey, pin, 'pin');

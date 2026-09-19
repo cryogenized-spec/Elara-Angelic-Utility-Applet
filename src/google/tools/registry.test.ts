@@ -30,7 +30,9 @@ const PASS_4_FILE_TOOLS = [
 describe('Google tool registry', () => {
   it('registers the Pass 4 Drive, Docs and Sheets file surface exactly once', () => {
     const matches = googleToolRegistry.filter((descriptor) => PASS_4_FILE_TOOLS.includes(descriptor.name as (typeof PASS_4_FILE_TOOLS)[number]));
-    expect(matches.map((descriptor) => descriptor.name)).toEqual([...PASS_4_FILE_TOOLS]);
+    const names = matches.map((descriptor) => descriptor.name);
+    expect(new Set(names).size).toBe(PASS_4_FILE_TOOLS.length);
+    expect([...names].sort()).toEqual([...PASS_4_FILE_TOOLS].sort());
   });
 
   it('keeps Drive reads separate from Drive writes', () => {

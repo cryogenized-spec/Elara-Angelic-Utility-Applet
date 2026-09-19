@@ -371,6 +371,27 @@ for (const marker of [
   if (!toolLoop.includes(marker)) fail(`Gemini Workspace provenance boundary changed: ${marker}`);
 }
 
+if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
+if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isUntrustedExternalReadTool') || !toolLoop.includes('UNTRUSTED_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must intrinsically taint later mutation confirmations after external reads');
+
+const googleBroker = read('src/google/confirmation/broker.ts');
+if (googleBroker.includes("all.dataset.decision = 'all';") || googleBroker.includes('✓ Approve all')) fail('Google confirmation broker must not expose approve-all');
+if (!googleBroker.includes('checkbox.checked = requests.length === 1 && request.untrustedContext !== true;')) fail('Grouped and tainted Google confirmations must default unselected');
+if (!googleBroker.includes("warning.dataset.untrustedContext = 'true';") || !googleBroker.includes('refreshApproveState')) fail('Tainted Google confirmations must expose a warning and require explicit selection');
+
+const confirmationPolicy = read('src/google/confirmation/policy.ts');
+const confirmationExecutor = read('src/google/tools/executor.ts');
+if (!confirmationPolicy.includes('MAX_CONFIRMATION_REVIEW_CHARS = 1_250_000')) fail('Confirmation review payload ceiling must remain bounded');
+if (!confirmationExecutor.includes('writeConfirmationSchema.parse') || !confirmationExecutor.includes('MAX_CONFIRMATION_REVIEW_CHARS')) fail('Confirmation requests must remain schema-validated and bounded');
+
+const lockboxAuthority = read('src/persistence/gemini-api-key.ts');
+if (!lockboxAuthority.includes('const PBKDF2_ITERATIONS = 600_000;')) fail('Lockbox new-write PBKDF2 work factor must remain hardened');
+if (!lockboxAuthority.includes('GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10')) fail('Fresh Lockbox PIN minimum must remain hardened');
+
+const workerProvider = read('worker/src/index.ts');
+if (!workerProvider.includes('verifyBearerToken') || !workerProvider.includes('requireProviderAdmission') || !workerProvider.includes('admissionConfigured')) fail('Worker provider routes and health contract must retain installation bearer admission');
+if (!workerProvider.includes("maxOutputTokens: z.number().int().min(1).max(65_536)")) fail('Worker provider output budget must remain bounded');
+
 if (errors.length) {
   process.stderr.write(`Security & architecture gate failed (${errors.length}):\n${errors.map((error) => `- ${error}`).join('\n')}\n`);
   process.exit(1);

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { googleDrivePickerAuthority, googleOAuthAuthority } from '../../google/oauth/authority';
+import { googleDrivePickerAuthority, googleOAuthAuthority, reviewGoogleWorkspacePermissions } from '../../google/oauth/authority';
+import { GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES } from '../../google/oauth/capability-policy';
 import { admitGooglePickerFiles, clearGooglePickerAdmissions, loadGooglePickerAdmissions, revokeGooglePickerFile } from '../../persistence/google-picker-admissions';
 import type { GooglePickerAdmission } from '../../google/picker/contracts';
 import type { GoogleCapabilityKey, GoogleOAuthStatus } from '../../google/oauth/contracts';
@@ -11,7 +12,7 @@ type ServiceDefinition = {
   description: string;
   readCapability: GoogleCapabilityKey;
   writeCapability?: GoogleCapabilityKey;
-  extraCapabilities?: readonly { capability: GoogleCapabilityKey; label: string; readyLabel: string }[];
+  extraCapabilities?: readonly { capability: GoogleCapabilityKey; label: string }[];
 };
 
 const SERVICES: readonly ServiceDefinition[] = [
@@ -22,14 +23,14 @@ const SERVICES: readonly ServiceDefinition[] = [
     readCapability: 'calendar.events.read',
     writeCapability: 'calendar.events.write',
     extraCapabilities: [
-      { capability: 'calendar.list.read', label: 'Enable calendar list', readyLabel: 'Calendar list ready' },
-      { capability: 'calendar.settings.read', label: 'Enable settings', readyLabel: 'Settings ready' },
-      { capability: 'calendar.freebusy.read', label: 'Enable availability', readyLabel: 'Availability ready' },
+      { capability: 'calendar.list.read', label: 'Calendars' },
+      { capability: 'calendar.settings.read', label: 'Settings' },
+      { capability: 'calendar.freebusy.read', label: 'Availability' },
     ],
   },
   { id: 'tasks', name: 'Google Tasks', description: 'Task lists, tasks, ordering, and completion.', readCapability: 'tasks.read', writeCapability: 'tasks.write' },
-  { id: 'gmail', name: 'Gmail', description: 'Mailbox reading, organization, labels, and sending.', readCapability: 'gmail.read', writeCapability: 'gmail.modify', extraCapabilities: [{ capability: 'gmail.labels', label: 'Enable labels', readyLabel: 'Labels ready' }, { capability: 'gmail.send', label: 'Enable sending', readyLabel: 'Sending ready' }] },
-  { id: 'drive', name: 'Google Drive', description: 'App-created or admitted files, plus optional library search across your Drive.', readCapability: 'drive.files.app.read', writeCapability: 'drive.files.app.write', extraCapabilities: [{ capability: 'drive.library.read', label: 'Enable library search', readyLabel: 'Library search ready' }] },
+  { id: 'gmail', name: 'Gmail', description: 'Mailbox reading, organization, labels, and sending.', readCapability: 'gmail.read', writeCapability: 'gmail.modify', extraCapabilities: [{ capability: 'gmail.labels', label: 'Labels' }, { capability: 'gmail.send', label: 'Send' }] },
+  { id: 'drive', name: 'Google Drive', description: 'App-created or admitted files, plus optional library search across your Drive.', readCapability: 'drive.files.app.read', writeCapability: 'drive.files.app.write', extraCapabilities: [{ capability: 'drive.library.read', label: 'Library search' }] },
   { id: 'docs', name: 'Google Docs', description: 'Documents created or admitted for Elara to work with.', readCapability: 'docs.read', writeCapability: 'docs.write' },
   { id: 'sheets', name: 'Google Sheets', description: 'Selected spreadsheets, ranges, rows, and updates.', readCapability: 'sheets.read', writeCapability: 'sheets.write' },
 ];
@@ -46,6 +47,14 @@ const stateLabels: Record<GoogleOAuthStatus['state'], string> = {
 
 function hasCapability(granted: readonly GoogleCapabilityKey[], capability?: GoogleCapabilityKey): boolean {
   return !!capability && granted.includes(capability);
+}
+
+function serviceCapabilities(service: ServiceDefinition): readonly { capability: GoogleCapabilityKey; label: string }[] {
+  return [
+    { capability: service.readCapability, label: 'Read' },
+    ...(service.writeCapability ? [{ capability: service.writeCapability, label: 'Write' }] : []),
+    ...(service.extraCapabilities ?? []),
+  ];
 }
 
 const emptyStatus = (): GoogleOAuthStatus => ({
@@ -103,6 +112,19 @@ export function GoogleOAuthSettings() {
     }
   }
 
+  async function reviewPermissions() {
+    setBusyCapability('google.account');
+    setError(null);
+    try {
+      await reviewGoogleWorkspacePermissions();
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Google permissions could not be reviewed.');
+    } finally {
+      setBusyCapability(null);
+    }
+  }
+
   async function disconnect() {
     setBusyCapability(null);
     setError(null);
@@ -153,13 +175,16 @@ export function GoogleOAuthSettings() {
     || status.state === 'reauthorization-required'
     || status.state === 'revoked'
     || !sessionReady;
+  const workspaceCapabilities = GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES.filter((capability) => capability !== 'google.account');
+  const missingWorkspaceCapabilities = workspaceCapabilities.filter((capability) => !hasCapability(status.grantedCapabilities, capability));
+  const workspaceComplete = missingWorkspaceCapabilities.length === 0;
 
   const accountActionLabel = useMemo(() => {
     if (busyCapability === 'google.account') return 'Opening Google…';
-    if (status.state === 'reauthorization-required' || status.state === 'revoked') return 'Reauthorize Google';
-    if (status.state === 'token-recovery') return 'Retry Google session';
-    if (accountKnown) return 'Refresh Google session';
-    return 'Connect Google account';
+    if (status.state === 'reauthorization-required' || status.state === 'revoked') return 'Reauthorize Google Workspace';
+    if (status.state === 'token-recovery') return 'Retry Google Workspace session';
+    if (accountKnown) return 'Refresh Google Workspace session';
+    return 'Connect Google Workspace';
   }, [accountKnown, busyCapability, status.state]);
 
   const summary = useMemo(() => {
@@ -177,13 +202,13 @@ export function GoogleOAuthSettings() {
       <section className={`google-oauth-account setting-card${sessionReady ? ' is-ready' : ''}`} aria-labelledby="google-account-title">
         <div className="google-oauth-account__copy">
           <span className="panel-kicker">GOOGLE ACCOUNT</span>
-          <strong id="google-account-title">{accountKnown ? 'Google account connected' : 'Connect Google before using Workspace'}</strong>
+          <strong id="google-account-title">{accountKnown ? 'Google Workspace connected' : 'Connect Google Workspace'}</strong>
           {status.account?.displayName && <span className="google-oauth-account__name">{status.account.displayName}</span>}
           {status.account?.email && <span className="google-oauth-account__email">{status.account.email}</span>}
           <p>
             {sessionReady
-              ? 'A live Google authorization session is ready. Workspace permissions remain separate and are granted only when you choose them below.'
-              : 'Open Google’s secure account and authorization window to establish a fresh session. Elara never receives your Google password, and Workspace data permissions are requested separately.'}
+              ? 'A live Google authorization session is ready. Elara requests its reviewed Workspace permissions together in Google’s consent screen; the status below reflects what Google actually granted.'
+              : 'Open Google’s secure authorization window. Calendar, Tasks, Gmail, Drive, Docs, and Sheets permissions are presented together there, and Google remains the source of truth for the permissions you approve.'}
           </p>
         </div>
 
@@ -225,7 +250,7 @@ export function GoogleOAuthSettings() {
             <div>
               <span className="panel-kicker">WORKSPACE ACCESS</span>
               <strong>Google Workspace permissions</strong>
-              <span>Grant only the services Elara should use. Reads, writes, sending, and broader library access remain separate authorization choices.</span>
+              <span>Permissions are requested together through Google Identity Services rather than activated one by one in Elara. Google’s granular consent screen lets you approve the full set or leave individual permissions ungranted.</span>
             </div>
             <div className="google-oauth-settings__state" data-state={status.state}>
               <span className="google-oauth-settings__dot" aria-hidden="true" />
@@ -294,13 +319,13 @@ export function GoogleOAuthSettings() {
 
           <div className="setting-card google-oauth-settings__note">
             <strong>Stay connected</strong>
-            <span>Elara is self-hosted. If this installation is paired to your own Worker, Google refresh credentials are encrypted in that Worker vault and the browser receives only short-lived access tokens. Without a paired Worker, Google remains interactive-only in the browser and a page reload can require the account-session button above again. Elara stores only non-secret authorization metadata locally. Workspace permissions remain incremental and can be expanded service by service.</span>
+            <span>Elara is self-hosted. If this installation is paired to your own Worker, Google refresh credentials are encrypted in that Worker vault and the browser receives only short-lived access tokens. Without a paired Worker, Google remains interactive-only in the browser and a page reload can require the account-session button above again. Elara stores only non-secret authorization metadata locally. Google’s returned scope set remains authoritative, including when you approve only part of the bundled request.</span>
           </div>
         </>
       ) : (
         <div className="setting-card google-oauth-settings__locked">
-          <strong>Workspace permissions unlock after account connection</strong>
-          <span>Calendar, Tasks, Gmail, Drive, Docs, and Sheets stay unavailable here until a live Google authorization session is established.</span>
+          <strong>Workspace permissions are granted in Google</strong>
+          <span>Connect Google Workspace once to open Google’s consent screen for Calendar, Tasks, Gmail, Drive, Docs, and Sheets together.</span>
         </div>
       )}
     </div>

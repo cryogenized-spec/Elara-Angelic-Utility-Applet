@@ -49,6 +49,32 @@ export const GOOGLE_V1_OPTIONAL_CAPABILITIES = [
   'drive.library.read',
 ] as const satisfies readonly GoogleCapabilityKey[];
 
+/**
+ * Settings onboarding requests the complete currently-supported Workspace v1
+ * surface in one explicit Google consent moment. Google still owns granular
+ * consent: the user may approve all or only a subset, and effective capabilities
+ * remain derived from the provider scopes actually returned.
+ */
+export const GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES = [
+  'google.account',
+  ...GOOGLE_V1_CORE_CAPABILITIES,
+  ...GOOGLE_V1_OPTIONAL_CAPABILITIES,
+] as const satisfies readonly GoogleCapabilityKey[];
+
+export function googleWorkspaceOnboardingScopes(): string[] {
+  const ordered = [...new Set(
+    GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES
+      .map((capability) => getGoogleScope(capability).scope)
+      .filter((scope): scope is string => Boolean(scope)),
+  )];
+  const retained = new Set(ordered);
+  for (const [broaderScope, impliedScopes] of Object.entries(PROVIDER_SCOPE_IMPLICATIONS)) {
+    if (!retained.has(broaderScope)) continue;
+    for (const impliedScope of impliedScopes) retained.delete(impliedScope);
+  }
+  return ordered.filter((scope) => retained.has(scope));
+}
+
 const FILE_READ_CAPABILITIES = new Set<GoogleCapabilityKey>([
   'docs.read',
   'sheets.read',
@@ -169,7 +195,7 @@ export function resolveAuthorizingCapability(
 }
 
 export const CAPABILITY_CONSENT_COPY: Readonly<Record<GoogleCapabilityKey, string>> = {
-  'google.account': 'Connect your Google account to establish an authorization session. Workspace data permissions are requested separately when you use those features.',
+  'google.account': 'Connect Google Workspace in one consent flow. Google shows the requested Calendar, Tasks, Gmail, Drive, Docs, and Sheets permissions together and may grant all or only the items you approve.',
   'calendar.events.read': 'To continue, Elara needs permission to read your Google Calendar.',
   'calendar.events.write': 'To continue, Elara needs permission to create or edit Google Calendar events.',
   'calendar.list.read': 'To continue, Elara needs permission to see which calendars you subscribe to.',

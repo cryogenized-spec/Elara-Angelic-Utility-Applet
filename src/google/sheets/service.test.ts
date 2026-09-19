@@ -117,7 +117,7 @@ describe('GoogleSheetsService', () => {
         capability,
         fetch: async (_input, _init, beforeProviderFetch) => {
           active = false;
-          beforeProviderFetch?.();
+          await beforeProviderFetch?.();
           providerCalls += 1;
           return new Response('{}', { status: 200 });
         },

@@ -266,7 +266,7 @@ describe('GoogleGmailSemanticService', () => {
           capability,
           fetch: async (_url, _init, beforeProviderFetch) => {
             active.value = false;
-            beforeProviderFetch?.();
+            await beforeProviderFetch?.();
             providerWrites += 1;
             return json({});
           },
@@ -290,7 +290,7 @@ describe('GoogleGmailSemanticService', () => {
           capability,
           fetch: async (_url, _init, beforeProviderFetch) => {
             active.value = false;
-            beforeProviderFetch?.();
+            await beforeProviderFetch?.();
             providerWrites += 1;
             return json({ id: 'Label_1', name: 'Projects', type: 'USER' });
           },
@@ -312,7 +312,7 @@ describe('GoogleGmailSemanticService', () => {
           fetch: async (_url, init, beforeProviderFetch) => {
             if (init?.method === 'DELETE') {
               active.value = false;
-              beforeProviderFetch?.();
+              await beforeProviderFetch?.();
               providerWrites += 1;
               return new Response(null, { status: 204 });
             }

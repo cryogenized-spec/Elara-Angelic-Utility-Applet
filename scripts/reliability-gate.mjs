@@ -161,9 +161,12 @@ if (!lockboxSource.includes('const PBKDF2_ITERATIONS = 600_000;')) throw new Err
 if (!lockboxSource.includes('GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10')) throw new Error('Reliability gate: fresh Lockbox PINs must retain the stronger minimum length.');
 if (!lockboxSource.includes("name: 'AES-GCM'")) throw new Error('Reliability gate: Gemini API credential must be encrypted with AES-GCM.');
 if (!lockboxSource.includes('crypto.getRandomValues')) throw new Error('Reliability gate: Lockbox encryption must use random salt and IV material.');
-if (lockboxSource.includes('localStorage.setItem')) throw new Error('Reliability gate: Gemini API credential must never be written to localStorage.');
+const approvedLockboxStorageWrite = 'window.localStorage.setItem(LOCKBOX_SESSION_REVOCATION_KEY, revision);';
+const lockboxStorageWrites = lockboxSource.match(/\blocalStorage\.setItem\b/g) ?? [];
+if (lockboxStorageWrites.length !== 1 || !lockboxSource.includes(approvedLockboxStorageWrite)) throw new Error('Reliability gate: Lockbox localStorage writes are limited to the opaque cross-tab revocation nonce.');
 if (!lockboxSource.includes('removeLegacyPlaintextKey')) throw new Error('Reliability gate: legacy plaintext Gemini API storage must be explicitly removed.');
 if (!lockboxSource.includes('const unlockedSecrets = new Map<LockboxSecretId, string>();')) throw new Error('Reliability gate: decrypted credentials must remain session-memory-only.');
+if (!lockboxSource.includes("event.key === LOCKBOX_SESSION_REVOCATION_KEY") || !lockboxSource.includes('handleSiblingLockboxRevocation')) throw new Error('Reliability gate: protected Lockbox sessions must revoke across sibling tabs.');
 if (lockboxSource.split('unlockedSecrets.clear();').length - 1 < 2) throw new Error('Reliability gate: locking and clearing the Lockbox must both clear decrypted credentials from session memory.');
 
 const lockboxTestSource = readFileSync(join(root, 'src/persistence/gemini-api-key.test.ts'), 'utf8');

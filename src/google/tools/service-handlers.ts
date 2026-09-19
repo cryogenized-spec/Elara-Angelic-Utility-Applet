@@ -7,12 +7,13 @@ import { GoogleDriveService } from '../drive/service';
 import { runGmailSendOnce } from '../gmail/send-replay';
 import { GoogleGmailSemanticService, type GmailTurnGuard } from '../gmail/semantic-service';
 import { googleOAuthAuthority } from '../oauth/authority';
-import { GoogleSheetsService } from '../sheets/service';
+import { GoogleSheetsService, type GoogleSheetInputMode } from '../sheets/service';
 import { runTaskCreateOnce } from '../tasks/create-replay';
 import { GoogleTasksService, type GoogleTaskStatus } from '../tasks/service';
 import type { GoogleToolHandlers } from './executor';
 import type { GmailOrganizeAction } from './gmail-schemas';
 import { googleReadToolHandlers } from './read-handlers';
+import { runWorkspaceCreateOnce } from './workspace-create-replay';
 
 const calendar = new GoogleCalendarService(googleOAuthAuthority);
 const chat = new GoogleChatService(googleOAuthAuthority);
@@ -81,6 +82,15 @@ function gmailAction(args: Record<string, unknown>): GmailOrganizeAction {
   const value = stringArg(args, 'action')!;
   if (!['archive', 'moveToInbox', 'markRead', 'markUnread', 'markSpam', 'markNotSpam', 'star', 'unstar', 'applyLabel', 'removeLabel'].includes(value)) throw new Error('Unsupported Gmail organize action.');
   return value as GmailOrganizeAction;
+}
+function sheetsInputMode(args: Record<string, unknown>): GoogleSheetInputMode {
+  const value = args.inputMode;
+  if (value === undefined) return 'literal';
+  if (value !== 'literal' && value !== 'userEntered') throw new Error('Google Sheets inputMode must be literal or userEntered.');
+  return value;
+}
+function mutationGuard(signal: AbortSignal | undefined, isGenerationActive: (() => boolean) | undefined) {
+  return { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) };
 }
 function gmailTurnGuard(signal: AbortSignal | undefined, isGenerationActive: (() => boolean) | undefined): GmailTurnGuard {
   return {
@@ -198,8 +208,17 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
 
   'docs.getDocument': async ({ arguments: raw }) => docs.getDocument(stringArg(objectArgs(raw), 'documentId')!),
   'docs.inspectDocument': async ({ arguments: raw }) => docs.inspectDocument(stringArg(objectArgs(raw), 'documentId')!),
-  'docs.createDocument': async ({ arguments: raw }) => docs.createDocument(stringArg(objectArgs(raw), 'title')!),
-  'docs.insertText': async ({ arguments: raw }) => {
+  'docs.createDocument': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
+    const title = stringArg(objectArgs(raw), 'title')!;
+    const payload = { title };
+    const guard = mutationGuard(signal, isGenerationActive);
+    return runWorkspaceCreateOnce(
+      { tool: 'docs.createDocument', callId, conversationId, messageId, generationId, ...guard },
+      payload,
+      () => docs.createDocument(title, guard),
+    );
+  },
+  'docs.insertText': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     return docs.insertText(
       stringArg(args, 'documentId')!,
@@ -207,18 +226,20 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'revisionId')!,
       optionalNumber(args, 'index') ?? 1,
       stringArg(args, 'text')!,
+      mutationGuard(signal, isGenerationActive),
     );
   },
-  'docs.appendParagraph': async ({ arguments: raw }) => {
+  'docs.appendParagraph': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     return docs.appendParagraph(
       stringArg(args, 'documentId')!,
       stringArg(args, 'tabId')!,
       stringArg(args, 'revisionId')!,
       stringArg(args, 'text')!,
+      mutationGuard(signal, isGenerationActive),
     );
   },
-  'docs.replaceText': async ({ arguments: raw }) => {
+  'docs.replaceText': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     return docs.replaceText(
       stringArg(args, 'documentId')!,
@@ -227,11 +248,12 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'findText')!,
       stringArg(args, 'replaceText')!,
       optionalBoolean(args, 'matchCase') ?? false,
+      mutationGuard(signal, isGenerationActive),
     );
   },
-  'docs.batchUpdate': async ({ arguments: raw }) => {
+  'docs.batchUpdate': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return docs.batchUpdate(stringArg(args, 'documentId')!, recordArrayArg(args, 'requests'), recordArg(args, 'writeControl', false));
+    return docs.batchUpdate(stringArg(args, 'documentId')!, recordArrayArg(args, 'requests'), recordArg(args, 'writeControl', false), mutationGuard(signal, isGenerationActive));
   },
 
   'chat.listMessages': async ({ arguments: raw }) => {
@@ -407,29 +429,55 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     const args = objectArgs(raw);
     return sheets.readRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!);
   },
-  'sheets.writeRange': async ({ arguments: raw }) => {
+  'sheets.createSpreadsheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return sheets.writeRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args));
+    const title = stringArg(args, 'title')!;
+    const firstSheetTitle = stringArg(args, 'firstSheetTitle', false);
+    const payload = { title, ...(firstSheetTitle ? { firstSheetTitle } : {}) };
+    const guard = mutationGuard(signal, isGenerationActive);
+    return runWorkspaceCreateOnce(
+      { tool: 'sheets.createSpreadsheet', callId, conversationId, messageId, generationId, ...guard },
+      payload,
+      () => sheets.createSpreadsheet(title, firstSheetTitle, guard),
+    );
   },
-  'sheets.appendRows': async ({ arguments: raw }) => {
+  'sheets.addSheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return sheets.appendRows(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args));
+    const spreadsheetId = stringArg(args, 'spreadsheetId')!;
+    const title = stringArg(args, 'title')!;
+    const rowCount = optionalNumber(args, 'rowCount') ?? 1000;
+    const columnCount = optionalNumber(args, 'columnCount') ?? 26;
+    const payload = { spreadsheetId, title, rowCount, columnCount };
+    const guard = mutationGuard(signal, isGenerationActive);
+    return runWorkspaceCreateOnce(
+      { tool: 'sheets.addSheet', callId, conversationId, messageId, generationId, ...guard },
+      payload,
+      () => sheets.addSheet(spreadsheetId, title, rowCount, columnCount, guard),
+    );
   },
-  'sheets.updateCell': async ({ arguments: raw }) => {
+  'sheets.writeRange': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return sheets.updateCell(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, args.value);
+    return sheets.writeRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args), sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
   },
-  'sheets.insertRows': async ({ arguments: raw }) => {
+  'sheets.appendRows': async ({ arguments: raw, signal, isGenerationActive }) => {
+    const args = objectArgs(raw);
+    return sheets.appendRows(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args), sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
+  },
+  'sheets.updateCell': async ({ arguments: raw, signal, isGenerationActive }) => {
+    const args = objectArgs(raw);
+    return sheets.updateCell(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, args.value, sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
+  },
+  'sheets.insertRows': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     const spreadsheetId = stringArg(args, 'spreadsheetId')!;
     const sheetId = optionalNumber(args, 'sheetId')!;
     const startIndex = optionalNumber(args, 'startIndex')!;
     const count = optionalNumber(args, 'count')!;
-    await sheets.insertRows(spreadsheetId, sheetId, startIndex, count);
+    await sheets.insertRows(spreadsheetId, sheetId, startIndex, count, mutationGuard(signal, isGenerationActive));
     return { inserted: true, spreadsheetId, sheetId, startIndex, count };
   },
-  'sheets.batchUpdate': async ({ arguments: raw }) => {
+  'sheets.batchUpdate': async ({ arguments: raw, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
-    return sheets.batchUpdate(stringArg(args, 'spreadsheetId')!, recordArrayArg(args, 'requests'));
+    return sheets.batchUpdate(stringArg(args, 'spreadsheetId')!, recordArrayArg(args, 'requests'), mutationGuard(signal, isGenerationActive));
   },
 };

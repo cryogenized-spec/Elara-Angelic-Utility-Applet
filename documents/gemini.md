@@ -64,7 +64,7 @@ Generation settings are capability-driven. The adapter maps supported values to 
 
 Attachments are stable artifact IDs. Ready files up to 4 MiB are sent inline; larger files use the Gemini Files API. Valid remote references may be reused until near expiry. Stale-generation/cancellation guards prevent obsolete preparation from mutating artifact metadata.
 
-The organic-memory classifier is not a second conversational agent. It receives a bounded user-message payload plus a dedicated classifier instruction, exposes no tools or thread memory, has an eight-second timeout and 4,000-character output ceiling, and returns data that remains powerless until `SYS-MEM` validates it.
+The organic-memory classifier is not a second conversational agent. It receives a bounded user-message payload plus a dedicated classifier instruction, exposes no tools or thread memory, has an eight-second timeout and 4,000-character output ceiling, and returns exact-span candidates with domain, human memory category, and coarse salience metadata. Those labels remain powerless until `SYS-MEM` revalidates the exact evidence and applies user-owned remembering/category policy.
 
 ## 5. Invariants
 
@@ -81,7 +81,7 @@ The organic-memory classifier is not a second conversational agent. It receives 
 
 Empty or locked Lockbox state yields explicit configuration failures. Provider exceptions are normalized; cancellation resolves promptly even if the network stream is idle. Function arguments are parsed as objects after streaming assembly. Attachment MIME/readiness is revalidated at the provider boundary.
 
-The organic-memory classifier is treated as an untrusted selector, not an authority. Provider failure, cancellation, timeout, oversized output or invalid JSON fails the classifier closed and does not fail an already-saved chat response. Exact evidence validation and persistence authority live in `SYS-MEM`.
+The organic-memory classifier is treated as an untrusted selector, not an authority. Provider failure, cancellation, timeout, oversized output or invalid JSON fails the classifier closed and does not fail an already-saved chat response. Exact evidence validation, sensitive-category downgrade protection, remembering-style thresholds, category permission and persistence authority live in `SYS-MEM`.
 
 The app may expose provider-produced thought summaries, but it does not treat hidden reasoning/signatures as a user-editable second transcript.
 

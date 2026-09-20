@@ -30,6 +30,10 @@ function domainTag(memory: DurableMemory): string | undefined {
   return memory.tags.find((tag) => tag.startsWith('domain:'));
 }
 
+function categoryTag(memory: DurableMemory): string | undefined {
+  return memory.tags.find((tag) => tag.startsWith('category:'));
+}
+
 /**
  * Conservative equivalence for automatic support only. It intentionally does
  * not remove punctuation or paraphrase text: case/Unicode/whitespace variants
@@ -40,8 +44,8 @@ export function normalizedEvidenceKey(value: string): string {
 }
 
 /**
- * Find a same-scope, same-domain, text-equivalent memory that can safely receive
- * automatic supporting evidence. Superseded, archived, and expired records are
+ * Find a same-scope, same-domain, category-compatible, text-equivalent memory
+ * that can safely receive automatic supporting evidence. Superseded, archived, and expired records are
  * never revived or reinforced by the organic path. Established memories win
  * over micro-observations.
  */
@@ -60,6 +64,14 @@ export async function findExactEvidenceSupportTarget(observation: DurableMemory)
     .filter((memory) => memory.expiresAt === null || memory.expiresAt > now)
     .filter((memory) => memory.folderId === observation.folderId)
     .filter((memory) => domainTag(memory) === domain)
+    // Legacy organic memories did not carry a category tag. Preserve exact
+    // evidence reinforcement for those rows, but require category agreement
+    // whenever both records were created under the category-aware contract.
+    .filter((memory) => {
+      const observationCategory = categoryTag(observation);
+      const candidateCategory = categoryTag(memory);
+      return !observationCategory || !candidateCategory || candidateCategory === observationCategory;
+    })
     .filter((memory) => normalizedEvidenceKey(memory.body) === evidenceKey)
     .sort((left, right) => (
       KIND_RANK[right.kind] - KIND_RANK[left.kind]

@@ -39,6 +39,29 @@ describe('memory lifecycle policy', () => {
     expect(await findExactEvidenceSupportTarget(otherDomain)).toBeUndefined();
   });
 
+  it('requires category agreement for category-aware organic reinforcement while preserving legacy rows', async () => {
+    const categorized = await recordObservation(
+      { title: 'Observed fact', body: 'I care for Piesang', tags: ['organic', 'domain:persistent_fact', 'category:pets'] },
+      { folderId: 'folder-a' },
+    );
+    const mismatched = await recordObservation(
+      { title: 'Observed fact', body: 'I care for Piesang', tags: ['organic', 'domain:persistent_fact', 'category:personal_facts'] },
+      { folderId: 'folder-a' },
+    );
+    expect(await findExactEvidenceSupportTarget(mismatched)).toBeUndefined();
+
+    const legacy = await recordObservation(
+      { title: 'Legacy observed fact', body: 'I care for Piesang', tags: ['organic', 'domain:persistent_fact'] },
+      { folderId: 'folder-b' },
+    );
+    const newEvidence = await recordObservation(
+      { title: 'Observed pet', body: 'I care for Piesang', tags: ['organic', 'domain:persistent_fact', 'category:pets'] },
+      { folderId: 'folder-b' },
+    );
+    expect((await findExactEvidenceSupportTarget(newEvidence))?.id).toBe(legacy.id);
+    expect(categorized.id).not.toBe(mismatched.id);
+  });
+
   it('does not select or reinforce an expired memory as an automatic support target', async () => {
     const expired = await recordObservation(
       { title: 'Observed preference', body: 'I prefer compact layouts', tags: ['organic', 'domain:preference'] },

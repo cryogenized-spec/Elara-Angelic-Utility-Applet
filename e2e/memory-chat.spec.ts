@@ -109,7 +109,7 @@ test('chat exposes memory tools and persists organic capture with the memory act
         status: 200,
         contentType: 'text/event-stream',
         body: completedTurn('memory-observer', JSON.stringify({
-          candidates: [{ domain: 'preference', evidence: USER_EVIDENCE }],
+          candidates: [{ domain: 'preference', category: 'likes_dislikes', salience: 'medium', evidence: USER_EVIDENCE }],
         })),
       });
       return;

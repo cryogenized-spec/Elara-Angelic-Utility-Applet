@@ -10,7 +10,9 @@ import {
   ORGANIC_OBSERVATION_CONFIDENCE,
   ORGANIC_OBSERVATION_IMPORTANCE,
   observePersistedTurn,
+  rememberingStyleAllowsSalience,
   shouldInspectUserMessage,
+  type OrganicMemoryCandidate,
 } from './organic-observer';
 
 async function resetMemoryState(): Promise<void> {
@@ -31,13 +33,26 @@ function baseRequest(extractor: (message: string) => Promise<unknown>) {
   };
 }
 
+function candidate(
+  evidence: string,
+  overrides: Partial<OrganicMemoryCandidate> = {},
+): OrganicMemoryCandidate {
+  return {
+    domain: 'preference',
+    category: 'likes_dislikes',
+    salience: 'medium',
+    evidence,
+    ...overrides,
+  };
+}
+
 describe('bounded organic memory observer', () => {
   beforeEach(resetMemoryState);
 
   it('stops organic formation when conversational memory is disabled', async () => {
     await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
     const extractor = vi.fn(async () => ({
-      candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout' }],
+      candidates: [candidate('I prefer the compact editor layout')],
     }));
 
     const result = await observePersistedTurn(baseRequest(extractor));
@@ -51,7 +66,7 @@ describe('bounded organic memory observer', () => {
     const evidence = 'I prefer the compact editor layout';
     const extractor = vi.fn(async () => {
       await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
-      return { candidates: [{ domain: 'preference', evidence }] };
+      return { candidates: [candidate(evidence)] };
     });
 
     const result = await observePersistedTurn({
@@ -67,13 +82,148 @@ describe('bounded organic memory observer', () => {
   it('keeps explicit-only remembering truly explicit by skipping the organic observer', async () => {
     await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'explicit-only' });
     const extractor = vi.fn(async () => ({
-      candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout' }],
+      candidates: [candidate('I prefer the compact editor layout')],
     }));
 
     const result = await observePersistedTurn(baseRequest(extractor));
 
     expect(result).toEqual({ status: 'skipped', count: 0 });
     expect(extractor).not.toHaveBeenCalled();
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+  it('applies remembering-style salience thresholds deterministically', () => {
+    expect(rememberingStyleAllowsSalience('explicit-only', 'high')).toBe(false);
+    expect(rememberingStyleAllowsSalience('selective', 'medium')).toBe(false);
+    expect(rememberingStyleAllowsSalience('selective', 'high')).toBe(true);
+    expect(rememberingStyleAllowsSalience('natural', 'low')).toBe(false);
+    expect(rememberingStyleAllowsSalience('natural', 'medium')).toBe(true);
+    expect(rememberingStyleAllowsSalience('attentive', 'low')).toBe(true);
+  });
+
+  it('uses the persisted remembering style to gate organic formation', async () => {
+    const evidence = 'I prefer the compact editor layout';
+
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'selective' });
+    expect(await observePersistedTurn(baseRequest(async () => ({
+      candidates: [candidate(evidence, { salience: 'medium' })],
+    })))).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+
+    expect(await observePersistedTurn({
+      ...baseRequest(async () => ({ candidates: [candidate(evidence, { salience: 'high' })] })),
+      messageId: 'user_message_high',
+    })).toEqual({ status: 'recorded', count: 1 });
+
+    await db.memories.clear();
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'natural' });
+    expect(await observePersistedTurn(baseRequest(async () => ({
+      candidates: [candidate(evidence, { salience: 'low' })],
+    })))).toEqual({ status: 'empty', count: 0 });
+
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'attentive' });
+    expect(await observePersistedTurn({
+      ...baseRequest(async () => ({ candidates: [candidate(evidence, { salience: 'low' })] })),
+      messageId: 'user_message_low',
+    })).toEqual({ status: 'recorded', count: 1 });
+  });
+
+  it('enforces per-category automatic-memory permissions at commit time', async () => {
+    const evidence = 'My cat is named Piesang';
+    await saveMemoryBehaviorPreferences({
+      ...DEFAULT_MEMORY_BEHAVIOR,
+      categories: { ...DEFAULT_MEMORY_BEHAVIOR.categories, pets: false },
+    });
+
+    const blocked = await observePersistedTurn({
+      ...baseRequest(async () => ({
+        candidates: [candidate(evidence, { domain: 'persistent_fact', category: 'pets', salience: 'high' })],
+      })),
+      userMessage: evidence,
+    });
+    expect(blocked).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+
+    await saveMemoryBehaviorPreferences({
+      ...DEFAULT_MEMORY_BEHAVIOR,
+      categories: { ...DEFAULT_MEMORY_BEHAVIOR.categories, pets: true },
+    });
+    const allowed = await observePersistedTurn({
+      ...baseRequest(async () => ({
+        candidates: [candidate(evidence, { domain: 'persistent_fact', category: 'pets', salience: 'high' })],
+      })),
+      messageId: 'user_message_pet_allowed',
+      userMessage: evidence,
+    });
+    expect(allowed).toEqual({ status: 'recorded', count: 1 });
+    expect((await listMemories())[0]?.tags).toContain('category:pets');
+  });
+
+  it('keeps sensitive categories default-off and rejects obvious category downgrades', async () => {
+    const evidence = 'I was diagnosed with diabetes';
+
+    const correctlyClassified = await observePersistedTurn({
+      ...baseRequest(async () => ({
+        candidates: [candidate(evidence, { domain: 'persistent_fact', category: 'health_wellbeing', salience: 'high' })],
+      })),
+      userMessage: evidence,
+    });
+    expect(correctlyClassified).toEqual({ status: 'empty', count: 0 });
+
+    const downgraded = await observePersistedTurn({
+      ...baseRequest(async () => ({
+        candidates: [candidate(evidence, { domain: 'persistent_fact', category: 'personal_facts', salience: 'high' })],
+      })),
+      messageId: 'user_message_health_downgrade',
+      userMessage: evidence,
+    });
+    expect(downgraded).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+
+    await saveMemoryBehaviorPreferences({
+      ...DEFAULT_MEMORY_BEHAVIOR,
+      categories: { ...DEFAULT_MEMORY_BEHAVIOR.categories, health_wellbeing: true },
+    });
+    const explicitlyEnabled = await observePersistedTurn({
+      ...baseRequest(async () => ({
+        candidates: [candidate(evidence, { domain: 'persistent_fact', category: 'health_wellbeing', salience: 'high' })],
+      })),
+      messageId: 'user_message_health_enabled',
+      userMessage: evidence,
+    });
+    expect(explicitlyEnabled).toEqual({ status: 'recorded', count: 1 });
+    expect((await listMemories())[0]?.tags).toContain('category:health_wellbeing');
+  });
+
+  it('rejects one exact span when classifier metadata disagrees on category or domain', async () => {
+    const evidence = 'My cat is named Piesang';
+
+    const result = await observePersistedTurn({
+      ...baseRequest(async () => ({
+        candidates: [
+          candidate(evidence, { domain: 'persistent_fact', category: 'pets', salience: 'medium' }),
+          candidate(evidence, { domain: 'persistent_fact', category: 'personal_facts', salience: 'high' }),
+        ],
+      })),
+      userMessage: evidence,
+    });
+
+    expect(result).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+  it('collapses duplicate matching nominations to the more conservative salience', async () => {
+    const evidence = 'I prefer the compact editor layout';
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'selective' });
+
+    const result = await observePersistedTurn(baseRequest(async () => ({
+      candidates: [
+        candidate(evidence, { salience: 'high' }),
+        candidate(evidence, { salience: 'medium' }),
+      ],
+    })));
+
+    expect(result).toEqual({ status: 'empty', count: 0 });
     expect(await listMemories()).toHaveLength(0);
   });
 
@@ -98,7 +248,7 @@ describe('bounded organic memory observer', () => {
     const evidence = 'I prefer the compact editor layout';
 
     const result = await observePersistedTurn(baseRequest(async () => ({
-      candidates: [{ domain: 'preference', evidence }],
+      candidates: [candidate(evidence)],
     })));
     const memories = await listMemories();
 
@@ -108,7 +258,7 @@ describe('bounded organic memory observer', () => {
       kind: 'MICRO_OBSERVATION',
       title: 'Observed preference',
       body: evidence,
-      tags: ['organic', 'domain:preference'],
+      tags: ['organic', 'domain:preference', 'category:likes_dislikes', 'salience:medium'],
       confidence: ORGANIC_OBSERVATION_CONFIDENCE,
       importance: ORGANIC_OBSERVATION_IMPORTANCE,
       folderId: 'project_folder',
@@ -124,7 +274,7 @@ describe('bounded organic memory observer', () => {
 
   it('reinforces literal repeated evidence and promotes the original observation after a second occurrence', async () => {
     const evidence = 'I prefer the compact editor layout';
-    const extractor = async () => ({ candidates: [{ domain: 'preference', evidence }] });
+    const extractor = async () => ({ candidates: [candidate(evidence)] });
 
     await observePersistedTurn(baseRequest(extractor));
     await observePersistedTurn({ ...baseRequest(extractor), messageId: 'user_message_2' });
@@ -146,7 +296,7 @@ describe('bounded organic memory observer', () => {
 
   it('matures repeatedly supported organic evidence to contextual but not CORE', async () => {
     const evidence = 'I prefer the compact editor layout';
-    const extractor = async () => ({ candidates: [{ domain: 'preference', evidence }] });
+    const extractor = async () => ({ candidates: [candidate(evidence)] });
 
     for (let index = 1; index <= 4; index += 1) {
       await observePersistedTurn({ ...baseRequest(extractor), messageId: `user_message_${index}` });
@@ -172,7 +322,7 @@ describe('bounded organic memory observer', () => {
     await updateMemory(target.id, { supportingMemoryIds: full, reinforcementCount: 64 });
 
     const result = await observePersistedTurn({
-      ...baseRequest(async () => ({ candidates: [{ domain: 'preference', evidence }] })),
+      ...baseRequest(async () => ({ candidates: [candidate(evidence)] })),
       messageId: 'user_message_overflow',
     });
     const memories = await listMemories();
@@ -187,7 +337,7 @@ describe('bounded organic memory observer', () => {
 
   it('does not infer semantic support from differently worded evidence', async () => {
     const firstEvidence = 'I prefer the compact editor layout';
-    await observePersistedTurn(baseRequest(async () => ({ candidates: [{ domain: 'preference', evidence: firstEvidence }] })));
+    await observePersistedTurn(baseRequest(async () => ({ candidates: [candidate(firstEvidence)] })));
 
     const secondMessage = 'For this project, compact layouts are my preference and I want to keep them.';
     const secondEvidence = 'compact layouts are my preference';
@@ -195,7 +345,7 @@ describe('bounded organic memory observer', () => {
       conversationId: 'thread_organic',
       messageId: 'user_message_2',
       userMessage: secondMessage,
-      extractor: async () => ({ candidates: [{ domain: 'preference', evidence: secondEvidence }] }),
+      extractor: async () => ({ candidates: [candidate(secondEvidence)] }),
     });
 
     const memories = await listMemories();
@@ -206,7 +356,7 @@ describe('bounded organic memory observer', () => {
 
   it('rejects model paraphrases instead of allowing the classifier to author facts', async () => {
     const result = await observePersistedTurn(baseRequest(async () => ({
-      candidates: [{ domain: 'preference', evidence: 'The user always wants a compact interface.' }],
+      candidates: [candidate('The user always wants a compact interface.')],
     })));
 
     expect(result).toEqual({ status: 'empty', count: 0 });
@@ -219,7 +369,7 @@ describe('bounded organic memory observer', () => {
       conversationId: 'thread_organic',
       messageId: 'user_secret_1',
       userMessage,
-      extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence: 'my API key is EXAMPLE_NOT_A_REAL_SECRET_12345' }] }),
+      extractor: async () => ({ candidates: [candidate('my API key is EXAMPLE_NOT_A_REAL_SECRET_12345', { domain: 'persistent_fact', category: 'personal_facts' })] }),
     });
 
     expect(result).toEqual({ status: 'empty', count: 0 });
@@ -228,7 +378,7 @@ describe('bounded organic memory observer', () => {
 
   it('fails closed on malformed classifier output', async () => {
     const result = await observePersistedTurn(baseRequest(async () => ({
-      candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout', extraAuthority: true }],
+      candidates: [{ ...candidate('I prefer the compact editor layout'), extraAuthority: true }],
     })));
 
     expect(result).toEqual({ status: 'unavailable', count: 0 });
@@ -239,8 +389,8 @@ describe('bounded organic memory observer', () => {
     const evidence = 'I prefer the compact editor layout';
     const result = await observePersistedTurn(baseRequest(async () => ({
       candidates: [
-        { domain: 'preference', evidence },
-        { domain: 'preference', evidence },
+        candidate(evidence),
+        candidate(evidence),
       ],
     })));
 
@@ -248,9 +398,22 @@ describe('bounded organic memory observer', () => {
     expect(await listMemories()).toHaveLength(1);
   });
 
+  it('collapses duplicate salience disagreements to the more conservative value', async () => {
+    const evidence = 'I prefer the compact editor layout';
+    const result = await observePersistedTurn(baseRequest(async () => ({
+      candidates: [
+        candidate(evidence, { salience: 'high' }),
+        candidate(evidence, { salience: 'low' }),
+      ],
+    })));
+
+    expect(result).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
   it('converges a replay of the same durable user evidence onto one observation', async () => {
     const evidence = 'I prefer the compact editor layout';
-    const request = baseRequest(async () => ({ candidates: [{ domain: 'preference', evidence }] }));
+    const request = baseRequest(async () => ({ candidates: [candidate(evidence)] }));
 
     const first = await observePersistedTurn(request);
     const replay = await observePersistedTurn(request);
@@ -262,7 +425,7 @@ describe('bounded organic memory observer', () => {
   });
 
   it('skips organic formation when deliberate memory tooling already owned the turn', async () => {
-    const extractor = vi.fn(async () => ({ candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout' }] }));
+    const extractor = vi.fn(async () => ({ candidates: [candidate('I prefer the compact editor layout')] }));
     const result = await observePersistedTurn({ ...baseRequest(extractor), usedMemoryTool: true });
 
     expect(result).toEqual({ status: 'skipped', count: 0 });
@@ -271,7 +434,7 @@ describe('bounded organic memory observer', () => {
   });
 
   it('does not re-observe regeneration variants of an already durable user turn', async () => {
-    const extractor = vi.fn(async () => ({ candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout' }] }));
+    const extractor = vi.fn(async () => ({ candidates: [candidate('I prefer the compact editor layout')] }));
     const result = await observePersistedTurn({ ...baseRequest(extractor), responseVariant: 2 });
 
     expect(result).toEqual({ status: 'skipped', count: 0 });

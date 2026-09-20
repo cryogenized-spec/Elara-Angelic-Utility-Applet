@@ -274,6 +274,27 @@ describe('Gemini provider stream fidelity', () => {
     expect((await geminiQuotaSnapshot()).rollingInputTokens).toBe(30_000);
   });
 
+  it('accepts interaction-scoped snake_case usage_metadata from the Interactions stream', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-snake-usage', model: 'gemini-3.8-flash' } },
+      {
+        event_type: 'interaction.completed',
+        interaction: {
+          id: 'interaction-snake-usage',
+          status: 'completed',
+          usage_metadata: { prompt_token_count: 222, candidates_token_count: 9, cached_content_token_count: 77, total_token_count: 231 },
+        },
+      },
+    ]);
+
+    expect(collected).toContainEqual(expect.objectContaining({
+      type: 'interaction-usage',
+      interactionId: 'interaction-snake-usage',
+      source: 'provider',
+      usage: { inputTokens: 222, outputTokens: 9, cachedTokens: 77, totalTokens: 231 },
+    }));
+  });
+
   it('accepts top-level camelCase usageMetadata from the Interactions stream', async () => {
     const collected = await collect([
       { event_type: 'interaction.created', interaction: { id: 'interaction-camel-usage', model: 'gemini-3.8-flash' } },

@@ -374,7 +374,7 @@ for (const marker of [
 }
 
 if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
-if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isUntrustedExternalReadTool') || !toolLoop.includes('UNTRUSTED_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must intrinsically taint later mutation confirmations after external reads');
+if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isExternalEvidenceReadTool') || !toolLoop.includes('EXTERNAL_EVIDENCE_READ_PREFIXES') || !toolLoop.includes('PRIVATE_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('taintedReadContinuationAllowed') || !toolLoop.includes('driveSearchCandidateIds') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must taint external evidence, block post-taint private reads, and limit Drive transfer continuation to same-turn search provenance');
 
 const googleBroker = read('src/google/confirmation/broker.ts');
 if (googleBroker.includes("all.dataset.decision = 'all';") || googleBroker.includes('✓ Approve all')) fail('Google confirmation broker must not expose approve-all');

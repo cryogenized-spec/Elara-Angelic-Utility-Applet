@@ -199,7 +199,7 @@ export const memoryToolHandlers: GoogleToolHandlers = {
 
   'memory.save': async ({ arguments: raw, conversationId, messageId, generationId, callId, signal, isGenerationActive }) => {
     const args = validateMemoryToolArguments('memory.save', raw);
-    if (containsCredentialMaterial(`${args.title}\n${args.body}`)) {
+    if (containsCredentialMaterial(`${args.title}: ${args.body}`)) {
       throw new Error('Credential material cannot be stored in durable memory.');
     }
     const boundConversationId = requiredIdentity(conversationId, 'conversation provenance');

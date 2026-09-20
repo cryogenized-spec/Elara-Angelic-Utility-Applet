@@ -214,7 +214,6 @@ describe('companion memory behavior preferences', () => {
       },
     });
 
-    expect(value.enabled).toBe(DEFAULT_MEMORY_BEHAVIOR.enabled);
     expect(value.rememberingStyle).toBe(DEFAULT_MEMORY_BEHAVIOR.rememberingStyle);
     expect(value.recallStyle).toBe(DEFAULT_MEMORY_BEHAVIOR.recallStyle);
     expect(value.enabled).toBe(false);

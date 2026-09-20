@@ -98,6 +98,7 @@ Organic formation is downstream of conversation durability. `generation-sync.ts`
 | Provenance presentation | `src/memory/provenance.ts` |
 | Portable archive boundary | `src/memory/archive.ts` |
 | Human Memory Bank | `src/app/components/DurableMemorySettings.tsx`, `durable-memory-settings.css` |
+| Companion memory behavior preferences | `src/domain/preferences.ts`, `src/persistence/preferences.ts` |
 | Browser acceptance | `e2e/memory-bank.spec.ts`, `e2e/memory-chat.spec.ts` |
 | Final hostile matrix | `src/memory/adversarial-certification.test.ts` plus owning subsystem tests |
 
@@ -106,6 +107,25 @@ Organic formation is downstream of conversation durability. `generation-sync.ts`
 Kinds are `CORE`, `CONTEXTUAL`, `EPISODIC`, `MICRO_OBSERVATION`. Lifecycles are `active`, `dormant`, `archived`. Provenance sources are `user`, `elara`, `import`, `migration`.
 
 A durable record carries title/body, confidence, importance, timestamps, tags, relationship evidence, supersession links, reinforcement count, folder scope, expiry, recall telemetry, optional landmark state (`pinned`) and explicit `autonomyContext` consent.
+
+### 4.1 Companion memory behavior preferences
+
+Companion memory behavior is preference policy over the existing memory subsystem, not another memory authority. The canonical preference record is `memory-behavior` in the existing `elara-preferences` database.
+
+The preference contract contains:
+
+- master `enabled` state for conversational memory behavior;
+- remembering style: `explicit-only | selective | natural | attentive`;
+- recall style: `direct-only | natural | proactive`;
+- per-category automatic-memory permissions for everyday companion context.
+
+Everyday categories default on for personal facts, likes/dislikes, people/relationships, pets, routines/daily life, goals/plans/commitments, interests/hobbies/projects, work/study/practical life, important/shared moments, feelings/vulnerabilities/reflections, and values/worldview.
+
+Sensitive automatic-memory categories default off: health/wellbeing, money/finances, intimacy/sexuality, religion/spirituality, politics/civics, and precise location/home. Credential material remains outside this preference surface entirely and is never made eligible for organic memory.
+
+Category permission governs future automatic/organic formation policy. Explicit, user-directed durable memory remains a separate confirmed authority boundary. Disabling conversational memory must not delete Memory Bank records or create a shadow copy.
+
+**Pass 1 scope:** this preference contract is persisted and normalized now so later passes can consume one stable authority. Existing recall/observer runtime behavior is intentionally unchanged in this pass; runtime policy integration and user-facing controls are subsequent passes.
 
 Promotion order is:
 

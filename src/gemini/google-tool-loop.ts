@@ -170,8 +170,8 @@ function stableToolArgumentValue(value: unknown): unknown {
   return Object.fromEntries(Object.keys(source).sort().map((key) => [key, stableToolArgumentValue(source[key])]));
 }
 
-function readFingerprint(call: PendingToolCall, mutationEpoch: number): string {
-  return `${mutationEpoch}:${call.name}:${JSON.stringify(stableToolArgumentValue(call.arguments))}`;
+function readFingerprint(call: PendingToolCall): string {
+  return `${call.name}:${JSON.stringify(stableToolArgumentValue(call.arguments))}`;
 }
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
@@ -230,8 +230,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   const seenInteractions = new Set<string>();
   const usageInteractions = new Set<string>();
   const checkpointEntries: ToolLoopCheckpointEntry[] = [];
-  const successfulReadFingerprints = new Set<string>();
-  let mutationEpoch = 0;
+  const successfulReadEpoch = new Map<string, number>();
+  let evidenceEpoch = 0;
   let latestInteractionId = '';
   let softBudgetNoted = false;
 
@@ -378,8 +378,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     if (immediateCalls.length > 0) {
       yield { type: 'interaction-status', interactionId, status: 'executing_tools' };
       for (const call of immediateCalls) {
-        const fingerprint = readFingerprint(call, mutationEpoch);
-        if (successfulReadFingerprints.has(fingerprint)) {
+        const fingerprint = readFingerprint(call);
+        if (successfulReadEpoch.get(fingerprint) === evidenceEpoch) {
           results.push(errorToolResult(call, 'DUPLICATE_READ_SKIPPED'));
           continue;
         }
@@ -418,7 +418,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         }
         if (result.ok) {
           results.push({ callId: call.callId, name: call.name, result: result.result });
-          successfulReadFingerprints.add(fingerprint);
+          evidenceEpoch += 1;
+          successfulReadEpoch.set(fingerprint, evidenceEpoch);
           if (isUntrustedExternalReadTool(call.name) || containsUntrustedExternal(result.result)) untrustedExternalSeen = true;
           const created = artifactEvent(call.name, result.result);
           if (created) yield created;
@@ -477,8 +478,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       }
       if (result.ok) {
         results.push({ callId: entry.call.callId, name: entry.call.name, result: result.result });
-        mutationEpoch += 1;
-        successfulReadFingerprints.clear();
+        evidenceEpoch += 1;
         const created = artifactEvent(entry.call.name, result.result);
         if (created) yield created;
         const media = mediaEvent(result.result);

@@ -186,15 +186,21 @@ describe('Gemini provider stream fidelity', () => {
     });
   });
 
-  it('treats requires_action completion as a status update, not a terminal event', async () => {
+  it('emits provider usage before the requires_action status and does not emit terminal completion', async () => {
     const collected = await collect([
       { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },
-      { event_type: 'interaction.completed', interaction: { id: 'interaction-1', status: 'requires_action' } },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-1', status: 'requires_action', usage: { total_input_tokens: 42_000, total_cached_tokens: 31_000, total_output_tokens: 900, total_tokens: 42_900 } } },
     ]);
-    expect(collected.at(-1)).toMatchObject({
-      type: 'interaction-status',
+    const usageIndex = collected.findIndex((event) => (event as { type: string }).type === 'interaction-usage');
+    const statusIndex = collected.findIndex((event) => (event as { type: string }).type === 'interaction-status' && (event as { status?: string }).status === 'requires_action');
+    expect(usageIndex).toBeGreaterThanOrEqual(0);
+    expect(statusIndex).toBeGreaterThan(usageIndex);
+    expect(collected[usageIndex]).toMatchObject({
+      type: 'interaction-usage',
       interactionId: 'interaction-1',
       status: 'requires_action',
+      source: 'provider',
+      usage: { inputTokens: 42_000, cachedTokens: 31_000, outputTokens: 900, totalTokens: 42_900 },
     });
     expect(collected.some((event) => (event as { type: string }).type === 'completed')).toBe(false);
   });
@@ -221,6 +227,13 @@ describe('Gemini provider stream fidelity', () => {
     ]);
     const deltas = collected.filter((event) => (event as { type: string }).type === 'thought-summary-delta');
     expect(deltas).toHaveLength(2);
+    expect(collected).toContainEqual(expect.objectContaining({
+      type: 'interaction-usage',
+      interactionId: 'interaction-1',
+      status: 'completed',
+      source: 'provider',
+      usage: { inputTokens: 12, outputTokens: 4 },
+    }));
     expect(collected.at(-1)).toMatchObject({
       type: 'completed',
       usage: { inputTokens: 12, outputTokens: 4, thoughtSummary: 'First thought. Second thought.' },

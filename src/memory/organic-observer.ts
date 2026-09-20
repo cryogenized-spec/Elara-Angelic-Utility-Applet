@@ -97,10 +97,13 @@ const BARE_CREDENTIAL_PATTERNS = [
 ] as const;
 
 function looksLikeCredential(evidence: string): boolean {
-  return /\b(?:password|passcode|pin|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token)\b\s*(?:is|=|:)\s*\S+/i.test(evidence)
+  const compact = evidence.trim();
+  const highSignalBarePrefix = /^(?:AKIA|ASIA|AIza|gh[pousr]_|xox[baprs]-|eyJ)/i.test(compact);
+  return highSignalBarePrefix
+    || /\b(?:password|passcode|pin|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token)\b\s*(?:is|=|:)\s*\S+/i.test(evidence)
     || /\bBearer\s+[A-Za-z0-9._~+/-]{12,}/i.test(evidence)
     || /\bsk-[A-Za-z0-9_-]{16,}\b/.test(evidence)
-    || BARE_CREDENTIAL_PATTERNS.some((pattern) => pattern.test(evidence))
+    || BARE_CREDENTIAL_PATTERNS.some((pattern) => pattern.test(compact))
     || /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(evidence)
     || containsLuhnValidCardNumber(evidence);
 }

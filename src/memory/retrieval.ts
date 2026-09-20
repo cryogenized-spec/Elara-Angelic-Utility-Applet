@@ -1,3 +1,4 @@
+import { SENSITIVE_MEMORY_CATEGORY_KEYS } from '../domain/preferences';
 import type { FolderState } from '../persistence/folders';
 import type { DurableMemory, MemoryRetrievalMode, MemoryRetrievalScope, RetrievedMemory } from './types';
 
@@ -13,10 +14,10 @@ const KIND_WEIGHT: Record<DurableMemory['kind'], number> = {
 };
 
 const QUERY_STOPWORDS = new Set([
-  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'been', 'being', 'but', 'by',
-  'did', 'do', 'does', 'for', 'from', 'had', 'has', 'have', 'how', 'i', 'if',
-  'in', 'is', 'it', 'its', 'me', 'memory', 'memories', 'my', 'of', 'on', 'or',
-  'our', 'ours', 'recall', 'remember', 'remembered', 'said', 'that', 'the',
+  'a', 'about', 'an', 'and', 'anything', 'are', 'as', 'at', 'be', 'been', 'being', 'but', 'by',
+  'can', 'could', 'did', 'do', 'does', 'for', 'from', 'had', 'has', 'have', 'how', 'i', 'if',
+  'in', 'is', 'it', 'its', 'know', 'known', 'me', 'memory', 'memories', 'my', 'of', 'on', 'or',
+  'our', 'ours', 'please', 'recall', 'remember', 'remembered', 'said', 'say', 'something', 'that', 'the',
   'their', 'them', 'then', 'these', 'they', 'this', 'to', 'told', 'was', 'we',
   'were', 'what', 'when', 'where', 'who', 'why', 'with', 'you', 'your', 'yours',
 ]);
@@ -102,13 +103,21 @@ export function isMemoryRetrievable(memory: DurableMemory, scope: MemoryRetrieva
 }
 
 function effectiveRetrievalMode(scope: MemoryRetrievalScope, query: string): MemoryRetrievalMode {
-  return scope.mode ?? (query ? 'relevant' : 'unfiltered');
+  if (scope.mode) return scope.mode;
+  return queryTokens(query).length > 0 ? 'relevant' : 'unfiltered';
+}
+
+const SENSITIVE_CATEGORY_TAGS = new Set(SENSITIVE_MEMORY_CATEGORY_KEYS.map((category) => `category:${category}`));
+
+function carriesSensitiveCategory(memory: DurableMemory): boolean {
+  return memory.tags.some((tag) => SENSITIVE_CATEGORY_TAGS.has(tag));
 }
 
 export function isContinuityAnchor(memory: DurableMemory): boolean {
   if (memory.lifecycle !== 'active') return false;
   if (memory.kind === 'MICRO_OBSERVATION') return false;
   if (memory.conflictingMemoryIds.length > 0) return false;
+  if (carriesSensitiveCategory(memory)) return false;
   if (memory.pinned === true) return true;
   if (memory.kind === 'CORE') return true;
   return memory.kind === 'CONTEXTUAL' && memory.importance >= 0.8 && memory.confidence >= 0.8;

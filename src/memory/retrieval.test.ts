@@ -59,6 +59,15 @@ describe('canonical memory retrieval engine', () => {
       .toEqual(['mother']);
   });
 
+  it('keeps a broad deliberate memory query available when it contains no substantive search terms', () => {
+    const result = rankAndBudgetMemories([
+      makeMemory({ id: 'a', title: 'Pet', body: 'The user has a cat named Piesang.' }),
+      makeMemory({ id: 'b', title: 'Routine', body: 'The user likes quiet mornings.' }),
+    ], { query: 'what do you remember about me', includeGlobal: true });
+
+    expect(result.map((memory) => memory.id).sort()).toEqual(['a', 'b']);
+  });
+
   it('keeps query-less ranking unfiltered for explicit non-conversational ranking authorities', () => {
     const result = rankAndBudgetMemories([
       makeMemory({ id: 'important', importance: 1, confidence: 1 }),
@@ -110,6 +119,8 @@ describe('canonical memory retrieval engine', () => {
     expect(isContinuityAnchor(makeMemory({ kind: 'MICRO_OBSERVATION', pinned: true }))).toBe(false);
     expect(isContinuityAnchor(makeMemory({ kind: 'CORE', lifecycle: 'dormant' }))).toBe(false);
     expect(isContinuityAnchor(makeMemory({ kind: 'CORE', conflictingMemoryIds: ['x'] }))).toBe(false);
+    expect(isContinuityAnchor(makeMemory({ kind: 'CORE', tags: ['category:health_wellbeing'] }))).toBe(false);
+    expect(isContinuityAnchor(makeMemory({ kind: 'CORE', tags: ['category:money_finances'], pinned: true }))).toBe(false);
   });
 
   it('uses reinforcement and importance as bounded secondary relevance signals', () => {

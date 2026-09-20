@@ -236,6 +236,20 @@ export async function saveMemoryBehaviorPreferences(value: MemoryBehaviorPrefere
   });
 }
 
+export async function updateMemoryBehaviorPreferences(
+  update: (current: MemoryBehaviorPreferences) => MemoryBehaviorPreferences,
+): Promise<MemoryBehaviorPreferences> {
+  return withMemoryBehaviorPolicyLock('exclusive', async () => db.transaction('rw', db.preferences, async () => {
+    const record = await db.preferences.get('memory-behavior');
+    const current = record?.id === 'memory-behavior'
+      ? normalizeMemoryBehaviorPreferences(record.value)
+      : normalizeMemoryBehaviorPreferences(DEFAULT_MEMORY_BEHAVIOR);
+    const nextValue = normalizeMemoryBehaviorPreferences(update(current));
+    await db.preferences.put({ id: 'memory-behavior', value: nextValue, updatedAt: Date.now() });
+    return nextValue;
+  }));
+}
+
 export function normalizeAutonomy(value: Partial<AutonomyPreferences> | null | undefined): AutonomyPreferences {
   const merged = { ...DEFAULT_AUTONOMY, ...(value ?? {}) };
   const cap = Number.isFinite(merged.maxEventsPerDay) ? Math.round(merged.maxEventsPerDay) : DEFAULT_AUTONOMY.maxEventsPerDay;

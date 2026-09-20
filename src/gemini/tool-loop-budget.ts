@@ -74,9 +74,11 @@ export function decideToolLoopBudget(snapshot: ToolLoopBudgetSnapshot, policy: T
 
 const SECRET_KEY = /(authorization|cookie|password|passwd|secret|token|api.?key|credential)/i;
 const PRIORITY_KEYS = [
-  'id', 'name', 'title', 'subject', 'snippet', 'summary', 'status', 'count', 'total',
-  'threadId', 'messageId', 'taskListId', 'taskId', 'scheduledDate', 'modifiedTime',
-  'createdTime', 'webViewLink', 'nextPageToken', 'trust', 'source',
+  'ok', 'error', 'code', 'id', 'name', 'title', 'subject', 'snippet', 'summary', 'status',
+  'count', 'total', 'threadId', 'messageId', 'taskListId', 'taskId', 'scheduledDate',
+  'modifiedTime', 'createdTime', 'webViewLink', 'nextPageToken', 'trust', 'source',
+  // Bounded result collections: their children are projected recursively.
+  'files', 'messages', 'threads', 'tasks', 'taskLists', 'events', 'items', 'values',
 ];
 
 function boundedString(value: string, max = 240): string {
@@ -93,10 +95,7 @@ function projectValue(value: unknown, depth = 0): unknown {
 
   const source = value as Record<string, unknown>;
   const keys = Object.keys(source).filter((key) => !SECRET_KEY.test(key));
-  const prioritized = [
-    ...PRIORITY_KEYS.filter((key) => keys.includes(key)),
-    ...keys.filter((key) => !PRIORITY_KEYS.includes(key)),
-  ].slice(0, 8);
+  const prioritized = PRIORITY_KEYS.filter((key) => keys.includes(key)).slice(0, 10);
 
   const projected: Record<string, unknown> = {};
   for (const key of prioritized) {
@@ -109,7 +108,10 @@ function projectValue(value: unknown, depth = 0): unknown {
 function boundedJson(value: unknown, maxChars: number): string {
   const json = JSON.stringify(projectValue(value));
   if (!json) return '{}';
-  return json.length > maxChars ? `${json.slice(0, maxChars)}…` : json;
+  if (json.length <= maxChars) return json;
+  const previewLength = Math.max(0, Math.floor(maxChars * 0.55));
+  const bounded = JSON.stringify({ truncated: true, preview: json.slice(0, previewLength) });
+  return bounded.length <= maxChars ? bounded : JSON.stringify({ truncated: true });
 }
 
 export interface ToolLoopCheckpointEntry {

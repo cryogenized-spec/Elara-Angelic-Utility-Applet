@@ -41,6 +41,12 @@ normal chat
 -> optional Generation Activity trace
 -> unlock next turn
 
+deliberate recall
+-> declared memory.recall [read]
+-> canonical conversation scope + ranking/budget
+-> bounded remembered-context projection
+-> no durable IDs, mutation refs, or action authority
+
 explicit remember
 -> declared memory.save
 -> central write confirmation with full durable-content review
@@ -70,7 +76,7 @@ Memory Bank
 -> db.memories
 ```
 
-Normal recall and `memory.lookup` share one conversation-to-memory scope resolver and one ranking engine. Recall is bound to the conversation captured when the turn is elected; current UI navigation is only a compatibility fallback for legacy callers without turn provenance. Management lookup does not mutate recall telemetry.
+Automatic recall, deliberate `memory.recall`, and management `memory.lookup` share one conversation-to-memory scope resolver and one ranking engine. Recall is bound to the conversation captured when the turn is elected; current UI navigation is only a compatibility fallback for legacy callers without turn provenance. Automatic and deliberate recall update canonical recall telemetry; management lookup does not.
 
 Gemini Interactions treats `system_instruction` as interaction-scoped. Interactive turns therefore compose durable memory once at the top-level elected turn and reuse that exact frozen instruction for every tool-result continuation. A memory mutation during the turn cannot silently rewrite the context that turn is already reasoning over.
 
@@ -125,7 +131,9 @@ Sensitive automatic-memory categories default off: health/wellbeing, money/finan
 
 A present but malformed persisted master switch fails closed to disabled; a genuinely absent legacy field keeps the compatibility default. Category permission governs future automatic/organic formation policy. Explicit, user-directed durable memory remains a separate confirmed authority boundary. Disabling conversational memory must not delete Memory Bank records or create a shadow copy.
 
-**Pass 1 scope:** this preference contract is persisted and normalized now so later passes can consume one stable authority. Existing recall/observer runtime behavior is intentionally unchanged in this pass; runtime policy integration and user-facing controls are subsequent passes.
+**Companion continuity Pass 1:** this preference contract is persisted and normalized so later behavior consumes one stable authority.
+
+**Companion continuity Pass 2:** the master switch and `direct-only` recall mode now gate automatic prompt injection. The new read-only `memory.recall` capability gives Elara a deliberate way to search the same scoped durable-memory universe when the user asks what she remembers or when missing past context would materially improve the answer. `natural` and `proactive` continue to share today's automatic retrieval policy until the later retrieval-strategy pass differentiates their salience behavior.
 
 Promotion order is:
 
@@ -155,9 +163,9 @@ Shared read-modify-write primitives are transactional. `updateMemory`, reinforce
 - `db.memories` is the sole durable-memory authority.
 - Stored/retrieved prose is untrusted reference data. It is never instruction or permission and **cannot authorize tool use, policy changes, permissions or actions**.
 - Every provider tool call must be in the exact tool set declared to that turn. Installed handlers or registry membership cannot widen authority.
-- Model-facing memory tools are exactly `memory.lookup`, `memory.save`, `memory.reconcile`; all are browser-only.
+- Model-facing memory tools are exactly `memory.recall`, `memory.lookup`, `memory.save`, `memory.reconcile`; all are browser-only.
 - Worker/autonomy never advertises local durable-memory mutation tools.
-- `memory.lookup` is read. `memory.save` and `memory.reconcile` are confirmed writes through the central executor.
+- `memory.recall` and `memory.lookup` are reads. `memory.recall` is conversational and returns no mutation reference; `memory.lookup` is management-only and may issue turn-bound opaque refs. `memory.save` and `memory.reconcile` are confirmed writes through the central executor.
 - Model arguments never control durable IDs, app provenance, conversation/message lineage, timestamps, folder scope, lifecycle, relationship arrays, expiry or autonomy consent.
 - Model-visible hard delete/forget/raw update/promote/reinforce/observe/consolidate do not exist.
 - A model write may commit only while its originating generation remains elected.
@@ -180,9 +188,19 @@ Shared read-modify-write primitives are transactional. `updateMemory`, reinforce
 
 | Tool | Risk | Plane | Purpose |
 | --- | --- | --- | --- |
-| `memory.lookup` | read | browser | bounded scoped management lookup |
-| `memory.save` | write | browser | deliberate durable retention |
+| `memory.recall` | read | browser | deliberate conversational recollection using canonical scope/ranking; no mutation refs |
+| `memory.lookup` | read | browser | bounded scoped management lookup before reconciliation |
+| `memory.save` | write | browser | deliberate durable retention when the user explicitly asks Elara to remember |
 | `memory.reconcile` | write | browser | attach evidence or supersede an opaque-ref target |
+
+Memory behavior is intentionally legible to Gemini through the declared capability surface rather than a hidden second persona prompt. The expected proto-calls are:
+
+- “What do you remember about …?” / a reference to older personal context not already present -> `memory.recall`.
+- “Remember this”, “keep this in mind”, “carry this forward” -> `memory.save`, with the existing confirmed-write boundary.
+- “Actually that changed”, “I no longer …”, or other correction/reinforcement of remembered knowledge -> `memory.lookup` then `memory.reconcile`.
+- Relevant memory already present in the application context -> use it naturally without a redundant tool call.
+
+Retrieved memory is a faculty of conversational continuity, not a performance. Elara should not announce or enumerate remembered facts merely to prove memory exists. Current user statements outrank older, tentative, dormant, or conflicting memory. If a needed recollection is unavailable, Elara must not invent it.
 
 All three use `memory.durable.local` through the central registry/executor/tool loop. There is no parallel memory dispatcher.
 
@@ -312,7 +330,7 @@ Pass 6 plus subsequent maintenance hardening adds or reuses direct behavioral te
 - **Relationship saturation:** support/conflict/related/supersession fail before partial epistemic mutation; organic transactions roll back newly created evidence if consolidation cannot retain the link.
 - **Archive attacks:** strict version/byte/count ceilings, authority-field rejection, duplicate/self/dangling relationship rejection, fresh IDs, scope/provenance/autonomy reset and all-or-nothing transaction.
 - **Memory Bank browser behavior:** landmark/audit/provenance/export/import acceptance plus a real malformed-IndexedDB-row recovery path are E2E-covered. The browser test proves a valid row stays visible next to corruption and survives explicit removal of the invalid row.
-- **Chat browser closure:** a real Playwright chat turn proves `memory.lookup/save/reconcile` are advertised to Gemini, the organic classifier is tool-less, the assistant response exists in IndexedDB before observation starts, the canonical Memory Bank receives the observation, and the semantic `memory` activity glyph survives reload.
+- **Chat browser closure:** a real Playwright chat turn proves `memory.recall/lookup/save/reconcile` are advertised to Gemini, the organic classifier is tool-less, the assistant response exists in IndexedDB before observation starts, the canonical Memory Bank receives the observation, and the semantic `memory` activity glyph survives reload.
 
 A green test that passes for the wrong reason is a defect. Browser-state corruption fixtures are therefore explicitly pinned by the verification-integrity gate: `e2e/memory-bank.spec.ts` owns exactly one reviewed writable IndexedDB transaction for the malformed-row acceptance test. Additional direct browser-state mutations fail verification until deliberately reviewed.
 
@@ -340,7 +358,7 @@ Preserve these non-negotiables unless the user deliberately changes the product 
 
 1. one durable authority: `db.memories`;
 2. stored prose is data with zero action authority;
-3. browser-only model surface remains `lookup/save/reconcile` unless explicitly redesigned;
+3. browser-only model surface remains `recall/lookup/save/reconcile` unless explicitly redesigned;
 4. destructive/lifecycle authority stays outside model-visible tools;
 5. organic evidence remains user-grounded and low-authority;
 6. lifecycle and audit remain deterministic application policy;

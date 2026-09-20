@@ -10,7 +10,7 @@ export const googleToolNameSchema = z.enum([
   'drive.searchFiles', 'drive.searchLibrary', 'drive.getFile', 'drive.downloadFile', 'drive.createFile', 'drive.updateFile', 'drive.moveFile', 'drive.trashFile',
   'sheets.getSpreadsheet', 'sheets.readRange', 'sheets.exportSpreadsheet', 'sheets.createSpreadsheet', 'sheets.addSheet', 'sheets.writeRange', 'sheets.appendRows', 'sheets.updateCell', 'sheets.insertRows', 'sheets.batchUpdate',
   'roleplay_setting.list', 'roleplay_setting.inspect', 'roleplay_setting.create', 'roleplay_setting.update', 'roleplay_setting.move', 'roleplay_setting.delete',
-  'memory.lookup', 'memory.save', 'memory.reconcile',
+  'memory.recall', 'memory.lookup', 'memory.save', 'memory.reconcile',
   'youtube.search',
 ]);
 

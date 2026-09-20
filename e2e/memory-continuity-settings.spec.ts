@@ -24,7 +24,7 @@ test('Memory continuity preferences persist through the real Settings flow', asy
 
   await pets.uncheck();
   await health.check();
-  await expect(page.getByRole('status')).toContainText(/Memory preferences saved|Changes save automatically/);
+  await expect(page.locator('.memory-continuity-settings').getByRole('status')).toContainText('Memory preferences saved.');
 
   await page.reload();
   await page.getByRole('button', { name: 'Open sidebar' }).click();
@@ -49,6 +49,7 @@ test('Memory master switch disables automatic controls without deleting their ch
   await expect(page.getByText(/Automatic recall and organic learning are off/)).toBeVisible();
   await expect(page.getByRole('radio', { name: /Selective/ })).toBeDisabled();
   await expect(page.getByLabel(/Likes & dislikes/)).toBeDisabled();
+  await expect(page.locator('.memory-continuity-settings').getByRole('status')).toContainText('Memory preferences saved.');
 
   await page.reload();
   await page.getByRole('button', { name: 'Open sidebar' }).click();

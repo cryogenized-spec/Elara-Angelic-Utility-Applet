@@ -114,7 +114,7 @@ test('Memory Bank landmarks and audit stay on the canonical store', async ({ pag
   await page.getByLabel('Filter').selectOption('all');
 
   await page.getByRole('button', { name: 'Audit Memory Bank' }).click();
-  await expect(page.getByRole('status')).toContainText('Reviewed 2 memories. No changes were made.');
+  await expect(page.locator('.memory-panel__status')).toContainText('Reviewed 2 memories. No changes were made.');
   await expect(page.getByLabel('Memory maintenance summary')).toContainText('1 duplicate group');
   await expect(page.getByText('Exact duplicate review')).toBeVisible();
 
@@ -151,12 +151,12 @@ test('Memory Bank exports locally and imports through the guarded archive bounda
   const download = await downloadPromise;
   const path = await download.path();
   expect(path).not.toBeNull();
-  await expect(page.getByRole('status')).toContainText('Exported 1 memories');
+  await expect(page.locator('.memory-panel__status')).toContainText('Exported 1 memories');
 
   await page.locator('input.memory-archive__file').setInputFiles(path!);
   await expect(page.getByText(/1 memories · 0 CORE records will restart as CONTEXTUAL/)).toBeVisible();
   await page.getByRole('button', { name: 'Import 1' }).click();
-  await expect(page.getByRole('status')).toContainText('Imported 1 memories');
+  await expect(page.locator('.memory-panel__status')).toContainText('Imported 1 memories');
   await expect(page.getByText(/2 valid · 2 stored · canonical store/)).toBeVisible();
 
   await page.getByLabel('Filter').selectOption('provenance:imported');

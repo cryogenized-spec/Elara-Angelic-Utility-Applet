@@ -196,7 +196,10 @@ export async function reserveGeminiQuota(
       }
 
       const id = crypto.randomUUID();
-      const nextEntries = [...entries, { id, startedAt: now, reservedInputTokens: reserve }].slice(-64);
+      // Keep every still-active reservation/observation. Count-based eviction
+      // would undercount a burst of many small finalized interactions before
+      // their 60-second TPM window has actually expired.
+      const nextEntries = [...entries, { id, startedAt: now, reservedInputTokens: reserve }];
       const next: StoredGeminiQuotaLedger = { id: LEDGER_ID, entries: nextEntries, updatedAt: now };
       await db.settings.put(next);
       result = { granted: true, id, startedAt: now, reservedInputTokens: reserve, rollingInputTokens: projectedInputTokens };

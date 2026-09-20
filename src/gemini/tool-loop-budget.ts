@@ -34,6 +34,19 @@ export interface ToolLoopBudgetSnapshot {
 
 export type ToolLoopBudgetDecision = 'continue' | 'compact' | 'terminal-synthesis' | 'local-fallback';
 
+export interface ToolLoopRequestEstimates {
+  /** Serialized current-interaction payload added on top of inherited history. */
+  readonly continuationInputTokens?: number;
+  /** Complete fresh compacted request, including system instruction and tools. */
+  readonly compactInputTokens?: number;
+  /** Complete fresh no-tools terminal synthesis request. */
+  readonly terminalInputTokens?: number;
+}
+
+function safeEstimate(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? Math.ceil(value) : 0;
+}
+
 export function addGrossUsage(snapshot: ToolLoopBudgetSnapshot, usage: GeminiUsage | undefined): ToolLoopBudgetSnapshot {
   const input = usage?.inputTokens;
   if (input === undefined || !Number.isFinite(input) || input < 0) return snapshot;
@@ -44,24 +57,37 @@ export function addGrossUsage(snapshot: ToolLoopBudgetSnapshot, usage: GeminiUsa
   };
 }
 
-export function projectedNextGross(snapshot: ToolLoopBudgetSnapshot, policy: ToolLoopBudgetPolicy): number {
-  const reserve = Math.max(snapshot.lastGrossInputTokens, policy.minNextInteractionReserve);
-  return snapshot.cumulativeGrossInputTokens + reserve;
+export function projectedNextGross(
+  snapshot: ToolLoopBudgetSnapshot,
+  policy: ToolLoopBudgetPolicy,
+  continuationInputTokens?: number,
+): number {
+  // Server-managed continuation context is at least as large as the latest
+  // measured interaction. Add the serialized pending continuation payload on
+  // top so large tool results cannot hide behind a history-only heuristic.
+  const inherited = Math.max(snapshot.lastGrossInputTokens, policy.minNextInteractionReserve);
+  return snapshot.cumulativeGrossInputTokens + inherited + safeEstimate(continuationInputTokens);
 }
 
-export function decideToolLoopBudget(snapshot: ToolLoopBudgetSnapshot, policy: ToolLoopBudgetPolicy): ToolLoopBudgetDecision {
+export function decideToolLoopBudget(
+  snapshot: ToolLoopBudgetSnapshot,
+  policy: ToolLoopBudgetPolicy,
+  estimates: ToolLoopRequestEstimates = {},
+): ToolLoopBudgetDecision {
   if (snapshot.cumulativeGrossInputTokens >= policy.hardGrossInputTokens || snapshot.interactions >= policy.maxModelInteractions) {
     return 'local-fallback';
   }
 
-  const nextGross = projectedNextGross(snapshot, policy);
-  const terminalFits = snapshot.cumulativeGrossInputTokens + policy.terminalSynthesisReserve <= policy.hardGrossInputTokens;
+  const nextGross = projectedNextGross(snapshot, policy, estimates.continuationInputTokens);
+  const compactReserve = Math.max(policy.minNextInteractionReserve, safeEstimate(estimates.compactInputTokens));
+  const terminalReserve = Math.max(policy.terminalSynthesisReserve, safeEstimate(estimates.terminalInputTokens));
+  const terminalFits = snapshot.cumulativeGrossInputTokens + terminalReserve <= policy.hardGrossInputTokens;
   const wantsCompaction = snapshot.cumulativeGrossInputTokens >= policy.compactGrossInputTokens
     || snapshot.interactions >= policy.compactAfterInteractions
     || nextGross > policy.hardGrossInputTokens;
 
   if (snapshot.compactions < policy.maxCompactions && wantsCompaction) {
-    const compactProjected = snapshot.cumulativeGrossInputTokens + policy.minNextInteractionReserve;
+    const compactProjected = snapshot.cumulativeGrossInputTokens + compactReserve;
     if (compactProjected <= policy.hardGrossInputTokens) return 'compact';
     return terminalFits ? 'terminal-synthesis' : 'local-fallback';
   }

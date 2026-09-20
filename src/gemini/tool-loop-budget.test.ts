@@ -35,6 +35,28 @@ describe('Gemini tool-loop TPM budget', () => {
     expect(decideToolLoopBudget(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY)).toBe('compact');
   });
 
+  it('uses terminal synthesis instead of first compaction when only the smaller terminal reserve still fits', () => {
+    const snapshot = {
+      ...base,
+      cumulativeGrossInputTokens: 137_000,
+      lastGrossInputTokens: 30_000,
+      interactions: 3,
+      compactions: 0,
+    };
+    expect(decideToolLoopBudget(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY)).toBe('terminal-synthesis');
+  });
+
+  it('falls back locally when neither first compaction nor terminal synthesis can fit the hard ceiling', () => {
+    const snapshot = {
+      ...base,
+      cumulativeGrossInputTokens: 140_000,
+      lastGrossInputTokens: 30_000,
+      interactions: 3,
+      compactions: 0,
+    };
+    expect(decideToolLoopBudget(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY)).toBe('local-fallback');
+  });
+
   it('uses terminal synthesis after the one compaction when the old-chain projection would cross hard budget', () => {
     const snapshot = {
       ...base,

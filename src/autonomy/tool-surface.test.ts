@@ -24,13 +24,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 //   network edge mocked).
 // ---------------------------------------------------------------------------
 
-const { streamReply, streamToolResult } = vi.hoisted(() => ({
+const { streamReply, streamToolResult, estimateTurn, estimateContinuation } = vi.hoisted(() => ({
   streamReply: vi.fn(),
   streamToolResult: vi.fn(),
+  estimateTurn: vi.fn(() => 0),
+  estimateContinuation: vi.fn(() => 0),
 }));
 
 vi.mock('../gemini/provider', () => ({
   geminiTurnPort: { streamReply, streamToolResult },
+  estimateGeminiTurnRequestInputTokens: estimateTurn,
+  estimateGeminiToolContinuationInputTokens: estimateContinuation,
 }));
 
 import { routineEngine, routineToolSet } from './runner';

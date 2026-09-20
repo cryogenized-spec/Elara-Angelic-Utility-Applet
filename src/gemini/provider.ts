@@ -198,7 +198,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         interactionId: interactionId ?? requestId,
         status,
         source: 'provider',
-        usage: providerUsage,
+        usage: { ...providerUsage, inputTokens: grossInput },
       };
     }
     return estimatedUsageEvent(status, providerUsage);

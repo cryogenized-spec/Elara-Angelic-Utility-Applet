@@ -324,8 +324,9 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           }
           sawTerminalEvent = true;
           const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts);
-          const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined);
-          if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
+          const completedUsage = usage
+            ? { ...usage, ...(thoughtSummary ? { thoughtSummary } : {}) }
+            : (thoughtSummary ? { thoughtSummary } : undefined);
           yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage };
           return;
         }

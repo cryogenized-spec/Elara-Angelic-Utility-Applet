@@ -161,6 +161,19 @@ describe('memory tool handlers', () => {
     expect((await getMemory(unrelated.id))?.recallCount).toBe(0);
   });
 
+  it('supports a bounded broad deliberate recall request without requiring a topical keyword', async () => {
+    await addFolder('folder_1', null);
+    await assignThread('folder_1');
+    await saveMemory({ title: 'Pet', body: 'The user has a cat named Piesang.', folderId: 'folder_1', kind: 'CONTEXTUAL' });
+    await saveMemory({ title: 'Routine', body: 'The user likes quiet mornings.', folderId: 'folder_1', kind: 'CONTEXTUAL' });
+
+    const result = await handlerFor('memory.recall')(contextFor('memory.recall', { query: 'what do you remember about me' })) as {
+      matches: Array<{ title: string }>;
+    };
+
+    expect(result.matches.map((entry) => entry.title).sort()).toEqual(['Pet', 'Routine']);
+  });
+
   it('fails conversational recall closed when the user disables memory behavior', async () => {
     const memoryRecord = await saveMemory({ title: 'Private note', body: 'This should not be conversationally recalled.' });
     await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });

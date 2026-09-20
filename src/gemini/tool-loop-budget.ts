@@ -55,18 +55,19 @@ export function decideToolLoopBudget(snapshot: ToolLoopBudgetSnapshot, policy: T
   }
 
   const nextGross = projectedNextGross(snapshot, policy);
-  if (snapshot.compactions < policy.maxCompactions && (
-    snapshot.cumulativeGrossInputTokens >= policy.compactGrossInputTokens
+  const terminalFits = snapshot.cumulativeGrossInputTokens + policy.terminalSynthesisReserve <= policy.hardGrossInputTokens;
+  const wantsCompaction = snapshot.cumulativeGrossInputTokens >= policy.compactGrossInputTokens
     || snapshot.interactions >= policy.compactAfterInteractions
-    || nextGross > policy.hardGrossInputTokens
-  )) {
-    return 'compact';
+    || nextGross > policy.hardGrossInputTokens;
+
+  if (snapshot.compactions < policy.maxCompactions && wantsCompaction) {
+    const compactProjected = snapshot.cumulativeGrossInputTokens + policy.minNextInteractionReserve;
+    if (compactProjected <= policy.hardGrossInputTokens) return 'compact';
+    return terminalFits ? 'terminal-synthesis' : 'local-fallback';
   }
 
-  if (snapshot.compactions >= policy.maxCompactions && nextGross > policy.hardGrossInputTokens) {
-    return snapshot.cumulativeGrossInputTokens + policy.terminalSynthesisReserve <= policy.hardGrossInputTokens
-      ? 'terminal-synthesis'
-      : 'local-fallback';
+  if (nextGross > policy.hardGrossInputTokens) {
+    return terminalFits ? 'terminal-synthesis' : 'local-fallback';
   }
 
   return 'continue';

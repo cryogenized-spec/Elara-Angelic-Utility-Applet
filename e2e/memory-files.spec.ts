@@ -1,14 +1,22 @@
 import { expect, test, type Page } from '@playwright/test';
 
-async function openMemoryTopics(page: Page): Promise<void> {
+async function gotoMemorySettings(page: Page): Promise<void> {
   await page.goto('');
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Memory' }).click();
-  await expect(page.getByRole('heading', { name: 'Memory topics' })).toBeVisible();
 }
 
-/** Seed one canonical memory plus a derived semantic file grounded in it. */
+async function openMemoryTopics(page: Page): Promise<void> {
+  await gotoMemorySettings(page);
+  await expect(page.getByText('Memory topics', { exact: true })).toBeVisible();
+}
+
+/**
+ * Seed one canonical memory plus a derived semantic file grounded in it.
+ * The page must already be on the Memory settings screen: that guarantees
+ * the app opened its database on this origin before we write the fixture.
+ */
 async function seedGroundedFile(page: Page, title: string, body: string, summary: string): Promise<void> {
   await page.evaluate(async ({ title, body, summary }) => {
     const request = indexedDB.open('elara-angelic-utility-applet');
@@ -70,6 +78,7 @@ async function seedGroundedFile(page: Page, title: string, body: string, summary
 }
 
 test('memory topics shows a grounded summary with its underlying source', async ({ page }) => {
+  await gotoMemorySettings(page);
   await seedGroundedFile(page, 'Project owner', 'Zuhayr is the owner of the project.', 'The owner of the project.');
   await openMemoryTopics(page);
 
@@ -88,6 +97,7 @@ test('memory topics shows a grounded summary with its underlying source', async 
 });
 
 test('removing a summary file preserves the underlying memory in the Memory Bank', async ({ page }) => {
+  await gotoMemorySettings(page);
   await seedGroundedFile(page, 'Project owner', 'Zuhayr is the owner of the project.', 'The owner of the project.');
   await openMemoryTopics(page);
   page.on('dialog', (dialog) => dialog.accept());

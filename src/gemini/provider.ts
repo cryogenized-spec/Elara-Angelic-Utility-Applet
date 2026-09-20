@@ -156,6 +156,47 @@ function buildInteractionPayload(request: InteractionRequest) {
   return payload;
 }
 
+function toolContinuationInput(request: GeminiToolContinuationRequest): unknown[] {
+  const results = request.results ?? (request.result ? [request.result] : []);
+  return results.map((result) => ({
+    type: 'function_result',
+    name: result.name,
+    call_id: result.callId,
+    result: [{ type: 'text', text: JSON.stringify(result.result) }],
+  }));
+}
+
+/**
+ * Estimate the serialized provider request before dispatch. This mirrors the
+ * exact declaration expansion used by the browser provider; fresh checkpoint
+ * calls use it to prove they still fit inside the turn-level hard budget.
+ */
+export function estimateGeminiTurnRequestInputTokens(request: GeminiTurnRequest): number {
+  return estimateSerializedInputTokens(buildInteractionPayload({
+    model: request.model || DEFAULT_GEMINI_MODEL,
+    input: request.input,
+    previousInteractionId: request.previousInteractionId,
+    generationConfig: request.generationConfig,
+    systemInstruction: request.systemInstruction,
+    tools: request.tools,
+  }));
+}
+
+/**
+ * Continuations inherit server-side history, so callers combine this serialized
+ * delta estimate with the previous interaction's measured gross input.
+ */
+export function estimateGeminiToolContinuationInputTokens(request: GeminiToolContinuationRequest): number {
+  return estimateSerializedInputTokens(buildInteractionPayload({
+    model: request.model || DEFAULT_GEMINI_MODEL,
+    input: toolContinuationInput(request),
+    previousInteractionId: request.previousInteractionId,
+    generationConfig: request.generationConfig,
+    systemInstruction: request.systemInstruction,
+    tools: request.tools,
+  }));
+}
+
 async function nextStreamItem(iterator: AsyncIterator<unknown>, signal?: AbortSignal): Promise<IteratorResult<unknown> | 'aborted'> {
   if (!signal || signal.aborted) return signal?.aborted ? 'aborted' : iterator.next();
   let onAbort: (() => void) | undefined;
@@ -406,8 +447,6 @@ export const geminiTurnPort: GeminiTurnPort = {
     return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, attachments: request.attachments, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: request.memoryContext, conversationId: request.conversationId, generationId: request.generationId, isGenerationActive: request.isGenerationActive }, signal);
   },
   streamToolResult(request: GeminiToolContinuationRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
-    const results = request.results ?? (request.result ? [request.result] : []);
-    const input = results.map((result) => ({ type: 'function_result', name: result.name, call_id: result.callId, result: [{ type: 'text', text: JSON.stringify(result.result) }] }));
-    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: 'none' }, signal);
+    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: toolContinuationInput(request), previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: 'none' }, signal);
   },
 };

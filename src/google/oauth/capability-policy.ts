@@ -49,6 +49,17 @@ export const GOOGLE_V1_OPTIONAL_CAPABILITIES = [
   'drive.library.read',
 ] as const satisfies readonly GoogleCapabilityKey[];
 
+/**
+ * Capabilities requested by the Settings "Connect Google Workspace" action.
+ * Google still controls granular consent: this is the complete requested
+ * bundle, while effective authority remains the intersection of the user's
+ * provider grants and these explicitly enabled application capabilities.
+ */
+export const GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES = [
+  ...GOOGLE_V1_CORE_CAPABILITIES,
+  ...GOOGLE_V1_OPTIONAL_CAPABILITIES,
+] as const satisfies readonly GoogleCapabilityKey[];
+
 const FILE_READ_CAPABILITIES = new Set<GoogleCapabilityKey>([
   'docs.read',
   'sheets.read',

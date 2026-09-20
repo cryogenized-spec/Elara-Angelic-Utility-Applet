@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { googleDrivePickerAuthority, googleOAuthAuthority } from '../../google/oauth/authority';
+import { authorizeGoogleWorkspace, googleDrivePickerAuthority, googleOAuthAuthority } from '../../google/oauth/authority';
+import { GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES } from '../../google/oauth/capability-policy';
 import { admitGooglePickerFiles, clearGooglePickerAdmissions, loadGooglePickerAdmissions, revokeGooglePickerFile } from '../../persistence/google-picker-admissions';
 import type { GooglePickerAdmission } from '../../google/picker/contracts';
 import type { GoogleCapabilityKey, GoogleOAuthStatus } from '../../google/oauth/contracts';
@@ -11,7 +12,7 @@ type ServiceDefinition = {
   description: string;
   readCapability: GoogleCapabilityKey;
   writeCapability?: GoogleCapabilityKey;
-  extraCapabilities?: readonly { capability: GoogleCapabilityKey; label: string; readyLabel: string }[];
+  extraCapabilities?: readonly { capability: GoogleCapabilityKey; label: string }[];
 };
 
 const SERVICES: readonly ServiceDefinition[] = [
@@ -22,14 +23,14 @@ const SERVICES: readonly ServiceDefinition[] = [
     readCapability: 'calendar.events.read',
     writeCapability: 'calendar.events.write',
     extraCapabilities: [
-      { capability: 'calendar.list.read', label: 'Enable calendar list', readyLabel: 'Calendar list ready' },
-      { capability: 'calendar.settings.read', label: 'Enable settings', readyLabel: 'Settings ready' },
-      { capability: 'calendar.freebusy.read', label: 'Enable availability', readyLabel: 'Availability ready' },
+      { capability: 'calendar.list.read', label: 'Calendar list' },
+      { capability: 'calendar.settings.read', label: 'Settings' },
+      { capability: 'calendar.freebusy.read', label: 'Availability' },
     ],
   },
   { id: 'tasks', name: 'Google Tasks', description: 'Task lists, tasks, ordering, and completion.', readCapability: 'tasks.read', writeCapability: 'tasks.write' },
-  { id: 'gmail', name: 'Gmail', description: 'Mailbox reading, organization, labels, and sending.', readCapability: 'gmail.read', writeCapability: 'gmail.modify', extraCapabilities: [{ capability: 'gmail.labels', label: 'Enable labels', readyLabel: 'Labels ready' }, { capability: 'gmail.send', label: 'Enable sending', readyLabel: 'Sending ready' }] },
-  { id: 'drive', name: 'Google Drive', description: 'App-created or admitted files, plus optional library search across your Drive.', readCapability: 'drive.files.app.read', writeCapability: 'drive.files.app.write', extraCapabilities: [{ capability: 'drive.library.read', label: 'Enable library search', readyLabel: 'Library search ready' }] },
+  { id: 'gmail', name: 'Gmail', description: 'Mailbox reading, organization, labels, and sending.', readCapability: 'gmail.read', writeCapability: 'gmail.modify', extraCapabilities: [{ capability: 'gmail.labels', label: 'Labels' }, { capability: 'gmail.send', label: 'Send' }] },
+  { id: 'drive', name: 'Google Drive', description: 'App-created or admitted files, plus optional library search across your Drive.', readCapability: 'drive.files.app.read', writeCapability: 'drive.files.app.write', extraCapabilities: [{ capability: 'drive.library.read', label: 'Library search' }] },
   { id: 'docs', name: 'Google Docs', description: 'Documents created or admitted for Elara to work with.', readCapability: 'docs.read', writeCapability: 'docs.write' },
   { id: 'sheets', name: 'Google Sheets', description: 'Selected spreadsheets, ranges, rows, and updates.', readCapability: 'sheets.read', writeCapability: 'sheets.write' },
 ];
@@ -59,7 +60,7 @@ const emptyStatus = (): GoogleOAuthStatus => ({
 export function GoogleOAuthSettings() {
   const [status, setStatus] = useState<GoogleOAuthStatus>(emptyStatus());
   const [loading, setLoading] = useState(true);
-  const [busyCapability, setBusyCapability] = useState<GoogleCapabilityKey | null>(null);
+  const [authorizationBusy, setAuthorizationBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pickerFiles, setPickerFiles] = useState<readonly GooglePickerAdmission[]>([]);
   const [pickerBusy, setPickerBusy] = useState(false);
@@ -90,21 +91,21 @@ export function GoogleOAuthSettings() {
     return () => { active = false; };
   }, []);
 
-  async function connect(capability: GoogleCapabilityKey) {
-    setBusyCapability(capability);
+  async function connectWorkspace() {
+    setAuthorizationBusy(true);
     setError(null);
     try {
-      await googleOAuthAuthority.authorize(capability);
-      await refresh();
+      const mode = accountKnown && !sessionReady ? 'refresh' : 'onboard';
+      setStatus(await authorizeGoogleWorkspace(mode));
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Google authorization could not be completed.');
+      setError(cause instanceof Error ? cause.message : 'Google Workspace authorization could not be completed.');
     } finally {
-      setBusyCapability(null);
+      setAuthorizationBusy(false);
     }
   }
 
   async function disconnect() {
-    setBusyCapability(null);
+    setAuthorizationBusy(false);
     setError(null);
     try {
       await googleOAuthAuthority.disconnect();
@@ -148,19 +149,24 @@ export function GoogleOAuthSettings() {
     || hasCapability(status.grantedCapabilities, 'google.account')
     || hasCapability(status.enabledCapabilities, 'google.account');
   const sessionReady = status.sessionReady === true;
+  const allWorkspaceReady = GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES.every((capability) =>
+    hasCapability(status.grantedCapabilities, capability),
+  );
   const accountNeedsAuthorization = status.state === 'disconnected'
     || status.state === 'needs-consent'
     || status.state === 'reauthorization-required'
     || status.state === 'revoked'
-    || !sessionReady;
+    || !sessionReady
+    || !allWorkspaceReady;
 
   const accountActionLabel = useMemo(() => {
-    if (busyCapability === 'google.account') return 'Opening Google…';
-    if (status.state === 'reauthorization-required' || status.state === 'revoked') return 'Reauthorize Google';
-    if (status.state === 'token-recovery') return 'Retry Google session';
-    if (accountKnown) return 'Refresh Google session';
-    return 'Connect Google account';
-  }, [accountKnown, busyCapability, status.state]);
+    if (authorizationBusy) return 'Opening Google…';
+    if (status.state === 'reauthorization-required' || status.state === 'revoked') return 'Reauthorize Google Workspace';
+    if (status.state === 'token-recovery') return 'Retry Google Workspace';
+    if (accountKnown && !sessionReady) return 'Refresh Google Workspace';
+    if (accountKnown) return 'Review Google permissions';
+    return 'Connect Google Workspace';
+  }, [accountKnown, authorizationBusy, sessionReady, status.state]);
 
   const summary = useMemo(() => {
     if (loading) return 'Checking Workspace permissions…';
@@ -182,8 +188,10 @@ export function GoogleOAuthSettings() {
           {status.account?.email && <span className="google-oauth-account__email">{status.account.email}</span>}
           <p>
             {sessionReady
-              ? 'A live Google authorization session is ready. Workspace permissions remain separate and are granted only when you choose them below.'
-              : 'Open Google’s secure account and authorization window to establish a fresh session. Elara never receives your Google password, and Workspace data permissions are requested separately.'}
+              ? allWorkspaceReady
+                ? 'A live Google authorization session is ready with the current Workspace permission bundle.'
+                : 'Your Google session is live, but some Workspace permissions were not granted. Review Google permissions to update access.'
+              : 'Open Google’s secure authorization window once to review the current Workspace permission bundle. Google keeps granular control over every permission you approve.'}
           </p>
         </div>
 
@@ -196,21 +204,21 @@ export function GoogleOAuthSettings() {
           <button
             className="google-oauth-account__primary"
             type="button"
-            onClick={() => void connect('google.account')}
-            disabled={loading || !!busyCapability}
+            onClick={() => void connectWorkspace()}
+            disabled={loading || authorizationBusy}
           >
             {accountActionLabel}
           </button>
         ) : (
-          <div className="google-oauth-account__ready" role="status">Google authorization is live</div>
+          <div className="google-oauth-account__ready" role="status">Google Workspace authorization is live</div>
         )}
 
         <div className="google-oauth-account__utility">
-          <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void refresh()} disabled={loading || !!busyCapability}>
+          <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void refresh()} disabled={loading || authorizationBusy}>
             {loading ? 'Checking…' : 'Refresh status'}
           </button>
           {accountKnown && (
-            <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void disconnect()} disabled={loading || !!busyCapability}>
+            <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void disconnect()} disabled={loading || authorizationBusy}>
               Disconnect Google
             </button>
           )}
@@ -225,7 +233,7 @@ export function GoogleOAuthSettings() {
             <div>
               <span className="panel-kicker">WORKSPACE ACCESS</span>
               <strong>Google Workspace permissions</strong>
-              <span>Grant only the services Elara should use. Reads, writes, sending, and broader library access remain separate authorization choices.</span>
+              <span>One Google consent screen requests the current Calendar, Tasks, Gmail, Drive, Docs, and Sheets bundle. Google still lets you approve or decline individual permissions there.</span>
             </div>
             <div className="google-oauth-settings__state" data-state={status.state}>
               <span className="google-oauth-settings__dot" aria-hidden="true" />
@@ -236,9 +244,9 @@ export function GoogleOAuthSettings() {
           <div className="google-oauth-settings__grid" aria-label="Google Workspace capabilities">
             {SERVICES.map((service) => {
               const readReady = hasCapability(status.grantedCapabilities, service.readCapability);
-              const writeReady = hasCapability(status.grantedCapabilities, service.writeCapability);
-              const activeCapability = !readReady ? service.readCapability : (service.writeCapability && !writeReady ? service.writeCapability : null);
-              const actionLabel = !readReady ? 'Enable read access' : service.writeCapability && !writeReady ? 'Enable writes' : 'Authorized';
+              const writeReady = !service.writeCapability || hasCapability(status.grantedCapabilities, service.writeCapability);
+              const extrasReady = service.extraCapabilities?.every((extra) => hasCapability(status.grantedCapabilities, extra.capability)) ?? true;
+              const serviceReady = readReady && writeReady && extrasReady;
 
               return (
                 <article className="google-oauth-service setting-card" key={service.id}>
@@ -247,29 +255,23 @@ export function GoogleOAuthSettings() {
                     <span>{service.description}</span>
                   </div>
                   <div className="google-oauth-service__status">
-                    <span className={`google-oauth-service__badge${readReady ? ' is-ready' : ''}`}>{readReady ? 'Read ready' : 'Not authorized'}</span>
-                    {writeReady && <span className="google-oauth-service__badge is-ready">Writes ready</span>}
-                    {service.extraCapabilities?.map((extra) => hasCapability(status.grantedCapabilities, extra.capability)
-                      ? <span className="google-oauth-service__badge is-ready" key={extra.capability}>{extra.readyLabel}</span>
-                      : null)}
+                    <span className={`google-oauth-service__badge ${readReady ? 'is-ready' : 'is-missing'}`} aria-label={`${service.name} read ${readReady ? 'granted' : 'not granted'}`}>Read</span>
+                    {service.writeCapability && <span className={`google-oauth-service__badge ${writeReady ? 'is-ready' : 'is-missing'}`} aria-label={`${service.name} write ${writeReady ? 'granted' : 'not granted'}`}>Write</span>}
+                    {service.extraCapabilities?.map((extra) => {
+                      const ready = hasCapability(status.grantedCapabilities, extra.capability);
+                      return <span className={`google-oauth-service__badge ${ready ? 'is-ready' : 'is-missing'}`} key={extra.capability} aria-label={`${extra.label} ${ready ? 'granted' : 'not granted'}`}>{extra.label}</span>;
+                    })}
                   </div>
-                  {activeCapability ? (
-                    <button className="google-oauth-settings__button" type="button" onClick={() => void connect(activeCapability)} disabled={loading || !!busyCapability}>
-                      {busyCapability === activeCapability ? 'Authorizing…' : actionLabel}
-                    </button>
-                  ) : (
-                    <span className="google-oauth-service__authorized" aria-label={`${service.name} base access authorized`}>Ready</span>
-                  )}
-                  {service.extraCapabilities?.map((extra) => !hasCapability(status.grantedCapabilities, extra.capability)
-                    ? <button className="google-oauth-settings__button google-oauth-settings__button--secondary" key={extra.capability} type="button" onClick={() => void connect(extra.capability)} disabled={loading || !!busyCapability}>{busyCapability === extra.capability ? 'Authorizing…' : extra.label}</button>
-                    : null)}
+                  <span className={`google-oauth-service__authorized${serviceReady ? ' is-ready' : ' is-partial'}`} aria-label={`${service.name} permission status`}>
+                    {serviceReady ? 'Ready' : 'Some permissions not granted'}
+                  </span>
                   {service.id === 'drive' && readReady && (
                     <div className="google-oauth-picker" aria-label="Google Picker admissions">
                       <button
                         className="google-oauth-settings__button google-oauth-settings__button--secondary"
                         type="button"
                         onClick={() => void chooseDriveFiles()}
-                        disabled={loading || !!busyCapability || pickerBusy || !googleDrivePickerAuthority.configured}
+                        disabled={loading || authorizationBusy || pickerBusy || !googleDrivePickerAuthority.configured}
                       >
                         {pickerBusy ? 'Opening Picker…' : 'Choose files with Google Picker'}
                       </button>
@@ -294,7 +296,7 @@ export function GoogleOAuthSettings() {
 
           <div className="setting-card google-oauth-settings__note">
             <strong>Stay connected</strong>
-            <span>Elara is self-hosted. If this installation is paired to your own Worker, Google refresh credentials are encrypted in that Worker vault and the browser receives only short-lived access tokens. Without a paired Worker, Google remains interactive-only in the browser and a page reload can require the account-session button above again. Elara stores only non-secret authorization metadata locally. Workspace permissions remain incremental and can be expanded service by service.</span>
+            <span>Elara is self-hosted. If this installation is paired to your own Worker, Google refresh credentials are encrypted in that Worker vault and the browser receives only short-lived access tokens. Without a paired Worker, Google remains interactive-only in the browser and a page reload can require the Workspace button above again. Elara stores only non-secret authorization metadata locally. If you change Google permissions later, use Review Google permissions to reopen the same bundled consent flow.</span>
           </div>
         </>
       ) : (

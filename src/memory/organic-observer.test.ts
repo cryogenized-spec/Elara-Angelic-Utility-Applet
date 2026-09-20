@@ -195,6 +195,38 @@ describe('bounded organic memory observer', () => {
     expect((await listMemories())[0]?.tags).toContain('category:health_wellbeing');
   });
 
+  it('rejects one exact span when classifier metadata disagrees on category or domain', async () => {
+    const evidence = 'My cat is named Piesang';
+
+    const result = await observePersistedTurn({
+      ...baseRequest(async () => ({
+        candidates: [
+          candidate(evidence, { domain: 'persistent_fact', category: 'pets', salience: 'medium' }),
+          candidate(evidence, { domain: 'persistent_fact', category: 'personal_facts', salience: 'high' }),
+        ],
+      })),
+      userMessage: evidence,
+    });
+
+    expect(result).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+  it('collapses duplicate matching nominations to the more conservative salience', async () => {
+    const evidence = 'I prefer the compact editor layout';
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'selective' });
+
+    const result = await observePersistedTurn(baseRequest(async () => ({
+      candidates: [
+        candidate(evidence, { salience: 'high' }),
+        candidate(evidence, { salience: 'medium' }),
+      ],
+    })));
+
+    expect(result).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
   it('skips trivial acknowledgements without invoking Gemini', async () => {
     const extractor = vi.fn(async () => ({ candidates: [] }));
     expect(shouldInspectUserMessage('Okay!')).toBe(false);

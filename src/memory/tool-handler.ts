@@ -6,6 +6,7 @@ import { consolidateObservation, recordObservation, supersedeMemory } from './ob
 import { isMemoryRetrievable, memoryScopeForConversation, rankAndBudgetMemories } from './retrieval';
 import { getMemory, listMemories, retrieveMemories, runMemoryMutationTransaction } from './store';
 import { validateMemoryToolArguments } from './tool-schema';
+import { containsCredentialMaterial } from './safety';
 
 const MEMORY_REF_TTL_MS = 10 * 60_000;
 const MAX_MEMORY_REFS = 128;
@@ -198,6 +199,9 @@ export const memoryToolHandlers: GoogleToolHandlers = {
 
   'memory.save': async ({ arguments: raw, conversationId, messageId, generationId, callId, signal, isGenerationActive }) => {
     const args = validateMemoryToolArguments('memory.save', raw);
+    if (containsCredentialMaterial(`${args.title}\n${args.body}`)) {
+      throw new Error('Credential material cannot be stored in durable memory.');
+    }
     const boundConversationId = requiredIdentity(conversationId, 'conversation provenance');
     const boundMessageId = requiredIdentity(messageId, 'message provenance');
     const boundGenerationId = requiredIdentity(generationId, 'generation provenance');
@@ -233,6 +237,9 @@ export const memoryToolHandlers: GoogleToolHandlers = {
 
   'memory.reconcile': async ({ arguments: raw, conversationId, messageId, generationId, callId, signal, isGenerationActive }) => {
     const args = validateMemoryToolArguments('memory.reconcile', raw);
+    if (containsCredentialMaterial(`${args.title}\n${args.body}`)) {
+      throw new Error('Credential material cannot be stored in durable memory.');
+    }
     const boundConversationId = requiredIdentity(conversationId, 'conversation provenance');
     const boundMessageId = requiredIdentity(messageId, 'message provenance');
     const boundGenerationId = requiredIdentity(generationId, 'generation provenance');

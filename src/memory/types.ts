@@ -69,6 +69,8 @@ export interface MemoryInput {
   autonomyContext?: boolean;
 }
 
+export type MemoryRetrievalMode = 'unfiltered' | 'relevant' | 'proactive';
+
 export interface MemoryRetrievalScope {
   folderId?: string | null;
   folderIds?: string[];
@@ -77,6 +79,12 @@ export interface MemoryRetrievalScope {
   maxItems?: number;
   maxCharacters?: number;
   query?: string;
+  /**
+   * Query-bearing retrieval defaults to relevant; query-less retrieval defaults
+   * to unfiltered. Proactive adds at most one established continuity anchor
+   * after relevant memories, without changing query-less ranking authorities.
+   */
+  mode?: MemoryRetrievalMode;
 }
 
 export interface RetrievedMemory extends DurableMemory {

@@ -1,5 +1,7 @@
+import { SENSITIVE_MEMORY_CATEGORY_KEYS } from '../domain/preferences';
 import type { FolderState } from '../persistence/folders';
-import type { DurableMemory, MemoryRetrievalScope, RetrievedMemory } from './types';
+import { containsCredentialMaterial, sensitiveMemoryCategoryHints } from './safety';
+import type { DurableMemory, MemoryRetrievalMode, MemoryRetrievalScope, RetrievedMemory } from './types';
 
 export const DEFAULT_MAX_ITEMS = 8;
 export const DEFAULT_MAX_CHARACTERS = 6_000;
@@ -12,18 +14,31 @@ const KIND_WEIGHT: Record<DurableMemory['kind'], number> = {
   MICRO_OBSERVATION: 0,
 };
 
+const QUERY_STOPWORDS = new Set([
+  'a', 'about', 'an', 'and', 'anything', 'are', 'as', 'at', 'be', 'been', 'being', 'but', 'by',
+  'can', 'could', 'did', 'do', 'does', 'for', 'from', 'had', 'has', 'have', 'how', 'i', 'if',
+  'in', 'is', 'it', 'its', 'know', 'known', 'me', 'memory', 'memories', 'my', 'of', 'on', 'or',
+  'our', 'ours', 'please', 'recall', 'remember', 'remembered', 'said', 'say', 'something', 'that', 'the',
+  'their', 'them', 'then', 'these', 'they', 'this', 'to', 'told', 'was', 'we',
+  'were', 'what', 'when', 'where', 'who', 'why', 'with', 'you', 'your', 'yours',
+]);
+
 function tokenize(value: string): string[] {
   return [...new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [])];
+}
+
+function queryTokens(value: string): string[] {
+  return tokenize(value).filter((token) => !QUERY_STOPWORDS.has(token));
 }
 
 /** Structural minimum the scorer reads — satisfied by DurableMemory and by the Autonomy Context source snapshot. */
 export type ScorableMemory = Pick<DurableMemory, 'kind' | 'title' | 'body' | 'tags' | 'importance' | 'confidence' | 'updatedAt' | 'lifecycle' | 'relatedMemoryIds' | 'supportingMemoryIds' | 'conflictingMemoryIds' | 'reinforcementCount'> & { pinned?: boolean };
 
-function lexicalRelevance(memory: ScorableMemory, query: string): number {
-  const queryTokens = tokenize(query);
-  if (!queryTokens.length) return 0;
+export function lexicalMemoryRelevance(memory: ScorableMemory, query: string): number {
+  const tokens = queryTokens(query);
+  if (!tokens.length) return 0;
   const searchable = new Set(tokenize(`${memory.title} ${memory.body} ${memory.tags.join(' ')}`));
-  return queryTokens.filter((token) => searchable.has(token)).length / queryTokens.length;
+  return tokens.filter((token) => searchable.has(token)).length / tokens.length;
 }
 
 function score(memory: ScorableMemory, query: string, now: number): number {
@@ -33,7 +48,7 @@ function score(memory: ScorableMemory, query: string, now: number): number {
   const relationshipDensity = Math.min((memory.relatedMemoryIds.length + memory.supportingMemoryIds.length + memory.conflictingMemoryIds.length) / 12, 1);
   const lifecycle = memory.lifecycle === 'active' ? 0.12 : memory.lifecycle === 'dormant' ? 0.03 : -0.4;
   const landmark = memory.pinned === true ? PINNED_MEMORY_WEIGHT : 0;
-  return lexicalRelevance(memory, query) * 0.5 + memory.importance * 0.18 + memory.confidence * 0.12 + reinforcement * 0.07 + recency * 0.06 + relationshipDensity * 0.03 + KIND_WEIGHT[memory.kind] + lifecycle + landmark;
+  return lexicalMemoryRelevance(memory, query) * 0.5 + memory.importance * 0.18 + memory.confidence * 0.12 + reinforcement * 0.07 + recency * 0.06 + relationshipDensity * 0.03 + KIND_WEIGHT[memory.kind] + lifecycle + landmark;
 }
 
 /**
@@ -88,6 +103,29 @@ export function isMemoryRetrievable(memory: DurableMemory, scope: MemoryRetrieva
   return memory.folderId === (scope.folderId ?? null);
 }
 
+function effectiveRetrievalMode(scope: MemoryRetrievalScope, query: string): MemoryRetrievalMode {
+  if (scope.mode) return scope.mode;
+  return queryTokens(query).length > 0 ? 'relevant' : 'unfiltered';
+}
+
+const SENSITIVE_CATEGORY_TAGS = new Set(SENSITIVE_MEMORY_CATEGORY_KEYS.map((category) => `category:${category}`));
+
+function carriesSensitiveCategory(memory: DurableMemory): boolean {
+  if (memory.tags.some((tag) => SENSITIVE_CATEGORY_TAGS.has(tag))) return true;
+  const prose = `${memory.title}\n${memory.body}`;
+  return containsCredentialMaterial(prose) || sensitiveMemoryCategoryHints(prose).length > 0;
+}
+
+export function isContinuityAnchor(memory: DurableMemory): boolean {
+  if (memory.lifecycle !== 'active') return false;
+  if (memory.kind === 'MICRO_OBSERVATION') return false;
+  if (memory.conflictingMemoryIds.length > 0) return false;
+  if (carriesSensitiveCategory(memory)) return false;
+  if (memory.pinned === true) return true;
+  if (memory.kind === 'CORE') return true;
+  return memory.kind === 'CONTEXTUAL' && memory.importance >= 0.8 && memory.confidence >= 0.8;
+}
+
 function fitMemoryToRemainingBudget(memory: RetrievedMemory, remainingCharacters: number): RetrievedMemory | null {
   const payloadCharacters = memory.title.length + memory.body.length;
   if (payloadCharacters <= remainingCharacters) return memory;
@@ -107,19 +145,42 @@ export function rankAndBudgetMemories(memories: DurableMemory[], scope: MemoryRe
   const maxItems = Math.max(1, Math.min(scope.maxItems ?? DEFAULT_MAX_ITEMS, 20));
   const maxCharacters = Math.max(200, Math.min(scope.maxCharacters ?? DEFAULT_MAX_CHARACTERS, 20_000));
   const query = scope.query?.trim() ?? '';
-  const candidates = memories
-    .filter((memory) => isMemoryRetrievable(memory, scope, now))
-    .map((memory) => ({ ...memory, score: score(memory, query, now) }))
+  const mode = effectiveRetrievalMode(scope, query);
+
+  const eligible = memories.filter((memory) => isMemoryRetrievable(memory, scope, now));
+  const relevantCandidates = eligible
+    .map((memory) => ({
+      ...memory,
+      relevance: lexicalMemoryRelevance(memory, query),
+      score: score(memory, query, now),
+    }))
+    .filter((memory) => mode === 'unfiltered' || memory.relevance > 0)
     .sort((a, b) => b.score - a.score || b.updatedAt - a.updatedAt);
+
   const selected: RetrievedMemory[] = [];
   let characters = 0;
-  for (const memory of candidates) {
+  for (const memory of relevantCandidates) {
     if (selected.length >= maxItems) break;
-    const fitted = fitMemoryToRemainingBudget(memory, maxCharacters - characters);
+    const { relevance: _relevance, ...retrieved } = memory;
+    const fitted = fitMemoryToRemainingBudget(retrieved, maxCharacters - characters);
     if (!fitted) continue;
     selected.push(fitted);
     characters += fitted.title.length + fitted.body.length;
   }
+
+  if (mode !== 'proactive' || selected.length >= maxItems) return selected;
+
+  const selectedIds = new Set(selected.map((memory) => memory.id));
+  const anchor = eligible
+    .filter((memory) => !selectedIds.has(memory.id))
+    .filter((memory) => lexicalMemoryRelevance(memory, query) === 0)
+    .filter(isContinuityAnchor)
+    .map((memory) => ({ ...memory, score: score(memory, '', now) }))
+    .sort((a, b) => b.score - a.score || b.updatedAt - a.updatedAt)[0];
+
+  if (!anchor) return selected;
+  const fittedAnchor = fitMemoryToRemainingBudget(anchor, maxCharacters - characters);
+  if (fittedAnchor) selected.push(fittedAnchor);
   return selected;
 }
 

@@ -140,8 +140,9 @@ describe('memory tool handlers', () => {
     await assignThread('folder_1');
     const established = await saveMemory({ title: 'Cat name', body: 'The user said their cat is named Piesang.', folderId: 'folder_1', kind: 'CONTEXTUAL' });
     const tentative = await saveMemory({ title: 'Observed routine', body: 'The user mentioned feeding the cats before dawn.', folderId: 'folder_1', kind: 'MICRO_OBSERVATION' });
+    const unrelated = await saveMemory({ title: 'Favorite game', body: 'The user loves elaborate fantasy role-playing games.', folderId: 'folder_1', kind: 'CORE', importance: 1, confidence: 1, pinned: true });
 
-    const result = await handlerFor('memory.recall')(contextFor('memory.recall', { query: 'cats feeding name' })) as {
+    const result = await handlerFor('memory.recall')(contextFor('memory.recall', { query: 'Piesang feeding' })) as {
       enabled: boolean;
       notice: string;
       matches: Array<Record<string, unknown>>;
@@ -157,6 +158,20 @@ describe('memory tool handlers', () => {
     expect(serialized).not.toContain('memref_');
     expect((await getMemory(established.id))?.recallCount).toBe(1);
     expect((await getMemory(tentative.id))?.recallCount).toBe(1);
+    expect((await getMemory(unrelated.id))?.recallCount).toBe(0);
+  });
+
+  it('supports a bounded broad deliberate recall request without requiring a topical keyword', async () => {
+    await addFolder('folder_1', null);
+    await assignThread('folder_1');
+    await saveMemory({ title: 'Pet', body: 'The user has a cat named Piesang.', folderId: 'folder_1', kind: 'CONTEXTUAL' });
+    await saveMemory({ title: 'Routine', body: 'The user likes quiet mornings.', folderId: 'folder_1', kind: 'CONTEXTUAL' });
+
+    const result = await handlerFor('memory.recall')(contextFor('memory.recall', { query: 'what do you remember about me' })) as {
+      matches: Array<{ title: string }>;
+    };
+
+    expect(result.matches.map((entry) => entry.title).sort()).toEqual(['Pet', 'Routine']);
   });
 
   it('fails conversational recall closed when the user disables memory behavior', async () => {
@@ -173,6 +188,19 @@ describe('memory tool handlers', () => {
     expect(result.notice).toMatch(/disabled by the user/i);
     expect(result.matches).toEqual([]);
     expect((await getMemory(memoryRecord.id))?.recallCount).toBe(0);
+  });
+
+  it('does not return unrelated established memories from management lookup', async () => {
+    await addFolder('folder_1', null);
+    await assignThread('folder_1');
+    await saveMemory({ title: 'Mother plans', body: 'The user plans to visit their mother this weekend.', folderId: 'folder_1', kind: 'CONTEXTUAL' });
+    await saveMemory({ title: 'Unrelated core', body: 'The user loves elaborate fantasy role-playing games.', folderId: 'folder_1', kind: 'CORE', importance: 1, confidence: 1, pinned: true });
+
+    const result = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'mother weekend' })) as {
+      matches: Array<{ title: string }>;
+    };
+
+    expect(result.matches.map((entry) => entry.title)).toEqual(['Mother plans']);
   });
 
   it('returns scoped opaque lookup refs without mutating recall telemetry', async () => {

@@ -145,6 +145,17 @@ describe('canonical durable memory store', () => {
     expect((await getMemory(core.id))?.reinforcementCount).toBe(0);
   });
 
+  it('updates recall telemetry only for memories selected by relevance policy', async () => {
+    const relevant = await saveMemory({ title: 'Mother plans', body: 'The user plans to visit their mother this weekend.' });
+    const unrelated = await saveMemory({ title: 'Favorite game', body: 'The user loves elaborate fantasy role-playing games.', kind: 'CORE', importance: 1, confidence: 1, pinned: true });
+
+    const selected = await retrieveMemories({ includeGlobal: true, query: 'mother weekend' });
+
+    expect(selected.map((memory) => memory.id)).toEqual([relevant.id]);
+    expect((await getMemory(relevant.id))?.recallCount).toBe(1);
+    expect((await getMemory(unrelated.id))?.recallCount).toBe(0);
+  });
+
   it('keeps folder scope isolated and global scope explicit', async () => {
     await saveMemory({ title: 'Folder A', body: 'A folder-only fact', folderId: 'folder-a' });
     await saveMemory({ title: 'Folder B', body: 'A different-folder fact', folderId: 'folder-b' });

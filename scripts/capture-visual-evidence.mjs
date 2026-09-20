@@ -149,7 +149,7 @@ async function captureGenerationActivity(page) {
   await activity.locator('.generation-activity__step').first().waitFor({ state: 'visible', timeout: 10_000 });
 
   const notoReady = await page.waitForFunction(
-    () => document.querySelectorAll('.generation-activity__noto-glyph').length > 0,
+    () => globalThis.document.querySelectorAll('.generation-activity__noto-glyph').length > 0,
     undefined,
     { timeout: 10_000 },
   ).then(() => true).catch(() => false);
@@ -161,7 +161,7 @@ async function captureGenerationActivity(page) {
     const circleBox = circle?.getBoundingClientRect();
     const glyphBox = glyph?.getBoundingClientRect();
     const fallbackBox = fallback?.getBoundingClientRect();
-    const glyphStyle = glyph ? getComputedStyle(glyph) : null;
+    const glyphStyle = glyph ? globalThis.getComputedStyle(glyph) : null;
     return {
       stepCount: section.querySelectorAll('.generation-activity__step').length,
       circle: circleBox ? {
@@ -236,7 +236,7 @@ async function main() {
     serviceWorkers: 'block',
   });
   await context.addInitScript(() => {
-    window.localStorage.setItem('elara.onboarding.completed', 'true');
+    globalThis.localStorage.setItem('elara.onboarding.completed', 'true');
   });
   const page = await context.newPage();
 

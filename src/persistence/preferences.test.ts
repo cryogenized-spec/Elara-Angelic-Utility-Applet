@@ -1,14 +1,17 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE } from '../domain/preferences';
+import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_MEMORY_BEHAVIOR, DEFAULT_MEMORY_CATEGORIES, SENSITIVE_MEMORY_CATEGORY_KEYS } from '../domain/preferences';
 import {
   loadAppUiPreferences,
   loadChatAppearance,
+  loadMemoryBehaviorPreferences,
   normalizeAppUiPreferences,
   normalizeChatAppearance,
+  normalizeMemoryBehaviorPreferences,
   normalizeRoleplay,
   saveAppUiPreferences,
   saveChatAppearance,
+  saveMemoryBehaviorPreferences,
 } from './preferences';
 
 const longString = 'x'.repeat(400);
@@ -175,5 +178,87 @@ describe('enterToSend persistence', () => {
       expect(saved.enterToSend).toBe(value);
       expect((await loadAppUiPreferences()).enterToSend).toBe(value);
     }
+  });
+});
+
+
+describe('companion memory behavior preferences', () => {
+  beforeEach(async () => {
+    await saveMemoryBehaviorPreferences(DEFAULT_MEMORY_BEHAVIOR);
+  });
+
+  it('preserves current memory behavior by default while keeping sensitive automatic categories off', () => {
+    const value = normalizeMemoryBehaviorPreferences(undefined);
+
+    expect(value.enabled).toBe(true);
+    expect(value.rememberingStyle).toBe('natural');
+    expect(value.recallStyle).toBe('natural');
+    expect(value.categories.likes_dislikes).toBe(true);
+    expect(value.categories.people_relationships).toBe(true);
+    expect(value.categories.pets).toBe(true);
+    expect(value.categories.feelings_vulnerabilities_reflections).toBe(true);
+    for (const category of SENSITIVE_MEMORY_CATEGORY_KEYS) {
+      expect(value.categories[category]).toBe(false);
+    }
+  });
+
+  it('normalizes invalid styles and category values without widening sensitive defaults', () => {
+    const value = normalizeMemoryBehaviorPreferences({
+      enabled: 'yes' as never,
+      rememberingStyle: 'memorize-everything' as never,
+      recallStyle: 'constantly' as never,
+      categories: {
+        ...DEFAULT_MEMORY_CATEGORIES,
+        health_wellbeing: 'yes' as never,
+        pets: false,
+      },
+    });
+
+    expect(value.enabled).toBe(DEFAULT_MEMORY_BEHAVIOR.enabled);
+    expect(value.rememberingStyle).toBe(DEFAULT_MEMORY_BEHAVIOR.rememberingStyle);
+    expect(value.recallStyle).toBe(DEFAULT_MEMORY_BEHAVIOR.recallStyle);
+    expect(value.categories.health_wellbeing).toBe(false);
+    expect(value.categories.pets).toBe(false);
+  });
+
+  it('persists the master switch, behavioral styles, and per-category choices in the existing preferences store', async () => {
+    const saved = await saveMemoryBehaviorPreferences({
+      enabled: false,
+      rememberingStyle: 'attentive',
+      recallStyle: 'proactive',
+      categories: {
+        ...DEFAULT_MEMORY_CATEGORIES,
+        people_relationships: false,
+        health_wellbeing: true,
+        religion_spirituality: true,
+      },
+    });
+
+    expect(saved.enabled).toBe(false);
+    expect(saved.rememberingStyle).toBe('attentive');
+    expect(saved.recallStyle).toBe('proactive');
+    expect(saved.categories.people_relationships).toBe(false);
+    expect(saved.categories.health_wellbeing).toBe(true);
+    expect(saved.categories.religion_spirituality).toBe(true);
+
+    const loaded = await loadMemoryBehaviorPreferences();
+    expect(loaded).toEqual(saved);
+  });
+
+  it('fills newly introduced categories from safe defaults when loading an older partial preference shape', () => {
+    const value = normalizeMemoryBehaviorPreferences({
+      enabled: true,
+      rememberingStyle: 'selective',
+      recallStyle: 'direct-only',
+      categories: {
+        likes_dislikes: false,
+        health_wellbeing: true,
+      } as never,
+    });
+
+    expect(value.categories.likes_dislikes).toBe(false);
+    expect(value.categories.health_wellbeing).toBe(true);
+    expect(value.categories.pets).toBe(DEFAULT_MEMORY_CATEGORIES.pets);
+    expect(value.categories.precise_location_home).toBe(DEFAULT_MEMORY_CATEGORIES.precise_location_home);
   });
 });

@@ -121,6 +121,8 @@ describe('canonical memory retrieval engine', () => {
     expect(isContinuityAnchor(makeMemory({ kind: 'CORE', conflictingMemoryIds: ['x'] }))).toBe(false);
     expect(isContinuityAnchor(makeMemory({ kind: 'CORE', tags: ['category:health_wellbeing'] }))).toBe(false);
     expect(isContinuityAnchor(makeMemory({ kind: 'CORE', tags: ['category:money_finances'], pinned: true }))).toBe(false);
+    expect(isContinuityAnchor(makeMemory({ kind: 'CORE', title: 'Health note', body: 'I was diagnosed with diabetes.' }))).toBe(false);
+    expect(isContinuityAnchor(makeMemory({ kind: 'CORE', title: 'Account note', body: 'Bank account number: 1234567890' }))).toBe(false);
   });
 
   it('uses reinforcement and importance as bounded secondary relevance signals', () => {

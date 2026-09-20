@@ -177,9 +177,9 @@ export function MemoryContinuitySettings() {
             <span className="memory-continuity__kicker">REMEMBERING</span>
             <strong id="memory-remembering-heading">How readily Elara remembers</strong>
           </div>
-          <span>Automatic formation</span>
+          <span>What gets kept</span>
         </div>
-        <p>Controls how readily new user-grounded observations become durable memory. It never turns incidental assistant prose into fact.</p>
+        <p>This is about the things you tell Elara in ordinary conversation. Higher attention notices smaller recurring details; Elara’s own words never become memories about you.</p>
         <div className="memory-continuity__options" role="radiogroup" aria-label="How readily Elara remembers">
           {REMEMBERING_OPTIONS.map((option) => (
             <button
@@ -205,9 +205,9 @@ export function MemoryContinuitySettings() {
             <span className="memory-continuity__kicker">CONTINUITY</span>
             <strong id="memory-recall-heading">How Elara uses memories</strong>
           </div>
-          <span>Conversational recall</span>
+          <span>What comes back up</span>
         </div>
-        <p>Controls when existing durable memories are brought into a conversation. Relevance and security boundaries still apply in every mode.</p>
+        <p>This is about when remembered things come back into the conversation. What you are saying now always matters more than an older memory.</p>
         <div className="memory-continuity__options memory-continuity__options--three" role="radiogroup" aria-label="How Elara uses memories">
           {RECALL_OPTIONS.map((option) => (
             <button
@@ -235,7 +235,7 @@ export function MemoryContinuitySettings() {
           </div>
           <span>Per-topic control</span>
         </div>
-        <p>These switches affect organic remembering only. An explicit “remember this” request remains a separate, confirmed action.</p>
+        <p>Choose the kinds of things Elara may pick up naturally. Asking her directly to “remember this” is still a separate, confirmed action.</p>
         <div className="memory-continuity__category-grid">
           {EVERYDAY_CATEGORIES.map(renderCategory)}
         </div>

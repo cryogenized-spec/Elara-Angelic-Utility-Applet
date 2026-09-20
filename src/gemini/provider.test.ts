@@ -245,6 +245,26 @@ describe('Gemini provider stream fidelity', () => {
     expect(collected.some((event) => (event as { type: string }).type === 'completed')).toBe(false);
   });
 
+  it('accounts for a nonterminal requires_action status at stream end before tools can execute', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-status-requires', model: 'gemini-3.8-flash' } },
+      { event_type: 'interaction.status', interaction: { id: 'interaction-status-requires', status: 'requires_action' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-status-requires', name: 'gmail.listLabels' } },
+      { event_type: 'step.stop', index: 0 },
+    ]);
+    const usageIndex = collected.findIndex((event) => (event as { type: string }).type === 'interaction-usage');
+    const callIndex = collected.findIndex((event) => (event as { type: string }).type === 'tool-call');
+    expect(callIndex).toBeGreaterThanOrEqual(0);
+    expect(usageIndex).toBeGreaterThan(callIndex);
+    expect(collected[usageIndex]).toMatchObject({
+      type: 'interaction-usage',
+      interactionId: 'interaction-status-requires',
+      status: 'requires_action',
+      source: 'estimate',
+      usage: { inputTokens: 30_000 },
+    });
+  });
+
   it('uses the reserved gross-input estimate when interaction.requires_action omits provider usage', async () => {
     const collected = await collect([
       { event_type: 'interaction.created', interaction: { id: 'interaction-event-estimate', model: 'gemini-3.8-flash' } },

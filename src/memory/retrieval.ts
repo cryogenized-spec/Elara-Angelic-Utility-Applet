@@ -1,5 +1,6 @@
 import { SENSITIVE_MEMORY_CATEGORY_KEYS } from '../domain/preferences';
 import type { FolderState } from '../persistence/folders';
+import { containsCredentialMaterial, sensitiveMemoryCategoryHints } from './safety';
 import type { DurableMemory, MemoryRetrievalMode, MemoryRetrievalScope, RetrievedMemory } from './types';
 
 export const DEFAULT_MAX_ITEMS = 8;
@@ -110,7 +111,9 @@ function effectiveRetrievalMode(scope: MemoryRetrievalScope, query: string): Mem
 const SENSITIVE_CATEGORY_TAGS = new Set(SENSITIVE_MEMORY_CATEGORY_KEYS.map((category) => `category:${category}`));
 
 function carriesSensitiveCategory(memory: DurableMemory): boolean {
-  return memory.tags.some((tag) => SENSITIVE_CATEGORY_TAGS.has(tag));
+  if (memory.tags.some((tag) => SENSITIVE_CATEGORY_TAGS.has(tag))) return true;
+  const prose = `${memory.title}\n${memory.body}`;
+  return containsCredentialMaterial(prose) || sensitiveMemoryCategoryHints(prose).length > 0;
 }
 
 export function isContinuityAnchor(memory: DurableMemory): boolean {

@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { WriteConfirmationRequest } from '../google/confirmation/policy';
 
-const { streamReply, streamToolResult } = vi.hoisted(() => ({
+const { streamReply, streamToolResult, estimateTurn, estimateContinuation } = vi.hoisted(() => ({
   streamReply: vi.fn(),
   streamToolResult: vi.fn(),
+  estimateTurn: vi.fn(() => 0),
+  estimateContinuation: vi.fn(() => 0),
 }));
 
 vi.mock('./provider', () => ({
   geminiTurnPort: { streamReply, streamToolResult },
+  estimateGeminiTurnRequestInputTokens: estimateTurn,
+  estimateGeminiToolContinuationInputTokens: estimateContinuation,
 }));
 
 import { streamGoogleToolLoop } from './google-tool-loop';

@@ -83,11 +83,13 @@ export async function preprocessImage(source: Blob, policy: ImagePreprocessPolic
     throw new ArtifactError('IMAGE_PROCESSING_FAILED', 'The selected image could not be decoded safely.', cause);
   }
 
+  const sourcePixels = bitmap.width * bitmap.height;
+  if (!Number.isSafeInteger(sourcePixels) || sourcePixels <= 0 || sourcePixels > ARTIFACT_LIMITS.maxImagePixels) {
+    bitmap.close();
+    throw new ArtifactError('FILE_TOO_LARGE', `Image dimensions exceed the ${ARTIFACT_LIMITS.maxImagePixels.toLocaleString()} pixel safety limit.`);
+  }
+
   try {
-    const sourcePixels = bitmap.width * bitmap.height;
-    if (!Number.isSafeInteger(sourcePixels) || sourcePixels <= 0 || sourcePixels > ARTIFACT_LIMITS.maxImagePixels) {
-      throw new ArtifactError('FILE_TOO_LARGE', `Image dimensions exceed the ${ARTIFACT_LIMITS.maxImagePixels.toLocaleString()} pixel safety limit.`);
-    }
     const maxLongEdge = effectivePolicy.maxLongEdge && effectivePolicy.maxLongEdge > 0 ? effectivePolicy.maxLongEdge : Math.max(bitmap.width, bitmap.height);
     const scale = Math.min(1, maxLongEdge / Math.max(bitmap.width, bitmap.height));
     const width = Math.max(1, Math.round(bitmap.width * scale));

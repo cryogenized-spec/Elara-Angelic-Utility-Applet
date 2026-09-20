@@ -7,6 +7,13 @@ import { composeSystemInstructionWithStatus } from './memory-context';
 import { artifactRepository } from '../artifacts/repository';
 import { ArtifactError } from '../artifacts/errors';
 import { isAttachment } from '../domain/artifact';
+import {
+  estimateSerializedInputTokens,
+  finalizeGeminiQuotaReservation,
+  releaseGeminiQuotaReservation,
+  reserveGeminiQuota,
+  type GeminiQuotaReservation,
+} from './quota-ledger';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
@@ -168,6 +175,19 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   let sawRequiresAction = false;
   const pendingFunctions = new Map<number, PendingFunctionCall>();
   const thoughtSummaryParts = new Map<number, string>();
+  let quotaReservation: Extract<GeminiQuotaReservation, { granted: true }> | undefined;
+  let usageReported = false;
+  const estimatedUsageEvent = (status: string): GeminiStreamEvent | undefined => {
+    if (usageReported || !quotaReservation) return undefined;
+    usageReported = true;
+    return {
+      type: 'interaction-usage',
+      interactionId: interactionId ?? requestId,
+      status,
+      source: 'estimate',
+      usage: { inputTokens: quotaReservation.reservedInputTokens },
+    };
+  };
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
   try {
     const lockboxStatus = await getGeminiLockboxStatus();
@@ -204,13 +224,46 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
 
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const providerInput = await resolveGeminiInput({ ...request, signal }, client);
-    const stream = await client.interactions.create(buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction }) as never);
+    const payload = buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction });
+    const reservation = await reserveGeminiQuota(estimateSerializedInputTokens(payload));
+    if (!reservation.granted) {
+      const failure = new Error('Elara paused this Gemini request before the local rolling input budget could be exceeded.') as Error & { status?: number; code?: string };
+      failure.status = 429;
+      failure.code = 'LOCAL_RATE_LIMIT';
+      const normalized = normalizeGeminiError(failure, { requestId, category: 'rate_limit' });
+      yield {
+        type: 'failed',
+        error: {
+          ...normalized,
+          code: 'GEMINI_LOCAL_RATE_LIMIT',
+          providerCode: 'LOCAL_RATE_LIMIT',
+          debug: {
+            ...normalized.debug,
+            localQuotaReason: reservation.reason,
+            rollingInputTokens: reservation.rollingInputTokens,
+            projectedInputTokens: reservation.projectedInputTokens,
+            allowance: reservation.allowance,
+            retryAfterMs: reservation.retryAfterMs,
+          },
+        },
+      };
+      return;
+    }
+    quotaReservation = reservation;
+    if (signal?.aborted || request.isGenerationActive?.() === false) {
+      await releaseGeminiQuotaReservation(reservation);
+      yield { type: 'cancelled', interactionId };
+      return;
+    }
+    const stream = await client.interactions.create(payload as never);
     const iterator = (stream as unknown as AsyncIterable<unknown>)[Symbol.asyncIterator]();
     try {
       for (;;) {
         const next = await nextStreamItem(iterator, signal);
         if (next === 'aborted' || signal?.aborted) {
           void iterator.return?.()?.catch(() => undefined);
+          const estimated = estimatedUsageEvent('cancelled');
+          if (estimated) yield estimated;
           yield { type: 'cancelled', interactionId };
           return;
         }
@@ -246,13 +299,23 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
           continue;
         }
-        if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
+        if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { const estimated = estimatedUsageEvent('failed'); if (estimated) yield estimated; yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
         if (eventType === 'interaction.completed') {
           const interaction = asRecord(raw.interaction);
           interactionId = readString(interaction, 'id') ?? interactionId;
           const status = readString(interaction, 'status') ?? 'completed';
-          const usage = readUsage(interaction.usage) ?? readUsage(raw.usage);
-          if (usage) yield { type: 'interaction-usage', interactionId: interactionId ?? 'unknown', status, usage, source: 'provider' };
+          const usage = readUsage(interaction.usage)
+            ?? readUsage(interaction.usage_metadata)
+            ?? readUsage(raw.usage)
+            ?? readUsage(raw.usage_metadata);
+          if (usage) {
+            usageReported = true;
+            if (quotaReservation) await finalizeGeminiQuotaReservation(quotaReservation, usage.inputTokens);
+            yield { type: 'interaction-usage', interactionId: interactionId ?? 'unknown', status, usage, source: 'provider' };
+          } else {
+            const estimated = estimatedUsageEvent(status);
+            if (estimated) yield estimated;
+          }
           if (status === 'requires_action') {
             sawRequiresAction = true;
             if (interactionId) yield { type: 'interaction-status', interactionId, status };
@@ -275,11 +338,15 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           const providerCode = readString(providerError, 'code') ?? readString(providerError, 'type') ?? readString(nestedError, 'code');
           if (providerCode !== undefined) failure.code = providerCode;
           sawTerminalEvent = true;
+          const estimated = estimatedUsageEvent('failed');
+          if (estimated) yield estimated;
           yield { type: 'failed', error: normalizeGeminiError(failure, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
           return;
         }
       }
       if (sawRequiresAction || sawTerminalEvent) return;
+      const estimated = estimatedUsageEvent('failed');
+      if (estimated) yield estimated;
       yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
     } finally {
       void iterator.return?.()?.catch(() => undefined);
@@ -289,7 +356,14 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     const error = cause instanceof ArtifactError
       ? { ...normalized, code: cause.code, message: cause.userMessage, retryable: false, debug: { ...normalized.debug, artifactError: cause.code } }
       : normalized;
-    if (error.cancelled || signal?.aborted || request.isGenerationActive?.() === false) { yield { type: 'cancelled', interactionId }; return; }
+    if (error.cancelled || signal?.aborted || request.isGenerationActive?.() === false) {
+      const estimated = estimatedUsageEvent('cancelled');
+      if (estimated) yield estimated;
+      yield { type: 'cancelled', interactionId };
+      return;
+    }
+    const estimated = estimatedUsageEvent('failed');
+    if (estimated) yield estimated;
     yield { type: 'failed', error };
   }
 }

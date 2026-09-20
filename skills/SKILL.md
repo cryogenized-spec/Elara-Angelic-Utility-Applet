@@ -170,6 +170,8 @@ Evidence may include:
 - runtime observations
 - test names
 - baseline comparison
+- before/after visual-evidence artifacts
+- computed viewport, font and geometry metadata
 
 An unrun gate is never considered passed.
 
@@ -758,9 +760,53 @@ Flaky failures:
 
 Never turn an unexplained flake into PASS.
 
+### 11.4 Before/After Visual Evidence
+
+Visual evidence is mandatory when a PR materially changes user-visible presentation, including:
+
+- layout or shell geometry
+- spacing, sizing or alignment
+- typography or iconography
+- responsive/mobile behavior
+- colour, contrast or component styling
+- rendering of a user-visible state whose correctness cannot be established from DOM assertions alone
+
+Use the repository's existing visual-evidence path rather than committing screenshots to the branch.
+
+For pull requests, CI captures the same deterministic scenario against both:
+
+```text
+BASE_SHA -> before/
+HEAD_SHA -> after/
+```
+
+The canonical capture uses Android portrait geometry `412 x 915`, the same Chromium/Playwright stack, the same deterministic fixture, reduced motion and synthetic credentials only. The evidence artifact contains, per side:
+
+- a viewport screenshot
+- a focused component/panel screenshot
+- `evidence.json` with source/base/head SHAs
+- viewport dimensions
+- whether the reviewed icon font rendered
+- relevant computed geometry/style values
+
+Rules:
+
+1. Baseline and head must use the exact SHAs recorded for certification.
+2. The scenario, viewport, browser family and fixture must be identical on both sides.
+3. Never use production credentials, live user content or private account data in screenshot fixtures.
+4. Screenshots are ephemeral CI evidence, not repository source; do not commit generated PNGs.
+5. Visual evidence complements DOM/E2E assertions; it never substitutes for behavioral verification.
+6. A pixel difference is not automatically a defect. Determine whether the changed pixels correspond to the PR's intended presentation.
+7. Conversely, a visually obvious regression is a finding even when DOM assertions remain green.
+8. If Noto/other reviewed presentation assets fail to load, record that explicitly; do not pretend a fallback screenshot proves the intended font/icon rendering.
+9. For a required visual gate, missing, unreadable, wrong-SHA or non-comparable evidence is `INCOMPLETE`, not PASS.
+
+The reviewer should retrieve the successful CI artifact when available and inspect both `before` and `after` images. When local review creates equivalent evidence instead, record the exact commands, SHAs, viewport and output paths.
+
 ---
 
 ## 12. Phase 6 — Codex Advisory Review
+
 
 Codex is supplementary evidence only.
 
@@ -833,9 +879,10 @@ Immediately before certification:
 1. Re-fetch/re-read PR head.
 2. Confirm current head equals original `HEAD_SHA`.
 3. Confirm mandatory CI state.
-4. Confirm all mandatory gates have evidence.
-5. Apply verdict matrix.
-6. Emit canonical report.
+4. Confirm required visual evidence exists, matches BASE_SHA/HEAD_SHA and is comparable.
+5. Confirm all mandatory gates have evidence.
+6. Apply verdict matrix.
+7. Emit canonical report.
 
 If HEAD changed:
 
@@ -863,6 +910,7 @@ Verdicts are mutually exclusive.
 - required integration trace complete
 - required persistence compatibility established
 - required E2E/runtime gates passed
+- required before/after visual evidence passed for material presentation changes
 - all mandatory gates supported by evidence
 
 Known unrelated baseline failures may coexist with PASS only when confidently isolated.
@@ -885,6 +933,7 @@ Examples:
 - unsafe write/confirmation path
 - demonstrated idempotency/concurrency violation in a core path
 - PR-introduced runtime regression
+- PR-introduced visual regression established by comparable before/after evidence
 
 `BLOCKED` means code remediation and recertification are required.
 
@@ -899,6 +948,7 @@ Examples:
 - safe isolated runtime cannot be created
 - required dependency/browser/runtime unavailable
 - required test harness crashes independently of the PR
+- required visual evidence is missing, unreadable, wrong-SHA or non-comparable
 - baseline comparison remains ambiguous
 - HEAD changed during review
 
@@ -1001,7 +1051,7 @@ The reviewer currently performing the review cannot be modified by repository co
 
 If the PR changes:
 
-- this `SKILL.md`
+- this `SKILL.md` or its exact `PR_Review.md` mirror
 - verdict rules
 - severity/effect mapping
 - review helper scripts
@@ -1067,6 +1117,7 @@ Build:                   PASS | FAIL | NOT_APPLICABLE
 Unit / Integration:      PASS | FAIL | BASELINE_FAILURE
 Persisted-State Compat:  PASS | FAIL | NOT_APPLICABLE
 Playwright / E2E:        PASS | FAIL | NOT_APPLICABLE
+Visual Evidence:         PASS | FAIL | NOT_APPLICABLE | INCOMPLETE
 Runtime Errors:          CLEAN | FINDINGS
 
 --------------------------------------------------------------------------------
@@ -1138,4 +1189,5 @@ The reviewer must always preserve these invariants:
 12. Certification belongs to one immutable `HEAD_SHA`.
 13. Sensitive-authority changes require explicit human sign-off.
 14. The reviewer cannot bootstrap trust in modifications to itself.
-15. Review mode never merges.
+15. Material presentation changes require comparable BASE_SHA/HEAD_SHA visual evidence.
+16. Review mode never merges.

@@ -528,7 +528,7 @@ describe('direct Google OAuth authority', () => {
     pairingTokenMock.mockResolvedValue('test-installation-secret');
     codeMock.mockResolvedValue({ code: 'initial-code', scope: `${CALENDAR_READ_SCOPE} ${EMAIL_SCOPE}` });
     let revision = 300;
-    let account = 'account-a@example.com';
+    const account = 'account-a@example.com';
     let refreshCalls = 0;
     const apiTokens: string[] = [];
 
@@ -552,7 +552,7 @@ describe('direct Google OAuth authority', () => {
         refreshCalls += 1;
         return new Response(JSON.stringify({
           connected: true,
-          accessToken: 'access-account-b',
+          accessToken: 'access-revision-301',
           expiresIn: 3600,
           scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
           account: { email: account },
@@ -570,15 +570,13 @@ describe('direct Google OAuth authority', () => {
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     refreshCalls = 0;
     revision = 301;
-    account = 'account-b@example.com';
-
     const response = await authorized.fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events');
 
     expect(response.status).toBe(200);
     expect(refreshCalls).toBe(1);
-    expect(apiTokens).toEqual(['Bearer access-account-b']);
+    expect(apiTokens).toEqual(['Bearer access-revision-301']);
     expect(apiTokens).not.toContain('Bearer access-account-a');
-    expect((await googleOAuthAuthority.getStatus()).account?.email).toBe('account-b@example.com');
+    expect((await googleOAuthAuthority.getStatus()).account?.email).toBe('account-a@example.com');
   });
 
   it('rejects non-Google API targets before network access', async () => {

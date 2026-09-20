@@ -100,6 +100,7 @@ Organic formation is downstream of conversation durability. `generation-sync.ts`
 | Semantic synthesis extractor | `src/gemini/semantic-synthesis.ts` |
 | Provenance class / volatility | `src/memory/volatility.ts` |
 | Semantic dossier retrieval | `src/memory/semantic-retrieval.ts` |
+| Semantic cabinet maintenance | `src/memory/semantic-maintenance.ts` |
 | Gemini memory tool schemas / handlers | `src/memory/tool-schema.ts`, `tool-handler.ts` |
 | Gemini recall projection | `src/gemini/memory-context.ts`, `provider.ts` |
 | Central tool authority | `src/google/tools/registry.ts`, `contracts.ts`, `gemini-declarations.ts`, `executor.ts` |
@@ -342,6 +343,8 @@ The attentive-memory programme adds a derived filing cabinet above the canonical
 **Retrieval (miserly dossier lane).** Semantic files enter model context only through the bounded dossier lane appended after the canonical lane: at most 3 files and 1,500 characters total, strict top-K lexical relevance over title/aliases/summary (zero substantive overlap excludes the file), at most 2 live canonical source memories at most 700 characters each, and broad query-less recall retrieves no dossiers. Live sources must pass the canonical `isMemoryRetrievable` folder/scope/lifecycle policy, credential material and policy-disabled sensitive content fail closed, and conflicting files surface at most two canonical source records rather than the model inventing a resolution. Stale or volatile files are explicitly marked, and all dossier prose is framed as inert reference data. The canonical 8-record/6,000-character recall budget, scope policy and ranking are untouched, `memory.recall` remains canonical-only, and any dossier failure yields no dossier text rather than a partial or unvetted one.
 
 **Human surface.** Settings exposes the cabinet as a **Memory topics** surface between Memory & continuity and the Memory Bank: grouped You / People / Projects / Areas / Topics cards showing title, aliases, summary, source count and stale/conflict markers. The surface is navigation, not policy authority. Editing a card rewrites that synthesis only (version + 1, with an explicit note that rebuilding regenerates it from evidence); refreshing runs the explicit rebuild path; removing a file deletes the derived view while every underlying `db.memories` record remains fully intact and visible in the Memory Bank. No UI action rewrites canonical history.
+
+**Maintenance (lazy, bounded, convergent).** The cabinet has no timers or background sweeps. Maintenance runs only on explicit human action (the "refresh stale topics" sweep or a per-file refresh) and is strictly bounded: one file at a time, sequentially; a bounded window per run (default 5, hard cap 50) with the deterministic ID-ordered stale remainder reported as deferred; the staleness set frozen before any write so the sweep never feeds its own output back in (no recursive synthesis); and every per-file rebuild routed through the same fail-closed `rebuildSemanticFile` path with evidence drawn only from canonical `db.memories`. Maintenance never deletes files, never mutates `db.memories`, and an unchanged rebuild advances no version.
 
 ## 8. Security and failure semantics
 

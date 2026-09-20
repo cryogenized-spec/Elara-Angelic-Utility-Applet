@@ -190,4 +190,21 @@ describe('SemanticMemoryFiles (memory topics surface)', () => {
     expect(refreshed.aliases).toContain('Z');
     expect(refreshed.version).toBeGreaterThan(1);
   });
+
+  it('offers a bounded maintenance sweep for stale topics', async () => {
+    const source = await saveMemory({ title: 'Project owner', body: 'Zuhayr is the owner of the project.' });
+    await writeSemanticFile(fileTemplate({ id: 'semantic_ui_sweep', sourceMemoryIds: [source.id] }), 0);
+
+    act(() => { root.render(<SemanticMemoryFiles />); });
+    await waitForText('Refresh 1 stale topic');
+    await act(async () => { buttonByText('Refresh 1 stale topic').click(); });
+    await waitForText('Maintenance: Refreshed 1 stale topic.');
+
+    const after = (await getSemanticFile('semantic_ui_sweep'))!;
+    expect(after.version).toBe(2);
+    expect(after.summary).toBe(SYNTHESIS_OUTPUT.summary);
+    expect(container.textContent).not.toContain('Refresh 1 stale topic');
+    expect(container.textContent).not.toContain('May be out of date');
+    expect(await db.memories.count()).toBe(1);
+  });
 });

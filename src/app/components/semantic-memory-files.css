@@ -19,6 +19,18 @@
 .semantic-files__header div { display: flex; flex-direction: column; gap: 4px; }
 .semantic-files__header strong { font-size: 1.05rem; letter-spacing: 0.01em; }
 .semantic-files__header span { color: rgba(235, 240, 255, 0.65); font-size: 0.85rem; max-width: 60ch; }
+.semantic-files__sweep {
+  flex-shrink: 0;
+  padding: 7px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.semantic-files__sweep:hover:not(:disabled) { background: rgba(255, 255, 255, 0.1); }
+.semantic-files__sweep:disabled { opacity: 0.55; cursor: wait; }
 
 .semantic-files__status { margin: 0; color: rgba(140, 220, 160, 0.9); font-size: 0.85rem; }
 .semantic-files__error { margin: 0; color: rgba(255, 150, 150, 0.95); font-size: 0.85rem; }

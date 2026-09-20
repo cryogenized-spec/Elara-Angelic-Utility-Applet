@@ -10,6 +10,7 @@ import {
   writeSemanticFile,
   type SemanticMemoryFile,
 } from '../../memory/semantic-file';
+import { maintainSemanticFiles } from '../../memory/semantic-maintenance';
 import { rebuildSemanticFile } from '../../memory/semantic-rebuild';
 import { geminiSemanticSynthesisExtractor } from '../../gemini/semantic-synthesis';
 import { loadGeminiSettings } from '../../persistence/conversation';
@@ -54,6 +55,7 @@ export function SemanticMemoryFiles() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditDraft>({ title: '', summary: '', aliases: '' });
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [sweepRunning, setSweepRunning] = useState(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -143,6 +145,28 @@ export function SemanticMemoryFiles() {
     }
   }
 
+  async function handleSweep() {
+    setSweepRunning(true);
+    setStatus(null);
+    setError(null);
+    try {
+      const settings = await loadGeminiSettings();
+      const report = await maintainSemanticFiles(geminiSemanticSynthesisExtractor(settings.model));
+      const parts: string[] = [];
+      parts.push(report.refreshed > 0 ? `Refreshed ${report.refreshed} stale topic${report.refreshed === 1 ? '' : 's'}.` : 'No stale topics needed refreshing.');
+      if (report.unchanged > 0) parts.push(`${report.unchanged} already up to date.`);
+      if (report.rejected > 0) parts.push(`${report.rejected} skipped — nothing was changed.`);
+      if (report.unavailable > 0) parts.push(`${report.unavailable} could not be processed this time.`);
+      if (report.nextRunHasWork) parts.push('The bounded window deferred some stale topics for the next run.');
+      setStatus(`Maintenance: ${parts.join(' ')}`);
+      await refresh();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Memory maintenance could not run right now. The underlying memories are untouched.');
+    } finally {
+      setSweepRunning(false);
+    }
+  }
+
   async function handleClear(file: SemanticMemoryFile) {
     if (!window.confirm(`Remove the "${file.title}" summary file? Only this organized summary is removed — every underlying memory stays in the Memory Bank.`)) return;
     try {
@@ -208,6 +232,7 @@ export function SemanticMemoryFiles() {
         <strong id="memory-topics-heading">Memory topics</strong>
         <span>Organized summaries of what Elara has noticed — people, projects, areas, topics, and you. Summaries are rebuilt from the underlying memories; they are a map, not a second memory store.</span>
       </div>
+      {!loading && staleIds.size > 0 && <button type="button" className="semantic-files__sweep" disabled={sweepRunning} onClick={() => void handleSweep()}>{sweepRunning ? 'Maintaining…' : `Refresh ${staleIds.size} stale topic${staleIds.size === 1 ? '' : 's'}`}</button>}
     </div>
     {status && <p className="semantic-files__status" role="status">{status}</p>}
     {error && <div className="semantic-files__error" role="alert">{error}</div>}

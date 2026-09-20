@@ -86,7 +86,7 @@ The app may expose provider-produced thought summaries, but it does not treat hi
 
 Interactive streaming has finite live-memory ceilings before persistence: at most 50,000 provider events, 1,000,000 generated-text characters, 64,000 thought-summary characters, and 100,000 streamed function-argument characters per provider interaction stream. The provider enforces these limits before yielding oversized deltas, and the chat reducer independently enforces the text and thought ceilings so a future alternate adapter cannot bypass the live-state boundary. Persisted diagnostic truncation is defense-in-depth, not the resource limit.
 
-Tool-enabled turns freeze a single untrusted-context policy into every continuation. Attachments, recalled durable memory, and external provider results are evidence rather than instructions; application code, not model compliance, owns the recursive-read refusal and elevated-mutation behavior.
+Tool-enabled turns freeze a single untrusted-context policy into every continuation. Attachments, recalled durable memory, and external provider results are evidence rather than instructions; application code, not model compliance, owns private-read containment and elevated-mutation behavior. Public YouTube discovery is not treated as private-account access. A post-taint Drive download is allowed only when its exact file ID was surfaced by a same-turn Drive search and the file bytes remain in the local artifact boundary.
 
 ## 7. Verification and tests
 

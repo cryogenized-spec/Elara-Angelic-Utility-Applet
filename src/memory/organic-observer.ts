@@ -3,6 +3,7 @@ import { loadFolderState } from '../persistence/folders';
 import { consolidateObservation, recordObservation } from './observation';
 import { findExactEvidenceSupportTarget } from './lifecycle';
 import { runMemoryMutationTransaction } from './store';
+import { containsCredentialMaterial } from './safety';
 
 export const ORGANIC_MEMORY_DOMAINS = [
   'preference',
@@ -63,18 +64,6 @@ const DOMAIN_TITLES: Readonly<Record<OrganicMemoryDomain, string>> = {
   shared_event: 'Observed shared event',
 };
 
-/**
- * Obvious credential material is never eligible for automatic persistence.
- * This is intentionally narrow: the model prompt supplies the broader privacy
- * policy, while this deterministic gate catches common secret-shaped evidence.
- */
-function looksLikeCredential(evidence: string): boolean {
-  return /\b(?:password|passcode|pin|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token)\b\s*(?:is|=|:)\s*\S+/i.test(evidence)
-    || /\bBearer\s+[A-Za-z0-9._~+/-]{12,}/i.test(evidence)
-    || /\bsk-[A-Za-z0-9_-]{16,}\b/.test(evidence)
-    || /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(evidence);
-}
-
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -100,7 +89,7 @@ function acceptedCandidates(raw: unknown, fullUserMessage: string): OrganicMemor
     // The classifier may point only at literal user-authored evidence. It never
     // gets to paraphrase a fact into existence.
     if (!fullUserMessage.includes(candidate.evidence)) continue;
-    if (looksLikeCredential(candidate.evidence)) continue;
+    if (containsCredentialMaterial(candidate.evidence)) continue;
     const key = `${candidate.domain}\u0000${candidate.evidence}`;
     if (seen.has(key)) continue;
     seen.add(key);

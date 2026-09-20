@@ -1,6 +1,6 @@
 import { patchBoardTask, createBoardTask } from "../../kanban/task-writes";
 import { moveBefore, moveOne, type TaskMove } from "../../kanban/reordering";
-import type { TaskListSummary } from "../../kanban/google-port";
+import { taskServiceForAccount, type TaskListSummary } from "../../kanban/google-port";
 import {
   useEffect,
   useMemo,
@@ -37,7 +37,6 @@ import {
   saveRoutine,
   removeRoutine,
   syncBoard,
-  taskService,
   type BoardTask,
   type Subroutine,
 } from "../../kanban/store";
@@ -160,15 +159,17 @@ function KanbanWorkspace({
     setActionError(null);
     setEditor(next);
   };
-  async function run(action: () => Promise<unknown>, close = false, reconcile = true) {
+  async function run(action: (service: ReturnType<typeof taskServiceForAccount>) => Promise<unknown>, close = false, reconcile = true) {
     if (savingRef.current || !board) return;
+    const expectedAccount = board.account;
     savingRef.current = true;
     setSaving(true);
     setActionError(null);
     try {
-      if ((await currentAccount()) !== board.account)
+      if ((await currentAccount()) !== expectedAccount)
         throw new Error("Account changed. Sync before editing.");
-      await action();
+      const service = taskServiceForAccount(expectedAccount);
+      await action(service);
       if (close) {
         setEditor(null);
         setRemoval(null);
@@ -192,15 +193,15 @@ function KanbanWorkspace({
   }
   function reorder(move: TaskMove | null, task: BoardTask) {
     if (!move || !canReorder) return;
-    void run(async () => {
-      const latest = await taskService.getTask(move.listId, move.taskId);
+    void run(async (service) => {
+      const latest = await service.getTask(move.listId, move.taskId);
       if (
         (latest.parent ?? "") !== (task.parent ?? "") ||
         (task.etag && latest.etag !== task.etag)
       ) {
         throw new Error("This task changed in Google. Sync before reordering.");
       }
-      await taskService.moveTask(
+      await service.moveTask(
         move.listId,
         move.taskId,
         move.parent,
@@ -428,8 +429,9 @@ function KanbanWorkspace({
                               aria-label={`${task.status === "completed" ? "Reopen" : "Complete"} ${task.title}`}
                               aria-pressed={task.status === "completed"}
                               onClick={() =>
-                                void run(() =>
+                                void run((service) =>
                                   patchBoardTask(
+                                    service,
                                     list.id,
                                     task.id,
                                     {
@@ -727,14 +729,14 @@ function KanbanWorkspace({
               }
               if (editor.kind === "list")
                 void run(
-                  () =>
+                  (service) =>
                     editor.list
-                      ? taskService.updateTaskList(
+                      ? service.updateTaskList(
                           editor.list.id,
                           title,
                           editor.list.etag,
                         )
-                      : taskService.createTaskList(title),
+                      : service.createTaskList(title),
                   true,
                 );
               else if (editor.kind === "routine") {
@@ -760,15 +762,16 @@ function KanbanWorkspace({
                 const listId =
                   editor.task?.listId ?? String(data.get("listId"));
                 void run(
-                  () =>
+                  (service) =>
                     editor.task
                       ? patchBoardTask(
+                          service,
                           listId,
                           editor.task.id,
                           patch,
                           editor.task.etag,
                         )
-                      : createBoardTask(listId, {
+                      : createBoardTask(service, listId, {
                           ...patch,
                           scheduledDate: due || undefined,
                         }),
@@ -944,15 +947,15 @@ function KanbanWorkspace({
                 return;
               }
               void run(
-                () =>
+                (service) =>
                   removal.kind === "task"
-                    ? taskService.deleteTask(
+                    ? service.deleteTask(
                         removal.task.listId,
                         removal.task.id,
                         removal.task.etag,
                       )
                     : removal.kind === "list"
-                      ? taskService.deleteTaskList(
+                      ? service.deleteTaskList(
                           removal.list.id,
                           removal.list.etag,
                         )

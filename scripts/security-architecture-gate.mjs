@@ -368,6 +368,7 @@ if (!oauthAuthority.includes('accountEmail?: string') || !oauthAuthority.include
 if (!kanbanStore.includes('pruneCachedAccounts') || !kanbanStore.includes('status.state === "disconnected"') || !kanbanStore.includes('status.state === "revoked"') || !kanbanStore.includes('status.state === "reauthorization-required" && identityAccount === null')) fail('Kanban account switching/disconnect must retain explicit cache-pruning semantics');
 if (!kanbanStore.includes('else if (!board && state.board?.account === account) update.board = null;')) fail('Kanban cross-tab cache deletion must clear the matching in-memory board projection');
 const kanbanScreen = read('src/app/components/KanbanScreen.tsx');
+if (!kanbanPort.includes('taskServiceForAccount(expectedAccount: string)') || !kanbanPort.includes('admittedAccount(capability, expectedAccount)') || !kanbanScreen.includes('taskServiceForAccount(expectedAccount)')) fail('Kanban human mutations must remain bound to the displayed Google account through the reviewed service boundary');
 if (!kanbanScreen.includes('removal?.kind === "list" ||')) fail('Kanban task-list deletion must always disclose possible Docs/Chat assignment fallout');
 
 const googleBroker = read('src/google/confirmation/broker.ts');

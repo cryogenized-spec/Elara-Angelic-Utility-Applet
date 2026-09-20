@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { googleOAuthAuthority } from '../google/oauth/authority';
 import type { GoogleOAuthStatus } from '../google/oauth/contracts';
-import { taskService } from './google-port';
+import { taskService, taskServiceForAccount } from './google-port';
 
 const ready: GoogleOAuthStatus = { state: 'connected', account: { email: 'one@example.com' }, sessionReady: true, enabledCapabilities: ['tasks.read', 'tasks.write'], grantedCapabilities: ['tasks.read', 'tasks.write'], grantedProviderScopes: [] };
 afterEach(() => vi.restoreAllMocks());
@@ -16,6 +16,14 @@ describe('human board authorization boundary', () => {
     vi.spyOn(googleOAuthAuthority, 'getStatus').mockResolvedValue({ ...ready, grantedCapabilities: ['tasks.read'] });
     const authorize = vi.spyOn(googleOAuthAuthority, 'authorizeExisting');
     await expect(taskService.createTaskList('Work')).rejects.toThrow('permission');
+    expect(authorize).not.toHaveBeenCalled();
+  });
+  it('rejects a human board write if the displayed account changed before authorization begins', async () => {
+    vi.spyOn(googleOAuthAuthority, 'getStatus').mockResolvedValue({ ...ready, account: { email: 'two@example.com' } });
+    const authorize = vi.spyOn(googleOAuthAuthority, 'authorizeExisting');
+    const bound = taskServiceForAccount('one@example.com');
+
+    await expect(bound.createTaskList('Work')).rejects.toThrow('account changed');
     expect(authorize).not.toHaveBeenCalled();
   });
   it('does not issue a provider fetch if account identity changes during authorization', async () => {

@@ -276,7 +276,7 @@ Observer/classifier failure never converts an already-durable chat response into
 
 Archive import is an untrusted-data boundary. Application authority fields cannot be smuggled through the portable schema; imported identity, scope, provenance, autonomy consent and CORE authority are always re-owned by application policy.
 
-Automatic organic capture rejects obvious credential-shaped evidence deterministically even if the classifier selects it. In addition to labelled passwords, secrets, API keys, Bearer tokens, sk-prefixed keys, and private-key PEM blocks, the deterministic deny set covers common bare AWS access-key ids, Google API keys, GitHub access-token families, Slack token families, and JWT-shaped three-segment tokens. The classifier remains the broader privacy policy; these patterns are a narrow fail-closed backstop and are not a general secret scanner.
+Automatic organic capture rejects obvious credential-shaped evidence deterministically even if the classifier selects it. In addition to labelled passwords, secrets, API keys, Bearer tokens, sk-prefixed keys, and private-key PEM blocks, the deterministic deny set covers common bare AWS access-key ids, Google API keys, GitHub access-token families, Slack token families, JWT-shaped three-segment tokens, and Luhn-valid 13–19 digit payment-card-like values (including spaced or hyphenated forms). The classifier remains the broader privacy policy; these patterns are a narrow fail-closed backstop and are not a general secret scanner.
 
 ## 9. Adversarial certification matrix
 

@@ -93,8 +93,14 @@ function buildUsage(usage: GeminiUsage | undefined, thoughtSummary: string | und
   };
 }
 
+const MEMORY_TOOLS_THAT_OWN_TURN_MEMORY_EFFECTS = new Set([
+  'memory.lookup',
+  'memory.save',
+  'memory.reconcile',
+]);
+
 function generationUsedMemoryTool(generation: GenerationState): boolean {
-  return generation.steps.some((step) => step.toolName?.startsWith('memory.') === true);
+  return generation.steps.some((step) => step.toolName !== undefined && MEMORY_TOOLS_THAT_OWN_TURN_MEMORY_EFFECTS.has(step.toolName));
 }
 
 function withOrganicMemoryActivity(

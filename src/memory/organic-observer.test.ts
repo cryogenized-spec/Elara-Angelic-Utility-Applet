@@ -47,6 +47,23 @@ describe('bounded organic memory observer', () => {
     expect(await listMemories()).toHaveLength(0);
   });
 
+  it('rechecks memory policy after async extraction before committing', async () => {
+    const evidence = 'I prefer the compact editor layout';
+    const extractor = vi.fn(async () => {
+      await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
+      return { candidates: [{ domain: 'preference', evidence }] };
+    });
+
+    const result = await observePersistedTurn({
+      ...baseRequest(extractor),
+      userMessage: `For this project ${evidence}, and that preference should stick.`,
+    });
+
+    expect(extractor).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 'skipped', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
   it('keeps explicit-only remembering truly explicit by skipping the organic observer', async () => {
     await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'explicit-only' });
     const extractor = vi.fn(async () => ({

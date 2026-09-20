@@ -290,8 +290,8 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
           const interaction = asRecord(raw.interaction);
           const status = readString(raw, 'status') ?? readString(interaction, 'status') ?? eventType.replace('interaction.', '');
-          if (eventType === 'interaction.requires_action' || status === 'requires_action') {
-            sawRequiresAction = true;
+          if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true;
+          if (eventType === 'interaction.requires_action') {
             const providerUsage = readUsage(interaction.usage)
               ?? readUsage(interaction.usage_metadata)
               ?? readUsage(interaction.usageMetadata)
@@ -372,7 +372,12 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           return;
         }
       }
-      if (sawRequiresAction || sawTerminalEvent) return;
+      if (sawRequiresAction) {
+        const estimated = estimatedUsageEvent('requires_action');
+        if (estimated) yield estimated;
+        return;
+      }
+      if (sawTerminalEvent) return;
       const estimated = estimatedUsageEvent('failed');
       if (estimated) yield estimated;
       yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };

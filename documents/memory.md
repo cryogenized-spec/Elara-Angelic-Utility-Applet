@@ -121,9 +121,9 @@ The preference contract contains:
 
 Everyday categories default on for personal facts, likes/dislikes, people/relationships, pets, routines/daily life, goals/plans/commitments, interests/hobbies/projects, work/study/practical life, important/shared moments, feelings/vulnerabilities/reflections, and values/worldview.
 
-Sensitive automatic-memory categories default off: health/wellbeing, money/finances, intimacy/sexuality, religion/spirituality, politics/civics, and precise location/home. Credential material remains outside this preference surface entirely and is never made eligible for organic memory.
+Sensitive automatic-memory categories default off: health/wellbeing, money/finances, intimacy/sexuality, religion/spirituality, politics/civics, race/ethnicity, legal/criminal history, and precise location/home. Credential material remains outside this preference surface entirely and is never made eligible for organic memory.
 
-Category permission governs future automatic/organic formation policy. Explicit, user-directed durable memory remains a separate confirmed authority boundary. Disabling conversational memory must not delete Memory Bank records or create a shadow copy.
+A present but malformed persisted master switch fails closed to disabled; a genuinely absent legacy field keeps the compatibility default. Category permission governs future automatic/organic formation policy. Explicit, user-directed durable memory remains a separate confirmed authority boundary. Disabling conversational memory must not delete Memory Bank records or create a shadow copy.
 
 **Pass 1 scope:** this preference contract is persisted and normalized now so later passes can consume one stable authority. Existing recall/observer runtime behavior is intentionally unchanged in this pass; runtime policy integration and user-facing controls are subsequent passes.
 

@@ -59,18 +59,14 @@ async function connectWorkspaceService(page: Page, serviceName: string): Promise
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Google' }).click();
-  const accountButton = page.getByRole('button', { name: 'Connect Google account' });
+  const accountButton = page.getByRole('button', { name: 'Connect Google Workspace' });
   if (await accountButton.count()) {
     await accountButton.click();
     await expect(page.getByText('Session ready')).toBeVisible();
   }
   const row = page.locator('.google-oauth-service').filter({ hasText: serviceName });
-  const read = row.getByRole('button', { name: 'Enable read access' });
-  if (await read.count()) await read.click();
-  await expect(row.getByText('Read ready')).toBeVisible();
-  const write = row.getByRole('button', { name: 'Enable writes' });
-  if (await write.count()) await write.click();
-  await expect(row.getByText('Writes ready')).toBeVisible();
+  await expect(row.getByLabel(`${serviceName} read granted`)).toBeVisible();
+  await expect(row.getByLabel(`${serviceName} write granted`)).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 

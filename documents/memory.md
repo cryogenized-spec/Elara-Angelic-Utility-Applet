@@ -135,6 +135,8 @@ A present but malformed persisted master switch fails closed to disabled; a genu
 
 **Companion continuity Pass 2:** the master switch gates both conversational recall and organic formation; `explicit-only` disables organic formation while preserving explicit confirmed memory work, and `direct-only` disables automatic prompt injection while preserving deliberate `memory.recall`. The new read-only `memory.recall` capability gives Elara a deliberate way to search the same scoped durable-memory universe when the user asks what she remembers or when missing past context would materially improve the answer. `natural` and `proactive` continue to share today's automatic retrieval policy until the later retrieval-strategy pass differentiates their salience behavior. Memory-policy reads hold a shared cross-tab Web Lock through recall projection/telemetry and the final organic commit; preference saves take the exclusive side of that lock. Callers also re-read the canonical preference before exposing recalled context or committing organic memory so unsupported-lock fallbacks fail closed rather than trusting a stale first read.
 
+**Companion continuity Pass 3:** organic formation now consumes the persisted remembering policy. Classifier candidates carry a human memory category plus coarse `low | medium | high` salience, but those fields confer no write authority. Application policy enforces `selective = high`, `natural = medium/high`, `attentive = low/medium/high`, and `explicit-only = none`; it also requires the selected category to be enabled at final commit time. Sensitive categories remain default-off. A deterministic sensitive-text hint layer rejects obvious attempts to downgrade sensitive evidence into a less-sensitive category, and credential/account identifiers remain ineligible regardless of category settings.
+
 Promotion order is:
 
 ```text
@@ -173,8 +175,8 @@ Shared read-modify-write primitives are transactional. `updateMemory`, reinforce
 - One logical provider call converges on at most one logical mutation. Reusing a call identity with changed mutation arguments fails closed.
 - Tool continuations reuse one frozen memory instruction for the elected turn.
 - Organic observation starts only after response durability, receives no assistant-response evidence, and fails closed when memory behavior is disabled or remembering style is `explicit-only`. Read-only `memory.recall` does not suppress that observer; management/mutation tools (`memory.lookup`, `memory.save`, `memory.reconcile`) do because they already own the turn's deliberate memory effects.
-- Organic classifier output has no direct write authority; only exact persisted user spans can survive application validation.
-- Automatic reinforcement never crosses folder scope or memory domain and never targets archived, expired or superseded records.
+- Organic classifier output has no direct write authority; only exact persisted user spans can survive application validation, remembering-style thresholding and category permission checks.
+- Automatic reinforcement never crosses folder scope or memory domain, never crosses two explicit category tags, and never targets archived, expired or superseded records.
 - Automatic semantic merge/conflict/supersession inference does not exist.
 - Relationship saturation fails closed without partial mutation.
 - Schema-invalid rows have zero memory authority and are quarantined from functional reads; their existence cannot suppress unrelated valid memory.
@@ -239,19 +241,21 @@ The full operation is transactional. Cached exact replay identity is checked bef
 
 ### 7.1 Capture criteria
 
-The organic classifier receives at most 6,000 characters from the persisted user message, with no assistant response, retrieved memory, Character Master or tools. It may nominate at most three strict `{domain,evidence}` candidates.
+The organic classifier receives at most 6,000 characters from the persisted user message, with no assistant response, retrieved memory, Character Master or tools. It may nominate at most three strict `{domain,category,salience,evidence}` candidates.
 
-Allowed domains: `preference`, `persistent_fact`, `project_decision`, `commitment`, `recurring_context`, `shared_event`.
+Allowed domains remain `preference`, `persistent_fact`, `project_decision`, `commitment`, `recurring_context`, `shared_event`. Category must be one of the canonical human-facing memory categories from `src/domain/preferences.ts`. Salience is only `low | medium | high`.
 
-A candidate should remain useful beyond the immediate exchange. Ordinary questions, temporary task wording, acknowledgements, jokes, speculative hypotheticals, quoted third-party claims and incidental chatter are excluded. `evidence` is capped at 500 characters and must be an exact substring of the full user message. Paraphrases/inferences are discarded. Obvious credential-shaped evidence is deterministically rejected; highly sensitive personal facts are excluded by classifier policy.
+A candidate should remain useful beyond the immediate exchange. Ordinary questions, temporary task wording, acknowledgements, jokes, speculative hypotheticals, quoted third-party claims and incidental chatter are excluded. `evidence` is capped at 500 characters and must be an exact substring of the full user message. Paraphrases/inferences are discarded. The classifier may classify sensitive personal evidence, but must use its matching sensitive category; application policy, not the classifier, decides whether that category is enabled. Obvious sensitive-category downgrades fail closed. Obvious credential/authentication material and financial account identifiers are deterministically rejected regardless of settings.
 
-Accepted candidates become application-titled/tagged `MICRO_OBSERVATION`s with confidence `0.60`, importance `0.35`, tag `organic`, and `domain:<domain>`. The classifier cannot choose identity, title, kind, weight, provenance or scope.
+Remembering styles are application-owned thresholds: `selective` accepts only high salience; `natural` accepts medium/high; `attentive` accepts low/medium/high; `explicit-only` bypasses the observer entirely. Category permission is re-read under the shared memory-policy lease immediately before the transaction, so a cross-tab switch change can stop capture before commit.
 
-A stable organic replay key derives from conversation + user message + domain + SHA-256(exact evidence). A deliberate `memory.*` turn and regeneration variants skip organic formation.
+Accepted candidates become application-titled/tagged `MICRO_OBSERVATION`s with confidence `0.60`, importance `0.35`, tags `organic`, `domain:<domain>`, `category:<category>`, and `salience:<salience>`. The classifier cannot choose identity, title, kind, weight, provenance or scope.
+
+A stable organic replay key derives from conversation + user message + domain + SHA-256(exact evidence). The category/salience metadata is part of the saved payload, so a nondeterministic replay under the same idempotency identity fails closed rather than creating a second observation. Deliberate memory-management turns and regeneration variants skip organic formation; read-only `memory.recall` does not.
 
 ### 7.2 Reinforcement and maturity
 
-Automatic support requires same folder scope, same domain and NFKC/case/whitespace-equivalent body text. Punctuation and semantic paraphrases do not collapse.
+Automatic support requires same folder scope, same domain, category compatibility and NFKC/case/whitespace-equivalent body text. Category-aware observations do not reinforce a differently categorized observation. Legacy organic rows without a category tag remain eligible for exact-evidence reinforcement so Pass 3 does not strand pre-existing memories. Punctuation and semantic paraphrases do not collapse.
 
 One support adds `+0.08` confidence (ceiling `0.92`), `+0.04` importance (ceiling `0.75`) and one reinforcement. Values are quantized to hundredths.
 

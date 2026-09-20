@@ -1,6 +1,7 @@
 import { memoryScopeForConversation } from '../memory/retrieval';
 import { formatMemoryContext, retrieveMemories } from '../memory/store';
 import { loadFolderState } from '../persistence/folders';
+import { loadMemoryBehaviorPreferences } from '../persistence/preferences';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 
@@ -19,6 +20,9 @@ function resolveConversationId(conversationId?: string): string | null {
 export async function loadMemoryContext(query: string, conversationId?: string): Promise<string> {
   const threadId = resolveConversationId(conversationId);
   if (!threadId) return '';
+
+  const behavior = await loadMemoryBehaviorPreferences();
+  if (!behavior.enabled || behavior.recallStyle === 'direct-only') return '';
 
   const folderState = await loadFolderState();
   return formatMemoryContext(await retrieveMemories(memoryScopeForConversation(threadId, folderState, query)));

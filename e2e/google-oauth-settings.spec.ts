@@ -118,7 +118,10 @@ test('a genuine v2 record migrates, then a real acquisition supersedes it with s
     value: {
       version: 2,
       grantedCapabilities: ['calendar.events.read', 'tasks.read'],
-      account: { email: 'legacy@example.com' },
+      // Same account as the GIS/userinfo stub: this case certifies v2->v3
+      // migration, not account switching. Account-switch reset is covered
+      // separately by the OAuth authority suite.
+      account: { email: STUB_EMAIL, displayName: STUB_NAME },
       updatedAt: new Date().toISOString(),
     },
   });
@@ -128,7 +131,7 @@ test('a genuine v2 record migrates, then a real acquisition supersedes it with s
   await openSettings(page);
   // Legacy consent/account metadata remains visible, but there is no live
   // memory token after startup, so the account screen requires refresh first.
-  await expect(page.getByText('legacy@example.com')).toBeVisible();
+  await expect(page.getByText(STUB_EMAIL)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Refresh Google session' })).toBeVisible();
   await expect(page.locator('.google-oauth-service')).toHaveCount(0);
 

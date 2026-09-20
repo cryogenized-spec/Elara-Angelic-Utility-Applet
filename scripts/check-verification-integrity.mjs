@@ -243,6 +243,10 @@ if (existsSync(join(root, '.github/workflows/phase3-baseline.yml'))) fail('tempo
 if (existsSync(join(root, '.github/workflows/phase3-freeze.yml'))) fail('temporary Phase 3 final-freeze workflow must not remain in the repository');
 if (existsSync(join(root, '.github/workflows/deploy.yml'))) fail('standalone Pages deployment workflow must not return; deployment is owned by certified CI');
 
+const canonicalPrReviewSkill = read('skills/SKILL.md');
+const namedPrReviewSkill = read('skills/PR_Review.md');
+if (namedPrReviewSkill !== canonicalPrReviewSkill) fail('skills/PR_Review.md must remain an exact mirror of the canonical skills/SKILL.md');
+
 const workflow = read('.github/workflows/ci.yml');
 for (const marker of ['continue-on-error', 'if: always()', '|| true', 'set +e']) if (workflow.includes(marker)) fail(`CI workflow contains forbidden bypass marker: ${marker}`);
 if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci rather than npm install');
@@ -259,6 +263,15 @@ for (const command of orderedCommands) {
 }
 for (const marker of ['ref: ${{ github.event.pull_request.head.sha || github.sha }}', 'persist-credentials: false', 'cancel-in-progress: true', 'needs: runtime', 'pages: write', 'id-token: write']) {
   if (!workflow.includes(marker)) fail(`CI workflow lost Phase 4 control: ${marker}`);
+}
+for (const marker of [
+  'name: Visual evidence',
+  "if: github.event_name == 'pull_request'",
+  'git worktree add --detach "$RUNNER_TEMP/elara-visual-base" "${{ github.event.pull_request.base.sha }}"',
+  'node scripts/capture-visual-evidence.mjs',
+  'name: visual-evidence-pr-${{ github.event.pull_request.number }}',
+]) {
+  if (!workflow.includes(marker)) fail(`CI workflow lost before/after visual-evidence control: ${marker}`);
 }
 
 const eslintDisableComment = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?\b/;

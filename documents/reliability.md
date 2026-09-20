@@ -3,7 +3,7 @@ id: SYS-REL
 status: active
 verified_commit: 0b5fd5623962c1d737ec6f5a793428bc42cc8649
 scope: CI, verification integrity, test quality, adversarial certification, coverage, secret scanning, supply-chain controls and certified deployment
-paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/secret-scan.mjs, scripts/supply-chain-gate.mjs, scripts/supply-chain-baseline.json, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/verify-coverage-gate.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, .github/workflows/ci.yml, .github/dependabot.yml, package.json, package-lock.json, .npmrc, .nvmrc, e2e]
+paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/secret-scan.mjs, scripts/supply-chain-gate.mjs, scripts/supply-chain-baseline.json, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/verify-coverage-gate.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, scripts/capture-visual-evidence.mjs, .github/workflows/ci.yml, .github/dependabot.yml, package.json, package-lock.json, .npmrc, .nvmrc, e2e]
 keywords: [reliability, ci, exact-head, adversarial, mutation, fail-closed, supply-chain, secret-scan, audit, signature, dependency, coverage, deployment]
 ---
 
@@ -37,6 +37,7 @@ exact PR head / main push SHA
 -> production build
 -> Playwright: Chromium + Android portrait + onboarding
 -> final reliability gate
+-> PR only, after Runtime verification: exact-base/exact-head visual evidence
 -> main only: package certified dist/
 -> deploy job after Runtime verification succeeds
 ```
@@ -59,6 +60,7 @@ CI pins Node `24.21.0` and npm `11.19.0`. Pull-request checkout explicitly uses 
 | CI and Pages release | `.github/workflows/ci.yml` |
 | Automated dependency proposals | `.github/dependabot.yml` |
 | Browser behavior | `e2e/`, `playwright.config.ts` |
+| Before/after visual evidence | `scripts/capture-visual-evidence.mjs`, `.github/workflows/ci.yml` |
 | Worker behavior | `worker/test/`, `vitest.workers.config.ts` |
 
 ## 4. Supply-chain contract
@@ -94,9 +96,13 @@ The coverage checker requires all 185 eligible source files to appear in the rep
 
 Persistence/credential changes require failure-path and migration evidence. Worker changes are verified through the isolated Worker/Durable Object suite. Browser-visible geometry and interaction are owned by Playwright rather than source-string assertions.
 
+For pull requests, the read-only `visual-evidence` job runs only after `Runtime verification` succeeds. It checks out the exact PR head with comparison history, materializes the exact PR base SHA into a detached worktree, installs each side from its own lockfile, and drives the same deterministic browser fixture against both revisions. The canonical initial fixture is Generation Activity at the Android reference viewport `412 x 915`; it emits a viewport PNG, a focused panel PNG and JSON geometry/font metadata under `before/` and `after/`. The pair is uploaded as a seven-day Actions artifact and is not committed to the repository.
+
+Visual evidence is deliberately synthetic: no production secrets, live account data or user conversations are permitted in the fixture. Screenshots are review evidence rather than behavioral assertions; Playwright DOM/runtime checks remain authoritative for interaction correctness. A failed optional presentation asset is recorded in JSON rather than silently treated as proof of the intended rendering.
+
 ## 7. CI authority and release semantics
 
-Workflow-wide `GITHUB_TOKEN` permissions default to none. Runtime certification receives read-only repository contents. The permanent certification workflow rejects repository write authority and persisted checkout credentials. GitHub Actions are pinned to reviewed full commit SHAs; each job has an explicit timeout and superseded runs for the same ref are cancelled.
+Workflow-wide `GITHUB_TOKEN` permissions default to none. Runtime certification and PR visual evidence each receive read-only repository contents. The permanent certification workflow rejects repository write authority and persisted checkout credentials. GitHub Actions are pinned to reviewed full commit SHAs; each job has an explicit timeout and superseded runs for the same ref are cancelled.
 
 Pages write and OIDC authority exist only in the downstream deploy job. On a `main` push, the runtime job builds and certifies the commit first, then uploads `dist/`; the deploy job has `needs: runtime` and cannot run when certification fails. The former independent Pages workflow must not return.
 

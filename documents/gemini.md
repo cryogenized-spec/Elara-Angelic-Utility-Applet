@@ -71,7 +71,8 @@ The organic-memory classifier is not a second conversational agent. It receives 
 - One canonical browser Gemini provider path; never add `generateContent` fallback or a competing chat/classifier provider.
 - API keys come through `SYS-SEC / security.md`, never a `VITE_*` browser variable.
 - Empty Character Master means omit `system_instruction`, not inject a default persona.
-- Interactive chat defaults to thread-scoped memory composition; callers that own their context use `memoryContext: 'none'`.
+- Interactive chat defaults to thread-scoped memory composition when companion memory is enabled and recall style is not `direct-only`; callers that own their context use `memoryContext: 'none'`.
+- Deliberate conversational recollection is a browser tool capability (`memory.recall`), not a second provider or persona prompt.
 - Internal classifier calls never inherit Character Master, conversation memory or the interactive tool surface unless their owning system explicitly requires it.
 - Tool declarations come from the registered executable capability surface; schemas contain no secrets.
 - Structured tool/media/artifact events remain structured through the chat boundary.
@@ -80,13 +81,13 @@ The organic-memory classifier is not a second conversational agent. It receives 
 
 Empty or locked Lockbox state yields explicit configuration failures. Provider exceptions are normalized; cancellation resolves promptly even if the network stream is idle. Function arguments are parsed as objects after streaming assembly. Attachment MIME/readiness is revalidated at the provider boundary.
 
-The organic-memory classifier is treated as an untrusted selector, not an authority. Provider failure, cancellation, timeout, oversized output or invalid JSON fails the classifier closed and does not fail an already-saved chat response. Exact evidence validation and persistence authority live in `SYS-MEM`.
-
-The app may expose provider-produced thought summaries, but it does not treat hidden reasoning/signatures as a user-editable second transcript.
-
 Interactive streaming has finite live-memory ceilings before persistence: at most 50,000 provider events, 1,000,000 generated-text characters, 64,000 thought-summary characters, and 100,000 streamed function-argument characters per provider interaction stream. The provider enforces these limits before yielding oversized deltas, and the chat reducer independently enforces the text and thought ceilings so a future alternate adapter cannot bypass the live-state boundary. Persisted diagnostic truncation is defense-in-depth, not the resource limit.
 
 Tool-enabled turns freeze a single untrusted-context policy into every continuation. Attachments, recalled durable memory, and external provider results are evidence rather than instructions; application code, not model compliance, owns private-read containment and elevated-mutation behavior. Public YouTube discovery is not treated as private-account access. A post-taint Drive download is allowed only when its exact file ID was surfaced by a same-turn Drive search and the file bytes remain in the local artifact boundary.
+
+The organic-memory classifier is treated as an untrusted selector, not an authority. Provider failure, cancellation, timeout, oversized output or invalid JSON fails the classifier closed and does not fail an already-saved chat response. Exact evidence validation and persistence authority live in `SYS-MEM`.
+
+The app may expose provider-produced thought summaries, but it does not treat hidden reasoning/signatures as a user-editable second transcript.
 
 ## 7. Verification and tests
 

@@ -156,7 +156,7 @@ describe('Gemini tool-loop TPM budget', () => {
     expect(checkpoint).not.toContain('file-6');
     expect(checkpoint).toContain('checkpointTruncated');
     expect(checkpoint).toContain('"omittedItems":3');
-    expect(checkpoint).toContain('\"etag-1\"');
+    expect(checkpoint).toContain('"etag-1"');
     expect(checkpoint).toContain('Exact reread is permitted');
   });
 

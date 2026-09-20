@@ -203,6 +203,19 @@ describe('bounded organic memory observer', () => {
     expect(await listMemories()).toHaveLength(0);
   });
 
+  it('rejects Luhn-valid payment-card-like evidence from automatic memory', async () => {
+    const evidence = '4111 1111 1111 1111';
+    const result = await observePersistedTurn({
+      conversationId: 'thread_organic',
+      messageId: 'card_secret_1',
+      userMessage: `My recurring payment reference is ${evidence}`,
+      extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence }] }),
+    });
+
+    expect(result).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
   it('fails closed on malformed classifier output', async () => {
     const result = await observePersistedTurn(baseRequest(async () => ({
       candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout', extraAuthority: true }],

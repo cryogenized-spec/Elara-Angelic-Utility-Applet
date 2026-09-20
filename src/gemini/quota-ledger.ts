@@ -275,10 +275,15 @@ export function estimateSerializedInputTokens(value: unknown): number {
             ? { ...record, data: '[inline-image-bytes]' }
             : current;
         });
-    // Deliberately conservative and tokenizer-independent. Base64 is transport
-    // encoding, not prompt text, so image bytes are represented by a fixed
-    // safety reserve. Provider usage replaces this estimate whenever available.
-    return Math.max(1, Math.ceil(serialized.length / 4) + mediaReserve);
+    // Safety admission needs an upper bound, not the usual ~4 characters/token
+    // English heuristic. Gemini tokenization cannot consume more non-empty text
+    // pieces than the UTF-8 bytes supplied, so charging one token per serialized
+    // UTF-8 byte is deliberately conservative for arbitrary Unicode/high-entropy
+    // text. Provider usage replaces this bound with measured truth when present.
+    // Base64 image transport is still replaced above and charged via the fixed
+    // media reserve instead of pretending encoded bytes are prompt text.
+    const serializedBytes = new TextEncoder().encode(serialized).byteLength;
+    return Math.max(1, serializedBytes + mediaReserve);
   } catch {
     return MIN_RESERVE;
   }

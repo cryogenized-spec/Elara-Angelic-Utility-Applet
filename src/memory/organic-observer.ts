@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { loadFolderState } from '../persistence/folders';
+import { loadMemoryBehaviorPreferences } from '../persistence/preferences';
 import { consolidateObservation, recordObservation } from './observation';
 import { findExactEvidenceSupportTarget } from './lifecycle';
 import { runMemoryMutationTransaction } from './store';
@@ -120,6 +121,18 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
   if (request.usedMemoryTool || (request.responseVariant ?? 1) > 1 || !request.conversationId.trim() || !request.messageId.trim()) {
     return { status: 'skipped', count: 0 };
   }
+
+  let behavior;
+  try {
+    behavior = await loadMemoryBehaviorPreferences();
+  } catch {
+    // Preference authority is unavailable: automatic persistence fails closed.
+    return { status: 'unavailable', count: 0 };
+  }
+  if (!behavior.enabled || behavior.rememberingStyle === 'explicit-only') {
+    return { status: 'skipped', count: 0 };
+  }
+
   if (!shouldInspectUserMessage(request.userMessage)) return { status: 'skipped', count: 0 };
 
   const isMutationAllowed = mutationGuard(request);

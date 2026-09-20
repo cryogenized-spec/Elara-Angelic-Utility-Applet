@@ -8,6 +8,29 @@ async function openMemoryBank(page: Page): Promise<void> {
   await expect(page.getByText('One human-facing view over the canonical durable-memory store.', { exact: false })).toBeVisible();
 }
 
+async function readMemoryBehavior(page: Page): Promise<Record<string, unknown> | null> {
+  return page.evaluate(async () => {
+    const request = indexedDB.open('elara-preferences');
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<Record<string, unknown> | null>((resolve, reject) => {
+        const transaction = database.transaction('preferences', 'readonly');
+        const get = transaction.objectStore('preferences').get('memory-behavior');
+        get.onsuccess = () => {
+          const record = get.result as { value?: Record<string, unknown> } | undefined;
+          resolve(record?.value ?? null);
+        };
+        get.onerror = () => reject(get.error);
+      });
+    } finally {
+      database.close();
+    }
+  });
+}
+
 async function createMemory(page: Page, title: string, body: string): Promise<void> {
   await page.getByRole('button', { name: 'New memory' }).click();
   await page.getByLabel('Title').fill(title);
@@ -59,9 +82,13 @@ test('Memory & continuity preferences persist without erasing subordinate choice
   await master.click();
   await expect(master).toHaveAttribute('aria-checked', 'false');
 
-  // Persistence is local/transactional; give the serialized preference queue
-  // one browser turn to settle before reconstructing the Settings tree.
-  await page.waitForTimeout(120);
+  await expect.poll(() => readMemoryBehavior(page)).toEqual(expect.objectContaining({
+    enabled: false,
+    rememberingStyle: 'attentive',
+    recallStyle: 'proactive',
+    categories: expect.objectContaining({ health_wellbeing: true }),
+  }));
+
   await openMemoryBank(page);
 
   await expect(page.getByRole('switch', { name: 'Use memory in conversation' })).toHaveAttribute('aria-checked', 'false');

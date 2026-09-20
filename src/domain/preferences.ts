@@ -88,6 +88,8 @@ export const MEMORY_CATEGORY_KEYS = [
   'intimacy_sexuality',
   'religion_spirituality',
   'politics_civics',
+  'race_ethnicity',
+  'legal_criminal_history',
   'precise_location_home',
 ] as const;
 
@@ -99,6 +101,8 @@ export const SENSITIVE_MEMORY_CATEGORY_KEYS = [
   'intimacy_sexuality',
   'religion_spirituality',
   'politics_civics',
+  'race_ethnicity',
+  'legal_criminal_history',
   'precise_location_home',
 ] as const satisfies readonly MemoryCategoryKey[];
 
@@ -139,6 +143,8 @@ export const DEFAULT_MEMORY_CATEGORIES: Readonly<Record<MemoryCategoryKey, boole
   intimacy_sexuality: false,
   religion_spirituality: false,
   politics_civics: false,
+  race_ethnicity: false,
+  legal_criminal_history: false,
   precise_location_home: false,
 };
 

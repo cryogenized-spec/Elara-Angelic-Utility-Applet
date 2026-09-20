@@ -541,18 +541,19 @@ export const googleDrivePickerAuthority = createGoogleDrivePickerAuthority(
  * leaves unchecked are enabled as local intent but are not effective unless
  * the returned provider-scope set satisfies them.
  */
-export async function authorizeGoogleWorkspace(): Promise<GoogleOAuthStatusContract> {
-  const capabilities = uniqueCapabilities([
-    'google.account',
-    ...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES,
-  ]);
+export async function authorizeGoogleWorkspace(
+  mode: 'onboard' | 'refresh' = 'onboard',
+): Promise<GoogleOAuthStatusContract> {
   const pairing = activePairing();
-  if (pairing) {
-    await synchronizeDurableStatus(pairing);
-    await acquireDurableTokenForCapabilities(capabilities, pairing);
-  } else {
-    await acquireBrowserTokenForCapabilities(capabilities, '');
-  }
+  if (pairing) await synchronizeDurableStatus(pairing);
+
+  const current = loadStored();
+  const capabilities = mode === 'refresh' && current.enabledCapabilities.length
+    ? uniqueCapabilities(['google.account', ...current.enabledCapabilities])
+    : uniqueCapabilities(['google.account', ...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES]);
+
+  if (pairing) await acquireDurableTokenForCapabilities(capabilities, pairing);
+  else await acquireBrowserTokenForCapabilities(capabilities, '');
   return currentStatus();
 }
 

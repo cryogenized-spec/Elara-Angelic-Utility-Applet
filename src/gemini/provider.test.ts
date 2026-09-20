@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { createInteraction, getGeminiApiKey, getGeminiLockboxStatus, GoogleGenAI } = vi.hoisted(() => ({
@@ -11,13 +12,15 @@ vi.mock('@google/genai', () => ({ GoogleGenAI }));
 vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey, getGeminiLockboxStatus }));
 
 import { geminiTurnPort } from './provider';
+import { resetGeminiQuotaLedgerForTests } from './quota-ledger';
 
 async function* events(...items: unknown[]) {
   for (const item of items) yield item;
 }
 
 describe('Gemini provider credential preflight', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetGeminiQuotaLedgerForTests();
     createInteraction.mockReset();
     getGeminiApiKey.mockReset();
     getGeminiLockboxStatus.mockReset();
@@ -101,7 +104,8 @@ describe('Gemini provider credential preflight', () => {
 });
 
 describe('Gemini provider stream fidelity', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetGeminiQuotaLedgerForTests();
     createInteraction.mockReset();
     getGeminiApiKey.mockReset();
     getGeminiLockboxStatus.mockReset();

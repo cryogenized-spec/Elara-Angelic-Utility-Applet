@@ -168,8 +168,15 @@ export function normalizeMemoryBehaviorPreferences(
     ]),
   ) as Record<MemoryCategoryKey, boolean>;
 
+  const hasPersistedEnabled = value !== null
+    && value !== undefined
+    && Object.prototype.hasOwnProperty.call(value, 'enabled');
+  const enabled = hasPersistedEnabled
+    ? (typeof value!.enabled === 'boolean' ? value!.enabled : false)
+    : DEFAULT_MEMORY_BEHAVIOR.enabled;
+
   return {
-    enabled: typeof value?.enabled === 'boolean' ? value.enabled : DEFAULT_MEMORY_BEHAVIOR.enabled,
+    enabled,
     rememberingStyle: MEMORY_REMEMBERING_STYLES.includes(value?.rememberingStyle as MemoryBehaviorPreferences['rememberingStyle'])
       ? value!.rememberingStyle!
       : DEFAULT_MEMORY_BEHAVIOR.rememberingStyle,

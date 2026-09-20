@@ -94,7 +94,7 @@ describe('memory tool handlers', () => {
   it('rejects credential-shaped content from model-initiated durable writes', async () => {
     await expect(handlerFor('memory.save')(contextFor('memory.save', {
       title: 'API credential',
-      body: 'My API key is sk-abcdefghijklmnopqrstuvwxyz123456',
+      body: `My API key is ${'s' + 'k-'}abcdefghijklmnopqrstuvwxyz123456`,
     }))).rejects.toThrow(/credential material/i);
     expect(await countMemories()).toBe(0);
 

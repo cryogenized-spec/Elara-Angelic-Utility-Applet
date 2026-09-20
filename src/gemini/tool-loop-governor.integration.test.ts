@@ -263,6 +263,63 @@ describe('Gemini tool-loop gross-input governor', () => {
     expect(collected).toContainEqual(expect.objectContaining({ type: 'context-activity', label: 'Context compacted' }));
   });
 
+  it('permits the exact read again after lossy checkpoint compaction', async () => {
+    const listEvents = vi.fn(async () => ({
+      events: Array.from({ length: 8 }, (_, index) => ({
+        id: `event-${index + 1}`,
+        summary: `Event ${index + 1}`,
+        etag: `"etag-${index + 1}"`,
+      })),
+    }));
+    const readTools = ['calendar.listEvents'] as const;
+
+    estimateContinuation
+      .mockReturnValueOnce(100_000)
+      .mockReturnValue(0);
+    estimateTurn.mockReturnValue(10_000);
+
+    streamReply
+      .mockReturnValueOnce(events(
+        { type: 'interaction-created', interactionId: 'lossy-1', model: 'gemini-3.8-flash' },
+        { type: 'interaction-usage', interactionId: 'lossy-1', status: 'requires_action', source: 'provider', usage: { inputTokens: 40_000 } },
+        { type: 'tool-call', interactionId: 'lossy-1', index: 0, callId: 'lossy-read-1', name: 'calendar.listEvents', arguments: { calendarId: 'primary' } },
+      ))
+      .mockReturnValueOnce(events(
+        { type: 'interaction-created', interactionId: 'lossy-compact', model: 'gemini-3.8-flash' },
+        { type: 'interaction-usage', interactionId: 'lossy-compact', status: 'requires_action', source: 'provider', usage: { inputTokens: 10_000 } },
+        { type: 'tool-call', interactionId: 'lossy-compact', index: 0, callId: 'lossy-read-2', name: 'calendar.listEvents', arguments: { calendarId: 'primary' } },
+      ));
+
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'lossy-done', model: 'gemini-3.8-flash' },
+      { type: 'interaction-usage', interactionId: 'lossy-done', status: 'completed', source: 'provider', usage: { inputTokens: 10_000 } },
+      { type: 'completed', interactionId: 'lossy-done', status: 'completed', durationMs: 2, usage: { inputTokens: 10_000 } },
+    ));
+
+    const collected: unknown[] = [];
+    for await (const event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Find the event, even if you need to reread the page after compaction.', tools: readTools },
+      {
+        tools: readTools,
+        executor: { oauth, handlers: { 'calendar.listEvents': listEvents } },
+        budgetPolicy: {
+          compactGrossInputTokens: 140_000,
+          hardGrossInputTokens: 150_000,
+          compactAfterInteractions: 99,
+          maxModelInteractions: 10,
+        },
+      },
+    )) collected.push(event);
+
+    expect(listEvents).toHaveBeenCalledTimes(2);
+    expect(streamReply).toHaveBeenCalledTimes(2);
+    expect(streamToolResult).toHaveBeenCalledOnce();
+    const compacted = streamReply.mock.calls[1]?.[0] as { input?: string };
+    expect(compacted.input).toContain('checkpointTruncated');
+    expect(compacted.input).toContain('"etag-1"');
+    expect(collected.at(-1)).toMatchObject({ type: 'completed', status: 'completed' });
+  });
+
   it('returns a local synthesis fallback instead of dispatching another model call past the hard budget', async () => {
     const listEvents = vi.fn(async () => ({ events: [] }));
     const readTools = ['calendar.listEvents'] as const;

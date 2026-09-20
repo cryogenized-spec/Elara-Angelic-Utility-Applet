@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { loadFolderState } from '../persistence/folders';
-import { loadMemoryBehaviorPreferences } from '../persistence/preferences';
+import { loadMemoryBehaviorPreferences, withMemoryBehaviorReadLease } from '../persistence/preferences';
 import { consolidateObservation, recordObservation } from './observation';
 import { findExactEvidenceSupportTarget } from './lifecycle';
 import { runMemoryMutationTransaction } from './store';
@@ -160,41 +160,43 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
     if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
 
     // Extraction can take seconds and preferences are cross-tab mutable.
-    // Re-read the authoritative policy immediately before entering the write
-    // transaction so a user disabling memory (or switching to explicit-only)
-    // while classification is running prevents persistence.
-    const currentBehavior = await loadMemoryBehaviorPreferences();
-    if (!currentBehavior.enabled || currentBehavior.rememberingStyle === 'explicit-only') {
-      return { status: 'skipped', count: 0 };
-    }
-    if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
-
-    await runMemoryMutationTransaction(async () => {
-      for (const { candidate, evidenceFingerprint } of preparedCandidates) {
-        const context = {
-          actor: 'model' as const,
-          conversationId: request.conversationId,
-          messageId: request.messageId,
-          folderId,
-          idempotencyKey: `organic:${request.conversationId}:${request.messageId}:${candidate.domain}:sha256:${evidenceFingerprint}`,
-          isMutationAllowed,
-        };
-        const observation = await recordObservation(
-          {
-            title: DOMAIN_TITLES[candidate.domain],
-            body: candidate.evidence,
-            tags: ['organic', `domain:${candidate.domain}`],
-            confidence: ORGANIC_OBSERVATION_CONFIDENCE,
-            importance: ORGANIC_OBSERVATION_IMPORTANCE,
-          },
-          context,
-        );
-
-        const target = await findExactEvidenceSupportTarget(observation);
-        if (target) await consolidateObservation(observation.id, target.id, 'support', context);
+    // Re-read the authoritative policy immediately before the write and hold a
+    // shared cross-tab lease through the transaction. Preference writes take
+    // the exclusive side of this same lock.
+    return withMemoryBehaviorReadLease(async () => {
+      const currentBehavior = await loadMemoryBehaviorPreferences();
+      if (!currentBehavior.enabled || currentBehavior.rememberingStyle === 'explicit-only') {
+        return { status: 'skipped', count: 0 };
       }
-    }, isMutationAllowed);
-    return { status: 'recorded', count: candidates.length };
+      if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
+
+      await runMemoryMutationTransaction(async () => {
+        for (const { candidate, evidenceFingerprint } of preparedCandidates) {
+          const context = {
+            actor: 'model' as const,
+            conversationId: request.conversationId,
+            messageId: request.messageId,
+            folderId,
+            idempotencyKey: `organic:${request.conversationId}:${request.messageId}:${candidate.domain}:sha256:${evidenceFingerprint}`,
+            isMutationAllowed,
+          };
+          const observation = await recordObservation(
+            {
+              title: DOMAIN_TITLES[candidate.domain],
+              body: candidate.evidence,
+              tags: ['organic', `domain:${candidate.domain}`],
+              confidence: ORGANIC_OBSERVATION_CONFIDENCE,
+              importance: ORGANIC_OBSERVATION_IMPORTANCE,
+            },
+            context,
+          );
+
+          const target = await findExactEvidenceSupportTarget(observation);
+          if (target) await consolidateObservation(observation.id, target.id, 'support', context);
+        }
+      }, isMutationAllowed);
+      return { status: 'recorded', count: candidates.length };
+    });
   } catch {
     return { status: 'unavailable', count: 0 };
   }

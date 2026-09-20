@@ -114,7 +114,7 @@ Organic formation is downstream of conversation durability. `generation-sync.ts`
 | Human Memory topics surface | `src/app/components/SemanticMemoryFiles.tsx`, `semantic-memory-files.css` |
 | Companion memory behavior preferences | `src/domain/preferences.ts`, `src/persistence/preferences.ts` |
 | Browser acceptance | `e2e/memory-bank.spec.ts`, `e2e/memory-chat.spec.ts`, `e2e/memory-files.spec.ts` |
-| Final hostile matrix | `src/memory/adversarial-certification.test.ts` plus owning subsystem tests |
+| Final hostile matrix | `src/memory/adversarial-certification.test.ts`, `src/memory/attentive-certification.pass8.test.ts` plus owning subsystem tests |
 
 ## 4. Data, retrieval and lifecycle contract
 
@@ -377,7 +377,7 @@ Pass 6 plus subsequent maintenance hardening adds or reuses direct behavioral te
 - **Archive attacks:** strict version/byte/count ceilings, authority-field rejection, duplicate/self/dangling relationship rejection, fresh IDs, scope/provenance/autonomy reset and all-or-nothing transaction.
 - **Memory Bank browser behavior:** landmark/audit/provenance/export/import acceptance plus a real malformed-IndexedDB-row recovery path are E2E-covered. The browser test proves a valid row stays visible next to corruption and survives explicit removal of the invalid row.
 - **Chat browser closure:** a real Playwright chat turn proves `memory.recall/lookup/save/reconcile` are advertised to Gemini, the organic classifier is tool-less, the assistant response exists in IndexedDB before observation starts, the canonical Memory Bank receives the observation, and the semantic `memory` activity glyph survives reload.
-- **Attentive-memory programme:** capture breadth (small details enter as low-authority MICRO evidence, never upgraded), exact-key entity identity (no fuzzy merge), fail-closed synthesis (ungrounded/unvetted claims write nothing), miserly dossier retrieval (bounded lane, inert data, canonical budget intact), volatility lifecycle (30-day operational micro dormancy, no volatile auto-promotion), concurrent rebuild convergence and the Memory topics navigation surface (synthesis-only edits, removal preserves canonical records) each carry direct behavioral tests in their owning subsystem, with a dedicated hostile certification pass re-testing capture, linking, synthesis, retrieval, concurrency, security and migration at the exact head before hand-off.
+- **Attentive-memory programme:** capture breadth (small details enter as low-authority MICRO evidence, never upgraded), exact-key entity identity (no fuzzy merge), fail-closed synthesis (ungrounded/unvetted claims write nothing), miserly dossier retrieval (bounded lane, inert data, canonical budget intact), volatility lifecycle (30-day operational micro dormancy, no volatile auto-promotion), concurrent rebuild convergence and the Memory topics navigation surface (synthesis-only edits, removal preserves canonical records) each carry direct behavioral tests in their owning subsystem, and the dedicated hostile certification matrix (`src/memory/attentive-certification.pass8.test.ts`) re-tests capture, linking, synthesis, retrieval, concurrency, security and migration at the exact head.
 
 A green test that passes for the wrong reason is a defect. Browser-state corruption fixtures are therefore explicitly pinned by the verification-integrity gate: `e2e/memory-bank.spec.ts` owns exactly one reviewed writable IndexedDB transaction for the malformed-row acceptance test. Additional direct browser-state mutations fail verification until deliberately reviewed.
 
@@ -399,7 +399,7 @@ Every completed runtime pass cleared documentation/verification integrity, archi
 
 **Program status: CLOSED / CERTIFIED.** The seven-pass durable-memory completion program and its final browser closure audit are merged. Treat frontmatter `verified_commit` as the last certified handover baseline until a later memory maintenance PR is itself merged and post-merge certified.
 
-**Attentive-memory programme (delivery in progress):** the eight-pass programme — opportunistic small-detail capture, exact-key entity identity, semantic memory files, provenance/volatility, miserly semantic retrieval, the Memory topics human surface, lazy maintenance and adversarial certification — broadens capture while keeping every authority boundary closed. Its non-negotiable invariants are recorded in the delivery PR description; its behavior contracts live in sections 5, 7.1 and 7.5 above.
+**Attentive-memory programme (delivered, pending exact-head certification):** the eight-pass programme — opportunistic small-detail capture, exact-key entity identity, semantic memory files, provenance/volatility, miserly semantic retrieval, the Memory topics human surface, lazy maintenance and adversarial certification — broadens capture while keeping every authority boundary closed. Its non-negotiable invariants are recorded in the delivery PR description; its behavior contracts live in sections 5, 7.1 and 7.5 above.
 
 For future work, read `AGENTS.md`, route through `documents/manifest.json`, then load this document before modifying any memory path. Inspect only the exact source/tests needed for the requested change.
 

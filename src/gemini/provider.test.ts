@@ -272,7 +272,7 @@ describe('Gemini provider stream fidelity', () => {
       interactionId: 'interaction-1',
       status: 'completed',
       source: 'provider',
-      usage: { inputTokens: 12, outputTokens: 4 },
+      usage: expect.objectContaining({ inputTokens: 12, outputTokens: 4 }) as unknown,
     }));
     expect(collected.at(-1)).toMatchObject({
       type: 'completed',

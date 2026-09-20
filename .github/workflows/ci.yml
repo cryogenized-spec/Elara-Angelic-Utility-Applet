@@ -14,6 +14,11 @@ concurrency:
 
 env:
   PAGES_ORIGIN: https://cryogenized-spec.github.io
+  # Public browser configuration, supplied through GitHub repository variables.
+  # These are not secrets; Vite intentionally embeds them in the static bundle.
+  VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+  VITE_GOOGLE_PICKER_API_KEY: ${{ vars.VITE_GOOGLE_PICKER_API_KEY }}
+  VITE_GOOGLE_CLOUD_PROJECT_NUMBER: ${{ vars.VITE_GOOGLE_CLOUD_PROJECT_NUMBER }}
 
 jobs:
   runtime:
@@ -88,6 +93,20 @@ jobs:
 
       - name: Worker & Durable Object tests
         run: npm run test:workers
+
+      - name: Validate production Google browser configuration
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${VITE_GOOGLE_CLIENT_ID:-}" ]]; then
+            echo "::error::VITE_GOOGLE_CLIENT_ID repository variable is required for the production Pages build."
+            exit 1
+          fi
+          if [[ "${VITE_GOOGLE_CLIENT_ID}" != *.apps.googleusercontent.com ]]; then
+            echo "::error::VITE_GOOGLE_CLIENT_ID does not look like a Google Web OAuth client ID."
+            exit 1
+          fi
 
       - name: Build
         run: npm run build

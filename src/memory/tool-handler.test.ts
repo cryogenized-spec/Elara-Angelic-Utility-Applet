@@ -91,6 +91,26 @@ describe('memory tool handlers', () => {
     expect(records[0].source.note).toBe(`idempotency:thread_1:message_1:${currentGenerationId}:call_1`);
   });
 
+  it('rejects credential-shaped content from model-initiated durable writes', async () => {
+    await expect(handlerFor('memory.save')(contextFor('memory.save', {
+      title: 'API credential',
+      body: 'My API key is sk-abcdefghijklmnopqrstuvwxyz123456',
+    }))).rejects.toThrow(/credential material/i);
+    expect(await countMemories()).toBe(0);
+
+    const target = await saveMemory({ title: 'Existing preference', body: 'The user prefers the compact layout.' });
+    const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'compact layout' }));
+    const [ref] = refsFromLookup(lookup);
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'related',
+      title: 'Credential evidence',
+      body: 'Password: hunter2',
+    }))).rejects.toThrow(/credential material/i);
+    expect(await countMemories()).toBe(1);
+    expect((await getMemory(target.id))?.relatedMemoryIds).toHaveLength(0);
+  });
+
   it('fails closed when one save call identity is replayed with changed arguments', async () => {
     const saveHandler = handlerFor('memory.save');
     await saveHandler(contextFor('memory.save', { title: 'Original memory', body: 'Original durable body.', tags: ['original'] }));

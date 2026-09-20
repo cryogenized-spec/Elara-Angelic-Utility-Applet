@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db, type StoredGeminiQuotaLedger } from '../persistence/conversation';
 import {
+  estimateSerializedInputTokens,
   finalizeGeminiQuotaReservation,
   geminiQuotaSnapshot,
   reserveGeminiQuota,
@@ -13,6 +14,27 @@ const T0 = 1_800_000_000_000;
 describe('Gemini rolling quota ledger', () => {
   beforeEach(async () => {
     await resetGeminiQuotaLedgerForTests();
+  });
+
+  it('does not mistake inline image transport bytes for prompt-text tokens', () => {
+    const encodedImage = 'A'.repeat(1_000_000);
+    const imageEstimate = estimateSerializedInputTokens({
+      input: [{ type: 'image', mime_type: 'image/png', data: encodedImage }],
+    });
+    const textEstimate = estimateSerializedInputTokens({
+      input: [{ type: 'text', text: encodedImage }],
+    });
+
+    expect(imageEstimate).toBeGreaterThanOrEqual(12_000);
+    expect(imageEstimate).toBeLessThan(20_000);
+    expect(textEstimate).toBeGreaterThan(200_000);
+  });
+
+  it('reserves for remote image inputs even when only a provider URI is present', () => {
+    const estimate = estimateSerializedInputTokens({
+      input: [{ type: 'image', mime_type: 'image/png', uri: 'https://example.test/provider-file' }],
+    });
+    expect(estimate).toBeGreaterThanOrEqual(12_000);
   });
 
   it('reserves conservatively before provider dispatch and replaces the estimate with provider truth', async () => {

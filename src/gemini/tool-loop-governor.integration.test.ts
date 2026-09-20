@@ -21,8 +21,8 @@ const oauth = {
   authorize: async (capability: string) => ({ capability: capability as never, fetch: async () => new Response('{}', { status: 200 }) }),
   getStatus: async () => ({
     state: 'connected' as const,
-    grantedCapabilities: ['drive.files.app.read' as const, 'drive.library.read' as const, 'gmail.read' as const, 'tasks.write' as const],
-    enabledCapabilities: ['drive.files.app.read' as const, 'drive.library.read' as const, 'gmail.read' as const, 'tasks.write' as const],
+    grantedCapabilities: ['drive.files.app.read' as const, 'drive.library.read' as const, 'gmail.read' as const, 'tasks.write' as const, 'calendar.events.read' as const],
+    enabledCapabilities: ['drive.files.app.read' as const, 'drive.library.read' as const, 'gmail.read' as const, 'tasks.write' as const, 'calendar.events.read' as const],
     grantedProviderScopes: [],
   }),
   disconnect: async () => undefined,
@@ -93,7 +93,7 @@ describe('Gemini tool-loop gross-input governor', () => {
         budgetPolicy: {
           softGrossInputTokens: 100_000,
           compactGrossInputTokens: 120_000,
-          hardGrossInputTokens: 150_000,
+          hardGrossInputTokens: 200_000,
           compactAfterInteractions: 99,
           maxModelInteractions: 10,
         },

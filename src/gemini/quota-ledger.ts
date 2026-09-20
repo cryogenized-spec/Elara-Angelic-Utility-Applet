@@ -133,7 +133,10 @@ function publish(value: GeminiQuotaSnapshot, now: number): void {
 function staleCorruptRow(value: unknown, now: number): boolean {
   if (!value || typeof value !== 'object') return true;
   const updatedAt = (value as Record<string, unknown>).updatedAt;
-  return finiteNonNegativeInteger(updatedAt) && updatedAt <= now - WINDOW_MS;
+  // An invalid/missing timestamp cannot establish a live reservation window.
+  // Treat it as replaceable corruption rather than permanently bricking local
+  // admission; cleanup itself still happens only inside the write transaction.
+  return !finiteNonNegativeInteger(updatedAt) || updatedAt <= now - WINDOW_MS;
 }
 
 export async function geminiQuotaSnapshot(
@@ -144,7 +147,9 @@ export async function geminiQuotaSnapshot(
   const row = await db.settings.get(LEDGER_ID);
   if (row && !validLedger(row)) {
     if (!staleCorruptRow(row, now)) return snapshot([{ id: 'corrupt', startedAt: now, reservedInputTokens: allowance }], allowance);
-    await db.settings.delete(LEDGER_ID);
+    // Snapshot reads never mutate the authority. A reservation transaction is
+    // the sole place stale corruption may be removed/replaced, preventing a
+    // stale reader in one tab from deleting a fresh reservation from another.
     return snapshot([], allowance);
   }
   return snapshot(activeEntries(row?.entries ?? [], now), allowance);

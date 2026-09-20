@@ -61,6 +61,7 @@ test('Memory master switch disables automatic controls without deleting their ch
   await page.getByRole('switch', { name: 'Use memory' }).click();
   await expect(page.getByRole('radio', { name: /Selective/ })).toBeChecked();
   await expect(page.getByLabel(/Likes & dislikes/)).not.toBeChecked();
+  await expect(page.locator('.memory-continuity-settings').getByRole('status')).toContainText('Memory preferences saved.');
 });
 
 test('Sensitive automatic-memory categories start off and remain individually opt-in', async ({ page }) => {

@@ -4,8 +4,31 @@ async function openMemoryBank(page: Page): Promise<void> {
   await page.goto('');
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
-  await page.getByRole('button', { name: 'Memory Bank' }).click();
+  await page.getByRole('button', { name: 'Memory' }).click();
   await expect(page.getByText('One human-facing view over the canonical durable-memory store.', { exact: false })).toBeVisible();
+}
+
+async function readMemoryBehavior(page: Page): Promise<Record<string, unknown> | null> {
+  return page.evaluate(async () => {
+    const request = indexedDB.open('elara-preferences');
+    const database = await new Promise<IDBDatabase>((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise<Record<string, unknown> | null>((resolve, reject) => {
+        const transaction = database.transaction('preferences', 'readonly');
+        const get = transaction.objectStore('preferences').get('memory-behavior');
+        get.onsuccess = () => {
+          const record = get.result as { value?: Record<string, unknown> } | undefined;
+          resolve(record?.value ?? null);
+        };
+        get.onerror = () => reject(get.error);
+      });
+    } finally {
+      database.close();
+    }
+  });
 }
 
 async function createMemory(page: Page, title: string, body: string): Promise<void> {
@@ -42,6 +65,39 @@ async function seedMalformedMemory(page: Page, id: string): Promise<void> {
   }, id);
 }
 
+test('Memory & continuity preferences persist without erasing subordinate choices', async ({ page }) => {
+  await openMemoryBank(page);
+  await expect(page.getByRole('heading', { name: 'Memory & continuity' })).toBeVisible();
+
+  const master = page.getByRole('switch', { name: 'Use memory in conversation' });
+  await expect(master).toHaveAttribute('aria-checked', 'true');
+  await page.getByRole('radio', { name: /Attentive/ }).click();
+
+  const recallGroup = page.getByRole('radiogroup', { name: 'How Elara uses memories' });
+  await recallGroup.getByRole('radio', { name: /Make connections/ }).click();
+
+  const health = page.getByRole('switch', { name: 'Health & wellbeing' });
+  await expect(health).toHaveAttribute('aria-checked', 'false');
+  await health.click();
+  await master.click();
+  await expect(master).toHaveAttribute('aria-checked', 'false');
+
+  await expect.poll(() => readMemoryBehavior(page)).toEqual(expect.objectContaining({
+    enabled: false,
+    rememberingStyle: 'attentive',
+    recallStyle: 'proactive',
+    categories: expect.objectContaining({ health_wellbeing: true }),
+  }));
+
+  await openMemoryBank(page);
+
+  await expect(page.getByRole('switch', { name: 'Use memory in conversation' })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByRole('radio', { name: /Attentive/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('radiogroup', { name: 'How Elara uses memories' }).getByRole('radio', { name: /Make connections/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('switch', { name: 'Health & wellbeing' })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText('Existing memories stay in the Memory Bank', { exact: false })).toBeVisible();
+});
+
 test('Memory Bank landmarks and audit stay on the canonical store', async ({ page }) => {
   await openMemoryBank(page);
   await createMemory(page, 'Pass 5 duplicate', 'A deliberately duplicated durable fact.');
@@ -58,7 +114,7 @@ test('Memory Bank landmarks and audit stay on the canonical store', async ({ pag
   await page.getByLabel('Filter').selectOption('all');
 
   await page.getByRole('button', { name: 'Audit Memory Bank' }).click();
-  await expect(page.getByRole('status')).toContainText('Reviewed 2 memories. No changes were made.');
+  await expect(page.locator('.memory-panel__status')).toContainText('Reviewed 2 memories. No changes were made.');
   await expect(page.getByLabel('Memory maintenance summary')).toContainText('1 duplicate group');
   await expect(page.getByText('Exact duplicate review')).toBeVisible();
 
@@ -95,12 +151,12 @@ test('Memory Bank exports locally and imports through the guarded archive bounda
   const download = await downloadPromise;
   const path = await download.path();
   expect(path).not.toBeNull();
-  await expect(page.getByRole('status')).toContainText('Exported 1 memories');
+  await expect(page.locator('.memory-panel__status')).toContainText('Exported 1 memories');
 
   await page.locator('input.memory-archive__file').setInputFiles(path!);
   await expect(page.getByText(/1 memories · 0 CORE records will restart as CONTEXTUAL/)).toBeVisible();
   await page.getByRole('button', { name: 'Import 1' }).click();
-  await expect(page.getByRole('status')).toContainText('Imported 1 memories');
+  await expect(page.locator('.memory-panel__status')).toContainText('Imported 1 memories');
   await expect(page.getByText(/2 valid · 2 stored · canonical store/)).toBeVisible();
 
   await page.getByLabel('Filter').selectOption('provenance:imported');

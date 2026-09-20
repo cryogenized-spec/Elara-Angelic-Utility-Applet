@@ -88,7 +88,7 @@ function declaredToolNames(payload: InteractionPayload): string[] {
 async function openMemoryBank(page: Page): Promise<void> {
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
-  await page.getByRole('button', { name: 'Memory Bank' }).click();
+  await page.getByRole('button', { name: 'Memory' }).click();
   await expect(page.getByText('One human-facing view over the canonical durable-memory store.', { exact: false })).toBeVisible();
 }
 

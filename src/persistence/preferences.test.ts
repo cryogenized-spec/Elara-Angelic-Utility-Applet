@@ -12,6 +12,7 @@ import {
   saveAppUiPreferences,
   saveChatAppearance,
   saveMemoryBehaviorPreferences,
+  updateMemoryBehaviorPreferences,
 } from './preferences';
 
 const longString = 'x'.repeat(400);
@@ -243,6 +244,22 @@ describe('companion memory behavior preferences', () => {
 
     const loaded = await loadMemoryBehaviorPreferences();
     expect(loaded).toEqual(saved);
+  });
+
+  it('patches the latest canonical memory behavior record instead of replacing unrelated choices', async () => {
+    await saveMemoryBehaviorPreferences({
+      ...DEFAULT_MEMORY_BEHAVIOR,
+      categories: { ...DEFAULT_MEMORY_CATEGORIES, health_wellbeing: true },
+    });
+
+    const updated = await updateMemoryBehaviorPreferences((current) => ({
+      ...current,
+      recallStyle: 'proactive',
+    }));
+
+    expect(updated.recallStyle).toBe('proactive');
+    expect(updated.categories.health_wellbeing).toBe(true);
+    expect((await loadMemoryBehaviorPreferences()).categories.health_wellbeing).toBe(true);
   });
 
   it('fills newly introduced categories from safe defaults when loading an older partial preference shape', () => {

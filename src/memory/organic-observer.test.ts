@@ -366,6 +366,19 @@ describe('bounded organic memory observer', () => {
     expect(await listMemories()).toHaveLength(1);
   });
 
+  it('collapses duplicate salience disagreements to the more conservative value', async () => {
+    const evidence = 'I prefer the compact editor layout';
+    const result = await observePersistedTurn(baseRequest(async () => ({
+      candidates: [
+        candidate(evidence, { salience: 'high' }),
+        candidate(evidence, { salience: 'low' }),
+      ],
+    })));
+
+    expect(result).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
   it('converges a replay of the same durable user evidence onto one observation', async () => {
     const evidence = 'I prefer the compact editor layout';
     const request = baseRequest(async () => ({ candidates: [candidate(evidence)] }));

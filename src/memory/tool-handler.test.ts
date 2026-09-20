@@ -113,6 +113,14 @@ describe('memory tool handlers', () => {
       title: 'Credential evidence',
       body: 'Password: hunter2',
     }))).rejects.toThrow(/credential material/i);
+
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'related',
+      title: 'Wi-Fi password',
+      body: 'hunter2',
+    }, { callId: 'call_split_credential' }))).rejects.toThrow(/credential material/i);
+
     expect(await countMemories()).toBe(1);
     expect((await getMemory(target.id))?.relatedMemoryIds).toHaveLength(0);
   });

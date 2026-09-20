@@ -2,17 +2,11 @@ import { containsCredentialMaterial, sensitiveMemoryCategoryHints } from './safe
 import type { MemoryBehaviorPreferences } from '../domain/preferences';
 import { listSemanticFiles } from './semantic-file';
 import { listMemories } from './store';
-import {
-  isMemoryRetrievable,
-  queryLexicalFraction,
-  queryTokens,
-  rankAndBudgetMemories,
-  type MemoryRetrievalScope,
-} from './retrieval';
+import { isMemoryRetrievable, queryLexicalFraction, queryTokens, rankAndBudgetMemories } from './retrieval';
 import { isSemanticFileStale } from './semantic-evidence';
 import type { SemanticMemoryFile } from './semantic-file';
 import { deriveMemoryVolatility } from './volatility';
-import type { DurableMemory } from './types';
+import type { DurableMemory, MemoryRetrievalScope } from './types';
 
 /**
  * Miserly retrieval over the semantic cabinet (Pass 5).
@@ -121,7 +115,7 @@ export function buildSemanticMemoryContext(input: SemanticMemoryContextInput): S
       const volatile = live.some((memory) => deriveMemoryVolatility(memory).requiresRevalidation);
       return {
         file,
-        stale: isSemanticFileStale(file, memories, scope.now),
+        stale: isSemanticFileStale(file, memories),
         volatile,
         conflicted: file.openConflicts.length > 0 || live.some((memory) => memory.conflictingMemoryIds.length > 0),
         live,

@@ -163,7 +163,7 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
     // Re-read the authoritative policy immediately before the write and hold a
     // shared cross-tab lease through the transaction. Preference writes take
     // the exclusive side of this same lock.
-    return withMemoryBehaviorReadLease(async () => {
+    return await withMemoryBehaviorReadLease(async () => {
       const currentBehavior = await loadMemoryBehaviorPreferences();
       if (!currentBehavior.enabled || currentBehavior.rememberingStyle === 'explicit-only') {
         return { status: 'skipped', count: 0 };

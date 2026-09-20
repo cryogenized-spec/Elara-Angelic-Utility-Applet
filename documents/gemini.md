@@ -41,7 +41,7 @@ bounded internal classifier
 
 The SDK client uses API version `v1` with SDK automatic retry attempts fixed to `1`; application retry/lifecycle policy remains outside the SDK.
 
-Browser Gemini admission also uses a device-local rolling 60-second gross-input ledger stored as a typed row in the existing conversation/settings IndexedDB authority. Each provider request reserves conservatively before dispatch; provider-reported gross input replaces the estimate when available, while requests that fail after dispatch remain conservatively charged. IndexedDB serialization is authoritative across same-origin tabs; BroadcastChannel is notification-only. The default local allowance is intentionally below the observed free-tier TPM ceiling and is a safety policy, not a claim about provider billing or cached-token quota discounts.
+Browser Gemini admission also uses a device-local rolling 60-second gross-input ledger stored as a typed row in the existing conversation/settings IndexedDB authority. Each provider request reserves conservatively before dispatch; provider-reported gross input replaces the estimate when available, while requests that fail after dispatch remain conservatively charged. Inline image base64 is treated as transport encoding rather than prompt text and receives a fixed media safety reserve; textual/document payloads retain the stricter serialized-input estimate. IndexedDB serialization is authoritative across same-origin tabs; snapshot reads do not mutate the ledger and BroadcastChannel is notification-only. The default local allowance is intentionally below the observed free-tier TPM ceiling and is a safety policy, not a claim about provider billing or cached-token quota discounts.
 
 ## 3. Source map
 

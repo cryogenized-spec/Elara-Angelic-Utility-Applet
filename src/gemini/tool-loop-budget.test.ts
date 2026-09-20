@@ -87,6 +87,7 @@ describe('Gemini tool-loop TPM budget', () => {
         subject: 'GitHub PR #79',
         bodyText: 'Kanban board integration. '.repeat(100),
         accessToken: 'must-not-appear',
+        nextPageToken: 'page-2-cursor',
       },
       true,
     );
@@ -98,6 +99,7 @@ describe('Gemini tool-loop TPM budget', () => {
     expect(checkpoint.length).toBeLessThanOrEqual(1_225);
     expect(checkpoint).toContain('UNTRUSTED_EXTERNAL');
     expect(checkpoint).toContain('GitHub PR #79');
+    expect(checkpoint).toContain('page-2-cursor');
     expect(checkpoint).not.toContain('must-not-appear');
   });
 

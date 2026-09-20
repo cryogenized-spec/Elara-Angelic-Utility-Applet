@@ -177,7 +177,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   const thoughtSummaryParts = new Map<number, string>();
   let quotaReservation: Extract<GeminiQuotaReservation, { granted: true }> | undefined;
   let usageReported = false;
-  const estimatedUsageEvent = (status: string): GeminiStreamEvent | undefined => {
+  const estimatedUsageEvent = (status: string, providerUsage?: GeminiUsage): GeminiStreamEvent | undefined => {
     if (usageReported || !quotaReservation) return undefined;
     usageReported = true;
     return {
@@ -185,8 +185,23 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
       interactionId: interactionId ?? requestId,
       status,
       source: 'estimate',
-      usage: { inputTokens: quotaReservation.reservedInputTokens },
+      usage: { ...providerUsage, inputTokens: quotaReservation.reservedInputTokens },
     };
+  };
+  const usageEvent = async (status: string, providerUsage?: GeminiUsage): Promise<GeminiStreamEvent | undefined> => {
+    const grossInput = providerUsage?.inputTokens;
+    if (typeof grossInput === 'number' && Number.isInteger(grossInput) && grossInput >= 0) {
+      usageReported = true;
+      if (quotaReservation) await finalizeGeminiQuotaReservation(quotaReservation, grossInput);
+      return {
+        type: 'interaction-usage',
+        interactionId: interactionId ?? requestId,
+        status,
+        source: 'provider',
+        usage: providerUsage,
+      };
+    }
+    return estimatedUsageEvent(status, providerUsage);
   };
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
   try {
@@ -272,7 +287,23 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         const eventInteractionId = interactionIdFrom(raw);
         if (eventInteractionId) interactionId = eventInteractionId;
         if (eventType === 'interaction.created') { const interaction = asRecord(raw.interaction); const id = readString(interaction, 'id') ?? interactionId ?? 'unknown'; interactionId = id; const model = readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL); yield { type: 'interaction-created', interactionId: id, model }; continue; }
-        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') { const status = readString(raw, 'status') ?? readString(asRecord(raw.interaction), 'status') ?? eventType.replace('interaction.', ''); if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
+        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
+          const interaction = asRecord(raw.interaction);
+          const status = readString(raw, 'status') ?? readString(interaction, 'status') ?? eventType.replace('interaction.', '');
+          if (eventType === 'interaction.requires_action' || status === 'requires_action') {
+            sawRequiresAction = true;
+            const providerUsage = readUsage(interaction.usage)
+              ?? readUsage(interaction.usage_metadata)
+              ?? readUsage(interaction.usageMetadata)
+              ?? readUsage(raw.usage)
+              ?? readUsage(raw.usage_metadata)
+              ?? readUsage(raw.usageMetadata);
+            const accounting = await usageEvent(status, providerUsage);
+            if (accounting) yield accounting;
+          }
+          if (interactionId) yield { type: 'interaction-status', interactionId, status };
+          continue;
+        }
         if (eventType === 'step.start') {
           const index = stepIndex(raw);
           const step = asRecord(raw.step);
@@ -309,14 +340,9 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
             ?? readUsage(raw.usage)
             ?? readUsage(raw.usage_metadata)
             ?? readUsage(raw.usageMetadata);
-          if (usage) {
-            usageReported = true;
-            if (quotaReservation) await finalizeGeminiQuotaReservation(quotaReservation, usage.inputTokens);
-            yield { type: 'interaction-usage', interactionId: interactionId ?? 'unknown', status, usage, source: 'provider' };
-          } else {
-            const estimated = estimatedUsageEvent(status);
-            if (estimated) yield estimated;
-          }
+          const accounting = await usageEvent(status, usage);
+          if (accounting) yield accounting;
+          const effectiveUsage = accounting?.type === 'interaction-usage' ? accounting.usage : usage;
           if (status === 'requires_action') {
             sawRequiresAction = true;
             if (interactionId) yield { type: 'interaction-status', interactionId, status };
@@ -324,8 +350,8 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           }
           sawTerminalEvent = true;
           const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts);
-          const completedUsage = usage
-            ? { ...usage, ...(thoughtSummary ? { thoughtSummary } : {}) }
+          const completedUsage = effectiveUsage
+            ? { ...effectiveUsage, ...(thoughtSummary ? { thoughtSummary } : {}) }
             : (thoughtSummary ? { thoughtSummary } : undefined);
           yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage };
           return;

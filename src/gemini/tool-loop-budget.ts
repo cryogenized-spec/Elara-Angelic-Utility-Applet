@@ -222,7 +222,7 @@ export function buildInvestigationCheckpoint(
   ].join('\n');
 
   // Keep enough room for framing + final instruction before considering evidence.
-  let framing = render([]);
+  const framing = render([]);
   if (framing.length > safeMax && boundedObjective.length > 40) {
     const overflow = framing.length - safeMax;
     boundedObjective = boundedString(objective, Math.max(40, boundedObjective.length - overflow - 4));

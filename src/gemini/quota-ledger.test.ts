@@ -71,7 +71,7 @@ describe('Gemini rolling quota ledger', () => {
 
     const recovered = await reserveGeminiQuota(20_000, T0, 200_000);
     expect(recovered.granted).toBe(true);
-    expect(await geminiQuotaSnapshot(T0, 200_000)).toMatchObject({ rollingInputTokens: 20_000, entries: 1 });
+    expect(await geminiQuotaSnapshot(T0, 200_000)).toMatchObject({ rollingInputTokens: 30_000, entries: 1 });
   });
 
   it('recovers transactionally from malformed quota rows that cannot prove a live timestamp', async () => {

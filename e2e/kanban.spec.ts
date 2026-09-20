@@ -2,7 +2,7 @@ import { expect, test, type Page } from "@playwright/test";
 
 type FixtureTask = { id: string; title: string; notes?: string; due?: string | null; status: string; etag: string; position: string; assignmentInfo?: { surfaceType: 'DOCUMENT'; linkToTask?: string } };
 
-async function seedWorkspace(page: Page, existing = false) {
+async function seedWorkspace(page: Page) {
   const lists = [{ id: 'studio', title: 'Studio projects' }, { id: 'personal', title: 'Personal' }, { id: 'reading', title: 'Reading list' }, { id: 'later', title: 'Someday' }];
   const tasks: FixtureTask[] = [{ id: 'review', title: 'Review the launch proposal', notes: 'Read the source email and confirm the next steps.', due: '2020-01-01T00:00:00Z', status: 'needsAction', etag: 'one', position: '0001', assignmentInfo: { surfaceType: 'DOCUMENT', linkToTask: 'https://tasks.google.com/task/review' } }, ...Array.from({ length: 8 }, (_, index) => ({ id: `task-${index}`, title: `Project milestone ${index + 1}`, status: 'needsAction', etag: 'one', position: `000${index + 2}` }))];
   await page.route('https://accounts.google.com/gsi/client', (route) => route.fulfill({ contentType: 'text/javascript', body: `window.google = { accounts: { oauth2: { initTokenClient: (config) => ({ requestAccessToken: () => config.callback({ access_token: "kanban-test-token", expires_in: 3600, scope: config.scope }) }), revoke: (_token, callback) => callback({}) } } };` }));
@@ -34,13 +34,11 @@ async function seedWorkspace(page: Page, existing = false) {
   await page.getByRole('button', { name: 'Open sidebar' }).click();
   await page.getByRole('button', { name: 'Open settings' }).click();
   await page.getByRole('button', { name: 'Google', exact: true }).click();
-  await page.getByRole('button', { name: /Connect Google account|Refresh Google session/ }).click();
+  await page.getByRole('button', { name: /Connect Google Workspace|Refresh Google Workspace/ }).click();
+  await expect(page.getByText('Session ready')).toBeVisible();
   const service = page.locator('.google-oauth-service').filter({ hasText: 'Google Tasks' });
-  if (!existing) {
-    await service.getByRole('button', { name: 'Enable read access' }).click();
-    await service.getByRole('button', { name: 'Enable writes' }).click();
-  }
-  await expect(service.getByLabel('Google Tasks base access authorized')).toBeVisible();
+  await expect(service.getByLabel('Google Tasks read granted')).toBeVisible();
+  await expect(service.getByLabel('Google Tasks write granted')).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
 }
 
@@ -273,7 +271,7 @@ test('two tabs share local rules and stale editors cannot overwrite each other',
   await page.getByRole('button', { name: 'Edit subroutine Overdue watch' }).click();
   const peer = await context.newPage();
   try {
-    await peer.goto(''); await seedWorkspace(peer, true);
+    await peer.goto(''); await seedWorkspace(peer);
     await peer.getByRole('button', { name: 'Kanban', exact: true }).click();
     await peer.getByRole('button', { name: /Internal memo/ }).click();
     await peer.getByRole('button', { name: 'Edit subroutine Overdue watch' }).click();
@@ -299,7 +297,7 @@ test('mobile tabs share provider cooldowns without replaying reads', async ({ pa
   const peer = await context.newPage();
   try {
     await peer.setViewportSize({ width: 412, height: 915 });
-    await peer.goto(''); await seedWorkspace(peer, true);
+    await peer.goto(''); await seedWorkspace(peer);
     await peer.getByRole('button', { name: 'Kanban', exact: true }).click();
     await expect(peer.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
     await expect(peer.getByRole('button', { name: 'Sync now' })).toBeEnabled();
@@ -329,7 +327,7 @@ test('a suspended reader loses its lease and cannot overwrite a replacement read
   const peer = await context.newPage();
   let release: (() => void) | undefined;
   try {
-    await peer.goto(''); await seedWorkspace(peer, true);
+    await peer.goto(''); await seedWorkspace(peer);
     await peer.getByRole('button', { name: 'Kanban', exact: true }).click();
     await expect(peer.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
     await expect(peer.getByRole('button', { name: 'Sync now' })).toBeEnabled();

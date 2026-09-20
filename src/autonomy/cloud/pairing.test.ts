@@ -105,6 +105,23 @@ describe('pairing store', () => {
 
     await expect(resolvePairingToken(PAIRING)).resolves.toBe('');
   });
+
+  it('rechecks shared pairing identity after awaiting the protected credential queue', async () => {
+    savePairing(PAIRING);
+    // Clear only the module-memory token while preserving pairing metadata and
+    // the protected credential so resolvePairingToken must cross its async
+    // credential boundary.
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'elara.autonomy.pairing.v1',
+      oldValue: null,
+      newValue: window.localStorage.getItem('elara.autonomy.pairing.v1'),
+    }));
+
+    const resolving = resolvePairingToken({ ...PAIRING, token: '' });
+    window.localStorage.removeItem('elara.autonomy.pairing.v1');
+
+    await expect(resolving).resolves.toBe('');
+  });
 });
 
 describe('configuration generation (stale-config protection)', () => {

@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../persistence/conversation';
+import { DEFAULT_MEMORY_BEHAVIOR } from '../domain/preferences';
+import { saveMemoryBehaviorPreferences } from '../persistence/preferences';
 import { listMemories, updateMemory } from './store';
 import { memory } from './capability';
 import { MEMORY_MAX_RELATIONSHIPS } from './normalize';
@@ -17,6 +19,7 @@ async function resetMemoryState(): Promise<void> {
     await db.folders.clear();
     await db.folderAssignments.clear();
   });
+  await saveMemoryBehaviorPreferences(DEFAULT_MEMORY_BEHAVIOR);
 }
 
 function baseRequest(extractor: (message: string) => Promise<unknown>) {
@@ -30,6 +33,49 @@ function baseRequest(extractor: (message: string) => Promise<unknown>) {
 
 describe('bounded organic memory observer', () => {
   beforeEach(resetMemoryState);
+
+  it('stops organic formation when conversational memory is disabled', async () => {
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
+    const extractor = vi.fn(async () => ({
+      candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout' }],
+    }));
+
+    const result = await observePersistedTurn(baseRequest(extractor));
+
+    expect(result).toEqual({ status: 'skipped', count: 0 });
+    expect(extractor).not.toHaveBeenCalled();
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+  it('rechecks memory policy after async extraction before committing', async () => {
+    const evidence = 'I prefer the compact editor layout';
+    const extractor = vi.fn(async () => {
+      await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
+      return { candidates: [{ domain: 'preference', evidence }] };
+    });
+
+    const result = await observePersistedTurn({
+      ...baseRequest(extractor),
+      userMessage: `For this project ${evidence}, and that preference should stick.`,
+    });
+
+    expect(extractor).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 'skipped', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+  it('keeps explicit-only remembering truly explicit by skipping the organic observer', async () => {
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'explicit-only' });
+    const extractor = vi.fn(async () => ({
+      candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout' }],
+    }));
+
+    const result = await observePersistedTurn(baseRequest(extractor));
+
+    expect(result).toEqual({ status: 'skipped', count: 0 });
+    expect(extractor).not.toHaveBeenCalled();
+    expect(await listMemories()).toHaveLength(0);
+  });
 
   it('skips trivial acknowledgements without invoking Gemini', async () => {
     const extractor = vi.fn(async () => ({ candidates: [] }));
@@ -180,42 +226,6 @@ describe('bounded organic memory observer', () => {
     expect(await listMemories()).toHaveLength(0);
   });
 
-  it('deterministically rejects common bare credential formats without relying on labels', async () => {
-    const samples = [
-      ['AK', 'IA1234567890ABCDEF'].join(''),
-      ['AI', 'zaSyA1234567890bcdefghijklmnopqrstuv'].join(''),
-      ['gh', 'p_1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcd'].join(''),
-      ['xo', 'xb-123456789012-123456789012-abcdefghijklmnopqrstuv'].join(''),
-      ['ey', 'Jabcdefghijk.abcdefghijklmnop.abcdefghijklmnop'].join(''),
-    ];
-
-    for (let index = 0; index < samples.length; index += 1) {
-      const evidence = samples[index];
-      const result = await observePersistedTurn({
-        conversationId: 'thread_organic',
-        messageId: `bare_secret_${index}`,
-        userMessage: `Keep this recurring project value: ${evidence}`,
-        extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence }] }),
-      });
-      expect(result).toEqual({ status: 'empty', count: 0 });
-    }
-
-    expect(await listMemories()).toHaveLength(0);
-  });
-
-  it('rejects Luhn-valid payment-card-like evidence from automatic memory', async () => {
-    const evidence = '4111 1111 1111 1111';
-    const result = await observePersistedTurn({
-      conversationId: 'thread_organic',
-      messageId: 'card_secret_1',
-      userMessage: `My recurring payment reference is ${evidence}`,
-      extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence }] }),
-    });
-
-    expect(result).toEqual({ status: 'empty', count: 0 });
-    expect(await listMemories()).toHaveLength(0);
-  });
-
   it('fails closed on malformed classifier output', async () => {
     const result = await observePersistedTurn(baseRequest(async () => ({
       candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout', extraAuthority: true }],
@@ -287,4 +297,42 @@ describe('bounded organic memory observer', () => {
     expect(result).toEqual({ status: 'skipped', count: 0 });
     expect(extractor).not.toHaveBeenCalled();
   });
+  it('deterministically rejects common bare credential formats without relying on labels', async () => {
+    const samples = [
+      ['AK', 'IA1234567890ABCDEF'].join(''),
+      ['AI', 'zaSyA1234567890bcdefghijklmnopqrstuv'].join(''),
+      ['gh', 'p_1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZabcd'].join(''),
+      ['xo', 'xb-123456789012-123456789012-abcdefghijklmnopqrstuv'].join(''),
+      ['ey', 'Jabcdefghijk.abcdefghijklmnop.abcdefghijklmnop'].join(''),
+    ];
+
+    for (let index = 0; index < samples.length; index += 1) {
+      const evidence = samples[index];
+      const result = await observePersistedTurn({
+        conversationId: 'thread_organic',
+        messageId: `bare_secret_${index}`,
+        userMessage: `Keep this recurring project value: ${evidence}`,
+        extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence }] }),
+      });
+      expect(result).toEqual({ status: 'empty', count: 0 });
+    }
+
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+
+  it('rejects Luhn-valid payment-card-like evidence from automatic memory', async () => {
+    const evidence = '4111 1111 1111 1111';
+    const result = await observePersistedTurn({
+      conversationId: 'thread_organic',
+      messageId: 'card_secret_1',
+      userMessage: `My recurring payment reference is ${evidence}`,
+      extractor: async () => ({ candidates: [{ domain: 'persistent_fact', evidence }] }),
+    });
+
+    expect(result).toEqual({ status: 'empty', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+
 });

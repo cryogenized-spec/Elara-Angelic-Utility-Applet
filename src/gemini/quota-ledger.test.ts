@@ -1,0 +1,75 @@
+import 'fake-indexeddb/auto';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { db, type StoredGeminiQuotaLedger } from '../persistence/conversation';
+import {
+  finalizeGeminiQuotaReservation,
+  geminiQuotaSnapshot,
+  reserveGeminiQuota,
+  resetGeminiQuotaLedgerForTests,
+} from './quota-ledger';
+
+const T0 = 1_800_000_000_000;
+
+describe('Gemini rolling quota ledger', () => {
+  beforeEach(async () => {
+    await resetGeminiQuotaLedgerForTests();
+  });
+
+  it('reserves conservatively before provider dispatch and replaces the estimate with provider truth', async () => {
+    const first = await reserveGeminiQuota(undefined, T0, 200_000);
+    expect(first).toMatchObject({ granted: true, reservedInputTokens: 30_000, rollingInputTokens: 30_000 });
+    if (!first.granted) throw new Error('Expected reservation.');
+
+    await finalizeGeminiQuotaReservation(first, 42_000, T0 + 1_000, 200_000);
+    expect(await geminiQuotaSnapshot(T0 + 1_000, 200_000)).toMatchObject({
+      rollingInputTokens: 42_000,
+      entries: 1,
+    });
+
+    const second = await reserveGeminiQuota(undefined, T0 + 2_000, 200_000);
+    expect(second).toMatchObject({
+      granted: true,
+      // 42k recent truth + 15% safety margin.
+      reservedInputTokens: 48_300,
+      rollingInputTokens: 90_300,
+    });
+  });
+
+  it('serializes concurrent reservations across the authoritative IndexedDB row', async () => {
+    const [left, right] = await Promise.all([
+      reserveGeminiQuota(50_000, T0, 80_000),
+      reserveGeminiQuota(50_000, T0, 80_000),
+    ]);
+    expect([left.granted, right.granted].sort()).toEqual([false, true]);
+    const denied = left.granted ? right : left;
+    expect(denied).toMatchObject({ granted: false, reason: 'rolling-budget' });
+    expect(await geminiQuotaSnapshot(T0, 80_000)).toMatchObject({ rollingInputTokens: 50_000, entries: 1 });
+  });
+
+  it('keeps an unfinished request charged at its reservation so failed calls are not free', async () => {
+    const reservation = await reserveGeminiQuota(45_000, T0, 100_000);
+    expect(reservation.granted).toBe(true);
+    expect(await geminiQuotaSnapshot(T0 + 1_000, 100_000)).toMatchObject({ rollingInputTokens: 45_000 });
+  });
+
+  it('expires old usage after the rolling sixty-second window', async () => {
+    const reservation = await reserveGeminiQuota(70_000, T0, 100_000);
+    expect(reservation.granted).toBe(true);
+    expect((await reserveGeminiQuota(40_000, T0 + 10_000, 100_000)).granted).toBe(false);
+    expect((await reserveGeminiQuota(40_000, T0 + 60_001, 100_000)).granted).toBe(true);
+  });
+
+  it('fails closed on a recent malformed ledger row but recovers after its window has aged out', async () => {
+    await db.settings.put({
+      id: 'gemini-quota-ledger-v1',
+      entries: [{ id: 'bad', startedAt: 'not-a-number', reservedInputTokens: -1 }],
+      updatedAt: T0,
+    } as unknown as StoredGeminiQuotaLedger);
+
+    const recent = await reserveGeminiQuota(20_000, T0 + 1_000, 200_000);
+    expect(recent).toMatchObject({ granted: false, reason: 'ledger-unavailable' });
+
+    const recovered = await reserveGeminiQuota(20_000, T0 + 60_001, 200_000);
+    expect(recovered.granted).toBe(true);
+  });
+});

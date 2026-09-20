@@ -98,6 +98,10 @@ const runtimePermissions = permissionsForJob('runtime');
 if (JSON.stringify(runtimePermissions) !== JSON.stringify({ contents: 'read' })) {
   fail('runtime verification job may not have repository write authority');
 }
+const visualEvidencePermissions = permissionsForJob('visual-evidence');
+if (JSON.stringify(visualEvidencePermissions) !== JSON.stringify({ contents: 'read' })) {
+  fail('visual-evidence job may not have repository write authority');
+}
 const deployPermissions = permissionsForJob('deploy');
 if (JSON.stringify(deployPermissions) !== JSON.stringify({ contents: 'read', pages: 'write', 'id-token': 'write' })) {
   fail('deploy job permissions changed from the reviewed minimum');

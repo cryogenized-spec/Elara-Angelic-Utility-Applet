@@ -2,7 +2,6 @@ import { z } from 'zod';
 import {
   MEMORY_CATEGORY_KEYS,
   type MemoryBehaviorPreferences,
-  type MemoryCategoryKey,
   type MemoryRememberingStyle,
 } from '../domain/preferences';
 import { loadFolderState } from '../persistence/folders';
@@ -131,19 +130,22 @@ export function shouldInspectUserMessage(userMessage: string): boolean {
 function acceptedCandidates(raw: unknown, fullUserMessage: string): OrganicMemoryCandidate[] | null {
   const parsed = organicMemoryExtractionSchema.safeParse(raw);
   if (!parsed.success) return null;
-  const accepted: OrganicMemoryCandidate[] = [];
-  const seen = new Set<string>();
+  const accepted = new Map<string, OrganicMemoryCandidate>();
   for (const candidate of parsed.data.candidates) {
     // The classifier may point only at literal user-authored evidence. It never
     // gets to paraphrase a fact into existence.
     if (!fullUserMessage.includes(candidate.evidence)) continue;
     if (containsCredentialMaterial(candidate.evidence)) continue;
-    const key = `${candidate.domain}\u0000${candidate.category}\u0000${candidate.salience}\u0000${candidate.evidence}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    accepted.push(candidate);
+
+    const key = `${candidate.domain}\u0000${candidate.category}\u0000${candidate.evidence}`;
+    const existing = accepted.get(key);
+    // Duplicate classifier nominations with conflicting salience collapse to
+    // the more conservative value. Repetition can never inflate retention.
+    if (!existing || SALIENCE_RANK[candidate.salience] < SALIENCE_RANK[existing.salience]) {
+      accepted.set(key, candidate);
+    }
   }
-  return accepted;
+  return [...accepted.values()];
 }
 
 function mutationGuard(request: ObservePersistedTurnRequest): () => boolean {

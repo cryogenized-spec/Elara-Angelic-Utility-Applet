@@ -110,6 +110,7 @@ export async function preprocessImage(source: Blob, policy: ImagePreprocessPolic
     derivedEncodingCache.set(key, result);
     return { blob: result, mimeType: result.type || requestedMime, derived: true };
   } catch (cause) {
+    if (cause instanceof ArtifactError) throw cause;
     throw new ArtifactError('IMAGE_PROCESSING_FAILED', 'The image could not be safely transformed.', cause);
   } finally {
     bitmap.close();

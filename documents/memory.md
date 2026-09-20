@@ -133,7 +133,7 @@ A present but malformed persisted master switch fails closed to disabled; a genu
 
 **Companion continuity Pass 1:** this preference contract is persisted and normalized so later behavior consumes one stable authority.
 
-**Companion continuity Pass 2:** the master switch and `direct-only` recall mode now gate automatic prompt injection. The new read-only `memory.recall` capability gives Elara a deliberate way to search the same scoped durable-memory universe when the user asks what she remembers or when missing past context would materially improve the answer. `natural` and `proactive` continue to share today's automatic retrieval policy until the later retrieval-strategy pass differentiates their salience behavior.
+**Companion continuity Pass 2:** the master switch gates both conversational recall and organic formation; `explicit-only` disables organic formation while preserving explicit confirmed memory work, and `direct-only` disables automatic prompt injection while preserving deliberate `memory.recall`. The new read-only `memory.recall` capability gives Elara a deliberate way to search the same scoped durable-memory universe when the user asks what she remembers or when missing past context would materially improve the answer. `natural` and `proactive` continue to share today's automatic retrieval policy until the later retrieval-strategy pass differentiates their salience behavior.
 
 Promotion order is:
 
@@ -172,7 +172,7 @@ Shared read-modify-write primitives are transactional. `updateMemory`, reinforce
 - A model write may commit only while its originating generation remains elected.
 - One logical provider call converges on at most one logical mutation. Reusing a call identity with changed mutation arguments fails closed.
 - Tool continuations reuse one frozen memory instruction for the elected turn.
-- Organic observation starts only after response durability and receives no assistant-response evidence.
+- Organic observation starts only after response durability, receives no assistant-response evidence, and fails closed when memory behavior is disabled or remembering style is `explicit-only`.
 - Organic classifier output has no direct write authority; only exact persisted user spans can survive application validation.
 - Automatic reinforcement never crosses folder scope or memory domain and never targets archived, expired or superseded records.
 - Automatic semantic merge/conflict/supersession inference does not exist.

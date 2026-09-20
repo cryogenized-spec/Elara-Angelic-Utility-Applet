@@ -18,14 +18,14 @@ describe('Gemini organic memory classifier boundary', () => {
 
   it('uses the canonical provider with no tools or durable-memory context', async () => {
     streamReply.mockReturnValueOnce(events(
-      { type: 'text-delta', index: 0, text: '{"candidates":[{"domain":"preference","evidence":"I prefer compact layouts"}]}' },
+      { type: 'text-delta', index: 0, text: '{"candidates":[{"domain":"preference","category":"likes_dislikes","salience":"medium","evidence":"I prefer compact layouts"}]}' },
       { type: 'completed', interactionId: 'observer-1', status: 'completed', durationMs: 1 },
     ));
 
     const extractor = geminiOrganicMemoryExtractor('gemini-3.8-flash');
     const result = await extractor('I prefer compact layouts for this project.');
 
-    expect(result).toEqual({ candidates: [{ domain: 'preference', evidence: 'I prefer compact layouts' }] });
+    expect(result).toEqual({ candidates: [{ domain: 'preference', category: 'likes_dislikes', salience: 'medium', evidence: 'I prefer compact layouts' }] });
     expect(streamReply).toHaveBeenCalledTimes(1);
     const request = streamReply.mock.calls[0][0] as GeminiTurnRequest;
     expect(request).toMatchObject({
@@ -36,6 +36,10 @@ describe('Gemini organic memory classifier boundary', () => {
     });
     expect(request.input).toContain('I prefer compact layouts for this project.');
     expect(request.input).not.toMatch(/assistant_response/i);
+    expect(ORGANIC_MEMORY_OBSERVER_INSTRUCTION).toContain('category');
+    expect(ORGANIC_MEMORY_OBSERVER_INSTRUCTION).toContain('salience');
+    expect(ORGANIC_MEMORY_OBSERVER_INSTRUCTION).toContain('NEVER relabel');
+    expect(ORGANIC_MEMORY_OBSERVER_INSTRUCTION).toContain('health_wellbeing');
   });
 
   it('accepts an otherwise exact whole-response JSON fence', async () => {

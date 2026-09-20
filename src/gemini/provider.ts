@@ -227,8 +227,7 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     const payload = buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction });
     const reservation = await reserveGeminiQuota(estimateSerializedInputTokens(payload));
     if (!reservation.granted) {
-      const failure = new Error('Elara paused this Gemini request before the local rolling input budget could be exceeded.') as Error & { status?: number; code?: string };
-      failure.status = 429;
+      const failure = new Error('Elara paused this Gemini request before the local rolling input budget could be exceeded.') as Error & { code?: string };
       failure.code = 'LOCAL_RATE_LIMIT';
       const normalized = normalizeGeminiError(failure, { requestId, category: 'rate_limit' });
       yield {

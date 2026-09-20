@@ -63,6 +63,26 @@ const DOMAIN_TITLES: Readonly<Record<OrganicMemoryDomain, string>> = {
   shared_event: 'Observed shared event',
 };
 
+function containsLuhnValidCardNumber(value: string): boolean {
+  const candidates = value.match(/(?:\d[ -]?){13,19}/g) ?? [];
+  return candidates.some((candidate) => {
+    const digits = candidate.replace(/\D/g, '');
+    if (digits.length < 13 || digits.length > 19 || /^(\d)\1+$/.test(digits)) return false;
+    let sum = 0;
+    let double = false;
+    for (let index = digits.length - 1; index >= 0; index -= 1) {
+      let digit = Number(digits[index]);
+      if (double) {
+        digit *= 2;
+        if (digit > 9) digit -= 9;
+      }
+      sum += digit;
+      double = !double;
+    }
+    return sum % 10 === 0;
+  });
+}
+
 /**
  * Obvious credential material is never eligible for automatic persistence.
  * This is intentionally narrow: the model prompt supplies the broader privacy
@@ -77,7 +97,8 @@ function looksLikeCredential(evidence: string): boolean {
     || /\bgh[pousr]_[A-Za-z0-9]{36,}\b/.test(evidence)
     || /\bxox[baprs]-[A-Za-z0-9-]{20,}\b/.test(evidence)
     || /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/.test(evidence)
-    || /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(evidence);
+    || /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(evidence)
+    || containsLuhnValidCardNumber(evidence);
 }
 
 async function sha256Hex(value: string): Promise<string> {

@@ -103,9 +103,10 @@ Organic formation is downstream of conversation durability. `generation-sync.ts`
 | Inspection / integrity health | `src/memory/inspection.ts`, `health.ts` |
 | Provenance presentation | `src/memory/provenance.ts` |
 | Portable archive boundary | `src/memory/archive.ts` |
+| Human Memory & continuity controls | `src/app/components/MemoryContinuitySettings.tsx`, `memory-continuity-settings.css` |
 | Human Memory Bank | `src/app/components/DurableMemorySettings.tsx`, `durable-memory-settings.css` |
 | Companion memory behavior preferences | `src/domain/preferences.ts`, `src/persistence/preferences.ts` |
-| Browser acceptance | `e2e/memory-bank.spec.ts`, `e2e/memory-chat.spec.ts` |
+| Browser acceptance | `e2e/memory-continuity-settings.spec.ts`, `e2e/memory-bank.spec.ts`, `e2e/memory-chat.spec.ts` |
 | Final hostile matrix | `src/memory/adversarial-certification.test.ts` plus owning subsystem tests |
 
 ## 4. Data, retrieval and lifecycle contract
@@ -138,6 +139,8 @@ A present but malformed persisted master switch fails closed to disabled; a genu
 **Companion continuity Pass 3:** organic formation now consumes the persisted remembering policy. Classifier candidates carry a human memory category plus coarse `low | medium | high` salience, but those fields confer no write authority. Application policy enforces `selective = high`, `natural = medium/high`, `attentive = low/medium/high`, and `explicit-only = none`; it also requires the selected category to be enabled at final commit time. Sensitive categories remain default-off. A deterministic sensitive-text hint layer rejects obvious attempts to downgrade sensitive evidence into a less-sensitive category, and credential/account identifiers remain ineligible regardless of category settings.
 
 **Companion continuity Pass 4 (current recall-quality change):** query-bearing recall now requires substantive lexical overlap after conversational stopword removal, so unrelated “important” memories cannot enter a turn solely through CORE/pinned/importance/recency weight. `natural` automatic recall uses only that relevant lane. `proactive` uses the same relevant lane first and may then add at most one unrelated continuity anchor if budget remains. A continuity anchor must be an active, non-conflicted, established memory (never MICRO); it may be pinned, CORE, or high-confidence/high-importance CONTEXTUAL. Memories tagged with a sensitive category are never eligible for the unrelated proactive-anchor lane, although they may still be recalled when actually relevant to the user’s present query. Relevant memories always have first claim on item/character budgets, so the proactive anchor cannot evict topical context. A mid-flight recall-style change invalidates the automatic projection rather than exposing context selected under an older broader style.
+
+**Companion continuity Pass 5 (current Settings surface):** the existing `memory-behavior` preference authority is exposed through a human-facing **Memory & continuity** panel before the advanced Memory Bank. The panel owns no memory data and creates no second policy store. It offers the master conversational-memory switch, human-labelled remembering/recall styles, everyday automatic-memory categories, and individually opt-in sensitive categories. Sensitive categories have no bulk-enable control. Disabling the master switch preserves stored memories and category/style choices; it stops automatic recall and organic learning while explicit confirmed memory operations and human Memory Bank management remain separate authorities. Preference writes are serialized through the existing cross-tab memory-policy lock, and the UI queues rapid edits so an older choice cannot persist after a newer one.
 
 Promotion order is:
 
@@ -289,9 +292,11 @@ save completed conversation
 Memory activity uses the Generation Activity `memory` glyph semantic. Its visible symbol is user-configurable in Appearance and normally renders through monochrome Noto Emoji 300; Lucide remains only the safe font-unavailable fallback. Recall is a context row; deliberate `memory.*` calls remain tool rows; successful organic capture adds `Saved to memory`. Failure of optional trace persistence is non-fatal after response/memory durability.
 
 <a id="memory-bank"></a>
-### 7.4 Memory Bank
+### 7.4 Memory & continuity Settings and Memory Bank
 
-Memory Bank is the human inspection/maintenance surface over `db.memories`. It supports search/filtering, create/edit/archive/restore/promote/delete controls, provenance views, landmark pinning, deterministic audit, integrity health/recovery and guarded local backup/transfer without another memory store.
+The Settings navigation exposes one **Memory** section. The first layer is the companion-facing Memory & continuity policy surface: it reads and writes only the existing `memory-behavior` preference record and explains remembering, recall and automatic-memory categories in everyday language. Sensitive automatic-memory categories are individually opt-in and remain default-off through the canonical preference normalizer.
+
+The advanced Memory Bank remains immediately below that policy surface and is the human inspection/maintenance projection over `db.memories`. It supports search/filtering, create/edit/archive/restore/promote/delete controls, provenance views, landmark pinning, deterministic audit, integrity health/recovery and guarded local backup/transfer without another memory store.
 
 Normal Memory Bank rendering uses the tolerant valid-record projection. A malformed row therefore does not blank the bank or hide unrelated healthy memories. In parallel, `inspectMemoryStore()` scans the complete primary table and reports total/valid/invalid counts plus concrete invalid IDs when available. The UI surfaces a store-integrity warning while valid records stay usable.
 

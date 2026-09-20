@@ -65,15 +65,18 @@ export function MemoryContinuitySettings() {
   const [value, setValue] = useState<MemoryBehaviorPreferences | null>(null);
   const valueRef = useRef<MemoryBehaviorPreferences | null>(null);
   const mountedRef = useRef(true);
+  const pendingSavesRef = useRef(0);
   const saveTailRef = useRef<Promise<void>>(Promise.resolve());
   const revisionRef = useRef(0);
   const [saveState, setSaveState] = useState<SaveState>('loading');
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    mountedRef.current = true;
     let cancelled = false;
 
     const refresh = async () => {
+      if (pendingSavesRef.current > 0) return;
       try {
         const loaded = await loadMemoryBehaviorPreferences();
         if (cancelled) return;
@@ -99,26 +102,30 @@ export function MemoryContinuitySettings() {
 
   function scheduleSave(next: MemoryBehaviorPreferences, previous: MemoryBehaviorPreferences) {
     const revision = ++revisionRef.current;
+    pendingSavesRef.current += 1;
     setSaveState('saving');
     setError(null);
 
     saveTailRef.current = saveTailRef.current
       .catch(() => undefined)
       .then(async () => {
-        const saved = await saveMemoryBehaviorPreferences(next);
-        if (revision !== revisionRef.current) return;
-        valueRef.current = saved;
-        if (!mountedRef.current) return;
-        setValue(saved);
-        setSaveState('saved');
-      })
-      .catch((cause) => {
-        if (revision !== revisionRef.current) return;
-        valueRef.current = previous;
-        if (!mountedRef.current) return;
-        setValue(previous);
-        setSaveState('error');
-        setError(cause instanceof Error ? cause.message : 'Memory preferences could not be saved.');
+        try {
+          const saved = await saveMemoryBehaviorPreferences(next);
+          if (revision !== revisionRef.current) return;
+          valueRef.current = saved;
+          if (!mountedRef.current) return;
+          setValue(saved);
+          setSaveState('saved');
+        } catch (cause) {
+          if (revision !== revisionRef.current) return;
+          valueRef.current = previous;
+          if (!mountedRef.current) return;
+          setValue(previous);
+          setSaveState('error');
+          setError(cause instanceof Error ? cause.message : 'Memory preferences could not be saved.');
+        } finally {
+          pendingSavesRef.current = Math.max(0, pendingSavesRef.current - 1);
+        }
       });
   }
 

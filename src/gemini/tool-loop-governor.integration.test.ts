@@ -167,6 +167,49 @@ describe('Gemini tool-loop gross-input governor', () => {
     });
   });
 
+  it('permits an evidence-driven recheck after a different successful read', async () => {
+    const listEvents = vi.fn(async () => ({ events: [{ id: 'e1', summary: 'Review' }] }));
+    const listLabels = vi.fn(async () => ({ labels: [{ id: 'l1', name: 'GitHub' }] }));
+    const readTools = ['calendar.listEvents', 'gmail.listLabels'] as const;
+
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'e1', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'e1', index: 0, callId: 'read-a1', name: 'calendar.listEvents', arguments: { calendarId: 'primary' } },
+    ));
+    streamToolResult
+      .mockReturnValueOnce(events(
+        { type: 'interaction-created', interactionId: 'e2', model: 'gemini-3.8-flash' },
+        { type: 'tool-call', interactionId: 'e2', index: 0, callId: 'read-b', name: 'gmail.listLabels', arguments: {} },
+      ))
+      .mockReturnValueOnce(events(
+        { type: 'interaction-created', interactionId: 'e3', model: 'gemini-3.8-flash' },
+        { type: 'tool-call', interactionId: 'e3', index: 0, callId: 'read-a2', name: 'calendar.listEvents', arguments: { calendarId: 'primary' } },
+      ))
+      .mockReturnValueOnce(events(
+        { type: 'interaction-created', interactionId: 'e4', model: 'gemini-3.8-flash' },
+        { type: 'completed', interactionId: 'e4', status: 'completed', durationMs: 2 },
+      ));
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Recheck the calendar if another source gives a reason.', tools: readTools },
+      {
+        tools: readTools,
+        executor: {
+          oauth,
+          handlers: {
+            'calendar.listEvents': listEvents,
+            'gmail.listLabels': listLabels,
+          },
+        },
+      },
+    )) {
+      // Consume.
+    }
+
+    expect(listEvents).toHaveBeenCalledTimes(2);
+    expect(listLabels).toHaveBeenCalledOnce();
+  });
+
   it('returns a local synthesis fallback instead of dispatching another model call past the hard budget', async () => {
     const listEvents = vi.fn(async () => ({ events: [] }));
     const readTools = ['calendar.listEvents'] as const;

@@ -59,6 +59,32 @@ describe('Gemini rolling quota ledger', () => {
     expect((await reserveGeminiQuota(40_000, T0 + 60_001, 100_000)).granted).toBe(true);
   });
 
+  it('does not delete stale corruption from a snapshot read before a transactional reservation replaces it', async () => {
+    await db.settings.put({
+      id: 'gemini-quota-ledger-v1',
+      entries: [{ id: 'bad', startedAt: 'not-a-number', reservedInputTokens: -1 }],
+      updatedAt: T0 - 60_001,
+    } as unknown as StoredGeminiQuotaLedger);
+
+    expect(await geminiQuotaSnapshot(T0, 200_000)).toMatchObject({ rollingInputTokens: 0, entries: 0 });
+    expect(await db.settings.get('gemini-quota-ledger-v1')).toBeDefined();
+
+    const recovered = await reserveGeminiQuota(20_000, T0, 200_000);
+    expect(recovered.granted).toBe(true);
+    expect(await geminiQuotaSnapshot(T0, 200_000)).toMatchObject({ rollingInputTokens: 20_000, entries: 1 });
+  });
+
+  it('recovers transactionally from malformed quota rows that cannot prove a live timestamp', async () => {
+    await db.settings.put({
+      id: 'gemini-quota-ledger-v1',
+      entries: [],
+      updatedAt: 'broken',
+    } as unknown as StoredGeminiQuotaLedger);
+
+    const recovered = await reserveGeminiQuota(20_000, T0, 200_000);
+    expect(recovered.granted).toBe(true);
+  });
+
   it('fails closed on a recent malformed ledger row but recovers after its window has aged out', async () => {
     await db.settings.put({
       id: 'gemini-quota-ledger-v1',

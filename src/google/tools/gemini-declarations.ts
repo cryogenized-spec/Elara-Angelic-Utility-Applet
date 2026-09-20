@@ -50,6 +50,7 @@ const toolProperties: Record<string, Record<string, unknown>> = {
     previous: stringProperty('Optional previous sibling task id. Omit to place first among siblings.'),
   },
   'tasks.updateTask': {
+    etag: stringProperty('Optional current task ETag from tasks.getTask. Pass it to reject concurrent edits rather than overwriting them.'),
     taskListId: stringProperty('Task-list id.'),
     taskId: stringProperty('Task id.'),
     title: stringProperty('Optional replacement title.'),

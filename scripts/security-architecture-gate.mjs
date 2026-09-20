@@ -126,6 +126,8 @@ for (const [path, marker] of reviewedWorkerAuthorities) {
 // durable store is always an explicit architecture review event.
 // ---------------------------------------------------------------------------
 const reviewedDexieAuthorities = new Set([
+  // Account-keyed task snapshots and local overdue rules; no credentials.
+  'src/kanban/store.ts',
   'src/autonomy/cloud/credential.ts',
   'src/media/storage.ts',
   'src/persistence/autonomy.ts',
@@ -317,6 +319,10 @@ for (const [path, endpoint] of [
 // loop/roleplay adapter. UI/domain code cannot quietly bypass those seams.
 // ---------------------------------------------------------------------------
 const reviewedGoogleServiceImporters = new Set([
+  // Human-operated board only: live-session/effective-scope/account admission,
+  // explicit Save actions and typed destructive confirmation in KanbanScreen.
+  // Model mutations continue through the existing tool executor/broker.
+  'src/kanban/google-port.ts',
   'src/google/tools/read-handlers.ts',
   'src/google/tools/service-handlers.ts',
 ]);
@@ -349,6 +355,22 @@ const toolLoop = read('src/gemini/google-tool-loop.ts');
 if (!toolLoop.includes('requestGoogleToolConfirmations')) fail('Gemini tool loop must retain grouped mutation confirmation');
 if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
 if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isUntrustedExternalReadTool') || !toolLoop.includes('UNTRUSTED_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must intrinsically taint later mutation confirmations after external reads');
+const geminiContracts = read('src/gemini/contracts.ts');
+const appSource = read('src/app/App.tsx');
+const kanbanStore = read('src/kanban/store.ts');
+if (appSource.includes('kanbanContext') && (!geminiContracts.includes('untrustedExternalContext?: boolean') || !appSource.includes('untrustedExternalContext: Boolean(kanbanInstruction)') || !toolLoop.includes('request.untrustedExternalContext === true'))) fail('Persisted Kanban provider context must enter the existing Gemini untrusted-context authority before the first model tool batch');
+if (appSource.includes('kanbanContext') && !kanbanStore.includes('if (!memo.length) return "";')) fail('Empty Kanban overdue memos must not taint unrelated model turns');
+if (appSource.includes('kanbanContext') && (!kanbanStore.includes('MAX_BOARD_LISTS = 500') || !kanbanStore.includes('MAX_BOARD_TASKS = 20_000') || !kanbanStore.includes('MAX_BOARD_PROVIDER_PAGES = 1_024'))) fail('Kanban provider traversal must retain explicit aggregate resource ceilings');
+const kanbanPort = read('src/kanban/google-port.ts');
+if (!oauthAuthority.includes('authorizeExisting(capability)') || !kanbanPort.includes('googleOAuthAuthority.authorizeExisting(capability)') || kanbanPort.includes('googleOAuthAuthority.authorize(capability)')) fail('Kanban background Tasks access must remain on the noninteractive existing-grant OAuth path');
+if (!oauthAuthority.includes('await beforeProviderFetch?.();') || !kanbanPort.includes('await admittedAccount(capability, account);')) fail('Google provider requests must await caller authority revalidation at the actual fetch boundary');
+if (!oauthAuthority.includes('accountEmail?: string') || !oauthAuthority.includes('normalizedAccountEmail(session.accountEmail) !== normalizedAccountEmail(nextStored.account?.email)') || !oauthAuthority.includes('Google account changed or could not be verified')) fail('Browser Google access tokens must remain bound to the account identity verified for that in-memory session');
+if (!oauthAuthority.includes('const latest = loadStored();') || !oauthAuthority.includes('GoogleAuthorizationStateChangedError') || !oauthAuthority.includes('Google account changed while refreshing') || !oauthAuthority.includes('!(error instanceof GoogleAuthorizationStateChangedError)')) fail('Silent Google refresh must recheck shared account state after provider awaits and must not overwrite or poison a newer account');
+if (!kanbanStore.includes('pruneCachedAccounts') || !kanbanStore.includes('status.state === "disconnected"') || !kanbanStore.includes('status.state === "revoked"') || !kanbanStore.includes('status.state === "reauthorization-required" && identityAccount === null')) fail('Kanban account switching/disconnect must retain explicit cache-pruning semantics');
+if (!kanbanStore.includes('else if (!board && state.board?.account === account) update.board = null;')) fail('Kanban cross-tab cache deletion must clear the matching in-memory board projection');
+const kanbanScreen = read('src/app/components/KanbanScreen.tsx');
+if (!kanbanPort.includes('taskServiceForAccount(expectedAccount: string)') || !kanbanPort.includes('admittedAccount(capability, expectedAccount)') || !kanbanScreen.includes('taskServiceForAccount(expectedAccount)')) fail('Kanban human mutations must remain bound to the displayed Google account through the reviewed service boundary');
+if (!kanbanScreen.includes('removal?.kind === "list" ||')) fail('Kanban task-list deletion must always disclose possible Docs/Chat assignment fallout');
 
 const googleBroker = read('src/google/confirmation/broker.ts');
 if (googleBroker.includes("all.dataset.decision = 'all';") || googleBroker.includes('✓ Approve all')) fail('Google confirmation broker must not expose approve-all');

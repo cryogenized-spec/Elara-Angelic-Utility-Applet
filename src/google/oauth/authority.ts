@@ -47,6 +47,8 @@ type StoredAuthorization = {
 type AccessSession = {
   accessToken: string;
   expiresAt: number;
+  /** Google account identity verified for this in-memory token. */
+  accountEmail?: string;
   /** Present only for paired durable OAuth sessions. */
   vaultUpdatedAt?: number;
 };
@@ -71,6 +73,8 @@ class DurableGoogleOAuthError extends Error {
   }
 }
 
+class GoogleAuthorizationStateChangedError extends Error {}
+
 let stored: StoredAuthorization = emptyStored();
 let session: AccessSession | null = null;
 
@@ -87,6 +91,11 @@ function configuredClientId(): string {
 
 function emptyStored(): StoredAuthorization {
   return { version: 3, enabledCapabilities: [], grantedProviderScopes: [], updatedAt: new Date().toISOString() };
+}
+
+function normalizedAccountEmail(value: string | undefined): string | undefined {
+  const email = value?.trim().toLowerCase();
+  return email || undefined;
 }
 
 function uniqueCapabilities(values: readonly GoogleCapabilityKey[]): GoogleCapabilityKey[] {
@@ -138,6 +147,9 @@ function loadStored(): StoredAuthorization {
       ...(parsed.needsReauthorization ? { needsReauthorization: true } : {}),
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     };
+    if (session && normalizedAccountEmail(session.accountEmail) !== normalizedAccountEmail(nextStored.account?.email)) {
+      session = null;
+    }
     if (!nextStored.enabledCapabilities.length || nextStored.needsReauthorization) session = null;
     stored = nextStored;
   } catch {
@@ -356,22 +368,35 @@ async function acquireBrowserTokenForCapabilities(
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
     const returnedScopes = parseProviderScopes(response.scope);
     const requestedProviderScopes = requestedCapabilities.map((capability) => getGoogleScope(capability).scope).filter(Boolean);
+    const fetched = await fetchGoogleAccount(response.access_token);
+    let commitState = current;
+    if (prompt === 'none') {
+      if (!current.account?.email) {
+        throw new Error('Google account changed or could not be verified. Refresh the Google session in Settings.');
+      }
+      const latest = loadStored();
+      if (normalizedAccountEmail(latest.account?.email) !== normalizedAccountEmail(current.account.email)) {
+        throw new GoogleAuthorizationStateChangedError('Google account changed while refreshing. Sync the current workspace before continuing.');
+      }
+      if (!fetched || normalizedAccountEmail(fetched.email) !== normalizedAccountEmail(latest.account?.email)) {
+        throw new Error('Google account changed or could not be verified. Refresh the Google session in Settings.');
+      }
+      commitState = latest;
+    }
     const grantedProviderScopes = returnedScopes.length
       ? returnedScopes
-      : [...new Set([...current.grantedProviderScopes, ...requestedProviderScopes])];
-    const enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, ...requestedCapabilities]);
+      : [...new Set([...commitState.grantedProviderScopes, ...requestedProviderScopes])];
+    const enabledCapabilities = prompt === 'none'
+      ? [...commitState.enabledCapabilities]
+      : uniqueCapabilities([...commitState.enabledCapabilities, ...requestedCapabilities]);
+    let nextAccount = commitState.account;
+    if (fetched) nextAccount = fetched;
+    else if (prompt === '') nextAccount = undefined;
     session = {
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
+      accountEmail: normalizedAccountEmail(nextAccount?.email),
     };
-    let nextAccount = current.account;
-    try {
-      const fetched = await fetchGoogleAccount(response.access_token);
-      if (fetched) nextAccount = fetched;
-      else if (prompt === '') nextAccount = undefined;
-    } catch {
-      if (prompt === '') nextAccount = undefined;
-    }
     legacyGrantedCapabilities = [];
     stored.enabledCapabilities = enabledCapabilities;
     stored.grantedProviderScopes = grantedProviderScopes;
@@ -382,9 +407,11 @@ async function acquireBrowserTokenForCapabilities(
   } catch (error) {
     const raw = error instanceof Error ? error.message : undefined;
     if (prompt === 'none') {
-      stored.needsReauthorization = true;
       session = null;
-      saveStored();
+      if (!(error instanceof GoogleAuthorizationStateChangedError)) {
+        stored.needsReauthorization = true;
+        saveStored();
+      }
     }
     throw new Error(raw || 'Google authorization failed.', { cause: error });
   }
@@ -417,6 +444,7 @@ async function acquireDurableTokenForCapabilities(
   session = {
     accessToken: response.accessToken,
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
+    accountEmail: normalizedAccountEmail(response.account?.email),
     vaultUpdatedAt: durableRevision(response.updatedAt),
   };
   legacyGrantedCapabilities = [];
@@ -437,6 +465,7 @@ async function refreshDurableToken(pairing: AutonomyPairing): Promise<void> {
   session = {
     accessToken: response.accessToken,
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
+    accountEmail: normalizedAccountEmail(response.account?.email ?? stored.account?.email),
     vaultUpdatedAt: durableRevision(response.updatedAt),
   };
   const scopes = parseProviderScopes(response.scopes.join(' '));
@@ -480,8 +509,12 @@ async function ensureToken(capability: GoogleCapabilityKey, allowInteraction = f
 
   const status = currentStatus();
   const authorizing = resolveAuthorizingCapability(capability, status.grantedCapabilities);
-  const target = authorizing ?? capability;
-  if (!authorizing || !tokenStillValid()) await acquireBrowserToken(target, allowInteraction ? '' : 'none');
+  if (!authorizing) {
+    if (!allowInteraction) throw new Error('Google authorization requires explicit consent in Settings.');
+    await acquireBrowserToken(capability, '');
+  } else if (!tokenStillValid()) {
+    await acquireBrowserToken(authorizing, allowInteraction ? '' : 'none');
+  }
   if (!tokenStillValid() || !session) throw new Error('Google authorization did not return a usable access token.');
   return session.accessToken;
 }
@@ -490,7 +523,7 @@ async function authorizedFetch(
   capability: GoogleCapabilityKey,
   input: RequestInfo | URL,
   init?: RequestInit,
-  beforeProviderFetch?: () => void,
+  beforeProviderFetch?: () => void | Promise<void>,
 ): Promise<Response> {
   const target = assertGoogleApiTarget(input);
   const token = await ensureToken(capability, false);
@@ -503,7 +536,7 @@ async function authorizedFetch(
     return { method: request.method, headers, body, signal: request.signal };
   };
 
-  beforeProviderFetch?.();
+  await beforeProviderFetch?.();
   let response = await fetch(new Request(target, requestOptions(token)));
   if (response.status !== 401) return response;
 
@@ -517,7 +550,7 @@ async function authorizedFetch(
 
   const refreshedToken = currentAccessToken();
   if (!refreshedToken) throw new Error('Google authorization did not return a refreshed access token.');
-  beforeProviderFetch?.();
+  await beforeProviderFetch?.();
   response = await fetch(new Request(target, requestOptions(refreshedToken)));
   if (response.status === 401) {
     markReauthorizationRequired();
@@ -569,13 +602,21 @@ export async function authorizeGoogleWorkspace(
   return currentStatus();
 }
 
+async function authorizeCapability(capability: GoogleCapabilityKey, allowInteraction: boolean): Promise<AuthorizedGoogleRequest> {
+  const parsed = googleCapabilityKeySchema.parse(capability);
+  const descriptor = getGoogleScope(parsed);
+  if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
+  await ensureToken(parsed, allowInteraction);
+  return { capability: parsed, fetch: (input, init, beforeProviderFetch) => authorizedFetch(parsed, input, init, beforeProviderFetch) } satisfies AuthorizedGoogleRequest;
+}
+
 export const googleOAuthAuthority: GoogleOAuthAuthority = {
-  async authorize(capability) {
-    const parsed = googleCapabilityKeySchema.parse(capability);
-    const descriptor = getGoogleScope(parsed);
-    if (!descriptor.scope) return { capability: parsed, fetch: async () => { throw new Error('This capability is application-local and does not use Google OAuth.'); } } satisfies AuthorizedGoogleRequest;
-    await ensureToken(parsed, true);
-    return { capability: parsed, fetch: (input, init, beforeProviderFetch) => authorizedFetch(parsed, input, init, beforeProviderFetch) } satisfies AuthorizedGoogleRequest;
+  authorize(capability) {
+    return authorizeCapability(capability, true);
+  },
+
+  authorizeExisting(capability) {
+    return authorizeCapability(capability, false);
   },
 
   async getStatus() {

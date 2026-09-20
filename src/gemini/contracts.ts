@@ -58,6 +58,12 @@ export interface GeminiTurnRequest {
    * their own memory scoping.
    */
   memoryContext?: 'thread' | 'none';
+  /**
+   * Application-owned provenance for provider-derived context already present
+   * before the model's first tool batch. Consumed only by the local tool loop;
+   * it is not serialized as a Gemini provider argument.
+   */
+  untrustedExternalContext?: boolean;
   /** Existing app generation arbiter context for artifact-producing work. */
   generationId?: string;
   isGenerationActive?: () => boolean;

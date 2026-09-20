@@ -1,3 +1,5 @@
+import { KanbanScreen } from './components/KanbanScreen';
+import { kanbanContext, startBoardSync } from '../kanban/store';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChatMessage, ConversationState, ConversationThread, ProviderStatus } from '../domain/chat';
 import type { Attachment } from '../domain/artifact';
@@ -92,6 +94,8 @@ export function App() {
   const [generation, setGeneration] = useState<GenerationState | null>(null);
   const [failedAttempt, setFailedAttempt] = useState<FailedTurnAttempt | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [kanbanOpen, setKanbanOpen] = useState(false);
+  useEffect(() => startBoardSync(), []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsSection, setSettingsSection] = useState<SettingsSection>('appearance');
   const [firstRunWelcomeOpen, setFirstRunWelcomeOpen] = useState(false);
@@ -372,7 +376,8 @@ export function App() {
     });
 
     try {
-      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction, tools: options.tools, conversationId, inputMessageId: options.inputMessageId, generationId, isGenerationActive: isActiveGeneration };
+      const kanbanInstruction = await kanbanContext();
+      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction + kanbanInstruction, untrustedExternalContext: Boolean(kanbanInstruction), tools: options.tools, conversationId, inputMessageId: options.inputMessageId, generationId, isGenerationActive: isActiveGeneration };
       const stream = options.tools?.length
         ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
         : geminiTurnPort.streamReply(request, controller.signal);
@@ -538,6 +543,7 @@ export function App() {
   const canRetry = canRetryFailedTurn(status, failedAttempt, conversation.id);
   const showLockboxAction = structuredError !== null && (structuredError.category === 'configuration' || structuredError.category === 'authentication' || structuredError.category === 'authorization' || structuredError.code === 'GEMINI_LOCKBOX_LOCKED');
   if (settingsOpen) return <SettingsScreen initialSection={settingsSection} font={uiSettings.font} onFontChange={(value) => handleUiSettingsChange({ font: value })} chatTextSize={uiSettings.chatTextSize} onChatTextSizeChange={(value) => handleUiSettingsChange({ chatTextSize: value })} portraitScale={uiSettings.portraitScale} onPortraitScaleChange={(value: 1 | 2 | 3) => handleUiSettingsChange({ portraitScale: value })} portraitBackground={uiSettings.portraitBackground} onPortraitBackgroundChange={(value) => handleUiSettingsChange({ portraitBackground: value })} selectedModel={geminiModel} geminiSettings={currentGeminiSettings} onModelChange={(model) => void handleModelChange(model)} onGeminiSettingsChange={(settings) => void handleGeminiSettingsChange(settings)} onResetGeminiSettings={() => void handleResetGeminiSettings()} character={character} onCharacterChange={(profile) => void handleCharacterChange(profile)} chatAppearance={chatAppearance} onChatAppearanceChange={(value: ChatAppearancePreferences) => void handleChatAppearanceChange(value)} roleplay={roleplay} onRoleplayChange={(value: RoleplayPreferences) => void handleRoleplayChange(value)} enterToSend={uiSettings.enterToSend} onEnterToSendChange={(value) => handleUiSettingsChange({ enterToSend: value })} onBack={(activityGlyphs) => void handleSettingsBack(activityGlyphs)} />;
+  if (kanbanOpen) return <main style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}><KanbanScreen onBack={() => setKanbanOpen(false)} onSettings={() => { setSettingsSection('google'); setSettingsOpen(true); }} /></main>;
   return <main className="app-shell" style={{ ...appStyle, fontFamily: fontFamilyForCss(uiSettings.font) } as React.CSSProperties}>
     <div className="app-shell__background" aria-hidden="true" />
     {/* One authoritative control cluster: the hamburger and the Workspace
@@ -546,6 +552,7 @@ export function App() {
       <button className="glass-menu-button" type="button" aria-label="Open sidebar" aria-expanded={sidebarOpen} onClick={() => setSidebarOpen(true)}><Icon name="menu" size={21} /></button>
       <TopToolRail tools={DEFAULT_QUICK_ACTIONS} activeId={null} onAction={(shortcut) => void handleQuickShortcut(shortcut)} />
     </div>
+    <button type="button" className="kanban-launcher" onClick={() => setKanbanOpen(true)}>Kanban</button>
     <MasterPromptWarning systemInstruction={character.systemInstruction} />
     <PortraitBanner collapsed={sidebarOpen} scale={uiSettings.portraitScale} background={uiSettings.portraitBackground} artworkMode={character.artworkMode} artwork={character.artwork} characterName={character.name} />
     <ConversationSurface key={conversation.id} messages={visibleMessages} generation={generation} onRegenerate={handleRegenerate} activityGlyphs={chatAppearance.generationActivityGlyphs} />

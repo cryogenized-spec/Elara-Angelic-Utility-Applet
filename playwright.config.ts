@@ -14,10 +14,10 @@ export default defineConfig({
     },
     {
       name: 'android-portrait',
-      // Phone-specific reliability, media handoff/delivery, Workspace Drive,
+      // Phone-specific reliability, media handoff/delivery, Workspace services/Kanban,
       // and Generation Activity behaviour run against the canonical 9:16-ish
       // Android canvas with reduced motion.
-      testMatch: /(?:mobile-reliability|vtt|media-handoff|media-delivery\.phase3|media-lifecycle\.acceptance|generation-activity|google-drive|google-picker|google-workspace-pass4)\.spec\.ts/,
+      testMatch: /(?:kanban|mobile-reliability|vtt|media-handoff|media-delivery\.phase3|media-lifecycle\.acceptance|generation-activity|google-drive|google-picker|google-workspace-pass4)\.spec\.ts/,
       use: {
         browserName: 'chromium',
         viewport: { width: 412, height: 915 },
@@ -36,6 +36,9 @@ export default defineConfig({
     },
   ],
   use: {
+    // Provider-mocked UI suites must not let an activated worker bypass page routes.
+    // Dedicated PWA lifecycle tests opt back in; production registration is unchanged.
+    serviceWorkers: 'block',
     baseURL: 'http://127.0.0.1:5173/Elara-Angelic-Utility-Applet/',
     storageState: 'e2e/.auth/legacy.json',
     trace: 'retain-on-failure',

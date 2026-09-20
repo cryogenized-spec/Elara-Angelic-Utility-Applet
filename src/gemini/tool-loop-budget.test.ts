@@ -167,7 +167,10 @@ describe('Gemini tool-loop TPM budget', () => {
       { tool: 'drive.searchFiles', arguments: { query: `query-${index + 1}` } },
       {
         source: 'drive',
-        files: [{ id: `file-${index + 1}`, name: `report-${index + 1}-${'x'.repeat(300)}` }],
+        files: [{
+          id: `observation-${String(index + 1).padStart(2, '0')}`,
+          name: `report-${index + 1}-${'x'.repeat(300)}`,
+        }],
       },
       true,
     ));
@@ -181,8 +184,8 @@ describe('Gemini tool-loop TPM budget', () => {
     expect(checkpoint.length).toBeLessThanOrEqual(1_600);
     expect(checkpoint).toContain('[APPLICATION-GENERATED INVESTIGATION CHECKPOINT]');
     expect(checkpoint).toContain('CHECKPOINT TRUNCATED: OLDEST OBSERVATIONS OMITTED');
-    expect(checkpoint).toContain('file-20');
-    expect(checkpoint).not.toContain('file-1');
+    expect(checkpoint).toContain('observation-20');
+    expect(checkpoint).not.toContain('observation-01');
     expect(checkpoint).toContain('Continuation instruction:');
   });
 

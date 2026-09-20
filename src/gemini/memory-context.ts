@@ -26,13 +26,17 @@ export async function loadMemoryContext(query: string, conversationId?: string):
     if (!behavior.enabled || behavior.recallStyle === 'direct-only') return '';
 
     const folderState = await loadFolderState();
-    const memories = await retrieveMemories(memoryScopeForConversation(threadId, folderState, query));
+    const scope = memoryScopeForConversation(threadId, folderState, query);
+    const retrievalMode = behavior.recallStyle === 'proactive' ? 'proactive' : 'relevant';
+    const memories = await retrieveMemories({ ...scope, mode: retrievalMode });
 
     // Fallback revalidation for browsers without Web Locks. On supporting
     // browsers the shared lease also prevents a cross-tab policy write from
-    // committing until this read/telemetry projection completes.
+    // committing until this read/telemetry projection completes. A style
+    // change invalidates this projection instead of exposing context selected
+    // under an older, potentially broader policy.
     const current = await loadMemoryBehaviorPreferences();
-    if (!current.enabled || current.recallStyle === 'direct-only') return '';
+    if (!current.enabled || current.recallStyle !== behavior.recallStyle) return '';
     return formatMemoryContext(memories);
   });
 }

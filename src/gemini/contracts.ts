@@ -22,7 +22,7 @@ export type GeminiStreamEvent =
    */
   | { type: 'media-resolved'; provider: MediaProviderId; queries: readonly string[]; items: readonly MediaItem[] }
   /** Provider-reported usage for one interaction, including requires_action continuations. */
-  | { type: 'interaction-usage'; interactionId: string; status: string; usage: GeminiUsage; source: 'provider' }
+  | { type: 'interaction-usage'; interactionId: string; status: string; usage: GeminiUsage; source: 'provider' | 'estimate' }
   | { type: 'completed'; interactionId: string; status: string; durationMs: number; usage?: GeminiUsage }
   | { type: 'cancelled'; interactionId?: string }
   | { type: 'failed'; error: NormalizedProviderError }

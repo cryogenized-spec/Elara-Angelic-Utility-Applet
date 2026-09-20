@@ -217,6 +217,7 @@ describe('companion memory behavior preferences', () => {
     expect(value.enabled).toBe(DEFAULT_MEMORY_BEHAVIOR.enabled);
     expect(value.rememberingStyle).toBe(DEFAULT_MEMORY_BEHAVIOR.rememberingStyle);
     expect(value.recallStyle).toBe(DEFAULT_MEMORY_BEHAVIOR.recallStyle);
+    expect(value.enabled).toBe(false);
     expect(value.categories.health_wellbeing).toBe(false);
     expect(value.categories.pets).toBe(false);
   });
@@ -259,6 +260,14 @@ describe('companion memory behavior preferences', () => {
     expect(value.categories.likes_dislikes).toBe(false);
     expect(value.categories.health_wellbeing).toBe(true);
     expect(value.categories.pets).toBe(DEFAULT_MEMORY_CATEGORIES.pets);
+    expect(value.categories.race_ethnicity).toBe(false);
+    expect(value.categories.legal_criminal_history).toBe(false);
     expect(value.categories.precise_location_home).toBe(DEFAULT_MEMORY_CATEGORIES.precise_location_home);
   });
+  it('keeps a missing legacy master switch compatible but fails a present malformed switch closed', () => {
+    expect(normalizeMemoryBehaviorPreferences({ categories: {} } as never).enabled).toBe(true);
+    expect(normalizeMemoryBehaviorPreferences({ enabled: 'corrupt' as never }).enabled).toBe(false);
+    expect(normalizeMemoryBehaviorPreferences({ enabled: 1 as never }).enabled).toBe(false);
+  });
+
 });

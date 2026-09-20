@@ -16,6 +16,16 @@ describe('Gemini rolling quota ledger', () => {
     await resetGeminiQuotaLedgerForTests();
   });
 
+  it('uses a UTF-8 byte upper bound for arbitrary Unicode fallback accounting', () => {
+    const ascii = 'x'.repeat(1_000);
+    const cjk = '漢'.repeat(1_000);
+    const emoji = '😀'.repeat(1_000);
+
+    expect(estimateSerializedInputTokens(ascii)).toBeGreaterThanOrEqual(1_000);
+    expect(estimateSerializedInputTokens(cjk)).toBeGreaterThanOrEqual(3_000);
+    expect(estimateSerializedInputTokens(emoji)).toBeGreaterThanOrEqual(4_000);
+  });
+
   it('does not mistake inline image transport bytes for prompt-text tokens', () => {
     const encodedImage = 'A'.repeat(1_000_000);
     const imageEstimate = estimateSerializedInputTokens({

@@ -27,8 +27,20 @@ function tokenize(value: string): string[] {
   return [...new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}]{2,}/gu) ?? [])];
 }
 
-function queryTokens(value: string): string[] {
+export function queryTokens(value: string): string[] {
   return tokenize(value).filter((token) => !QUERY_STOPWORDS.has(token));
+}
+
+/**
+ * Fraction of substantive query tokens present in one haystack. The same
+ * tokenization/stopword authority as the canonical memory scorer, exposed so
+ * the derived semantic-file lane cannot drift onto a second relevance notion.
+ */
+export function queryLexicalFraction(query: string, value: string): number {
+  const tokens = queryTokens(query);
+  if (!tokens.length) return 0;
+  const haystack = new Set(tokenize(value));
+  return tokens.filter((token) => haystack.has(token)).length / tokens.length;
 }
 
 /** Structural minimum the scorer reads — satisfied by DurableMemory and by the Autonomy Context source snapshot. */

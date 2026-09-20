@@ -74,6 +74,21 @@ describe('Gemini rolling quota ledger', () => {
     expect(await geminiQuotaSnapshot(T0 + 1_000, 100_000)).toMatchObject({ rollingInputTokens: 45_000 });
   });
 
+  it('retains more than 64 still-live finalized interactions until their rolling window expires', async () => {
+    const allowance = 2_000_000;
+    for (let index = 0; index < 70; index += 1) {
+      const at = T0 + index;
+      const reservation = await reserveGeminiQuota(1, at, allowance);
+      expect(reservation.granted).toBe(true);
+      if (!reservation.granted) throw new Error('Expected reservation.');
+      await finalizeGeminiQuotaReservation(reservation, 1, at, allowance);
+    }
+    expect(await geminiQuotaSnapshot(T0 + 100, allowance)).toMatchObject({
+      rollingInputTokens: 70,
+      entries: 70,
+    });
+  });
+
   it('expires old usage after the rolling sixty-second window', async () => {
     const reservation = await reserveGeminiQuota(70_000, T0, 100_000);
     expect(reservation.granted).toBe(true);

@@ -51,6 +51,31 @@ describe('Gemini durable-memory context boundary', () => {
     expect(await db.memories.count()).toBe(1);
   });
 
+  it('keeps natural automatic recall limited to query-relevant memory', async () => {
+    window.localStorage.setItem('elara.active-thread', 'thread-natural');
+    await saveMemory({ title: 'Garden note', body: 'The user is planting basil in the garden.', kind: 'CONTEXTUAL', importance: 0.5, confidence: 0.8 });
+    await saveMemory({ title: 'Identity landmark', body: 'The user values quiet daily reflection.', kind: 'CORE', importance: 1, confidence: 1 });
+
+    const context = await loadMemoryContext('garden basil');
+
+    expect(context).toContain('planting basil');
+    expect(context).not.toContain('quiet daily reflection');
+  });
+
+  it('lets proactive automatic recall add at most one established continuity anchor', async () => {
+    window.localStorage.setItem('elara.active-thread', 'thread-proactive');
+    await saveMemory({ title: 'Garden note', body: 'The user is planting basil in the garden.', kind: 'CONTEXTUAL', importance: 0.5, confidence: 0.8 });
+    await saveMemory({ title: 'Primary landmark', body: 'The user values quiet daily reflection.', kind: 'CORE', importance: 1, confidence: 1 });
+    await saveMemory({ title: 'Secondary landmark', body: 'The user loves elaborate fantasy worlds.', kind: 'CORE', importance: 0.7, confidence: 0.9 });
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, recallStyle: 'proactive' });
+
+    const context = await loadMemoryContext('garden basil');
+
+    expect(context).toContain('planting basil');
+    expect(context).toContain('quiet daily reflection');
+    expect(context).not.toContain('elaborate fantasy worlds');
+  });
+
   it('prefers captured turn conversation over a newly active UI thread', async () => {
     const origin = await createFolderPath('Projects/Origin');
     const navigated = await createFolderPath('Projects/Navigated');

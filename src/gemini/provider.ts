@@ -28,7 +28,7 @@ function readUsage(raw: unknown): GeminiUsage | undefined {
   const usage = asRecord(raw);
   const inputTokens = readNumber(usage, 'input_tokens') ?? readNumber(usage, 'prompt_tokens') ?? readNumber(usage, 'prompt_token_count') ?? readNumber(usage, 'total_input_tokens');
   const outputTokens = readNumber(usage, 'output_tokens') ?? readNumber(usage, 'completion_tokens') ?? readNumber(usage, 'candidates_token_count') ?? readNumber(usage, 'total_output_tokens');
-  const cachedTokens = readNumber(usage, 'cached_tokens') ?? readNumber(usage, 'cached_content_token_count');
+  const cachedTokens = readNumber(usage, 'cached_tokens') ?? readNumber(usage, 'cached_content_token_count') ?? readNumber(usage, 'total_cached_tokens');
   const thoughtsTokens = readNumber(usage, 'thoughts_tokens') ?? readNumber(usage, 'total_thought_tokens');
   const totalTokens = readNumber(usage, 'total_tokens') ?? readNumber(usage, 'total_token_count');
   if ([inputTokens, outputTokens, cachedTokens, thoughtsTokens, totalTokens].every((value) => value === undefined)) return undefined;
@@ -306,8 +306,10 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           const status = readString(interaction, 'status') ?? 'completed';
           const usage = readUsage(interaction.usage)
             ?? readUsage(interaction.usage_metadata)
+            ?? readUsage(interaction.usageMetadata)
             ?? readUsage(raw.usage)
-            ?? readUsage(raw.usage_metadata);
+            ?? readUsage(raw.usage_metadata)
+            ?? readUsage(raw.usageMetadata);
           if (usage) {
             usageReported = true;
             if (quotaReservation) await finalizeGeminiQuotaReservation(quotaReservation, usage.inputTokens);

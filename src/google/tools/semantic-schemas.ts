@@ -188,6 +188,7 @@ const calendarUpdateSchema = z.object({
 });
 
 const taskUpdateSchema = z.object({
+  etag: concreteEtagSchema.optional(),
   taskListId: idSchema,
   taskId: idSchema,
   title: taskTitleSchema.optional(),

@@ -183,6 +183,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
   'tasks.updateTask': async ({ arguments: raw }) => {
     const args = objectArgs(raw);
     return tasks.updateSemanticTask({
+      etag: stringArg(args, 'etag', false),
       taskListId: stringArg(args, 'taskListId')!,
       taskId: stringArg(args, 'taskId')!,
       title: stringArg(args, 'title', false),

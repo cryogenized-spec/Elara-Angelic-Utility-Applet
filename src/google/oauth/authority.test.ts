@@ -215,6 +215,42 @@ describe('direct Google OAuth authority', () => {
     expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
   });
 
+  it('uses prompt none only to refresh an already-effective grant on the noninteractive path', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE],
+      account: { email: 'test@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+    tokenMock.mockResolvedValueOnce(token('silent-refresh', CALENDAR_READ_SCOPE));
+
+    const authorized = await googleOAuthAuthority.authorizeExisting?.('calendar.events.read');
+
+    expect(authorized?.capability).toBe('calendar.events.read');
+    expect(tokenMock).toHaveBeenCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
+      prompt: 'none',
+    });
+    expect(codeMock).not.toHaveBeenCalled();
+  });
+
+  it('does not silently enable a missing application capability on the noninteractive path', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE],
+      account: { email: 'test@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+
+    await expect(googleOAuthAuthority.authorizeExisting?.('tasks.read')).rejects.toThrow('explicit consent');
+    expect(tokenMock).not.toHaveBeenCalled();
+    expect(codeMock).not.toHaveBeenCalled();
+    expect((await googleOAuthAuthority.getStatus()).enabledCapabilities).toEqual(['calendar.events.read']);
+  });
+
   it('records GIS scopes and persists metadata without persisting the access token', async () => {
     tokenMock.mockResolvedValueOnce(token('secret-access-token', CALENDAR_READ_SCOPE));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
@@ -259,6 +295,114 @@ describe('direct Google OAuth authority', () => {
     const status = await googleOAuthAuthority.getStatus();
     expect(status.enabledCapabilities).toEqual(expect.arrayContaining(['drive.files.app.read', 'calendar.events.read']));
     expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['drive.files.app.read', 'docs.read', 'sheets.read', 'calendar.events.read']));
+  });
+
+  it('invalidates a browser token when another tab changes the shared Google account', async () => {
+    installUserinfoFetch('account-a@example.com');
+    tokenMock.mockResolvedValueOnce(token('access-account-a', CALENDAR_READ_SCOPE));
+    const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
+
+    const shared = JSON.parse(localStorage.getItem('elara.google.authorization.v2') ?? '{}') as {
+      account?: { email: string };
+      updatedAt?: string;
+    };
+    shared.account = { email: 'account-b@example.com' };
+    shared.updatedAt = new Date().toISOString();
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify(shared));
+
+    const changedStatus = await googleOAuthAuthority.getStatus();
+    expect(changedStatus.account?.email).toBe('account-b@example.com');
+    expect(changedStatus.sessionReady).toBe(false);
+
+    tokenMock.mockResolvedValueOnce(token('access-account-b', CALENDAR_READ_SCOPE));
+    const apiTokens: string[] = [];
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      if (url.includes('userinfo') || url.includes('openidconnect')) return userinfoResponse('account-b@example.com');
+      const request = input instanceof Request ? input : new Request(url, init);
+      apiTokens.push(request.headers.get('Authorization') ?? '');
+      return new Response('{"items":[]}', { status: 200 });
+    }) as unknown as typeof fetch;
+
+    const response = await authorized.fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events');
+
+    expect(response.status).toBe(200);
+    expect(tokenMock).toHaveBeenLastCalledWith({
+      clientId: 'test-client.apps.googleusercontent.com',
+      scope: EXPECTED_SCOPE(CALENDAR_READ_SCOPE),
+      prompt: 'none',
+    });
+    expect(apiTokens).toEqual(['Bearer access-account-b']);
+    expect(apiTokens).not.toContain('Bearer access-account-a');
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(true);
+  });
+
+  it('rejects a silent refresh when the returned token belongs to a different account', async () => {
+    installUserinfoFetch('account-a@example.com');
+    tokenMock.mockResolvedValueOnce(token('access-account-a', CALENDAR_READ_SCOPE, 61));
+    const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 2_000);
+      tokenMock.mockResolvedValueOnce(token('wrong-account-token', CALENDAR_READ_SCOPE));
+      globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+        const url = requestUrl(input);
+        if (url.includes('userinfo') || url.includes('openidconnect')) return userinfoResponse('account-b@example.com');
+        throw new Error('Provider request must not run with the wrong account token: ' + url);
+      }) as unknown as typeof fetch;
+
+      await expect(authorized.fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events'))
+        .rejects.toThrow('Google account changed or could not be verified');
+      expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not overwrite a newer shared account when it changes during silent refresh', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE],
+      account: { email: 'account-a@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+    tokenMock.mockResolvedValueOnce(token('silent-account-a', CALENDAR_READ_SCOPE));
+
+    let switched = false;
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.includes('userinfo') || url.includes('openidconnect')) {
+        if (!switched) {
+          const shared = JSON.parse(localStorage.getItem('elara.google.authorization.v2') ?? '{}') as {
+            account?: { email: string };
+            needsReauthorization?: boolean;
+            updatedAt?: string;
+          };
+          shared.account = { email: 'account-b@example.com' };
+          delete shared.needsReauthorization;
+          shared.updatedAt = new Date().toISOString();
+          localStorage.setItem('elara.google.authorization.v2', JSON.stringify(shared));
+          switched = true;
+        }
+        return userinfoResponse('account-a@example.com');
+      }
+      throw new Error('Provider request must not run after a shared account switch: ' + url);
+    }) as unknown as typeof fetch;
+
+    await expect(googleOAuthAuthority.authorizeExisting?.('calendar.events.read'))
+      .rejects.toThrow('Google account changed while refreshing');
+
+    const persisted = JSON.parse(localStorage.getItem('elara.google.authorization.v2') ?? '{}') as {
+      account?: { email: string };
+      needsReauthorization?: boolean;
+    };
+    expect(persisted.account?.email).toBe('account-b@example.com');
+    expect(persisted.needsReauthorization).not.toBe(true);
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.account?.email).toBe('account-b@example.com');
+    expect(status.sessionReady).toBe(false);
   });
 
   it('attaches the short-lived access token directly to an approved Google API request', async () => {
@@ -547,7 +691,7 @@ describe('direct Google OAuth authority', () => {
     pairingTokenMock.mockResolvedValue('test-installation-secret');
     codeMock.mockResolvedValue({ code: 'initial-code', scope: `${CALENDAR_READ_SCOPE} ${EMAIL_SCOPE}` });
     let revision = 300;
-    let account = 'account-a@example.com';
+    const account = 'account-a@example.com';
     let refreshCalls = 0;
     const apiTokens: string[] = [];
 
@@ -571,7 +715,7 @@ describe('direct Google OAuth authority', () => {
         refreshCalls += 1;
         return new Response(JSON.stringify({
           connected: true,
-          accessToken: 'access-account-b',
+          accessToken: 'access-revision-301',
           expiresIn: 3600,
           scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
           account: { email: account },
@@ -589,15 +733,13 @@ describe('direct Google OAuth authority', () => {
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');
     refreshCalls = 0;
     revision = 301;
-    account = 'account-b@example.com';
-
     const response = await authorized.fetch('https://www.googleapis.com/calendar/v3/calendars/primary/events');
 
     expect(response.status).toBe(200);
     expect(refreshCalls).toBe(1);
-    expect(apiTokens).toEqual(['Bearer access-account-b']);
+    expect(apiTokens).toEqual(['Bearer access-revision-301']);
     expect(apiTokens).not.toContain('Bearer access-account-a');
-    expect((await googleOAuthAuthority.getStatus()).account?.email).toBe('account-b@example.com');
+    expect((await googleOAuthAuthority.getStatus()).account?.email).toBe('account-a@example.com');
   });
 
   it('rejects non-Google API targets before network access', async () => {

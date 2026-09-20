@@ -43,7 +43,7 @@ Interactive Gemini is direct from `src/gemini/provider.ts` using the local Lockb
 | `SYS-DOC` | Documents | local PDF compilation and OCR | `src/documents/`, `src/ocr/` |
 | `SYS-CHAR` | Character | Character Master, profile/portrait, roleplay/world state | `src/character/`, roleplay domain/persistence |
 | `SYS-GAUTH` | Google auth | GIS, capabilities/scopes, browser token state, durable refresh brokerage | `src/google/oauth/`, Worker OAuth boundary |
-| `SYS-GWS` | Workspace/tools | Google services, executable registry, confirmations | `src/google/` excluding OAuth |
+| `SYS-GWS` | Workspace/tools | Google services, executable registry, confirmations, human task workspace/cache | `src/google/` excluding OAuth, `src/kanban/` |
 | `SYS-MEDIA` | Media | YouTube search, cache/budget, normalized handoff | `src/media/` |
 | `SYS-AUTO` | Autonomy | routines, schedules, authority/context, cloud sync | `src/autonomy/`, `worker/src/autonomy/` |
 | `SYS-SEC` | Security | browser credentials, encryption/unlock session, capability gates | security modules + gates |

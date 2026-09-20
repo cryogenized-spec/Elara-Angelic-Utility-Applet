@@ -51,9 +51,9 @@ describe('GoogleDriveService', () => {
 
   it('rechecks elected-turn authority immediately before a provider write', async () => {
     let active = true;
-    const providerFetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit, beforeProviderFetch?: () => void) => {
+    const providerFetch = vi.fn(async (_url: RequestInfo | URL, _init?: RequestInit, beforeProviderFetch?: () => void | Promise<void>) => {
       active = false;
-      beforeProviderFetch?.();
+      await beforeProviderFetch?.();
       return jsonResponse(FILE_METADATA);
     });
     const oauth: GoogleOAuthAuthority = {

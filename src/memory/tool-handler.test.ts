@@ -98,6 +98,12 @@ describe('memory tool handlers', () => {
     }))).rejects.toThrow(/credential material/i);
     expect(await countMemories()).toBe(0);
 
+    await expect(handlerFor('memory.save')(contextFor('memory.save', {
+      title: 'Wi-Fi password',
+      body: 'hunter2',
+    }))).rejects.toThrow(/credential material/i);
+    expect(await countMemories()).toBe(0);
+
     const target = await saveMemory({ title: 'Existing preference', body: 'The user prefers the compact layout.' });
     const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'compact layout' }));
     const [ref] = refsFromLookup(lookup);

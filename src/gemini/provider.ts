@@ -248,11 +248,22 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         }
         if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
         if (eventType === 'interaction.completed') {
-          const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed';
-          if (status === 'requires_action') { sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
+          const interaction = asRecord(raw.interaction);
+          interactionId = readString(interaction, 'id') ?? interactionId;
+          const status = readString(interaction, 'status') ?? 'completed';
+          const usage = readUsage(interaction.usage) ?? readUsage(raw.usage);
+          if (usage) yield { type: 'interaction-usage', interactionId: interactionId ?? 'unknown', status, usage, source: 'provider' };
+          if (status === 'requires_action') {
+            sawRequiresAction = true;
+            if (interactionId) yield { type: 'interaction-status', interactionId, status };
+            continue;
+          }
           sawTerminalEvent = true;
-          const usage = readUsage(interaction.usage) ?? readUsage(raw.usage); const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts); const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined); if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
-          yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage }; return;
+          const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts);
+          const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined);
+          if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
+          yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage };
+          return;
         }
         if (eventType === 'error') {
           const providerError = asRecord(raw.error);

@@ -137,6 +137,29 @@ describe('Gemini tool-loop TPM budget', () => {
     expect(checkpoint).not.toContain('must-not-appear');
   });
 
+  it('marks truncated collections, preserves ETags, and exposes bounded recovery evidence', () => {
+    const entry = checkpointEntryFor(
+      { tool: 'drive.searchFiles', arguments: { query: 'Quarterly' } },
+      {
+        trust: 'untrusted-external',
+        source: 'drive',
+        files: Array.from({ length: 8 }, (_, index) => ({
+          id: `file-${index + 1}`,
+          name: `Report ${index + 1}.pdf`,
+          etag: `"etag-${index + 1}"`,
+        })),
+      },
+      true,
+    );
+    const checkpoint = buildInvestigationCheckpoint('Find the report.', [entry], 4_000);
+    expect(checkpoint).toContain('file-5');
+    expect(checkpoint).not.toContain('file-6');
+    expect(checkpoint).toContain('checkpointTruncated');
+    expect(checkpoint).toContain('"omittedItems":3');
+    expect(checkpoint).toContain('\"etag-1\"');
+    expect(checkpoint).toContain('Exact reread is permitted');
+  });
+
   it('retains bounded Gmail message body and header evidence in a checkpoint', () => {
     const entry = checkpointEntryFor(
       { tool: 'gmail.getMessage', arguments: { messageId: 'm-semantic' } },

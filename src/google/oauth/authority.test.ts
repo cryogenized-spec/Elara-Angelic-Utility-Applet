@@ -490,6 +490,58 @@ describe('direct Google OAuth authority', () => {
     expect(tokenMock).not.toHaveBeenCalled();
   });
 
+  it('refreshes paired Workspace Settings from the durable grant without reopening GIS', async () => {
+    pairingMock.mockReturnValue(TEST_PAIRING);
+    pairingTokenMock.mockResolvedValue('test-installation-secret');
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['google.account', 'calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+      account: { email: 'durable@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+
+    let refreshCalls = 0;
+    let exchangeCalls = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = requestMethod(input, init);
+      if (url === 'https://worker.example/google/oauth/status' && method === 'GET') {
+        return new Response(JSON.stringify({
+          connected: true,
+          scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+          account: { email: 'durable@example.com' },
+          updatedAt: 210,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/token' && method === 'POST') {
+        refreshCalls += 1;
+        return new Response(JSON.stringify({
+          connected: true,
+          accessToken: 'settings-refresh-token',
+          expiresIn: 3600,
+          scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+          account: { email: 'durable@example.com' },
+          updatedAt: 210,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/exchange' && method === 'POST') {
+        exchangeCalls += 1;
+        return new Response('{}', { status: 500 });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    }) as unknown as typeof fetch;
+
+    const status = await authorizeGoogleWorkspace('refresh');
+
+    expect(refreshCalls).toBe(1);
+    expect(exchangeCalls).toBe(0);
+    expect(codeMock).not.toHaveBeenCalled();
+    expect(status.sessionReady).toBe(true);
+    expect(status.enabledCapabilities).toEqual(['google.account', 'calendar.events.read']);
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
+  });
+
   it('invalidates an unexpired paired browser token when the authoritative vault revision changes', async () => {
     pairingMock.mockReturnValue(TEST_PAIRING);
     pairingTokenMock.mockResolvedValue('test-installation-secret');

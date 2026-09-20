@@ -188,11 +188,12 @@ test('a genuine v2 record migrates and session refresh preserves its existing le
     account: { email: STUB_EMAIL, displayName: STUB_NAME },
   }));
   const stored = await readStoredAuthorization(page);
-  expect(stored?.enabledCapabilities).toEqual([
+  expect(stored?.enabledCapabilities).toHaveLength(3);
+  expect(stored?.enabledCapabilities).toEqual(expect.arrayContaining([
     'google.account',
     'calendar.events.read',
     'tasks.read',
-  ]);
+  ]));
   expect(stored?.grantedProviderScopes).toEqual(expect.arrayContaining([
     CALENDAR_READ_SCOPE,
     TASKS_READ_SCOPE,

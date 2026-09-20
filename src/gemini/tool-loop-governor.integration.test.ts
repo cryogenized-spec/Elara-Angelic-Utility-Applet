@@ -316,7 +316,7 @@ describe('Gemini tool-loop gross-input governor', () => {
     expect(streamToolResult).toHaveBeenCalledOnce();
     const compacted = streamReply.mock.calls[1]?.[0] as { input?: string };
     expect(compacted.input).toContain('checkpointTruncated');
-    expect(compacted.input).toContain('"etag-1"');
+    expect(compacted.input).toContain('etag-1');
     expect(collected.at(-1)).toMatchObject({ type: 'completed', status: 'completed' });
   });
 

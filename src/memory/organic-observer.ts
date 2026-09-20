@@ -1,10 +1,16 @@
 import { z } from 'zod';
+import {
+  MEMORY_CATEGORY_KEYS,
+  type MemoryBehaviorPreferences,
+  type MemoryCategoryKey,
+  type MemoryRememberingStyle,
+} from '../domain/preferences';
 import { loadFolderState } from '../persistence/folders';
 import { loadMemoryBehaviorPreferences, withMemoryBehaviorReadLease } from '../persistence/preferences';
 import { consolidateObservation, recordObservation } from './observation';
 import { findExactEvidenceSupportTarget } from './lifecycle';
 import { runMemoryMutationTransaction } from './store';
-import { containsCredentialMaterial } from './safety';
+import { containsCredentialMaterial, sensitiveMemoryCategoryHints } from './safety';
 
 export const ORGANIC_MEMORY_DOMAINS = [
   'preference',
@@ -15,6 +21,9 @@ export const ORGANIC_MEMORY_DOMAINS = [
   'shared_event',
 ] as const;
 
+export const ORGANIC_MEMORY_SALIENCES = ['low', 'medium', 'high'] as const;
+export type OrganicMemorySalience = (typeof ORGANIC_MEMORY_SALIENCES)[number];
+
 export const MAX_ORGANIC_CANDIDATES = 3;
 export const MAX_ORGANIC_EVIDENCE_CHARS = 500;
 export const MAX_ORGANIC_INPUT_CHARS = 6_000;
@@ -23,6 +32,8 @@ export const ORGANIC_OBSERVATION_IMPORTANCE = 0.35;
 
 export const organicMemoryCandidateSchema = z.object({
   domain: z.enum(ORGANIC_MEMORY_DOMAINS),
+  category: z.enum(MEMORY_CATEGORY_KEYS),
+  salience: z.enum(ORGANIC_MEMORY_SALIENCES),
   evidence: z.string().min(1).max(MAX_ORGANIC_EVIDENCE_CHARS),
 }).strict();
 
@@ -65,6 +76,42 @@ const DOMAIN_TITLES: Readonly<Record<OrganicMemoryDomain, string>> = {
   shared_event: 'Observed shared event',
 };
 
+const STYLE_MIN_SALIENCE: Readonly<Record<MemoryRememberingStyle, number>> = {
+  'explicit-only': Number.POSITIVE_INFINITY,
+  selective: 2,
+  natural: 1,
+  attentive: 0,
+};
+
+const SALIENCE_RANK: Readonly<Record<OrganicMemorySalience, number>> = {
+  low: 0,
+  medium: 1,
+  high: 2,
+};
+
+export function rememberingStyleAllowsSalience(
+  style: MemoryRememberingStyle,
+  salience: OrganicMemorySalience,
+): boolean {
+  return SALIENCE_RANK[salience] >= STYLE_MIN_SALIENCE[style];
+}
+
+function candidateAllowedByBehavior(
+  candidate: OrganicMemoryCandidate,
+  behavior: MemoryBehaviorPreferences,
+): boolean {
+  if (!behavior.enabled || behavior.rememberingStyle === 'explicit-only') return false;
+  if (!rememberingStyleAllowsSalience(behavior.rememberingStyle, candidate.salience)) return false;
+  if (!behavior.categories[candidate.category]) return false;
+
+  const sensitiveHints = sensitiveMemoryCategoryHints(candidate.evidence);
+  // Ambiguous multi-sensitive spans and category mismatches fail closed. A
+  // user can still retain such material deliberately through confirmed memory.
+  if (sensitiveHints.length > 1) return false;
+  if (sensitiveHints.length === 1 && sensitiveHints[0] !== candidate.category) return false;
+  return sensitiveHints.every((category) => behavior.categories[category]);
+}
+
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -91,7 +138,7 @@ function acceptedCandidates(raw: unknown, fullUserMessage: string): OrganicMemor
     // gets to paraphrase a fact into existence.
     if (!fullUserMessage.includes(candidate.evidence)) continue;
     if (containsCredentialMaterial(candidate.evidence)) continue;
-    const key = `${candidate.domain}\u0000${candidate.evidence}`;
+    const key = `${candidate.domain}\u0000${candidate.category}\u0000${candidate.salience}\u0000${candidate.evidence}`;
     if (seen.has(key)) continue;
     seen.add(key);
     accepted.push(candidate);
@@ -170,8 +217,11 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
       }
       if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
 
+      const eligibleCandidates = preparedCandidates.filter(({ candidate }) => candidateAllowedByBehavior(candidate, currentBehavior));
+      if (!eligibleCandidates.length) return { status: 'empty', count: 0 };
+
       await runMemoryMutationTransaction(async () => {
-        for (const { candidate, evidenceFingerprint } of preparedCandidates) {
+        for (const { candidate, evidenceFingerprint } of eligibleCandidates) {
           const context = {
             actor: 'model' as const,
             conversationId: request.conversationId,
@@ -184,7 +234,7 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
             {
               title: DOMAIN_TITLES[candidate.domain],
               body: candidate.evidence,
-              tags: ['organic', `domain:${candidate.domain}`],
+              tags: ['organic', `domain:${candidate.domain}`, `category:${candidate.category}`, `salience:${candidate.salience}`],
               confidence: ORGANIC_OBSERVATION_CONFIDENCE,
               importance: ORGANIC_OBSERVATION_IMPORTANCE,
             },
@@ -195,7 +245,7 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
           if (target) await consolidateObservation(observation.id, target.id, 'support', context);
         }
       }, isMutationAllowed);
-      return { status: 'recorded', count: candidates.length };
+      return { status: 'recorded', count: eligibleCandidates.length };
     });
   } catch {
     return { status: 'unavailable', count: 0 };

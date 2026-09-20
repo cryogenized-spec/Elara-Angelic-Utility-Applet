@@ -94,6 +94,16 @@ The web application is static Vite output deployed to the host chosen by the use
 main -> CI/build -> dist/ -> GitHub Pages
 ```
 
+For this repository's Pages deployment, configure the public Google browser identifiers under **Settings → Secrets and variables → Actions → Variables**:
+
+```text
+VITE_GOOGLE_CLIENT_ID              required for Google account / Workspace OAuth
+VITE_GOOGLE_PICKER_API_KEY         optional; required together with Picker use
+VITE_GOOGLE_CLOUD_PROJECT_NUMBER   optional; required together with Picker use
+```
+
+These are browser-visible public identifiers, not OAuth client secrets. The CI workflow injects the variables into the Vite build. A production `main` build fails closed when `VITE_GOOGLE_CLIENT_ID` is missing, so GitHub Pages cannot silently publish a Workspace UI whose account button can never open Google Identity Services. The **Connect Google account** button remains the explicit user gesture that invokes the existing Google OAuth authority and launches GIS. The Google Web client must authorize the Pages origin `https://cryogenized-spec.github.io`; Picker credentials should be restricted to the same web origin and the Google Picker API.
+
 The optional Cloudflare Worker is a separate self-hosted boundary with its own configuration, Durable Objects and secrets. Pairing the PWA to that Worker enables durable Google authorization and cloud features without turning the Worker into the normal browser Gemini provider.
 
 ## License and third-party assets

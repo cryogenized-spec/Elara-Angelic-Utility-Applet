@@ -73,6 +73,8 @@ class DurableGoogleOAuthError extends Error {
   }
 }
 
+class GoogleAuthorizationStateChangedError extends Error {}
+
 let stored: StoredAuthorization = emptyStored();
 let session: AccessSession | null = null;
 
@@ -366,17 +368,28 @@ async function acquireBrowserTokenForCapabilities(
     if (!response.access_token) throw new Error('Google authorization did not return an access token.');
     const returnedScopes = parseProviderScopes(response.scope);
     const requestedProviderScopes = requestedCapabilities.map((capability) => getGoogleScope(capability).scope).filter(Boolean);
-    const grantedProviderScopes = returnedScopes.length
-      ? returnedScopes
-      : [...new Set([...current.grantedProviderScopes, ...requestedProviderScopes])];
-    const enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, ...requestedCapabilities]);
-    let nextAccount = current.account;
     const fetched = await fetchGoogleAccount(response.access_token);
+    let commitState = current;
     if (prompt === 'none') {
-      if (!current.account?.email || !fetched || normalizedAccountEmail(fetched.email) !== normalizedAccountEmail(current.account.email)) {
+      if (!current.account?.email) {
         throw new Error('Google account changed or could not be verified. Refresh the Google session in Settings.');
       }
+      const latest = loadStored();
+      if (normalizedAccountEmail(latest.account?.email) !== normalizedAccountEmail(current.account.email)) {
+        throw new GoogleAuthorizationStateChangedError('Google account changed while refreshing. Sync the current workspace before continuing.');
+      }
+      if (!fetched || normalizedAccountEmail(fetched.email) !== normalizedAccountEmail(latest.account?.email)) {
+        throw new Error('Google account changed or could not be verified. Refresh the Google session in Settings.');
+      }
+      commitState = latest;
     }
+    const grantedProviderScopes = returnedScopes.length
+      ? returnedScopes
+      : [...new Set([...commitState.grantedProviderScopes, ...requestedProviderScopes])];
+    const enabledCapabilities = prompt === 'none'
+      ? [...commitState.enabledCapabilities]
+      : uniqueCapabilities([...commitState.enabledCapabilities, ...requestedCapabilities]);
+    let nextAccount = commitState.account;
     if (fetched) nextAccount = fetched;
     else if (prompt === '') nextAccount = undefined;
     session = {
@@ -394,9 +407,11 @@ async function acquireBrowserTokenForCapabilities(
   } catch (error) {
     const raw = error instanceof Error ? error.message : undefined;
     if (prompt === 'none') {
-      stored.needsReauthorization = true;
       session = null;
-      saveStored();
+      if (!(error instanceof GoogleAuthorizationStateChangedError)) {
+        stored.needsReauthorization = true;
+        saveStored();
+      }
     }
     throw new Error(raw || 'Google authorization failed.', { cause: error });
   }

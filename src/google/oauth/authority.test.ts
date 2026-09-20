@@ -360,6 +360,51 @@ describe('direct Google OAuth authority', () => {
     }
   });
 
+  it('does not overwrite a newer shared account when it changes during silent refresh', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE],
+      account: { email: 'account-a@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+    tokenMock.mockResolvedValueOnce(token('silent-account-a', CALENDAR_READ_SCOPE));
+
+    let switched = false;
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = requestUrl(input);
+      if (url.includes('userinfo') || url.includes('openidconnect')) {
+        if (!switched) {
+          const shared = JSON.parse(localStorage.getItem('elara.google.authorization.v2') ?? '{}') as {
+            account?: { email: string };
+            needsReauthorization?: boolean;
+            updatedAt?: string;
+          };
+          shared.account = { email: 'account-b@example.com' };
+          delete shared.needsReauthorization;
+          shared.updatedAt = new Date().toISOString();
+          localStorage.setItem('elara.google.authorization.v2', JSON.stringify(shared));
+          switched = true;
+        }
+        return userinfoResponse('account-a@example.com');
+      }
+      throw new Error('Provider request must not run after a shared account switch: ' + url);
+    }) as unknown as typeof fetch;
+
+    await expect(googleOAuthAuthority.authorizeExisting?.('calendar.events.read'))
+      .rejects.toThrow('Google account changed while refreshing');
+
+    const persisted = JSON.parse(localStorage.getItem('elara.google.authorization.v2') ?? '{}') as {
+      account?: { email: string };
+      needsReauthorization?: boolean;
+    };
+    expect(persisted.account?.email).toBe('account-b@example.com');
+    expect(persisted.needsReauthorization).not.toBe(true);
+    const status = await googleOAuthAuthority.getStatus();
+    expect(status.account?.email).toBe('account-b@example.com');
+    expect(status.sessionReady).toBe(false);
+  });
+
   it('attaches the short-lived access token directly to an approved Google API request', async () => {
     tokenMock.mockResolvedValueOnce(token('access-123', CALENDAR_READ_SCOPE));
     const authorized = await googleOAuthAuthority.authorize('calendar.events.read');

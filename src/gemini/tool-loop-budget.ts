@@ -103,8 +103,9 @@ const SECRET_KEY = /(authorization|cookie|password|passwd|secret|token|api.?key|
 const PAGINATION_KEYS = new Set(['pageToken', 'nextPageToken', 'page_token', 'next_page_token', 'cursor', 'nextCursor']);
 const PRIORITY_KEYS = [
   'ok', 'error', 'code', 'id', 'name', 'title', 'subject', 'snippet', 'summary', 'status',
-  'count', 'total', 'threadId', 'messageId', 'documentId', 'revisionId', 'taskListId', 'taskId',
-  'scheduledDate', 'modifiedTime', 'createdTime', 'webViewLink', 'pageToken', 'nextPageToken',
+  'count', 'total', 'threadId', 'messageId', 'documentId', 'revisionId', 'etag', 'eTag',
+  'taskListId', 'taskId', 'scheduledDate', 'modifiedTime', 'createdTime', 'webViewLink',
+  'pageToken', 'nextPageToken',
   'page_token', 'next_page_token', 'cursor', 'nextCursor', 'trust', 'source',
   // Bounded semantic evidence required to continue after chain compaction.
   'bodyText', 'bodyTruncated', 'headers', 'from', 'to', 'cc', 'date', 'inReplyTo', 'references',
@@ -125,7 +126,19 @@ function projectValue(value: unknown, depth = 0): unknown {
   if (depth > 8) return '[bounded]';
   if (typeof value === 'string') return boundedString(value);
   if (typeof value === 'number' || typeof value === 'boolean' || value === null) return value;
-  if (Array.isArray(value)) return value.slice(0, 3).map((item) => projectValue(item, depth + 1));
+  if (Array.isArray(value)) {
+    const retained = value.slice(0, 5).map((item) => projectValue(item, depth + 1));
+    if (value.length <= 5) return retained;
+    return [
+      ...retained,
+      {
+        checkpointTruncated: true,
+        totalItems: value.length,
+        omittedItems: value.length - retained.length,
+        recovery: 'Exact reread is permitted after checkpoint compaction.',
+      },
+    ];
+  }
   if (!value || typeof value !== 'object') return undefined;
 
   const source = value as Record<string, unknown>;

@@ -274,7 +274,7 @@ export function SemanticMemoryFiles() {
     <button type="button" disabled={loading || busyId !== null || sweepRunning} onClick={() => setCreating(!creating)}>Create topic from memories</button>
     {creating && <form className="semantic-files__edit" onSubmit={(event) => { event.preventDefault(); void handleCreate(); }}>
       <p>Choose a concept already present in your memories. Creation makes one bounded model request; it does not save new facts or run automatically.</p>
-      <label><span>Topic kind</span><select value={createKind} onChange={(event) => setCreateKind(event.target.value as SemanticMemoryFile['kind'])}>
+      <label><span>Topic kind</span><select aria-label="Topic kind" value={createKind} onChange={(event) => setCreateKind(event.target.value as SemanticMemoryFile['kind'])}>
         {SEMANTIC_CONCEPT_KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABELS[kind]}</option>)}
       </select></label>
       <label><span>Topic name</span><input value={createTitle} maxLength={SEMANTIC_LABEL_MAX_LENGTH} onChange={(event) => setCreateTitle(event.target.value)} required /></label>

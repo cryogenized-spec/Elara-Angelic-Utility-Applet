@@ -108,6 +108,7 @@ describe('SemanticMemoryFiles (memory topics surface)', () => {
     act(() => { root.render(<SemanticMemoryFiles />); });
     await waitForText('No summaries yet.');
     act(() => buttonByText('Create topic from memories').click());
+    expect(container.querySelector('form select')?.getAttribute('aria-label')).toBe('Topic kind');
     const input = container.querySelector('form input') as HTMLInputElement;
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Zuhayr');
@@ -126,6 +127,7 @@ describe('SemanticMemoryFiles (memory topics surface)', () => {
     act(() => { root.render(<SemanticMemoryFiles />); });
     await waitForText('No summaries yet.');
     act(() => buttonByText('Create topic from memories').click());
+    expect(container.querySelector('form select')?.getAttribute('aria-label')).toBe('Topic kind');
     const input = container.querySelector('form input') as HTMLInputElement;
     act(() => {
       Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'Unknown');

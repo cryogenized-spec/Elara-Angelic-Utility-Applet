@@ -130,21 +130,37 @@ export function shouldInspectUserMessage(userMessage: string): boolean {
 function acceptedCandidates(raw: unknown, fullUserMessage: string): OrganicMemoryCandidate[] | null {
   const parsed = organicMemoryExtractionSchema.safeParse(raw);
   if (!parsed.success) return null;
+
   const accepted = new Map<string, OrganicMemoryCandidate>();
+  const ambiguousEvidence = new Set<string>();
+
   for (const candidate of parsed.data.candidates) {
     // The classifier may point only at literal user-authored evidence. It never
     // gets to paraphrase a fact into existence.
     if (!fullUserMessage.includes(candidate.evidence)) continue;
     if (containsCredentialMaterial(candidate.evidence)) continue;
 
-    const key = `${candidate.domain}\u0000${candidate.category}\u0000${candidate.evidence}`;
+    const key = candidate.evidence;
+    if (ambiguousEvidence.has(key)) continue;
     const existing = accepted.get(key);
-    // Duplicate classifier nominations with conflicting salience collapse to
-    // the more conservative value. Repetition can never inflate retention.
+
+    if (existing && (existing.domain !== candidate.domain || existing.category !== candidate.category)) {
+      // One exact span cannot gain authority through contradictory classifier
+      // metadata. Reject the span entirely rather than choosing a permissive
+      // category/domain or storing duplicate memories.
+      accepted.delete(key);
+      ambiguousEvidence.add(key);
+      continue;
+    }
+
+    // Duplicate nominations with matching metadata but conflicting salience
+    // collapse to the more conservative value. Repetition can never inflate
+    // retention.
     if (!existing || SALIENCE_RANK[candidate.salience] < SALIENCE_RANK[existing.salience]) {
       accepted.set(key, candidate);
     }
   }
+
   return [...accepted.values()];
 }
 

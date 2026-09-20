@@ -103,12 +103,18 @@ const SECRET_KEY = /(authorization|cookie|password|passwd|secret|token|api.?key|
 const PAGINATION_KEYS = new Set(['pageToken', 'nextPageToken', 'page_token', 'next_page_token', 'cursor', 'nextCursor']);
 const PRIORITY_KEYS = [
   'ok', 'error', 'code', 'id', 'name', 'title', 'subject', 'snippet', 'summary', 'status',
-  'count', 'total', 'threadId', 'messageId', 'taskListId', 'taskId', 'scheduledDate',
-  'modifiedTime', 'createdTime', 'webViewLink', 'pageToken', 'nextPageToken', 'page_token',
-  'next_page_token', 'cursor', 'nextCursor', 'trust', 'source',
+  'count', 'total', 'threadId', 'messageId', 'documentId', 'revisionId', 'taskListId', 'taskId',
+  'scheduledDate', 'modifiedTime', 'createdTime', 'webViewLink', 'pageToken', 'nextPageToken',
+  'page_token', 'next_page_token', 'cursor', 'nextCursor', 'trust', 'source',
+  // Bounded semantic evidence required to continue after chain compaction.
+  'bodyText', 'bodyTruncated', 'headers', 'from', 'to', 'cc', 'date', 'inReplyTo', 'references',
+  'body', 'blocks', 'tabs', 'tabId', 'parentTabId', 'startIndex', 'endIndex', 'index',
+  'nestingLevel', 'kind', 'namedStyleType', 'paragraph', 'elements', 'textRun', 'content', 'text',
+  'messageCount', 'messagesTruncated', 'labelIds',
   // Bounded result collections: their children are projected recursively.
   'files', 'messages', 'threads', 'tasks', 'taskLists', 'events', 'items', 'values',
 ];
+const SEMANTIC_TEXT_KEYS = new Set(['bodyText', 'text', 'content']);
 
 function boundedString(value: string, max = 240): string {
   const normalized = value.replace(/\s+/g, ' ').trim();
@@ -116,7 +122,7 @@ function boundedString(value: string, max = 240): string {
 }
 
 function projectValue(value: unknown, depth = 0): unknown {
-  if (depth > 3) return '[bounded]';
+  if (depth > 8) return '[bounded]';
   if (typeof value === 'string') return boundedString(value);
   if (typeof value === 'number' || typeof value === 'boolean' || value === null) return value;
   if (Array.isArray(value)) return value.slice(0, 3).map((item) => projectValue(item, depth + 1));
@@ -124,11 +130,14 @@ function projectValue(value: unknown, depth = 0): unknown {
 
   const source = value as Record<string, unknown>;
   const keys = Object.keys(source).filter((key) => PAGINATION_KEYS.has(key) || !SECRET_KEY.test(key));
-  const prioritized = PRIORITY_KEYS.filter((key) => keys.includes(key)).slice(0, 10);
+  const prioritized = PRIORITY_KEYS.filter((key) => keys.includes(key)).slice(0, 12);
 
   const projected: Record<string, unknown> = {};
   for (const key of prioritized) {
-    const child = projectValue(source[key], depth + 1);
+    const raw = source[key];
+    const child = typeof raw === 'string' && SEMANTIC_TEXT_KEYS.has(key)
+      ? boundedString(raw, 600)
+      : projectValue(raw, depth + 1);
     if (child !== undefined) projected[key] = child;
   }
   return projected;

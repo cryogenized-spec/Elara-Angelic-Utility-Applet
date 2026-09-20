@@ -172,7 +172,7 @@ Shared read-modify-write primitives are transactional. `updateMemory`, reinforce
 - A model write may commit only while its originating generation remains elected.
 - One logical provider call converges on at most one logical mutation. Reusing a call identity with changed mutation arguments fails closed.
 - Tool continuations reuse one frozen memory instruction for the elected turn.
-- Organic observation starts only after response durability, receives no assistant-response evidence, and fails closed when memory behavior is disabled or remembering style is `explicit-only`.
+- Organic observation starts only after response durability, receives no assistant-response evidence, and fails closed when memory behavior is disabled or remembering style is `explicit-only`. Read-only `memory.recall` does not suppress that observer; management/mutation tools (`memory.lookup`, `memory.save`, `memory.reconcile`) do because they already own the turn's deliberate memory effects.
 - Organic classifier output has no direct write authority; only exact persisted user spans can survive application validation.
 - Automatic reinforcement never crosses folder scope or memory domain and never targets archived, expired or superseded records.
 - Automatic semantic merge/conflict/supersession inference does not exist.

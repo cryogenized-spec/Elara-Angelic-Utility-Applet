@@ -154,6 +154,27 @@ describe('direct Google OAuth authority', () => {
     expect(status.sessionReady).toBe(true);
   });
 
+  it('refreshes a known Workspace session without expanding the user\'s existing capability set', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['google.account', 'calendar.events.read'],
+      grantedProviderScopes: [EMAIL_SCOPE, CALENDAR_READ_SCOPE],
+      account: { email: 'test@example.com', displayName: 'Test User' },
+      updatedAt: new Date().toISOString(),
+    }));
+    tokenMock.mockResolvedValueOnce(token('refreshed-token', `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE}`));
+
+    const status = await authorizeGoogleWorkspace('refresh');
+
+    expect(tokenMock).toHaveBeenCalledTimes(1);
+    const request = tokenMock.mock.calls[0]?.[0];
+    expect(request?.scope).toBe(`${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE} ${OPENID_SCOPE}`);
+    expect(status.enabledCapabilities).toEqual(['google.account', 'calendar.events.read']);
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
+    expect(status.grantedCapabilities).not.toContain('gmail.send');
+    expect(status.grantedCapabilities).not.toContain('drive.library.read');
+  });
+
   it('keeps Google granular consent authoritative when bundled onboarding returns only a subset', async () => {
     tokenMock.mockResolvedValueOnce(token('partial-workspace-token', `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE}`));
 

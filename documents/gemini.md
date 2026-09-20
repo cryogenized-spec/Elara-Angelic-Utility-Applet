@@ -23,10 +23,12 @@ interactive App / tool loop
 -> Lockbox credential
 -> compose thread memory unless memoryContext=none
 -> resolve attachments
+-> local rolling-input admission reservation
 -> interactions.create(stream=true, store=true)
--> normalized GeminiStreamEvent
+-> normalized GeminiStreamEvent + per-interaction usage
 -> optional tool execution
 -> grouped tool-result continuation
+-> bounded chain compaction / terminal synthesis when gross-input budget requires it
 
 bounded internal classifier
 -> GeminiTurnPort
@@ -38,6 +40,8 @@ bounded internal classifier
 ```
 
 The SDK client uses API version `v1` with SDK automatic retry attempts fixed to `1`; application retry/lifecycle policy remains outside the SDK.
+
+Browser Gemini admission also uses a device-local rolling 60-second gross-input ledger stored as a typed row in the existing conversation/settings IndexedDB authority. Each provider request reserves conservatively before dispatch; provider-reported gross input replaces the estimate when available, while requests that fail after dispatch remain conservatively charged. IndexedDB serialization is authoritative across same-origin tabs; BroadcastChannel is notification-only. The default local allowance is intentionally below the observed free-tier TPM ceiling and is a safety policy, not a claim about provider billing or cached-token quota discounts.
 
 ## 3. Source map
 
@@ -58,7 +62,7 @@ The SDK client uses API version `v1` with SDK automatic retry attempts fixed to 
 
 Default model is `gemini-3.8-flash`. `model-registry.ts` is authoritative for exposed stable text models and supported thinking/settings controls; preview/experimental and non-text model families are deliberately excluded from the normal selector.
 
-`GeminiStreamEvent` normalizes interaction/status, step boundaries, function calls, text deltas, thought-summary deltas/signatures, artifact creation, structured media resolution, completion, cancellation and failure. Tool continuations accept one result or a grouped `results` array.
+`GeminiStreamEvent` normalizes interaction/status, step boundaries, function calls, text deltas, thought-summary deltas/signatures, artifact creation, structured media resolution, per-interaction usage, completion, cancellation and failure. Usage is surfaced for `requires_action` interactions before tool execution; when Google omits usage on an already-dispatched request, the provider emits an explicitly estimated conservative input floor rather than treating the request as free. Tool continuations accept one result or a grouped `results` array.
 
 Generation settings are capability-driven. The adapter maps supported values to `thinking_level`, `thinking_summaries`, `max_output_tokens`, `seed` and up to five stop sequences. Unsupported controls must not be invented or sent.
 
@@ -84,6 +88,8 @@ Empty or locked Lockbox state yields explicit configuration failures. Provider e
 The organic-memory classifier is treated as an untrusted selector, not an authority. Provider failure, cancellation, timeout, oversized output or invalid JSON fails the classifier closed and does not fail an already-saved chat response. Exact evidence validation, sensitive-category downgrade protection, remembering-style thresholds, category permission and persistence authority live in `SYS-MEM`.
 
 The app may expose provider-produced thought summaries, but it does not treat hidden reasoning/signatures as a user-editable second transcript.
+
+The interactive tool loop has two independent governors: a call-count ceiling and a gross-input/model-interaction ceiling. Gross accounting never subtracts cached tokens for safety. As a chain grows, the application keeps a bounded deterministic checkpoint of semantic tool observations, preserves external-data taint and existing mutation/confirmation authority, severs `previous_interaction_id`, and resumes from a fresh interaction. Exact duplicate successful reads are skipped until a successful mutation changes the read epoch. If another exploratory call would exceed the hard local budget, the loop uses a fresh no-tools synthesis when safe or a deterministic local fallback without contacting Gemini.
 
 ## 7. Verification and tests
 

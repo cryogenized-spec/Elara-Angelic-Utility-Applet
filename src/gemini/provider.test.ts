@@ -406,3 +406,73 @@ describe('Gemini provider live stream resource ceilings', () => {
     });
   });
 });
+
+
+describe('Gemini provider remaining stream-limit branches', () => {
+  beforeEach(() => {
+    createInteraction.mockReset();
+    getGeminiApiKey.mockReset();
+    getGeminiLockboxStatus.mockReset();
+    GoogleGenAI.mockReset();
+    GoogleGenAI.mockImplementation(function MockGoogleGenAI(this: { interactions: { create: typeof createInteraction } }) {
+      this.interactions = { create: createInteraction };
+    });
+    getGeminiLockboxStatus.mockResolvedValue('unlocked');
+    getGeminiApiKey.mockResolvedValue('test-gemini-key');
+  });
+
+  it('fails closed when a thought-summary delta exceeds its live budget', async () => {
+    createInteraction.mockResolvedValue(events(
+      { event_type: 'interaction.created', interaction: { id: 'interaction-thought-limit', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'thought' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'thought_summary', text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxThoughtChars + 1) } },
+    ));
+
+    const collected: Array<{ type?: string; error?: { message?: string } }> = [];
+    for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Think.' })) collected.push(event);
+
+    expect(collected.some((event) => event.type === 'thought-summary-delta')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { message: 'Gemini thought summary exceeded the live safety limit.' },
+    });
+  });
+
+  it('fails closed when an initial thought-summary block already exceeds its live budget', async () => {
+    createInteraction.mockResolvedValue(events(
+      { event_type: 'interaction.created', interaction: { id: 'interaction-thought-start-limit', model: 'gemini-3.8-flash' } },
+      {
+        event_type: 'step.start',
+        index: 0,
+        step: { type: 'thought', summary: [{ text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxThoughtChars + 1) }] },
+      },
+    ));
+
+    const collected: Array<{ type?: string; error?: { message?: string } }> = [];
+    for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Think.' })) collected.push(event);
+
+    expect(collected.some((event) => event.type === 'thought-summary-delta')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { message: 'Gemini thought summary exceeded the live safety limit.' },
+    });
+  });
+
+  it('fails closed after the finite provider event budget is exhausted', async () => {
+    async function* overBudgetEvents() {
+      for (let index = 0; index <= GEMINI_STREAM_LIMITS.maxEvents; index += 1) {
+        yield { event_type: 'unknown.keepalive', index };
+      }
+    }
+    createInteraction.mockResolvedValue(overBudgetEvents());
+
+    const collected: Array<{ type?: string; error?: { message?: string } }> = [];
+    for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Hello.' })) collected.push(event);
+
+    expect(collected).toHaveLength(1);
+    expect(collected[0]).toMatchObject({
+      type: 'failed',
+      error: { message: 'Gemini stream exceeded the event safety limit.' },
+    });
+  });
+});

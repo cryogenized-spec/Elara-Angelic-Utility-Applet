@@ -2,6 +2,7 @@ import Dexie, { type Table } from 'dexie';
 import type { ChatMessage, ConversationState, ConversationThread } from '../domain/chat';
 import { freshMediaItems } from '../domain/media';
 import type { DurableMemory } from '../domain/memory';
+import type { SemanticMemoryFile } from '../memory/semantic-file';
 import type { StoredArtifactBlob, StoredArtifactMetadata } from '../domain/artifact';
 import { DEFAULT_GEMINI_MODEL, getGeminiModel } from '../gemini/model-registry';
 import { defaultsForModel, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
@@ -66,6 +67,13 @@ export class ElaraDatabase extends Dexie {
   folders!: Table<StoredConversationFolder, string>;
   folderAssignments!: Table<StoredFolderAssignment, string>;
   memories!: Table<DurableMemory, string>;
+  /**
+   * Strictly derived semantic-organization index over `memories` (companion
+   * continuity Pass 3). Every record references canonical memory IDs and can
+   * be rebuilt from them; it is never read by canonical recall/lookup,
+   * lifecycle or archive paths, and dropping the table loses no information.
+   */
+  semanticMemories!: Table<SemanticMemoryFile, string>;
   artifactMetadata!: Table<StoredArtifactMetadata, string>;
   artifactBlobs!: Table<StoredArtifactBlob, string>;
 
@@ -180,6 +188,21 @@ export class ElaraDatabase extends Dexie {
         const migrated = stripLegacyEmbedUrls(message.media);
         if (migrated.changed) message.media = migrated.value;
       });
+    });
+    // v10 adds the derived semantic-organization index. Pure index addition:
+    // no data migration and no change to the canonical memory table, whose
+    // records remain the sole durable memory authority.
+    this.version(10).stores({
+      messages: 'id, conversationId, createdAt, role',
+      threads: 'id, updatedAt, archived',
+      settings: 'id, updatedAt',
+      workspaceShortcuts: 'id, service, enabled, order, updatedAt',
+      folders: 'id, parentId, contextScope, updatedAt',
+      folderAssignments: 'id, threadId, folderId, updatedAt',
+      memories: 'id, kind, lifecycle, folderId, expiresAt, updatedAt, lastRecalledAt, autonomyContext',
+      semanticMemories: 'id, kind, updatedAt',
+      artifactMetadata: 'id, artifactType, provenance, status, createdAt, mimeType, sourceMessageId, toolName',
+      artifactBlobs: 'id',
     });
   }
 }

@@ -116,6 +116,14 @@ export type SemanticEntityResolution =
   | { status: 'create' }
   | { status: 'unresolved'; reason: 'ambiguous' };
 
+/** True when two concept identity sets share at least one normalized key. */
+export function semanticIdentityOverlaps(
+  left: Pick<SemanticEntityRecord, 'title' | 'aliases'>,
+  right: Pick<SemanticEntityRecord, 'title' | 'aliases'>,
+): boolean {
+  return [...identityKeysOf(left)].some((key) => identityKeysOf(right).has(key));
+}
+
 /**
  * Resolve one normalized proposal against existing concepts.
  *

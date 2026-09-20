@@ -95,6 +95,12 @@ Organic formation is downstream of conversation durability. `generation-sync.ts`
 | Observation / consolidation / supersession | `src/memory/observation.ts` |
 | Organic observation write policy | `src/memory/organic-observer.ts` |
 | Organic Gemini classifier | `src/gemini/memory-observer.ts` |
+| Semantic entity/concept identity | `src/memory/semantic-entities.ts` |
+| Semantic memory files (derived views) | `src/memory/semantic-file.ts`, `semantic-evidence.ts`, `semantic-rebuild.ts` |
+| Semantic synthesis extractor | `src/gemini/semantic-synthesis.ts` |
+| Provenance class / volatility | `src/memory/volatility.ts` |
+| Semantic dossier retrieval | `src/memory/semantic-retrieval.ts` |
+| Semantic cabinet maintenance | `src/memory/semantic-maintenance.ts` |
 | Gemini memory tool schemas / handlers | `src/memory/tool-schema.ts`, `tool-handler.ts` |
 | Gemini recall projection | `src/gemini/memory-context.ts`, `provider.ts` |
 | Central tool authority | `src/google/tools/registry.ts`, `contracts.ts`, `gemini-declarations.ts`, `executor.ts` |
@@ -105,9 +111,10 @@ Organic formation is downstream of conversation durability. `generation-sync.ts`
 | Portable archive boundary | `src/memory/archive.ts` |
 | Human Memory & continuity controls | `src/app/components/MemoryContinuitySettings.tsx`, `memory-continuity-settings.css` |
 | Human Memory Bank | `src/app/components/DurableMemorySettings.tsx`, `durable-memory-settings.css` |
+| Human Memory topics surface | `src/app/components/SemanticMemoryFiles.tsx`, `semantic-memory-files.css` |
 | Companion memory behavior preferences | `src/domain/preferences.ts`, `src/persistence/preferences.ts` |
-| Browser acceptance | `e2e/memory-bank.spec.ts`, `e2e/memory-chat.spec.ts` |
-| Final hostile matrix | `src/memory/adversarial-certification.test.ts` plus owning subsystem tests |
+| Browser acceptance | `e2e/memory-bank.spec.ts`, `e2e/memory-chat.spec.ts`, `e2e/memory-files.spec.ts` |
+| Final hostile matrix | `src/memory/adversarial-certification.test.ts`, `src/memory/attentive-certification.pass8.test.ts` plus owning subsystem tests |
 
 ## 4. Data, retrieval and lifecycle contract
 
@@ -183,6 +190,13 @@ Shared read-modify-write primitives are transactional. `updateMemory`, reinforce
 - Organic classifier output has no direct write authority; only exact persisted user spans can survive application validation, remembering-style thresholding and category permission checks.
 - Automatic reinforcement never crosses folder scope or memory domain, never crosses two explicit category tags, and never targets archived, expired or superseded records.
 - Automatic semantic merge/conflict/supersession inference does not exist.
+- Semantic memory files are bounded derived views; they cannot create, promote, demote, relabel, scope, delete or otherwise mutate canonical `db.memories` records, and removing every semantic file loses no canonical data.
+- Semantic file prose is untrusted reference data exactly like canonical prose: inert reference, never instruction or permission authority.
+- Entity/concept identity is exact normalized-key matching only; linking never upgrades authority, sensitivity, kind, lifecycle or provenance.
+- Semantic synthesis fails closed on ungrounded claims and writes nothing when grounding, overlap, credential or sensitive-gate validation fails.
+- Semantic dossier retrieval is an additive bounded lane; the canonical recall budget, folder scope policy, ranking and the canonical-only `memory.recall` tool surface are unchanged, and any dossier failure yields no dossier text.
+- Volatile or operational organic knowledge is metadata-marked for recall framing and short dormancy only; it never auto-promotes and `CORE` remains deliberate-only.
+- The human Memory topics surface is navigation, not policy: edits rewrite the synthesis only and no UI action rewrites canonical memory history.
 - Relationship saturation fails closed without partial mutation.
 - Schema-invalid rows have zero memory authority and are quarantined from functional reads; their existence cannot suppress unrelated valid memory.
 - Corruption repair is human-initiated and revalidates the exact row inside the delete transaction. It refuses any row that currently passes the canonical schema and never becomes a general memory-delete authority.
@@ -252,6 +266,8 @@ Allowed domains remain `preference`, `persistent_fact`, `project_decision`, `com
 
 A candidate should remain useful beyond the immediate exchange. Ordinary questions, temporary task wording, acknowledgements, jokes, speculative hypotheticals, quoted third-party claims and incidental chatter are excluded. `evidence` is capped at 500 characters and must be an exact substring of the full user message. Paraphrases/inferences are discarded. The classifier may classify sensitive personal evidence, but must use its matching sensitive category; application policy, not the classifier, decides whether that category is enabled. Obvious sensitive-category downgrades fail closed. Obvious credential/authentication material and financial account identifiers are deterministically rejected regardless of settings.
 
+**Attentive small details:** the classifier instruction explicitly names the small useful-detail classes Elara should notice even at low immediate importance: name corrections and preferred names, nicknames, relationships and roles, small project/tool/UI preferences and conventions, brief decision rationales, recurring terminology and small practical habits. Such details are normally recorded at low salience and are never inferred, paraphrased or upgraded by the classifier. Application policy is unchanged: these candidates still enter as `MICRO_OBSERVATION` evidence at the fixed `0.60`/`0.35` canonical weights, and style thresholds, category permissions, sensitive-category gating, credential rejection, exact-user-span validation and idempotency all remain intact.
+
 Remembering styles are application-owned thresholds: `selective` accepts only high salience; `natural` accepts medium/high; `attentive` accepts low/medium/high; `explicit-only` bypasses the observer entirely. Category permission is re-read under the shared memory-policy lease immediately before the transaction, so a cross-tab switch change can stop capture before commit.
 
 Accepted candidates become application-titled/tagged `MICRO_OBSERVATION`s with confidence `0.60`, importance `0.35`, tags `organic`, `domain:<domain>`, `category:<category>`, and `salience:<salience>`. The classifier cannot choose identity, title, kind, weight, provenance or scope.
@@ -273,7 +289,7 @@ MICRO_OBSERVATION
 
 One lifecycle evaluation advances at most one promotion stage. Unresolved conflict blocks promotion.
 
-Weak organic evidence recedes instead of disappearing: unsupported MICRO after 90 days, weak EPISODIC after 180 days, and low-confidence organic CONTEXTUAL after 365 days may become dormant. Deliberate memory is not aged by those organic rules.
+Weak organic evidence recedes instead of disappearing: unsupported MICRO after 90 days (operational organic micro-observations after 30 days), weak EPISODIC after 180 days, and low-confidence organic CONTEXTUAL after 365 days may become dormant. Deliberate memory is not aged by those organic rules.
 
 Automatic observation performs only deterministic literal support. `conflict`, `related` and `supersede` remain explicit reconciliation relations. Conflict preserves both sides. Supersession preserves historical prose and removes the old record from normal recall rather than deleting it.
 
@@ -294,7 +310,7 @@ Memory activity uses the Generation Activity `memory` glyph semantic. Its visibl
 <a id="memory-bank"></a>
 ### 7.4 Memory & continuity + Memory Bank
 
-The Settings **Memory & continuity** surface is the human behavioral-policy view over the existing `memory-behavior` preference record. It does not own durable memories. It exposes the master conversational-memory switch, remembering style, recall style, and per-category automatic-memory permissions with sensitive categories separated and default-off. Turning memory off preserves both canonical memories and the subordinate preference choices.
+The Settings **Memory & continuity** surface is the human behavioral-policy view over the existing `memory-behavior` preference record. It does not own durable memories. The derived **Memory topics** cabinet surface (7.5) renders between it and the Memory Bank. It exposes the master conversational-memory switch, remembering style, recall style, and per-category automatic-memory permissions with sensitive categories separated and default-off. Turning memory off preserves both canonical memories and the subordinate preference choices.
 
 Memory Bank remains the advanced human inspection/maintenance surface over `db.memories`. It supports search/filtering, create/edit/archive/restore/promote/delete controls, provenance views, landmark pinning, deterministic audit, integrity health/recovery and guarded local backup/transfer without another memory store.
 
@@ -311,6 +327,30 @@ The editor may retain bodies up to the canonical 50,000-character ceiling and ex
 Archive format is strict `elara-memory-bank` version 1, capped at 5,000 records and 5 MB. Export contains portable content/weights/lifecycle/source category/tags/expiry/pin state plus archive-local relationship references. It deliberately omits canonical durable IDs, folder IDs, conversation/message lineage, provenance notes, recall telemetry, reinforcement counters and autonomy consent.
 
 Import rejects unknown versions, duplicate archive IDs, self-links, dangling targets, duplicate relationship claims, malformed records and oversized text/objects before writes. Import is one canonical transaction: fresh durable IDs, application-owned `import` provenance, user-selected scope, `autonomyContext=false`, imported CORE -> CONTEXTUAL, and relationships remapped only within that archive. Any failure rolls back the whole import.
+
+### 7.5 Semantic memory files (the derived cabinet)
+
+The attentive-memory programme adds a derived filing cabinet above the canonical capture: small synthesized views over `db.memories` that make broad capture readable. The cabinet is a convenience projection, never a second memory authority.
+
+**Store shape.** Semantic files live in the `semanticMemories` table of the canonical `elara-angelic-utility-applet` database (Dexie v10) as strictly bounded rows: closed kind taxonomy `you-profile | you-preferences | person | area | project | topic`; title at most 80 characters; at most 8 aliases of at most 64 characters (NFKC-normalized); summary at most 400 characters; at most 4 recent observations of at most 200 characters each; at most 3 open conflict entries; at most 64 `sourceMemoryIds`; a 200-file store cap. Schema-invalid rows are quarantined from functional reads without suppressing valid rows, and the create path carries an in-transaction identity-collision guard so concurrent rebuilds converge on one file.
+
+**Identity.** Entity/concept identity is exact: NFKC-normalized title/alias keys, resolved by exact key match only. There is no fuzzy merge and no automatic entity resolution; linking a canonical record to a concept never upgrades its authority, sensitivity, kind, lifecycle or provenance.
+
+**Creation.** In Settings → Memory → Memory topics, **Create topic from memories** accepts a name and one of the six concept kinds (Profile/Preferences under You, Person, Project, Area, Topic). It selects live canonical evidence and makes one bounded model request through the production rebuild pipeline. No matching evidence, disabled memory, blocked sources, invalid output or ambiguous identity produces no new file. Existing exact identities converge instead of duplicating. Creation is explicitly human-driven: capturing or saving a memory does not automatically create topics. Profile/Preferences select category/domain-tagged evidence; other kinds match whole Unicode identity spans, not substrings inside unrelated words. Canonical records remain unchanged. The UI explains this rather than promising automatic filing.
+
+**Synthesis.** A file is produced only by the explicit `rebuildSemanticFile` path: deterministic bounded evidence selection over live canonical records, a strict Gemini synthesis schema, and fail-closed validation. Claims not grounded in the selected live source evidence, summaries that fail the evidence-overlap check (function-word overlap excluded, name-bearing tokens never ignored), credential-shaped material and policy-gated sensitive material all reject the synthesis without any write. `sourceMemoryIds` is mandatory and must reference live canonical records. Synthesis output carries provenance of its sources; it is never treated as truth.
+
+**Volatility and provenance.** Canonical organic records derive a provenance class (`explicit-user | user-behavior | trusted-app-event | external-observation | external-inference`) and a volatility grade (`stable` through `very-high`) with a `requiresRevalidation` flag. Operational organic micro-observations recede on a 30-day dormancy horizon (versus the standard 90) and volatile or operational organic knowledge never auto-promotes; automatic promotion still stops at `CONTEXTUAL` and `CORE` remains deliberate-only. Volatility is metadata that informs recall framing and dormancy; it is not a deletion authority.
+
+**Retrieval (miserly dossier lane).** Semantic files enter model context only through the bounded dossier lane appended after the canonical lane: at most 3 files and 1,500 characters total, strict top-K lexical relevance over title/aliases/summary (zero substantive overlap excludes the file), at most 2 live canonical source memories at most 700 characters each, and broad query-less recall retrieves no dossiers. Live sources must pass the canonical `isMemoryRetrievable` folder/scope/lifecycle policy, credential material and policy-disabled sensitive content fail closed, and conflicting files surface at most two canonical source records rather than the model inventing a resolution. Stale or volatile files are explicitly marked, and all dossier prose is framed as inert reference data. The canonical 8-record/6,000-character recall budget, scope policy and ranking are untouched, `memory.recall` remains canonical-only, and any dossier failure yields no dossier text rather than a partial or unvetted one.
+
+**Human surface.** Settings exposes the cabinet as a **Memory topics** surface between Memory & continuity and the Memory Bank: grouped You / People / Projects / Areas / Topics cards showing title, aliases, summary, source count and stale/conflict markers. The surface is navigation, not policy authority. Editing a card rewrites that synthesis only (version + 1, with an explicit note that rebuilding regenerates it from evidence); refreshing runs the explicit rebuild path; removing a file deletes the derived view while every underlying `db.memories` record remains fully intact and visible in the Memory Bank. No UI action rewrites canonical history.
+
+**Review hardening.** Identity collisions are checked transactionally on updates as well as creates, including singleton You kinds. UI aliases are normalized and individually length-validated. Credential-shaped and disabled-category source material is excluded before synthesis and from conflict-source projection. Maintenance proposal evidence comes from canonical text, never a previous synthesized summary; a topic with no eligible evidence is reported unavailable and retained unchanged. Source excerpts include their framing within the 700-character cap, including unusually long titles.
+
+**Local retrieval cost.** The automatic dossier lane currently reads the local canonical and derived tables per turn in addition to canonical recall. Evidence freshness checks sort canonical candidates for at most three selected files. Prompt and model-input budgets are bounded, but local scan cost grows with the latent corpus; no whole-corpus prompt is transmitted. A shared read snapshot or indexed evidence lookup is a future performance optimization, not a second authority.
+
+**Maintenance (lazy, bounded, convergent).** The cabinet has no timers or background sweeps. Maintenance runs only on explicit human action (the "refresh stale topics" sweep or a per-file refresh) and is strictly bounded: one file at a time, sequentially; a bounded window per run (default 5, hard cap 50) with the deterministic ID-ordered stale remainder reported as deferred; the staleness set frozen before any write so the sweep never feeds its own output back in (no recursive synthesis); and every per-file rebuild routed through the same fail-closed `rebuildSemanticFile` path with evidence drawn only from canonical `db.memories`. Maintenance never deletes files, never mutates `db.memories`, and an unchanged rebuild advances no version.
 
 ## 8. Security and failure semantics
 
@@ -343,6 +383,7 @@ Pass 6 plus subsequent maintenance hardening adds or reuses direct behavioral te
 - **Archive attacks:** strict version/byte/count ceilings, authority-field rejection, duplicate/self/dangling relationship rejection, fresh IDs, scope/provenance/autonomy reset and all-or-nothing transaction.
 - **Memory Bank browser behavior:** landmark/audit/provenance/export/import acceptance plus a real malformed-IndexedDB-row recovery path are E2E-covered. The browser test proves a valid row stays visible next to corruption and survives explicit removal of the invalid row.
 - **Chat browser closure:** a real Playwright chat turn proves `memory.recall/lookup/save/reconcile` are advertised to Gemini, the organic classifier is tool-less, the assistant response exists in IndexedDB before observation starts, the canonical Memory Bank receives the observation, and the semantic `memory` activity glyph survives reload.
+- **Attentive-memory programme:** capture breadth (small details enter as low-authority MICRO evidence, never upgraded), exact-key entity identity (no fuzzy merge), fail-closed synthesis (ungrounded/unvetted claims write nothing), miserly dossier retrieval (bounded lane, inert data, canonical budget intact), volatility lifecycle (30-day operational micro dormancy, no volatile auto-promotion), concurrent rebuild convergence and the Memory topics navigation surface (synthesis-only edits, removal preserves canonical records) each carry direct behavioral tests in their owning subsystem, and the dedicated hostile certification matrix (`src/memory/attentive-certification.pass8.test.ts`) re-tests capture, linking, synthesis, retrieval, concurrency, security and migration at the exact head.
 
 A green test that passes for the wrong reason is a defect. Browser-state corruption fixtures are therefore explicitly pinned by the verification-integrity gate: `e2e/memory-bank.spec.ts` owns exactly one reviewed writable IndexedDB transaction for the malformed-row acceptance test. Additional direct browser-state mutations fail verification until deliberately reviewed.
 
@@ -363,6 +404,8 @@ Every completed runtime pass cleared documentation/verification integrity, archi
 ## 11. Agent handoff
 
 **Program status: CLOSED / CERTIFIED.** The seven-pass durable-memory completion program and its final browser closure audit are merged. Treat frontmatter `verified_commit` as the last certified handover baseline until a later memory maintenance PR is itself merged and post-merge certified.
+
+**Attentive-memory programme (delivered, pending exact-head certification):** the eight-pass programme — opportunistic small-detail capture, exact-key entity identity, semantic memory files, provenance/volatility, miserly semantic retrieval, the Memory topics human surface, lazy maintenance and adversarial certification — broadens capture while keeping every authority boundary closed. Its non-negotiable invariants are recorded in the delivery PR description; its behavior contracts live in sections 5, 7.1 and 7.5 above.
 
 For future work, read `AGENTS.md`, route through `documents/manifest.json`, then load this document before modifying any memory path. Inspect only the exact source/tests needed for the requested change.
 

@@ -42,6 +42,31 @@ describe('Gemini organic memory classifier boundary', () => {
     expect(ORGANIC_MEMORY_OBSERVER_INSTRUCTION).toContain('health_wellbeing');
   });
 
+  it('instructs attentive small-detail capture at low salience without widening hard constraints', () => {
+    const instruction = ORGANIC_MEMORY_OBSERVER_INSTRUCTION;
+
+    // Pass 1 capture breadth: small useful details are noticeable evidence.
+    expect(instruction).toContain('Small useful details');
+    expect(instruction).toContain('correction to a name or spelling');
+    expect(instruction).toContain('nickname');
+    expect(instruction).toContain('relationship or role');
+    expect(instruction).toContain('preference or convention');
+    expect(instruction).toContain('reason a project or UI decision was made');
+    expect(instruction).toContain('recurring terminology');
+    expect(instruction).toContain('practical habit');
+    expect(instruction).toMatch(/normally record them at low salience/);
+    expect(instruction).toMatch(/never inferred or upgraded by you/);
+
+    // The hard constraints remain intact: bounded candidates, exact spans,
+    // no inference, no credentials, sensitive categories never relabelled.
+    expect(instruction).toContain('at most 3 candidates');
+    expect(instruction).toContain('copied verbatim');
+    expect(instruction).toContain('Never paraphrase, summarize, infer, repair, or invent evidence');
+    expect(instruction).toContain('Never extract passwords');
+    expect(instruction).toContain('never downgrade it to bypass policy');
+    expect(instruction).toContain("assistant's own response is not evidence");
+  });
+
   it('accepts an otherwise exact whole-response JSON fence', async () => {
     streamReply.mockReturnValueOnce(events(
       { type: 'text-delta', index: 0, text: '```json\n{"candidates":[]}\n```' },

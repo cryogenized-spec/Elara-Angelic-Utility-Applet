@@ -387,16 +387,19 @@ describe("snapshot reconciliation", () => {
     await syncBoard();
     expect(boardStore.getSnapshot().board).toBeNull();
   });
-  it("clears the in-memory board when another tab deletes the current account cache row", async () => {
+  it("clears the in-memory board when another tab deletes the current account cache row while offline", async () => {
     await syncBoard();
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
     const stop = startBoardSync();
     const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
     try {
       await vi.waitFor(() => expect(boardStore.getSnapshot().board?.account).toBe(initial.account));
       await peer.table('boards').delete(initial.account);
       await vi.waitFor(() => expect(boardStore.getSnapshot().board).toBeNull());
+      expect(mocks.lists).toHaveBeenCalledOnce();
     } finally {
       stop();
+      online.mockRestore();
       peer.close();
       await syncBoard();
     }

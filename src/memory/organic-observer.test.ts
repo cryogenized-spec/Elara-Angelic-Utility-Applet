@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { db } from '../persistence/conversation';
+import { DEFAULT_MEMORY_BEHAVIOR } from '../domain/preferences';
+import { saveMemoryBehaviorPreferences } from '../persistence/preferences';
 import { listMemories, updateMemory } from './store';
 import { memory } from './capability';
 import { MEMORY_MAX_RELATIONSHIPS } from './normalize';
@@ -17,6 +19,7 @@ async function resetMemoryState(): Promise<void> {
     await db.folders.clear();
     await db.folderAssignments.clear();
   });
+  await saveMemoryBehaviorPreferences(DEFAULT_MEMORY_BEHAVIOR);
 }
 
 function baseRequest(extractor: (message: string) => Promise<unknown>) {
@@ -30,6 +33,49 @@ function baseRequest(extractor: (message: string) => Promise<unknown>) {
 
 describe('bounded organic memory observer', () => {
   beforeEach(resetMemoryState);
+
+  it('stops organic formation when conversational memory is disabled', async () => {
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
+    const extractor = vi.fn(async () => ({
+      candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout' }],
+    }));
+
+    const result = await observePersistedTurn(baseRequest(extractor));
+
+    expect(result).toEqual({ status: 'skipped', count: 0 });
+    expect(extractor).not.toHaveBeenCalled();
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+  it('rechecks memory policy after async extraction before committing', async () => {
+    const evidence = 'I prefer the compact editor layout';
+    const extractor = vi.fn(async () => {
+      await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
+      return { candidates: [{ domain: 'preference', evidence }] };
+    });
+
+    const result = await observePersistedTurn({
+      ...baseRequest(extractor),
+      userMessage: `For this project ${evidence}, and that preference should stick.`,
+    });
+
+    expect(extractor).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({ status: 'skipped', count: 0 });
+    expect(await listMemories()).toHaveLength(0);
+  });
+
+  it('keeps explicit-only remembering truly explicit by skipping the organic observer', async () => {
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, rememberingStyle: 'explicit-only' });
+    const extractor = vi.fn(async () => ({
+      candidates: [{ domain: 'preference', evidence: 'I prefer the compact editor layout' }],
+    }));
+
+    const result = await observePersistedTurn(baseRequest(extractor));
+
+    expect(result).toEqual({ status: 'skipped', count: 0 });
+    expect(extractor).not.toHaveBeenCalled();
+    expect(await listMemories()).toHaveLength(0);
+  });
 
   it('skips trivial acknowledgements without invoking Gemini', async () => {
     const extractor = vi.fn(async () => ({ candidates: [] }));

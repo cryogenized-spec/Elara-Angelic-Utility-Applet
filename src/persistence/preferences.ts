@@ -194,10 +194,46 @@ export async function loadMemoryBehaviorPreferences(): Promise<MemoryBehaviorPre
     : normalizeMemoryBehaviorPreferences(DEFAULT_MEMORY_BEHAVIOR);
 }
 
+const MEMORY_BEHAVIOR_POLICY_LOCK = 'elara-memory-behavior-policy';
+
+type MemoryPolicyLockManager = {
+  request<T>(
+    name: string,
+    options: { mode: 'shared' | 'exclusive' },
+    callback: () => Promise<T>,
+  ): Promise<T>;
+};
+
+function memoryPolicyLocks(): MemoryPolicyLockManager | null {
+  if (typeof navigator === 'undefined') return null;
+  return (navigator as Navigator & { locks?: MemoryPolicyLockManager }).locks ?? null;
+}
+
+async function withMemoryBehaviorPolicyLock<T>(
+  mode: 'shared' | 'exclusive',
+  operation: () => Promise<T>,
+): Promise<T> {
+  const locks = memoryPolicyLocks();
+  return locks ? locks.request(MEMORY_BEHAVIOR_POLICY_LOCK, { mode }, operation) : operation();
+}
+
+/**
+ * Hold a cross-tab shared lease while reading/using conversational memory
+ * policy. Preference writes take the exclusive side of the same Web Lock.
+ * Unsupported browsers still receive the caller's explicit post-read policy
+ * revalidation; the lock is additional cross-tab serialization, not a second
+ * policy authority.
+ */
+export async function withMemoryBehaviorReadLease<T>(operation: () => Promise<T>): Promise<T> {
+  return withMemoryBehaviorPolicyLock('shared', operation);
+}
+
 export async function saveMemoryBehaviorPreferences(value: MemoryBehaviorPreferences): Promise<MemoryBehaviorPreferences> {
-  const nextValue = normalizeMemoryBehaviorPreferences(value);
-  await db.preferences.put({ id: 'memory-behavior', value: nextValue, updatedAt: Date.now() });
-  return nextValue;
+  return withMemoryBehaviorPolicyLock('exclusive', async () => {
+    const nextValue = normalizeMemoryBehaviorPreferences(value);
+    await db.preferences.put({ id: 'memory-behavior', value: nextValue, updatedAt: Date.now() });
+    return nextValue;
+  });
 }
 
 export function normalizeAutonomy(value: Partial<AutonomyPreferences> | null | undefined): AutonomyPreferences {

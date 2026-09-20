@@ -71,7 +71,8 @@ The organic-memory classifier is not a second conversational agent. It receives 
 - One canonical browser Gemini provider path; never add `generateContent` fallback or a competing chat/classifier provider.
 - API keys come through `SYS-SEC / security.md`, never a `VITE_*` browser variable.
 - Empty Character Master means omit `system_instruction`, not inject a default persona.
-- Interactive chat defaults to thread-scoped memory composition; callers that own their context use `memoryContext: 'none'`.
+- Interactive chat defaults to thread-scoped memory composition when companion memory is enabled and recall style is not `direct-only`; callers that own their context use `memoryContext: 'none'`.
+- Deliberate conversational recollection is a browser tool capability (`memory.recall`), not a second provider or persona prompt.
 - Internal classifier calls never inherit Character Master, conversation memory or the interactive tool surface unless their owning system explicitly requires it.
 - Tool declarations come from the registered executable capability surface; schemas contain no secrets.
 - Structured tool/media/artifact events remain structured through the chat boundary.

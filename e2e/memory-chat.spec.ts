@@ -135,7 +135,7 @@ test('chat exposes memory tools and persists organic capture with the memory act
   const memoryTools = declaredToolNames(chatRequests[0])
     .filter((name) => name.startsWith('memory.'))
     .sort();
-  expect(memoryTools).toEqual(['memory.lookup', 'memory.reconcile', 'memory.save']);
+  expect(memoryTools).toEqual(['memory.lookup', 'memory.recall', 'memory.reconcile', 'memory.save']);
   expect(declaredToolNames(observerRequests[0])).toEqual([]);
 
   const activity = page.getByRole('region', { name: 'Generation activity' });

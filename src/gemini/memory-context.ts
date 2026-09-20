@@ -1,6 +1,7 @@
 import { memoryScopeForConversation } from '../memory/retrieval';
 import { formatMemoryContext, retrieveMemories } from '../memory/store';
 import { loadFolderState } from '../persistence/folders';
+import { loadMemoryBehaviorPreferences, withMemoryBehaviorReadLease } from '../persistence/preferences';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 
@@ -20,8 +21,20 @@ export async function loadMemoryContext(query: string, conversationId?: string):
   const threadId = resolveConversationId(conversationId);
   if (!threadId) return '';
 
-  const folderState = await loadFolderState();
-  return formatMemoryContext(await retrieveMemories(memoryScopeForConversation(threadId, folderState, query)));
+  return withMemoryBehaviorReadLease(async () => {
+    const behavior = await loadMemoryBehaviorPreferences();
+    if (!behavior.enabled || behavior.recallStyle === 'direct-only') return '';
+
+    const folderState = await loadFolderState();
+    const memories = await retrieveMemories(memoryScopeForConversation(threadId, folderState, query));
+
+    // Fallback revalidation for browsers without Web Locks. On supporting
+    // browsers the shared lease also prevents a cross-tab policy write from
+    // committing until this read/telemetry projection completes.
+    const current = await loadMemoryBehaviorPreferences();
+    if (!current.enabled || current.recallStyle === 'direct-only') return '';
+    return formatMemoryContext(memories);
+  });
 }
 
 export type MemoryContextStatus = 'used' | 'empty' | 'unavailable';

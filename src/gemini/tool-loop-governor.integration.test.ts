@@ -1,12 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { streamReply, streamToolResult } = vi.hoisted(() => ({
+const { streamReply, streamToolResult, estimateTurn, estimateContinuation } = vi.hoisted(() => ({
   streamReply: vi.fn(),
   streamToolResult: vi.fn(),
+  estimateTurn: vi.fn(),
+  estimateContinuation: vi.fn(),
 }));
 
 vi.mock('./provider', () => ({
   geminiTurnPort: { streamReply, streamToolResult },
+  estimateGeminiTurnRequestInputTokens: estimateTurn,
+  estimateGeminiToolContinuationInputTokens: estimateContinuation,
 }));
 
 import { streamGoogleToolLoop } from './google-tool-loop';
@@ -32,6 +36,10 @@ describe('Gemini tool-loop gross-input governor', () => {
   beforeEach(() => {
     streamReply.mockReset();
     streamToolResult.mockReset();
+    estimateTurn.mockReset();
+    estimateContinuation.mockReset();
+    estimateTurn.mockReturnValue(0);
+    estimateContinuation.mockReturnValue(0);
   });
 
   it('severs a growing chain at the compaction boundary and preserves external-data taint', async () => {
@@ -208,6 +216,51 @@ describe('Gemini tool-loop gross-input governor', () => {
 
     expect(listEvents).toHaveBeenCalledTimes(2);
     expect(listLabels).toHaveBeenCalledOnce();
+  });
+
+  it('compacts before dispatch when the pending serialized tool result makes the continuation exceed the hard budget', async () => {
+    const getMessage = vi.fn(async () => ({
+      trust: 'untrusted-external',
+      source: 'gmail',
+      id: 'm-large',
+      bodyText: 'x'.repeat(120_000),
+    }));
+    const readTools = ['gmail.getMessage'] as const;
+    estimateContinuation.mockReturnValue(40_000);
+    estimateTurn.mockImplementation((candidate: { tools?: readonly string[] }) => candidate.tools?.length ? 15_000 : 8_000);
+
+    streamReply
+      .mockReturnValueOnce(events(
+        { type: 'interaction-created', interactionId: 'large-1', model: 'gemini-3.8-flash' },
+        { type: 'interaction-usage', interactionId: 'large-1', status: 'requires_action', source: 'provider', usage: { inputTokens: 60_000 } },
+        { type: 'tool-call', interactionId: 'large-1', index: 0, callId: 'large-call', name: 'gmail.getMessage', arguments: { messageId: 'm-large' } },
+      ))
+      .mockReturnValueOnce(events(
+        { type: 'interaction-created', interactionId: 'large-compact', model: 'gemini-3.8-flash' },
+        { type: 'interaction-usage', interactionId: 'large-compact', status: 'completed', source: 'provider', usage: { inputTokens: 15_000 } },
+        { type: 'completed', interactionId: 'large-compact', status: 'completed', durationMs: 2, usage: { inputTokens: 15_000 } },
+      ));
+
+    const collected: unknown[] = [];
+    for await (const event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Read that message and continue.', tools: readTools },
+      {
+        tools: readTools,
+        executor: { oauth, handlers: { 'gmail.getMessage': getMessage } },
+        budgetPolicy: {
+          compactGrossInputTokens: 140_000,
+          hardGrossInputTokens: 150_000,
+          compactAfterInteractions: 99,
+          maxModelInteractions: 10,
+        },
+      },
+    )) collected.push(event);
+
+    expect(getMessage).toHaveBeenCalledOnce();
+    expect(estimateContinuation).toHaveBeenCalled();
+    expect(streamToolResult).not.toHaveBeenCalled();
+    expect(streamReply).toHaveBeenCalledTimes(2);
+    expect(collected).toContainEqual(expect.objectContaining({ type: 'context-activity', label: 'Context compacted' }));
   });
 
   it('returns a local synthesis fallback instead of dispatching another model call past the hard budget', async () => {

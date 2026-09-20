@@ -135,6 +135,21 @@ describe('MemoryContinuitySettings', () => {
     expect(switchByLabel('Health & wellbeing').getAttribute('aria-checked')).toBe('false');
   });
 
+  it('preserves a newer choice from another tab when changing an unrelated setting', async () => {
+    await saveMemoryBehaviorPreferences({
+      ...DEFAULT_MEMORY_BEHAVIOR,
+      categories: { ...DEFAULT_MEMORY_BEHAVIOR.categories, health_wellbeing: true },
+    });
+
+    act(() => { radio('Attentive').click(); });
+    await waitForSaved();
+
+    const stored = await loadMemoryBehaviorPreferences();
+    expect(stored.rememberingStyle).toBe('attentive');
+    expect(stored.categories.health_wellbeing).toBe(true);
+    expect(switchByLabel('Health & wellbeing').getAttribute('aria-checked')).toBe('true');
+  });
+
   it('preserves detailed choices while the master switch is off', async () => {
     await act(async () => { switchByLabel('Health & wellbeing').click(); });
     await waitForSaved();

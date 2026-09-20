@@ -12,7 +12,7 @@ vi.mock('@google/genai', () => ({ GoogleGenAI }));
 vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey, getGeminiLockboxStatus }));
 
 import { geminiTurnPort } from './provider';
-import { resetGeminiQuotaLedgerForTests } from './quota-ledger';
+import { reserveGeminiQuota, resetGeminiQuotaLedgerForTests } from './quota-ledger';
 
 async function* events(...items: unknown[]) {
   for (const item of items) yield item;
@@ -207,6 +207,42 @@ describe('Gemini provider stream fidelity', () => {
       usage: { inputTokens: 42_000, cachedTokens: 31_000, outputTokens: 900, totalTokens: 42_900 },
     });
     expect(collected.some((event) => (event as { type: string }).type === 'completed')).toBe(false);
+  });
+
+  it('emits an estimated usage floor before requires_action when Google omits usage metadata', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-estimate', model: 'gemini-3.8-flash' } },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-estimate', status: 'requires_action' } },
+    ]);
+    const usageIndex = collected.findIndex((event) => (event as { type: string }).type === 'interaction-usage');
+    const statusIndex = collected.findIndex((event) => (event as { type: string }).type === 'interaction-status' && (event as { status?: string }).status === 'requires_action');
+    expect(usageIndex).toBeGreaterThanOrEqual(0);
+    expect(statusIndex).toBeGreaterThan(usageIndex);
+    expect(collected[usageIndex]).toMatchObject({
+      type: 'interaction-usage',
+      interactionId: 'interaction-estimate',
+      status: 'requires_action',
+      source: 'estimate',
+      usage: { inputTokens: 30_000 },
+    });
+  });
+
+  it('blocks provider dispatch when the shared rolling budget cannot reserve the next request', async () => {
+    const existing = await reserveGeminiQuota(190_000, Date.now(), 200_000);
+    expect(existing.granted).toBe(true);
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'must-not-run', model: 'gemini-3.8-flash' } },
+    ]);
+    expect(createInteraction).not.toHaveBeenCalled();
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: {
+        category: 'rate_limit',
+        code: 'GEMINI_LOCAL_RATE_LIMIT',
+        providerCode: 'LOCAL_RATE_LIMIT',
+        retryable: true,
+      },
+    });
   });
 
   it('fails explicitly when the stream ends without interaction.completed', async () => {

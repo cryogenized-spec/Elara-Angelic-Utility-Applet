@@ -295,6 +295,54 @@ describe('Gemini provider stream fidelity', () => {
     }));
   });
 
+  it('accepts the remaining supported provider usage container variants', async () => {
+    const variants: Array<{ id: string; event: Record<string, unknown>; expected: number }> = [
+      {
+        id: 'interaction-camel-container',
+        event: {
+          event_type: 'interaction.completed',
+          interaction: {
+            id: 'interaction-camel-container',
+            status: 'completed',
+            usageMetadata: { input_tokens: 101 },
+          },
+        },
+        expected: 101,
+      },
+      {
+        id: 'raw-usage-container',
+        event: {
+          event_type: 'interaction.completed',
+          interaction: { id: 'raw-usage-container', status: 'completed' },
+          usage: { input_tokens: 102 },
+        },
+        expected: 102,
+      },
+      {
+        id: 'raw-snake-container',
+        event: {
+          event_type: 'interaction.completed',
+          interaction: { id: 'raw-snake-container', status: 'completed' },
+          usage_metadata: { input_tokens: 103 },
+        },
+        expected: 103,
+      },
+    ];
+
+    for (const variant of variants) {
+      const collected = await collect([
+        { event_type: 'interaction.created', interaction: { id: variant.id, model: 'gemini-3.8-flash' } },
+        variant.event,
+      ]);
+      expect(collected).toContainEqual(expect.objectContaining({
+        type: 'interaction-usage',
+        interactionId: variant.id,
+        source: 'provider',
+        usage: expect.objectContaining({ inputTokens: variant.expected }) as unknown,
+      }));
+    }
+  });
+
   it('accepts top-level camelCase usageMetadata from the Interactions stream', async () => {
     const collected = await collect([
       { event_type: 'interaction.created', interaction: { id: 'interaction-camel-usage', model: 'gemini-3.8-flash' } },

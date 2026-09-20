@@ -186,6 +186,7 @@ export function MemoryContinuitySettings() {
               key={option.id}
               type="button"
               role="radio"
+              aria-label={option.label}
               aria-checked={value.rememberingStyle === option.id}
               className={`memory-continuity__option${value.rememberingStyle === option.id ? ' is-active' : ''}`}
               disabled={loading}
@@ -213,6 +214,7 @@ export function MemoryContinuitySettings() {
               key={option.id}
               type="button"
               role="radio"
+              aria-label={option.label}
               aria-checked={value.recallStyle === option.id}
               className={`memory-continuity__option${value.recallStyle === option.id ? ' is-active' : ''}`}
               disabled={loading}

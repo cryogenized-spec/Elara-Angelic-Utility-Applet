@@ -6,6 +6,7 @@ const CHANNEL_NAME = 'elara-gemini-quota-ledger-v1';
 const DEFAULT_FIRST_RESERVE = 30_000;
 const MIN_RESERVE = 20_000;
 const RECENT_RESERVE_MULTIPLIER = 1.15;
+const IMAGE_INPUT_TOKEN_RESERVE = 12_000;
 
 export const DEFAULT_GEMINI_ROLLING_INPUT_ALLOWANCE = 200_000;
 
@@ -258,10 +259,23 @@ export async function releaseGeminiQuotaReservation(
 
 export function estimateSerializedInputTokens(value: unknown): number {
   try {
-    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
-    // Deliberately conservative and tokenizer-independent. This is admission
-    // planning only; provider usage replaces it whenever Google reports truth.
-    return Math.max(1, Math.ceil(serialized.length / 4));
+    let mediaReserve = 0;
+    const serialized = typeof value === 'string'
+      ? value
+      : JSON.stringify(value, (_key, current: unknown) => {
+          if (!current || typeof current !== 'object' || Array.isArray(current)) return current;
+          const record = current as Record<string, unknown>;
+          if (record.type !== 'image') return current;
+          if (typeof record.data !== 'string' && typeof record.uri !== 'string') return current;
+          mediaReserve += IMAGE_INPUT_TOKEN_RESERVE;
+          return typeof record.data === 'string'
+            ? { ...record, data: '[inline-image-bytes]' }
+            : current;
+        });
+    // Deliberately conservative and tokenizer-independent. Base64 is transport
+    // encoding, not prompt text, so image bytes are represented by a fixed
+    // safety reserve. Provider usage replaces this estimate whenever available.
+    return Math.max(1, Math.ceil(serialized.length / 4) + mediaReserve);
   } catch {
     return MIN_RESERVE;
   }

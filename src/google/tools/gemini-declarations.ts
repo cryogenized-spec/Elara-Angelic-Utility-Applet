@@ -149,7 +149,8 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'roleplay_setting.update': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.'), name: stringProperty('Optional replacement name.'), description: stringProperty('Optional replacement description.'), parentId: stringProperty('Optional destination parent id.'), type: { type: 'string', enum: ['building','room','outdoor','place','area','object','world'] } },
   'roleplay_setting.move': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.'), parentId: stringProperty('Optional destination parent id.') },
   'roleplay_setting.delete': { id: stringProperty('Optional entity id.'), ref: stringProperty('Optional opaque 16-hex world reference.') },
-  'memory.lookup': { query: { type: 'string', minLength: 1, maxLength: 500, description: 'Concise query for finding an existing established durable memory to manage. Normal conversational recall is already automatic.' } },
+  'memory.recall': { query: { type: 'string', minLength: 1, maxLength: 500, description: 'Concise recollection query about previously shared user context. Use this when deliberate recall would materially help the current conversation.' } },
+  'memory.lookup': { query: { type: 'string', minLength: 1, maxLength: 500, description: 'Concise query for finding an existing established durable memory to manage or correct. Use memory.recall for ordinary recollection.' } },
   'memory.save': {
     title: { type: 'string', minLength: 1, maxLength: 160, description: 'Short durable-memory title.' },
     body: { type: 'string', minLength: 1, maxLength: 4_000, description: 'Concise durable fact, preference, decision, commitment, or other information the user explicitly asked Elara to retain.' },
@@ -205,6 +206,7 @@ const requiredByTool: Record<string, readonly string[]> = {
   'drive.getFile': ['fileId'], 'drive.downloadFile': ['fileId'], 'drive.createFile': ['name'], 'drive.updateFile': ['fileId', 'etag', 'patch'], 'drive.moveFile': ['fileId', 'etag', 'parentId'], 'drive.trashFile': ['fileId', 'etag'],
   'sheets.getSpreadsheet': ['spreadsheetId'], 'sheets.readRange': ['spreadsheetId', 'range'], 'sheets.exportSpreadsheet': ['spreadsheetId', 'format'], 'sheets.createSpreadsheet': ['title'], 'sheets.addSheet': ['spreadsheetId', 'title'], 'sheets.writeRange': ['spreadsheetId', 'range', 'values'], 'sheets.appendRows': ['spreadsheetId', 'range', 'values'], 'sheets.updateCell': ['spreadsheetId', 'range', 'value'], 'sheets.insertRows': ['spreadsheetId', 'sheetId', 'startIndex', 'count'], 'sheets.batchUpdate': ['spreadsheetId', 'requests'],
   'roleplay_setting.create': ['type', 'name'],
+  'memory.recall': ['query'],
   'memory.lookup': ['query'],
   'memory.save': ['title', 'body'],
   'memory.reconcile': ['targetRef', 'relation', 'title', 'body'],

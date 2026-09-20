@@ -57,6 +57,40 @@ describe('Gemini tool-loop TPM budget', () => {
     expect(decideToolLoopBudget(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY)).toBe('local-fallback');
   });
 
+  it('includes the serialized pending continuation payload in the hard-budget projection', () => {
+    const snapshot = {
+      ...base,
+      cumulativeGrossInputTokens: 100_000,
+      lastGrossInputTokens: 40_000,
+      interactions: 3,
+    };
+    expect(projectedNextGross(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY, 20_000)).toBe(160_000);
+    expect(decideToolLoopBudget(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY, {
+      continuationInputTokens: 20_000,
+      compactInputTokens: 18_000,
+      terminalInputTokens: 9_000,
+    })).toBe('compact');
+  });
+
+  it('sizes fresh compact and terminal requests from their actual serialized payloads', () => {
+    const snapshot = {
+      ...base,
+      cumulativeGrossInputTokens: 130_000,
+      lastGrossInputTokens: 25_000,
+      interactions: 4,
+    };
+    expect(decideToolLoopBudget(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY, {
+      continuationInputTokens: 5_000,
+      compactInputTokens: 25_000,
+      terminalInputTokens: 15_000,
+    })).toBe('terminal-synthesis');
+    expect(decideToolLoopBudget(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY, {
+      continuationInputTokens: 5_000,
+      compactInputTokens: 25_000,
+      terminalInputTokens: 25_000,
+    })).toBe('local-fallback');
+  });
+
   it('uses terminal synthesis after the one compaction when the old-chain projection would cross hard budget', () => {
     const snapshot = {
       ...base,
@@ -101,6 +135,47 @@ describe('Gemini tool-loop TPM budget', () => {
     expect(checkpoint).toContain('GitHub PR #79');
     expect(checkpoint).toContain('page-2-cursor');
     expect(checkpoint).not.toContain('must-not-appear');
+  });
+
+  it('retains bounded Gmail message body and header evidence in a checkpoint', () => {
+    const entry = checkpointEntryFor(
+      { tool: 'gmail.getMessage', arguments: { messageId: 'm-semantic' } },
+      {
+        trust: 'untrusted-external',
+        source: 'gmail',
+        id: 'm-semantic',
+        headers: { from: 'Alice <alice@example.com>', subject: 'Build status' },
+        bodyText: 'The deployment window moved to Tuesday at 09:00. '.repeat(20),
+        bodyTruncated: false,
+      },
+      true,
+    );
+    const checkpoint = buildInvestigationCheckpoint('Check the message.', [entry], 2_000);
+    expect(checkpoint).toContain('deployment window moved to Tuesday');
+    expect(checkpoint).toContain('Alice');
+  });
+
+  it('retains bounded Google Docs block/tab text evidence in a checkpoint', () => {
+    const entry = checkpointEntryFor(
+      { tool: 'docs.inspectDocument', arguments: { documentId: 'doc-1' } },
+      {
+        trust: 'untrusted-external',
+        source: 'docs',
+        documentId: 'doc-1',
+        title: 'Launch plan',
+        blocks: [{ kind: 'paragraph', text: 'Primary launch date is 18 October.' }],
+        tabs: [{
+          tabId: 'tab-1',
+          title: 'Risks',
+          endIndex: 20,
+          blocks: [{ kind: 'paragraph', text: 'Fallback region is eu-west.' }],
+        }],
+      },
+      true,
+    );
+    const checkpoint = buildInvestigationCheckpoint('Inspect the plan.', [entry], 2_000);
+    expect(checkpoint).toContain('Primary launch date is 18 October');
+    expect(checkpoint).toContain('Fallback region is eu-west');
   });
 
   it('aggregates per-interaction provider usage into turn usage', () => {

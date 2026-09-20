@@ -3,11 +3,11 @@ import { googleToolRegistry } from '../google/tools/registry';
 
 /** Prevent later work from casually widening model memory authority. */
 describe('Pass 2 memory authority sentinel', () => {
-  it('keeps the model-visible read surface to scoped lookup only', () => {
+  it('keeps the model-visible read surface to conversational recall and scoped management lookup', () => {
     const modelMemoryReads = googleToolRegistry
       .filter((tool) => tool.exposure === 'gemini' && tool.name.startsWith('memory.') && tool.risk === 'read')
       .map((tool) => tool.name);
-    expect(modelMemoryReads).toEqual(['memory.lookup']);
+    expect(modelMemoryReads).toEqual(['memory.recall', 'memory.lookup']);
   });
 
   it('keeps the model-visible mutation surface to deliberate save and confirmed reconciliation', () => {

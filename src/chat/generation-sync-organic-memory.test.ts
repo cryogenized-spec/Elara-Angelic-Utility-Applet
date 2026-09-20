@@ -46,12 +46,12 @@ function makeContext(save: GenerationSyncContext['save'], responseVariant?: numb
   return { context, read: () => ({ conversation, status, handedOff }) };
 }
 
-function completedGeneration(withMemoryTool = false) {
+function completedGeneration(memoryToolName?: 'memory.lookup' | 'memory.recall') {
   let state = createGenerationState('gen-1', { startedAt: 0 });
-  const events = withMemoryTool
+  const events = memoryToolName
     ? [
         { type: 'step-start', index: 0, stepType: 'function_call' } as const,
-        { type: 'tool-call', interactionId: 'i-1', index: 0, callId: 'call-1', name: 'memory.lookup', arguments: { query: 'compact' } } as const,
+        { type: 'tool-call', interactionId: 'i-1', index: 0, callId: 'call-1', name: memoryToolName, arguments: { query: 'compact' } } as const,
         { type: 'step-stop', index: 0 } as const,
         { type: 'completed', interactionId: 'i-1', status: 'completed', durationMs: 1 } as const,
       ]
@@ -141,7 +141,7 @@ describe('terminal persistence -> organic observation barrier', () => {
     geminiOrganicMemoryExtractor.mockReturnValue(extractor);
     observePersistedTurn.mockResolvedValue({ status: 'skipped', count: 0 } satisfies OrganicObservationResult);
     const harness = makeContext(async () => undefined, 2);
-    const { state, completed } = completedGeneration(true);
+    const { state, completed } = completedGeneration('memory.lookup');
 
     syncGenerationEvent(completed, state, harness.context);
     const handedOff = harness.read().handedOff;
@@ -151,6 +151,23 @@ describe('terminal persistence -> organic observation barrier', () => {
     expect(observePersistedTurn).toHaveBeenCalledWith(expect.objectContaining({
       usedMemoryTool: true,
       responseVariant: 2,
+    }));
+  });
+
+  it('allows recall-only turns to continue into organic observation', async () => {
+    geminiOrganicMemoryExtractor.mockReturnValue(vi.fn());
+    observePersistedTurn.mockResolvedValue({ status: 'empty', count: 0 } satisfies OrganicObservationResult);
+    const harness = makeContext(async () => undefined);
+    const { state, completed } = completedGeneration('memory.recall');
+
+    syncGenerationEvent(completed, state, harness.context);
+    const handedOff = harness.read().handedOff;
+    if (!handedOff) throw new Error('expected terminal persistence handoff');
+    await handedOff;
+
+    expect(observePersistedTurn).toHaveBeenCalledWith(expect.objectContaining({
+      usedMemoryTool: false,
+      responseVariant: undefined,
     }));
   });
 

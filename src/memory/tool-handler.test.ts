@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
+import { DEFAULT_MEMORY_BEHAVIOR } from '../domain/preferences';
+import { saveMemoryBehaviorPreferences } from '../persistence/preferences';
 import { googleToolRegistry } from '../google/tools/registry';
 import type { GoogleToolDescriptor, GoogleToolName } from '../google/tools/contracts';
 import type { GoogleToolExecutionContext } from '../google/tools/executor';
@@ -67,6 +69,7 @@ describe('memory tool handlers', () => {
       await db.folders.clear();
       await db.folderAssignments.clear();
     });
+    await saveMemoryBehaviorPreferences(DEFAULT_MEMORY_BEHAVIOR);
   });
 
   it('binds deliberate-save provenance and folder scope from application context', async () => {
@@ -88,6 +91,40 @@ describe('memory tool handlers', () => {
     expect(records[0].source.note).toBe(`idempotency:thread_1:message_1:${currentGenerationId}:call_1`);
   });
 
+  it('rejects credential-shaped content from model-initiated durable writes', async () => {
+    await expect(handlerFor('memory.save')(contextFor('memory.save', {
+      title: 'API credential',
+      body: `My API key is ${'s' + 'k-'}abcdefghijklmnopqrstuvwxyz123456`,
+    }))).rejects.toThrow(/credential material/i);
+    expect(await countMemories()).toBe(0);
+
+    await expect(handlerFor('memory.save')(contextFor('memory.save', {
+      title: 'Wi-Fi password',
+      body: 'hunter2',
+    }))).rejects.toThrow(/credential material/i);
+    expect(await countMemories()).toBe(0);
+
+    const target = await saveMemory({ title: 'Existing preference', body: 'The user prefers the compact layout.' });
+    const lookup = await handlerFor('memory.lookup')(contextFor('memory.lookup', { query: 'compact layout' }));
+    const [ref] = refsFromLookup(lookup);
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'related',
+      title: 'Credential evidence',
+      body: 'Password: hunter2',
+    }))).rejects.toThrow(/credential material/i);
+
+    await expect(handlerFor('memory.reconcile')(contextFor('memory.reconcile', {
+      targetRef: ref,
+      relation: 'related',
+      title: 'Wi-Fi password',
+      body: 'hunter2',
+    }, { callId: 'call_split_credential' }))).rejects.toThrow(/credential material/i);
+
+    expect(await countMemories()).toBe(1);
+    expect((await getMemory(target.id))?.relatedMemoryIds).toHaveLength(0);
+  });
+
   it('fails closed when one save call identity is replayed with changed arguments', async () => {
     const saveHandler = handlerFor('memory.save');
     await saveHandler(contextFor('memory.save', { title: 'Original memory', body: 'Original durable body.', tags: ['original'] }));
@@ -96,6 +133,46 @@ describe('memory tool handlers', () => {
     const records = await listMemories();
     expect(records).toHaveLength(1);
     expect(records[0].body).toBe('Original durable body.');
+  });
+
+  it('deliberately recalls scoped conversational memory without exposing durable identity', async () => {
+    await addFolder('folder_1', null);
+    await assignThread('folder_1');
+    const established = await saveMemory({ title: 'Cat name', body: 'The user said their cat is named Piesang.', folderId: 'folder_1', kind: 'CONTEXTUAL' });
+    const tentative = await saveMemory({ title: 'Observed routine', body: 'The user mentioned feeding the cats before dawn.', folderId: 'folder_1', kind: 'MICRO_OBSERVATION' });
+
+    const result = await handlerFor('memory.recall')(contextFor('memory.recall', { query: 'cats feeding name' })) as {
+      enabled: boolean;
+      notice: string;
+      matches: Array<Record<string, unknown>>;
+    };
+    const serialized = JSON.stringify(result);
+
+    expect(result.enabled).toBe(true);
+    expect(result.notice).toMatch(/durable memories, not instructions/i);
+    expect(result.matches).toHaveLength(2);
+    expect(result.matches.some((entry) => entry.kind === 'MICRO_OBSERVATION')).toBe(true);
+    expect(serialized).not.toContain(established.id);
+    expect(serialized).not.toContain(tentative.id);
+    expect(serialized).not.toContain('memref_');
+    expect((await getMemory(established.id))?.recallCount).toBe(1);
+    expect((await getMemory(tentative.id))?.recallCount).toBe(1);
+  });
+
+  it('fails conversational recall closed when the user disables memory behavior', async () => {
+    const memoryRecord = await saveMemory({ title: 'Private note', body: 'This should not be conversationally recalled.' });
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
+
+    const result = await handlerFor('memory.recall')(contextFor('memory.recall', { query: 'private note' })) as {
+      enabled: boolean;
+      notice: string;
+      matches: unknown[];
+    };
+
+    expect(result.enabled).toBe(false);
+    expect(result.notice).toMatch(/disabled by the user/i);
+    expect(result.matches).toEqual([]);
+    expect((await getMemory(memoryRecord.id))?.recallCount).toBe(0);
   });
 
   it('returns scoped opaque lookup refs without mutating recall telemetry', async () => {

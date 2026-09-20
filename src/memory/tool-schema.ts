@@ -8,6 +8,10 @@ export const MEMORY_LOOKUP_REF_MAX_LENGTH = 96;
 
 const toolTagsSchema = z.array(z.string().min(1).max(MEMORY_TAG_MAX_LENGTH)).max(MEMORY_TOOL_MAX_TAGS).optional();
 
+export const memoryRecallToolArgumentsSchema = z.object({
+  query: z.string().min(1).max(MEMORY_LOOKUP_QUERY_MAX_LENGTH),
+}).strict();
+
 export const memoryLookupToolArgumentsSchema = z.object({
   query: z.string().min(1).max(MEMORY_LOOKUP_QUERY_MAX_LENGTH),
 }).strict();
@@ -30,16 +34,19 @@ export const memoryReconcileToolArgumentsSchema = z.object({
 }).strict();
 
 export const memoryToolArgumentSchemas = {
+  'memory.recall': memoryRecallToolArgumentsSchema,
   'memory.lookup': memoryLookupToolArgumentsSchema,
   'memory.save': memorySaveToolArgumentsSchema,
   'memory.reconcile': memoryReconcileToolArgumentsSchema,
 } as const;
 
 export type MemoryToolName = keyof typeof memoryToolArgumentSchemas;
+export type MemoryRecallToolArguments = z.infer<typeof memoryRecallToolArgumentsSchema>;
 export type MemoryLookupToolArguments = z.infer<typeof memoryLookupToolArgumentsSchema>;
 export type MemorySaveToolArguments = z.infer<typeof memorySaveToolArgumentsSchema>;
 export type MemoryReconcileToolArguments = z.infer<typeof memoryReconcileToolArgumentsSchema>;
 export interface MemoryToolArgumentsByName {
+  'memory.recall': MemoryRecallToolArguments;
   'memory.lookup': MemoryLookupToolArguments;
   'memory.save': MemorySaveToolArguments;
   'memory.reconcile': MemoryReconcileToolArguments;

@@ -1,6 +1,8 @@
 import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { db } from '../persistence/conversation';
+import { DEFAULT_MEMORY_BEHAVIOR } from '../domain/preferences';
+import { saveMemoryBehaviorPreferences } from '../persistence/preferences';
 import { saveMemory } from '../memory/store';
 import { createFolderPath } from '../persistence/folders';
 import { appendMemoryContext, composeSystemInstruction, loadMemoryContext, loadMemoryContextResult, loadMemoryContextSafely } from './memory-context';
@@ -11,6 +13,7 @@ describe('Gemini durable-memory context boundary', () => {
     await db.folderAssignments.clear();
     await db.folders.clear();
     window.localStorage.clear();
+    await saveMemoryBehaviorPreferences(DEFAULT_MEMORY_BEHAVIOR);
   });
 
   it('formats retrieved memory as contextual application data', () => {
@@ -28,6 +31,24 @@ describe('Gemini durable-memory context boundary', () => {
     expect(result).toContain('MASTER');
     expect(result).toContain('The user prefers dark mode.');
     expect(result).toContain('[APPLICATION CONTEXT — DURABLE MEMORY]');
+  });
+
+  it('does not inject conversational memory when the master behavior switch is off', async () => {
+    window.localStorage.setItem('elara.active-thread', 'thread-disabled');
+    await saveMemory({ title: 'Remembered preference', body: 'The user prefers quiet mornings.', kind: 'CORE', confidence: 1, importance: 1 });
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, enabled: false });
+
+    await expect(loadMemoryContext('quiet mornings')).resolves.toBe('');
+    await expect(composeSystemInstruction('MASTER', 'quiet mornings')).resolves.toBe('MASTER');
+  });
+
+  it('leaves automatic injection off in direct-only recall mode while keeping memory stored', async () => {
+    window.localStorage.setItem('elara.active-thread', 'thread-direct');
+    await saveMemory({ title: 'Remembered preference', body: 'The user prefers quiet mornings.', kind: 'CORE', confidence: 1, importance: 1 });
+    await saveMemoryBehaviorPreferences({ ...DEFAULT_MEMORY_BEHAVIOR, recallStyle: 'direct-only' });
+
+    await expect(loadMemoryContext('quiet mornings')).resolves.toBe('');
+    expect(await db.memories.count()).toBe(1);
   });
 
   it('prefers captured turn conversation over a newly active UI thread', async () => {

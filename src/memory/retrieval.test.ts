@@ -109,7 +109,18 @@ describe('canonical memory retrieval engine', () => {
     expect(isMemoryRetrievable(memory, { includeGlobal: true })).toBe(true);
     const context = formatMemoryContext([memory]);
     expect(context).toContain('[CONTEXTUAL; dormant; unresolved-conflict]');
+    expect(context).toContain('Use a memory naturally only when it materially helps');
+    expect(context).toContain('use memory.recall rather than pretending to remember');
+    expect(context).toContain('Prefer what the user says now');
     expect(context).not.toContain('secret-internal-id');
+  });
+
+  it('labels micro-observations as tentative context', () => {
+    const memory = {
+      ...makeMemory({ id: 'tentative', kind: 'MICRO_OBSERVATION', body: 'The user may prefer tea.' }),
+      score: 1,
+    };
+    expect(formatMemoryContext([memory])).toContain('[MICRO_OBSERVATION; tentative]');
   });
 
   it('keeps global memories opt-in when a folder is selected', () => {

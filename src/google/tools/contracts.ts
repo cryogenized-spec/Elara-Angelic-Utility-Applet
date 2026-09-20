@@ -44,6 +44,12 @@ export interface GoogleToolDescriptor {
   readonly description: string;
   readonly exposure: GoogleToolExposure;
   readonly executionPlane?: GoogleToolExecutionPlane;
+  /**
+   * Narrow information-flow exception for a read whose model-facing result
+   * cannot expose provider body content. The loop still requires matching
+   * same-turn provenance before using this exception.
+   */
+  readonly taintedReadContinuation?: 'drive-search-file';
 }
 
 const WORKSPACE_SERVICE_LABELS: Readonly<Record<string, string>> = {

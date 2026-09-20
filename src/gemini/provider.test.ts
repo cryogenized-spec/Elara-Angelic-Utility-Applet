@@ -219,6 +219,74 @@ describe('Gemini provider stream fidelity', () => {
     });
   });
 
+  it('accounts for the terminal interaction.requires_action event shape before returning control to tools', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-event-requires', model: 'gemini-3.8-flash' } },
+      {
+        event_type: 'interaction.requires_action',
+        interaction: {
+          id: 'interaction-event-requires',
+          status: 'requires_action',
+          usage_metadata: { prompt_token_count: 41_000, candidates_token_count: 700 },
+        },
+      },
+    ]);
+    const usageIndex = collected.findIndex((event) => (event as { type: string }).type === 'interaction-usage');
+    const statusIndex = collected.findIndex((event) => (event as { type: string }).type === 'interaction-status');
+    expect(usageIndex).toBeGreaterThanOrEqual(0);
+    expect(statusIndex).toBeGreaterThan(usageIndex);
+    expect(collected[usageIndex]).toMatchObject({
+      type: 'interaction-usage',
+      interactionId: 'interaction-event-requires',
+      status: 'requires_action',
+      source: 'provider',
+      usage: { inputTokens: 41_000, outputTokens: 700 },
+    });
+    expect(collected.some((event) => (event as { type: string }).type === 'completed')).toBe(false);
+  });
+
+  it('uses the reserved gross-input estimate when interaction.requires_action omits provider usage', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-event-estimate', model: 'gemini-3.8-flash' } },
+      {
+        event_type: 'interaction.requires_action',
+        interaction: { id: 'interaction-event-estimate', status: 'requires_action' },
+      },
+    ]);
+    expect(collected).toContainEqual(expect.objectContaining({
+      type: 'interaction-usage',
+      interactionId: 'interaction-event-estimate',
+      status: 'requires_action',
+      source: 'estimate',
+      usage: { inputTokens: 30_000 },
+    }));
+  });
+
+  it('keeps partial provider telemetry but falls back to the reservation for invalid gross input', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-malformed-usage', model: 'gemini-3.8-flash' } },
+      {
+        event_type: 'interaction.completed',
+        interaction: {
+          id: 'interaction-malformed-usage',
+          status: 'completed',
+          usage: { input_tokens: -1.5, output_tokens: 9, total_tokens: 9 },
+        },
+      },
+    ]);
+    expect(collected).toContainEqual(expect.objectContaining({
+      type: 'interaction-usage',
+      interactionId: 'interaction-malformed-usage',
+      status: 'completed',
+      source: 'estimate',
+      usage: { inputTokens: 30_000, outputTokens: 9, totalTokens: 9 },
+    }));
+    expect(collected.at(-1)).toMatchObject({
+      type: 'completed',
+      usage: { inputTokens: 30_000, outputTokens: 9, totalTokens: 9 },
+    });
+  });
+
   it('emits provider usage before the requires_action status and does not emit terminal completion', async () => {
     const collected = await collect([
       { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },

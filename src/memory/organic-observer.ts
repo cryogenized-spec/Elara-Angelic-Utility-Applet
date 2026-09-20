@@ -159,6 +159,16 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
     })));
     if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
 
+    // Extraction can take seconds and preferences are cross-tab mutable.
+    // Re-read the authoritative policy immediately before entering the write
+    // transaction so a user disabling memory (or switching to explicit-only)
+    // while classification is running prevents persistence.
+    const currentBehavior = await loadMemoryBehaviorPreferences();
+    if (!currentBehavior.enabled || currentBehavior.rememberingStyle === 'explicit-only') {
+      return { status: 'skipped', count: 0 };
+    }
+    if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
+
     await runMemoryMutationTransaction(async () => {
       for (const { candidate, evidenceFingerprint } of preparedCandidates) {
         const context = {

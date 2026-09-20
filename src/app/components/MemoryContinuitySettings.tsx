@@ -8,7 +8,7 @@ import {
   type MemoryRecallStyle,
   type MemoryRememberingStyle,
 } from '../../domain/preferences';
-import { loadMemoryBehaviorPreferences, saveMemoryBehaviorPreferences } from '../../persistence/preferences';
+import { loadMemoryBehaviorPreferences, updateMemoryBehaviorPreferences } from '../../persistence/preferences';
 import { ToggleSwitch } from './ToggleSwitch';
 import './memory-continuity-settings.css';
 
@@ -88,14 +88,14 @@ export function MemoryContinuitySettings() {
     return () => { mountedRef.current = false; };
   }, []);
 
-  function persist(next: MemoryBehaviorPreferences): void {
+  function persist(update: (current: MemoryBehaviorPreferences) => MemoryBehaviorPreferences): void {
     const revision = ++revisionRef.current;
     setSaving(true);
     setError(null);
     saveQueueRef.current = saveQueueRef.current
       .catch(() => undefined)
       .then(async () => {
-        const saved = await saveMemoryBehaviorPreferences(next);
+        const saved = await updateMemoryBehaviorPreferences(update);
         if (!mountedRef.current || revision !== revisionRef.current) return;
         valueRef.current = saved;
         setValue(saved);
@@ -118,7 +118,7 @@ export function MemoryContinuitySettings() {
     const next = update(valueRef.current);
     valueRef.current = next;
     setValue(next);
-    persist(next);
+    persist(update);
   }
 
   function setCategory(key: MemoryCategoryKey, checked: boolean): void {

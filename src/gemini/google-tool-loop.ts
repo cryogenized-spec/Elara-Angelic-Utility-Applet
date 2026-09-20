@@ -578,6 +578,12 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         durationMs: 0,
         outcome: 'completed',
       };
+      if (!terminal) {
+        // A checkpoint is deliberately lossy. Permit the fresh chain to repeat
+        // an exact read when it needs evidence omitted by bounded projection;
+        // duplicate suppression starts fresh after the first reread succeeds.
+        successfulReadEpoch.clear();
+      }
       stream = geminiTurnPort.streamReply(terminal ? terminalRequest : compactRequest, signal);
       if (terminal) toolBudgetExhausted = true;
       executedCalls += allowedCalls.length;

@@ -11,12 +11,54 @@ const { createInteraction, getGeminiApiKey, getGeminiLockboxStatus, GoogleGenAI 
 vi.mock('@google/genai', () => ({ GoogleGenAI }));
 vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey, getGeminiLockboxStatus }));
 
-import { geminiTurnPort } from './provider';
+import {
+  estimateGeminiToolContinuationInputTokens,
+  estimateGeminiTurnRequestInputTokens,
+  geminiTurnPort,
+} from './provider';
 import { geminiQuotaSnapshot, reserveGeminiQuota, resetGeminiQuotaLedgerForTests } from './quota-ledger';
 
 async function* events(...items: unknown[]) {
   for (const item of items) yield item;
 }
+
+describe('Gemini provider request sizing', () => {
+  it('accounts for large pending tool-result payloads before continuation dispatch', () => {
+    const common = {
+      model: 'gemini-3.8-flash',
+      previousInteractionId: 'interaction-before-tool',
+      systemInstruction: 'Stay concise.',
+      tools: ['gmail.getMessage'],
+    };
+    const small = estimateGeminiToolContinuationInputTokens({
+      ...common,
+      results: [{ callId: 'c1', name: 'gmail.getMessage', result: { bodyText: 'short' } }],
+    });
+    const large = estimateGeminiToolContinuationInputTokens({
+      ...common,
+      results: [{ callId: 'c1', name: 'gmail.getMessage', result: { bodyText: 'x'.repeat(120_000) } }],
+    });
+    expect(large).toBeGreaterThan(small + 25_000);
+  });
+
+  it('includes full system instructions and mounted tool declarations in fresh-call estimates', () => {
+    const small = estimateGeminiTurnRequestInputTokens({
+      model: 'gemini-3.8-flash',
+      input: 'checkpoint',
+      systemInstruction: 'short',
+      tools: [],
+      memoryContext: 'none',
+    });
+    const large = estimateGeminiTurnRequestInputTokens({
+      model: 'gemini-3.8-flash',
+      input: 'checkpoint',
+      systemInstruction: 'policy '.repeat(8_000),
+      tools: ['gmail.getMessage', 'drive.searchFiles', 'tasks.listTasks'],
+      memoryContext: 'none',
+    });
+    expect(large).toBeGreaterThan(small + 10_000);
+  });
+});
 
 describe('Gemini provider credential preflight', () => {
   beforeEach(async () => {

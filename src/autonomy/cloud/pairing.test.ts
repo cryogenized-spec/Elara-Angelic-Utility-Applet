@@ -92,6 +92,20 @@ describe('pairing store', () => {
     await expect(resolvePairingToken({ ...direct, token: '' })).resolves.toBe('direct-runtime-token');
   });
 
+  it('rejects stale pairing objects whose installation id or Worker URL no longer matches shared metadata', async () => {
+    savePairing(PAIRING);
+
+    await expect(resolvePairingToken({
+      ...PAIRING,
+      installationId: 'b'.repeat(32),
+    })).resolves.toBe('');
+
+    await expect(resolvePairingToken({
+      ...PAIRING,
+      workerUrl: 'https://different-worker.example.workers.dev',
+    })).resolves.toBe('');
+  });
+
   it('refuses a stale sibling-tab pairing object after the shared installation is removed', async () => {
     savePairing(PAIRING);
     await expect(resolvePairingToken(PAIRING)).resolves.toBe(PAIRING.token);

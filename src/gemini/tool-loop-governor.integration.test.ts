@@ -132,7 +132,7 @@ describe('Gemini tool-loop gross-input governor', () => {
     });
   });
 
-  it('short-circuits an exact duplicate successful read until a mutation changes the epoch', async () => {
+  it('short-circuits an exact duplicate successful read when no new evidence appeared', async () => {
     const listEvents = vi.fn(async () => ({ events: [{ id: 'e1', summary: 'Review' }] }));
     const readTools = ['calendar.listEvents'] as const;
 

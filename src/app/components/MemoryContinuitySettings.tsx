@@ -91,12 +91,14 @@ export function MemoryContinuitySettings() {
       }
     };
 
+    const handleFocus = () => { void refresh(); };
+
     void refresh();
-    window.addEventListener('focus', refresh);
+    window.addEventListener('focus', handleFocus);
     return () => {
       cancelled = true;
       mountedRef.current = false;
-      window.removeEventListener('focus', refresh);
+      window.removeEventListener('focus', handleFocus);
     };
   }, []);
 

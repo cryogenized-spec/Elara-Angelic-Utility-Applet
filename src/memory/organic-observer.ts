@@ -1,8 +1,10 @@
 import { z } from 'zod';
 import { loadFolderState } from '../persistence/folders';
+import { loadMemoryBehaviorPreferences, withMemoryBehaviorReadLease } from '../persistence/preferences';
 import { consolidateObservation, recordObservation } from './observation';
 import { findExactEvidenceSupportTarget } from './lifecycle';
 import { runMemoryMutationTransaction } from './store';
+import { containsCredentialMaterial } from './safety';
 
 export const ORGANIC_MEMORY_DOMAINS = [
   'preference',
@@ -63,51 +65,6 @@ const DOMAIN_TITLES: Readonly<Record<OrganicMemoryDomain, string>> = {
   shared_event: 'Observed shared event',
 };
 
-function containsLuhnValidCardNumber(value: string): boolean {
-  const candidates = value.match(/(?:\d[ -]?){13,19}/g) ?? [];
-  return candidates.some((candidate) => {
-    const digits = candidate.replace(/\D/g, '');
-    if (digits.length < 13 || digits.length > 19 || /^(\d)\1+$/.test(digits)) return false;
-    let sum = 0;
-    let double = false;
-    for (let index = digits.length - 1; index >= 0; index -= 1) {
-      let digit = Number(digits[index]);
-      if (double) {
-        digit *= 2;
-        if (digit > 9) digit -= 9;
-      }
-      sum += digit;
-      double = !double;
-    }
-    return sum % 10 === 0;
-  });
-}
-
-/**
- * Obvious credential material is never eligible for automatic persistence.
- * This is intentionally narrow: the model prompt supplies the broader privacy
- * policy, while this deterministic gate catches common secret-shaped evidence.
- */
-const BARE_CREDENTIAL_PATTERNS = [
-  /\b(?:AKIA|ASIA)[A-Z0-9]{16,32}\b/,
-  /\bAIza[0-9A-Za-z_-]{25,60}\b/,
-  /\bgh[pousr]_[A-Za-z0-9_]{20,255}\b/i,
-  /\bxox[baprs]-[A-Za-z0-9-]{20,255}\b/i,
-  /\beyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\b/,
-] as const;
-
-function looksLikeCredential(evidence: string): boolean {
-  const compact = evidence.trim();
-  const highSignalBarePrefix = /^(?:AKIA|ASIA|AIza|gh[pousr]_|xox[baprs]-|eyJ)/i.test(compact);
-  return highSignalBarePrefix
-    || /\b(?:password|passcode|pin|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token)\b\s*(?:is|=|:)\s*\S+/i.test(evidence)
-    || /\bBearer\s+[A-Za-z0-9._~+/-]{12,}/i.test(evidence)
-    || /\bsk-[A-Za-z0-9_-]{16,}\b/.test(evidence)
-    || BARE_CREDENTIAL_PATTERNS.some((pattern) => pattern.test(compact))
-    || /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(evidence)
-    || containsLuhnValidCardNumber(evidence);
-}
-
 async function sha256Hex(value: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('');
@@ -133,7 +90,7 @@ function acceptedCandidates(raw: unknown, fullUserMessage: string): OrganicMemor
     // The classifier may point only at literal user-authored evidence. It never
     // gets to paraphrase a fact into existence.
     if (!fullUserMessage.includes(candidate.evidence)) continue;
-    if (looksLikeCredential(candidate.evidence)) continue;
+    if (containsCredentialMaterial(candidate.evidence)) continue;
     const key = `${candidate.domain}\u0000${candidate.evidence}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -164,6 +121,18 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
   if (request.usedMemoryTool || (request.responseVariant ?? 1) > 1 || !request.conversationId.trim() || !request.messageId.trim()) {
     return { status: 'skipped', count: 0 };
   }
+
+  let behavior;
+  try {
+    behavior = await loadMemoryBehaviorPreferences();
+  } catch {
+    // Preference authority is unavailable: automatic persistence fails closed.
+    return { status: 'unavailable', count: 0 };
+  }
+  if (!behavior.enabled || behavior.rememberingStyle === 'explicit-only') {
+    return { status: 'skipped', count: 0 };
+  }
+
   if (!shouldInspectUserMessage(request.userMessage)) return { status: 'skipped', count: 0 };
 
   const isMutationAllowed = mutationGuard(request);
@@ -190,32 +159,44 @@ export async function observePersistedTurn(request: ObservePersistedTurnRequest)
     })));
     if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
 
-    await runMemoryMutationTransaction(async () => {
-      for (const { candidate, evidenceFingerprint } of preparedCandidates) {
-        const context = {
-          actor: 'model' as const,
-          conversationId: request.conversationId,
-          messageId: request.messageId,
-          folderId,
-          idempotencyKey: `organic:${request.conversationId}:${request.messageId}:${candidate.domain}:sha256:${evidenceFingerprint}`,
-          isMutationAllowed,
-        };
-        const observation = await recordObservation(
-          {
-            title: DOMAIN_TITLES[candidate.domain],
-            body: candidate.evidence,
-            tags: ['organic', `domain:${candidate.domain}`],
-            confidence: ORGANIC_OBSERVATION_CONFIDENCE,
-            importance: ORGANIC_OBSERVATION_IMPORTANCE,
-          },
-          context,
-        );
-
-        const target = await findExactEvidenceSupportTarget(observation);
-        if (target) await consolidateObservation(observation.id, target.id, 'support', context);
+    // Extraction can take seconds and preferences are cross-tab mutable.
+    // Re-read the authoritative policy immediately before the write and hold a
+    // shared cross-tab lease through the transaction. Preference writes take
+    // the exclusive side of this same lock.
+    return await withMemoryBehaviorReadLease(async () => {
+      const currentBehavior = await loadMemoryBehaviorPreferences();
+      if (!currentBehavior.enabled || currentBehavior.rememberingStyle === 'explicit-only') {
+        return { status: 'skipped', count: 0 };
       }
-    }, isMutationAllowed);
-    return { status: 'recorded', count: candidates.length };
+      if (!isMutationAllowed()) return { status: 'skipped', count: 0 };
+
+      await runMemoryMutationTransaction(async () => {
+        for (const { candidate, evidenceFingerprint } of preparedCandidates) {
+          const context = {
+            actor: 'model' as const,
+            conversationId: request.conversationId,
+            messageId: request.messageId,
+            folderId,
+            idempotencyKey: `organic:${request.conversationId}:${request.messageId}:${candidate.domain}:sha256:${evidenceFingerprint}`,
+            isMutationAllowed,
+          };
+          const observation = await recordObservation(
+            {
+              title: DOMAIN_TITLES[candidate.domain],
+              body: candidate.evidence,
+              tags: ['organic', `domain:${candidate.domain}`],
+              confidence: ORGANIC_OBSERVATION_CONFIDENCE,
+              importance: ORGANIC_OBSERVATION_IMPORTANCE,
+            },
+            context,
+          );
+
+          const target = await findExactEvidenceSupportTarget(observation);
+          if (target) await consolidateObservation(observation.id, target.id, 'support', context);
+        }
+      }, isMutationAllowed);
+      return { status: 'recorded', count: candidates.length };
+    });
   } catch {
     return { status: 'unavailable', count: 0 };
   }

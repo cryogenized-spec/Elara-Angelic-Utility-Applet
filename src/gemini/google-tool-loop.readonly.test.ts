@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // a model calling a tool it was never given must be refused structurally,
 // and a headless caller must never park on interactive authorization UI.
 
-const { streamReply, streamToolResult } = vi.hoisted(() => ({
+const { streamReply, streamToolResult, estimateTurn, estimateContinuation } = vi.hoisted(() => ({
   streamReply: vi.fn(),
   streamToolResult: vi.fn(),
+  estimateTurn: vi.fn(() => 0),
+  estimateContinuation: vi.fn(() => 0),
 }));
 
 const { executeGoogleTool, requestGoogleToolConfirmations, requestGoogleCapabilityGrant } = vi.hoisted(() => ({
@@ -17,6 +19,8 @@ const { executeGoogleTool, requestGoogleToolConfirmations, requestGoogleCapabili
 
 vi.mock('./provider', () => ({
   geminiTurnPort: { streamReply, streamToolResult },
+  estimateGeminiTurnRequestInputTokens: estimateTurn,
+  estimateGeminiToolContinuationInputTokens: estimateContinuation,
 }));
 
 vi.mock('../google/tools/executor', async (importOriginal) => ({

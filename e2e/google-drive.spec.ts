@@ -40,9 +40,23 @@ function sseTurn(interactionId: string, body: readonly string[], terminal: 'requ
     event_type: 'interaction.created',
     interaction: { id: interactionId, status: 'in_progress', model: 'gemini-3.8-flash' },
   })}\n\n`;
+  // This fixture tests Drive orchestration, not the provider's missing-usage
+  // fallback. Supply small realistic usage so the real TPM governor sees the
+  // same accounting shape it would normally receive from Gemini.
+  const usage_metadata = {
+    prompt_token_count: 4_000,
+    candidates_token_count: 200,
+    total_token_count: 4_200,
+  };
   const end = terminal === 'completed'
-    ? `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: interactionId, status: 'completed' } })}\n\n`
-    : `event: interaction.requires_action\ndata: ${JSON.stringify({ event_type: 'interaction.requires_action', interaction_id: interactionId, status: 'requires_action' })}\n\n`;
+    ? `event: interaction.completed\ndata: ${JSON.stringify({
+      event_type: 'interaction.completed',
+      interaction: { id: interactionId, status: 'completed', usage_metadata },
+    })}\n\n`
+    : `event: interaction.requires_action\ndata: ${JSON.stringify({
+      event_type: 'interaction.requires_action',
+      interaction: { id: interactionId, status: 'requires_action', usage_metadata },
+    })}\n\n`;
   return created + body.join('') + end;
 }
 

@@ -12,7 +12,7 @@ vi.mock('@google/genai', () => ({ GoogleGenAI }));
 vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey, getGeminiLockboxStatus }));
 
 import { geminiTurnPort } from './provider';
-import { reserveGeminiQuota, resetGeminiQuotaLedgerForTests } from './quota-ledger';
+import { geminiQuotaSnapshot, reserveGeminiQuota, resetGeminiQuotaLedgerForTests } from './quota-ledger';
 
 async function* events(...items: unknown[]) {
   for (const item of items) yield item;
@@ -243,6 +243,54 @@ describe('Gemini provider stream fidelity', () => {
         retryable: true,
       },
     });
+  });
+
+  it('releases a pre-dispatch reservation when the generation is already superseded', async () => {
+    const collected: unknown[] = [];
+    for await (const event of geminiTurnPort.streamReply({
+      model: 'gemini-3.8-flash',
+      input: 'Superseded request.',
+      isGenerationActive: () => false,
+    })) collected.push(event);
+
+    expect(createInteraction).not.toHaveBeenCalled();
+    expect(collected.at(-1)).toMatchObject({ type: 'cancelled' });
+    expect(await geminiQuotaSnapshot()).toMatchObject({ rollingInputTokens: 0, entries: 0 });
+  });
+
+  it('keeps a failed dispatched request conservatively charged when provider usage is absent', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-no-usage-error', model: 'gemini-3.8-flash' } },
+      { event_type: 'error', interaction_id: 'interaction-no-usage-error', error: { message: 'Service unavailable.', code: 503 } },
+    ]);
+
+    expect(collected).toContainEqual(expect.objectContaining({
+      type: 'interaction-usage',
+      interactionId: 'interaction-no-usage-error',
+      status: 'failed',
+      source: 'estimate',
+      usage: { inputTokens: 30_000 },
+    }));
+    expect((await geminiQuotaSnapshot()).rollingInputTokens).toBe(30_000);
+  });
+
+  it('accepts top-level camelCase usageMetadata from the Interactions stream', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-camel-usage', model: 'gemini-3.8-flash' } },
+      {
+        event_type: 'interaction.completed',
+        interaction: { id: 'interaction-camel-usage', status: 'completed' },
+        usageMetadata: { input_tokens: 321, output_tokens: 12, cached_tokens: 111, total_tokens: 333 },
+      },
+    ]);
+
+    expect(collected).toContainEqual(expect.objectContaining({
+      type: 'interaction-usage',
+      interactionId: 'interaction-camel-usage',
+      status: 'completed',
+      source: 'provider',
+      usage: { inputTokens: 321, outputTokens: 12, cachedTokens: 111, totalTokens: 333 },
+    }));
   });
 
   it('fails explicitly when the stream ends without interaction.completed', async () => {

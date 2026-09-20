@@ -547,8 +547,12 @@ export async function authorizeGoogleWorkspace(): Promise<GoogleOAuthStatusContr
     ...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES,
   ]);
   const pairing = activePairing();
-  if (pairing) await acquireDurableTokenForCapabilities(capabilities, pairing);
-  else await acquireBrowserTokenForCapabilities(capabilities, '');
+  if (pairing) {
+    await synchronizeDurableStatus(pairing);
+    await acquireDurableTokenForCapabilities(capabilities, pairing);
+  } else {
+    await acquireBrowserTokenForCapabilities(capabilities, '');
+  }
   return currentStatus();
 }
 

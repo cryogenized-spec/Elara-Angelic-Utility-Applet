@@ -122,12 +122,10 @@ describe('MemoryContinuitySettings', () => {
   });
 
   it('serializes rapid changes so the newest choice wins', async () => {
-    await act(async () => {
-      radio('Selective').click();
-      radio('Attentive').click();
-      switchByLabel('Health & wellbeing').click();
-      switchByLabel('Health & wellbeing').click();
-    });
+    act(() => { radio('Selective').click(); });
+    act(() => { radio('Attentive').click(); });
+    act(() => { switchByLabel('Health & wellbeing').click(); });
+    act(() => { switchByLabel('Health & wellbeing').click(); });
     await waitForSaved();
 
     const stored = await loadMemoryBehaviorPreferences();

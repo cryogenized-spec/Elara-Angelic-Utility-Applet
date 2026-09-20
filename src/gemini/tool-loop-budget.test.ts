@@ -137,6 +137,55 @@ describe('Gemini tool-loop TPM budget', () => {
     expect(checkpoint).not.toContain('must-not-appear');
   });
 
+  it('retains bounded tool argument provenance without credential-shaped fields', () => {
+    const entry = checkpointEntryFor(
+      {
+        tool: 'sheets.readRange',
+        arguments: {
+          spreadsheetId: 'sheet-123',
+          range: 'Summary!A1:D20',
+          query: 'quarterly',
+          fileId: 'file-9',
+          eventId: 'event-7',
+          accessToken: 'must-not-survive',
+        },
+      },
+      { values: [['ok']] },
+      true,
+    );
+
+    expect(entry.arguments).toContain('sheet-123');
+    expect(entry.arguments).toContain('Summary!A1:D20');
+    expect(entry.arguments).toContain('quarterly');
+    expect(entry.arguments).toContain('file-9');
+    expect(entry.arguments).toContain('event-7');
+    expect(entry.arguments).not.toContain('must-not-survive');
+  });
+
+  it('drops oldest observations first while preserving newest evidence and the final instruction', () => {
+    const entries = Array.from({ length: 20 }, (_, index) => checkpointEntryFor(
+      { tool: 'drive.searchFiles', arguments: { query: `query-${index + 1}` } },
+      {
+        source: 'drive',
+        files: [{ id: `file-${index + 1}`, name: `report-${index + 1}-${'x'.repeat(300)}` }],
+      },
+      true,
+    ));
+
+    const checkpoint = buildInvestigationCheckpoint(
+      'Investigate the latest report state and continue from the newest evidence.',
+      entries,
+      1_600,
+    );
+
+    expect(checkpoint.length).toBeLessThanOrEqual(1_600);
+    expect(checkpoint).toContain('[APPLICATION-GENERATED INVESTIGATION CHECKPOINT]');
+    expect(checkpoint).toContain('CHECKPOINT TRUNCATED: OLDEST OBSERVATIONS OMITTED');
+    expect(checkpoint).toContain('file-20');
+    expect(checkpoint).not.toContain('file-1');
+    expect(checkpoint).toContain('Continuation instruction:');
+  });
+
   it('marks truncated collections, preserves ETags, and exposes bounded recovery evidence', () => {
     const entry = checkpointEntryFor(
       { tool: 'drive.searchFiles', arguments: { query: 'Quarterly' } },

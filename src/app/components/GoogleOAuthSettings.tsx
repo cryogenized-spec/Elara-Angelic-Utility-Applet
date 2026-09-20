@@ -95,7 +95,8 @@ export function GoogleOAuthSettings() {
     setAuthorizationBusy(true);
     setError(null);
     try {
-      setStatus(await authorizeGoogleWorkspace());
+      const mode = accountKnown && !sessionReady ? 'refresh' : 'onboard';
+      setStatus(await authorizeGoogleWorkspace(mode));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Google Workspace authorization could not be completed.');
     } finally {

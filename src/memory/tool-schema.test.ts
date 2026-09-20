@@ -5,6 +5,13 @@ const validSave = { title: 'Preferred editor', body: 'The user explicitly asked 
 const validReconcile = { targetRef: 'memref_1234567890abcdef', relation: 'support' as const, title: 'Supporting evidence', body: 'The user explicitly repeated the preference.' };
 
 describe('memory tool schemas', () => {
+  it('accepts the bounded deliberate-recall surface only', () => {
+    expect(validateMemoryToolArguments('memory.recall', { query: 'what did they tell me about their cat' })).toEqual({ query: 'what did they tell me about their cat' });
+    expect(() => validateMemoryToolArguments('memory.recall', { query: '' })).toThrow();
+    expect(() => validateMemoryToolArguments('memory.recall', { query: 'x'.repeat(501) })).toThrow();
+    expect(() => validateMemoryToolArguments('memory.recall', { query: 'cat', folderId: 'spoofed' })).toThrow();
+  });
+
   it('accepts the bounded lookup surface only', () => {
     expect(validateMemoryToolArguments('memory.lookup', { query: 'compact editor preference' })).toEqual({ query: 'compact editor preference' });
     expect(() => validateMemoryToolArguments('memory.lookup', { query: '' })).toThrow();

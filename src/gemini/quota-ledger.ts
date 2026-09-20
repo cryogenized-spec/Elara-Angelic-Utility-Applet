@@ -252,15 +252,14 @@ export async function releaseGeminiQuotaReservation(
 }
 
 export function estimateSerializedInputTokens(value: unknown): number {
-  let serialized = '';
   try {
-    serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    const serialized = typeof value === 'string' ? value : JSON.stringify(value);
+    // Deliberately conservative and tokenizer-independent. This is admission
+    // planning only; provider usage replaces it whenever Google reports truth.
+    return Math.max(1, Math.ceil(serialized.length / 4));
   } catch {
     return MIN_RESERVE;
   }
-  // Deliberately conservative and tokenizer-independent. This is admission
-  // planning only; provider usage replaces it whenever Google reports truth.
-  return Math.max(1, Math.ceil(serialized.length / 4));
 }
 
 export function mirroredGeminiQuotaUsage(): number | undefined {

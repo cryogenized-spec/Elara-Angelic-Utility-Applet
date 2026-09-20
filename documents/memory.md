@@ -131,7 +131,7 @@ Sensitive automatic-memory categories default off: health/wellbeing, money/finan
 
 A present but malformed persisted master switch fails closed to disabled; a genuinely absent legacy field keeps the compatibility default. Category permission governs future automatic/organic formation policy. Explicit, user-directed durable memory remains a separate confirmed authority boundary. Disabling conversational memory must not delete Memory Bank records or create a shadow copy.
 
-**Companion continuity Pass 1:** this preference contract is persisted and normalized so later behavior consumes one stable authority.
+**Companion continuity Pass 1:** merged into `main`; this preference contract is persisted and normalized so later behavior consumes one stable authority.
 
 **Companion continuity Pass 2:** the master switch gates both conversational recall and organic formation; `explicit-only` disables organic formation while preserving explicit confirmed memory work, and `direct-only` disables automatic prompt injection while preserving deliberate `memory.recall`. The new read-only `memory.recall` capability gives Elara a deliberate way to search the same scoped durable-memory universe when the user asks what she remembers or when missing past context would materially improve the answer. `natural` and `proactive` continue to share today's automatic retrieval policy until the later retrieval-strategy pass differentiates their salience behavior.
 

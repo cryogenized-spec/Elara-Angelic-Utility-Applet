@@ -1,5 +1,5 @@
 import { loadMemoryBehaviorPreferences, withMemoryBehaviorReadLease } from '../persistence/preferences';
-import { selectSemanticFileEvidence } from './semantic-evidence';
+import { isSemanticSourcePermitted, selectSemanticFileEvidence } from './semantic-evidence';
 import { createSemanticFileId, getSemanticFile, listSemanticFiles, writeSemanticFile, type SemanticMemoryFile } from './semantic-file';
 import {
   applySemanticEntityMatch,
@@ -15,7 +15,6 @@ import {
 } from './semantic-synthesis';
 import { deriveMemoryVolatility } from './volatility';
 import { listMemories } from './store';
-import { containsCredentialMaterial, sensitiveMemoryCategoryHints } from './safety';
 
 /**
  * One-file rebuild for the semantic cabinet (Pass 3).
@@ -94,12 +93,7 @@ export async function rebuildSemanticFile(request: SemanticRebuildRequest): Prom
       };
     }
 
-    const selection = selectSemanticFileEvidence(concept, memories.filter((memory) => {
-      const text = `${memory.title}\n${memory.body}`;
-      return !containsCredentialMaterial(text)
-        && !sensitiveMemoryCategoryHints(text).some((category) => !behavior.categories[category])
-        && !Object.entries(behavior.categories).some(([category, enabled]) => !enabled && memory.tags.includes(`category:${category}`));
-    }));
+    const selection = selectSemanticFileEvidence(concept, memories.filter((memory) => isSemanticSourcePermitted(memory, behavior.categories)));
     if (!selection.memories.length) {
       if (concept.version === 0) return { status: 'unavailable' };
       // The existing file keeps its last grounded content; nothing new to say.
@@ -116,18 +110,10 @@ export async function rebuildSemanticFile(request: SemanticRebuildRequest): Prom
 
     let raw: unknown;
     try {
-      const existingForInput = concept.version > 0 ? await getSemanticFile(concept.id) : undefined;
       raw = await request.extractor(
         buildSemanticSynthesisInput(
           { kind: concept.kind, title: concept.title, aliases: concept.aliases },
           evidence,
-          existingForInput
-            ? {
-                summary: existingForInput.summary,
-                recentObservations: existingForInput.recentObservations,
-                openConflicts: existingForInput.openConflicts,
-              }
-            : undefined,
         ),
         request.signal,
       );
@@ -135,6 +121,7 @@ export async function rebuildSemanticFile(request: SemanticRebuildRequest): Prom
       return { status: 'unavailable' };
     }
 
+    if (request.signal?.aborted) return { status: 'unavailable' };
     const validated = validateSemanticSynthesis(raw, evidence, concept.title, behavior.categories);
     if (!validated) return { status: 'rejected' };
 

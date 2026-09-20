@@ -1,3 +1,5 @@
+import type { MemoryBehaviorPreferences } from '../domain/preferences';
+import { containsCredentialMaterial, sensitiveMemoryCategoryHints } from './safety';
 import type { DurableMemory } from './types';
 import { normalizeIdentityKey } from './semantic-entities';
 import type { SemanticMemoryFile, SemanticFileKind } from './semantic-file';
@@ -37,6 +39,17 @@ function matchesConcept(memory: DurableMemory, kind: SemanticFileKind, keys: rea
     const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(?:^|[^\\p{L}\\p{N}_])${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'u').test(haystack);
   });
+}
+
+/** Same source-policy boundary for outbound synthesis and inbound projection. */
+export function isSemanticSourcePermitted(
+  memory: DurableMemory,
+  categories: MemoryBehaviorPreferences['categories'],
+): boolean {
+  const text = `${memory.title}\n${memory.body}`;
+  return !containsCredentialMaterial(text)
+    && !sensitiveMemoryCategoryHints(text).some((category) => !categories[category])
+    && !Object.entries(categories).some(([category, enabled]) => !enabled && memory.tags.includes(`category:${category}`));
 }
 
 export interface SemanticEvidenceSelection {

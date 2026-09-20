@@ -3,7 +3,7 @@ import type { MemoryBehaviorPreferences } from '../domain/preferences';
 import { listSemanticFiles } from './semantic-file';
 import { listMemories } from './store';
 import { isMemoryRetrievable, queryLexicalFraction, queryTokens, rankAndBudgetMemories } from './retrieval';
-import { isSemanticFileStale } from './semantic-evidence';
+import { isSemanticFileStale, isSemanticSourcePermitted } from './semantic-evidence';
 import type { SemanticMemoryFile } from './semantic-file';
 import { deriveMemoryVolatility } from './volatility';
 import type { DurableMemory, MemoryRetrievalScope } from './types';
@@ -111,7 +111,10 @@ export function buildSemanticMemoryContext(input: SemanticMemoryContextInput): S
     .slice(0, SEMANTIC_RETRIEVAL_MAX_FILES)
     .map(({ file }) => {
       const live = liveSources(file, memories, scope);
-      if (!live.length) return null;
+      // A summary blends every referenced source. Showing it when only a
+      // subset is permitted could disclose a private or newly blocked claim.
+      if (!live.length || live.length !== file.sourceMemoryIds.length) return null;
+      if (live.some((memory) => !isSemanticSourcePermitted(memory, behavior.categories))) return null;
       if (carriesBlockedSensitiveMaterial(file, behavior)) return null;
       const volatile = live.some((memory) => deriveMemoryVolatility(memory).requiresRevalidation);
       return {
@@ -149,12 +152,7 @@ export function buildSemanticMemoryContext(input: SemanticMemoryContextInput): S
 
     if (entry.conflicted) {
       const sources = rankAndBudgetMemories(
-        entry.live.filter((memory) => {
-          const text = `${memory.title}\n${memory.body}`;
-          return memory.conflictingMemoryIds.length > 0
-            && !containsCredentialMaterial(text)
-            && !sensitiveMemoryCategoryHints(text).some((category) => !behavior.categories[category]);
-        }),
+        entry.live.filter((memory) => memory.conflictingMemoryIds.length > 0),
         { ...scope, query: '', maxItems: SEMANTIC_RETRIEVAL_MAX_SOURCE_MEMORIES, maxCharacters: SEMANTIC_SOURCE_CHARACTERS * SEMANTIC_RETRIEVAL_MAX_SOURCE_MEMORIES },
       );
       for (const source of sources) fileLines.push(`  ${formatSourceMemory(source)}`);
@@ -184,7 +182,10 @@ export async function loadSemanticMemoryContext(
   behavior: Pick<MemoryBehaviorPreferences, 'enabled' | 'recallStyle' | 'categories'>,
 ): Promise<string> {
   try {
-    const [files, memories] = await Promise.all([listSemanticFiles(), listMemories()]);
+    if (!behavior.enabled || behavior.recallStyle === 'direct-only' || queryTokens(query).length === 0) return '';
+    const files = await listSemanticFiles();
+    if (!files.length) return '';
+    const memories = await listMemories();
     return buildSemanticMemoryContext({ query, files, memories, scope, behavior }).text;
   } catch {
     return '';

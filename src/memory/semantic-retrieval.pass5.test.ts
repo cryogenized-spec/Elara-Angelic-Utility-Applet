@@ -248,8 +248,29 @@ describe('review regression: conflict source policy', () => {
     const source = sourceMemory({ id: 'memory_blocked', body, conflictingMemoryIds: ['memory_other'] });
     const file = semanticFile({ sourceMemoryIds: [source.id], openConflicts: ['The owner is disputed.'] });
     const result = buildSemanticMemoryContext({ query: 'owner project', files: [file], memories: [source], scope: GLOBAL_SCOPE, behavior: BEHAVIOR });
-    expect(result.text).toContain('unresolved-conflict');
+    expect(result.text).toBe('');
     expect(result.text).not.toContain(body);
     expect(result.text).not.toContain('Source "');
+  });
+});
+
+
+describe('complete-source policy on derived summaries', () => {
+  it('rejects a neutral-sounding summary grounded in a disabled category tag', () => {
+    const source = sourceMemory({ id: 'memory_tagged', body: 'Zuhayr has a recurring appointment.', tags: ['category:health_wellbeing'] });
+    const file = semanticFile({ sourceMemoryIds: [source.id] });
+    const input = { query: 'Zuhayr project', files: [file], memories: [source], scope: GLOBAL_SCOPE, behavior: BEHAVIOR };
+    expect(buildSemanticMemoryContext(input).text).toBe('');
+    expect(buildSemanticMemoryContext({ ...input, behavior: { ...BEHAVIOR, categories: { ...BEHAVIOR.categories, health_wellbeing: true } } }).text).toContain('Zuhayr');
+  });
+
+  it('rejects mixed-scope and partially deleted source sets, not just empty ones', () => {
+    const global = sourceMemory({ id: 'memory_global' });
+    const privateSource = sourceMemory({ id: 'memory_private', folderId: 'private_folder' });
+    const file = semanticFile({ sourceMemoryIds: [global.id, privateSource.id] });
+    const input = { query: 'Zuhayr project', files: [file], memories: [global, privateSource], scope: { ...GLOBAL_SCOPE, folderId: 'other_folder', folderIds: ['other_folder'], includeGlobal: true }, behavior: BEHAVIOR };
+    expect(buildSemanticMemoryContext(input).text).toBe('');
+    expect(buildSemanticMemoryContext({ ...input, memories: [global] }).text).toBe('');
+    expect(buildSemanticMemoryContext({ ...input, files: [{ ...file, sourceMemoryIds: [global.id] }] }).text).toContain('Zuhayr');
   });
 });

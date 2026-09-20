@@ -362,6 +362,34 @@ describe('semantic file rebuild', () => {
     expect(await listMemories()).toHaveLength(2);
   });
 
+  it('rebuilds only from canonical evidence, never forwarding old summary prose', async () => {
+    const source = evidenceMemory({ body: 'Zuhayr is the owner of the project.' });
+    await putEvidence(source);
+    await writeSemanticFile(fileTemplate({ sourceMemoryIds: [source.id], summary: 'Old private synthesis that must not leave the device.' }), 0);
+    let input = '';
+    const result = await rebuildSemanticFile({
+      proposal: { kind: 'person', canonicalLabel: 'Zuhayr', aliases: [], evidenceRef: source.body },
+      extractor: async (value) => { input = value; return groundedOutput; },
+    });
+    expect(result.status).toBe('refreshed');
+    expect(input).toContain(source.body);
+    expect(input).not.toContain('Old private synthesis');
+    expect(input).not.toContain('PREVIOUS SUMMARY');
+  });
+
+  it('does not commit output if the caller aborts during extraction', async () => {
+    const source = evidenceMemory({ body: 'Zuhayr is the owner of the project.' });
+    await putEvidence(source);
+    const controller = new AbortController();
+    const result = await rebuildSemanticFile({
+      proposal: { kind: 'person', canonicalLabel: 'Zuhayr', aliases: [], evidenceRef: source.body },
+      signal: controller.signal,
+      extractor: async () => { controller.abort(); return groundedOutput; },
+    });
+    expect(result.status).toBe('unavailable');
+    expect(await listSemanticFiles()).toEqual([]);
+  });
+
   it('converges repeated rebuilds over unchanged evidence and advances the version only on new content', async () => {
     await putEvidence(evidenceMemory({ body: 'Zuhayr is the owner of the project.' }));
     const proposal = { kind: 'person', canonicalLabel: 'Zuhayr', aliases: [], evidenceRef: 'Zuhayr is the owner of the project.' };

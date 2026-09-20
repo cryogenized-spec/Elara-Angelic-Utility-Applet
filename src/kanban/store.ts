@@ -426,6 +426,7 @@ export function startBoardSync(): () => void {
         if (stopped || retryAccount !== account) return;
         const update: Partial<BoardState> = {};
         if (board && (!state.board || (state.board.account === account && board.syncedAt >= state.board.syncedAt))) update.board = board;
+        else if (!board && state.board?.account === account) update.board = null;
         // Active reads/waiters recheck shared metadata themselves under the lease.
         if (schedule && !inFlight && navigator.onLine) {
           update.failures = schedule.failures; update.nextRetryAt = schedule.nextRetryAt; update.error = schedule.error;

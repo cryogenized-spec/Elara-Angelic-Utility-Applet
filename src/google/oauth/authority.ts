@@ -46,6 +46,8 @@ type StoredAuthorization = {
 type AccessSession = {
   accessToken: string;
   expiresAt: number;
+  /** Google account identity verified for this in-memory token. */
+  accountEmail?: string;
   /** Present only for paired durable OAuth sessions. */
   vaultUpdatedAt?: number;
 };
@@ -86,6 +88,11 @@ function configuredClientId(): string {
 
 function emptyStored(): StoredAuthorization {
   return { version: 3, enabledCapabilities: [], grantedProviderScopes: [], updatedAt: new Date().toISOString() };
+}
+
+function normalizedAccountEmail(value: string | undefined): string | undefined {
+  const email = value?.trim().toLowerCase();
+  return email || undefined;
 }
 
 function uniqueCapabilities(values: readonly GoogleCapabilityKey[]): GoogleCapabilityKey[] {
@@ -137,6 +144,9 @@ function loadStored(): StoredAuthorization {
       ...(parsed.needsReauthorization ? { needsReauthorization: true } : {}),
       updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : new Date().toISOString(),
     };
+    if (session && normalizedAccountEmail(session.accountEmail) !== normalizedAccountEmail(nextStored.account?.email)) {
+      session = null;
+    }
     if (!nextStored.enabledCapabilities.length || nextStored.needsReauthorization) session = null;
     stored = nextStored;
   } catch {
@@ -352,18 +362,20 @@ async function acquireBrowserToken(capability: GoogleCapabilityKey, prompt: '' |
       ? returnedScopes
       : [...new Set([...current.grantedProviderScopes, descriptor.scope])];
     const enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, capability]);
+    let nextAccount = current.account;
+    const fetched = await fetchGoogleAccount(response.access_token);
+    if (prompt === 'none' && current.account?.email) {
+      if (!fetched || normalizedAccountEmail(fetched.email) !== normalizedAccountEmail(current.account.email)) {
+        throw new Error('Google account changed or could not be verified. Refresh the Google session in Settings.');
+      }
+    }
+    if (fetched) nextAccount = fetched;
+    else if (prompt === '') nextAccount = undefined;
     session = {
       accessToken: response.access_token,
       expiresAt: Date.now() + Math.max(60, response.expires_in ?? 3600) * 1000,
+      accountEmail: normalizedAccountEmail(nextAccount?.email),
     };
-    let nextAccount = current.account;
-    try {
-      const fetched = await fetchGoogleAccount(response.access_token);
-      if (fetched) nextAccount = fetched;
-      else if (prompt === '') nextAccount = undefined;
-    } catch {
-      if (prompt === '') nextAccount = undefined;
-    }
     legacyGrantedCapabilities = [];
     stored.enabledCapabilities = enabledCapabilities;
     stored.grantedProviderScopes = grantedProviderScopes;
@@ -402,6 +414,7 @@ async function acquireDurableToken(capability: GoogleCapabilityKey, pairing: Aut
   session = {
     accessToken: response.accessToken,
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
+    accountEmail: normalizedAccountEmail(response.account?.email),
     vaultUpdatedAt: durableRevision(response.updatedAt),
   };
   legacyGrantedCapabilities = [];
@@ -418,6 +431,7 @@ async function refreshDurableToken(pairing: AutonomyPairing): Promise<void> {
   session = {
     accessToken: response.accessToken,
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
+    accountEmail: normalizedAccountEmail(response.account?.email ?? stored.account?.email),
     vaultUpdatedAt: durableRevision(response.updatedAt),
   };
   const scopes = parseProviderScopes(response.scopes.join(' '));

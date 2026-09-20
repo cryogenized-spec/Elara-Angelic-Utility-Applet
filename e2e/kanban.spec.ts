@@ -155,6 +155,7 @@ test("list and subroutine lifecycle require explicit destructive confirmation", 
   await expect(page.getByRole("heading", { name: "Home projects", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Manage list Home projects" }).click();
   await page.getByRole("button", { name: "Delete list and tasks" }).click();
+  await expect(page.getByRole("dialog", { name: "Delete from Google?" })).toContainText("originating assignment");
   await page.getByLabel("Type the list title to confirm").fill("wrong title");
   await page.getByRole("button", { name: "Confirm removal" }).click();
   await expect(page.getByRole("alert").last()).toContainText("does not match");

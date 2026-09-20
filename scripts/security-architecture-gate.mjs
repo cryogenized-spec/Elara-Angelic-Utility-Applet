@@ -364,7 +364,11 @@ if (appSource.includes('kanbanContext') && (!kanbanStore.includes('MAX_BOARD_LIS
 const kanbanPort = read('src/kanban/google-port.ts');
 if (!oauthAuthority.includes('authorizeExisting(capability)') || !kanbanPort.includes('googleOAuthAuthority.authorizeExisting(capability)') || kanbanPort.includes('googleOAuthAuthority.authorize(capability)')) fail('Kanban background Tasks access must remain on the noninteractive existing-grant OAuth path');
 if (!oauthAuthority.includes('await beforeProviderFetch?.();') || !kanbanPort.includes('await admittedAccount(capability, account);')) fail('Google provider requests must await caller authority revalidation at the actual fetch boundary');
+if (!oauthAuthority.includes('accountEmail?: string') || !oauthAuthority.includes('normalizedAccountEmail(session.accountEmail) !== normalizedAccountEmail(nextStored.account?.email)') || !oauthAuthority.includes('Google account changed or could not be verified')) fail('Browser Google access tokens must remain bound to the account identity verified for that in-memory session');
 if (!kanbanStore.includes('pruneCachedAccounts') || !kanbanStore.includes('status.state === "disconnected"') || !kanbanStore.includes('status.state === "revoked"') || !kanbanStore.includes('status.state === "reauthorization-required" && identityAccount === null')) fail('Kanban account switching/disconnect must retain explicit cache-pruning semantics');
+if (!kanbanStore.includes('else if (!board && state.board?.account === account) update.board = null;')) fail('Kanban cross-tab cache deletion must clear the matching in-memory board projection');
+const kanbanScreen = read('src/app/components/KanbanScreen.tsx');
+if (!kanbanScreen.includes('removal?.kind === "list" ||')) fail('Kanban task-list deletion must always disclose possible Docs/Chat assignment fallout');
 
 const googleBroker = read('src/google/confirmation/broker.ts');
 if (googleBroker.includes("all.dataset.decision = 'all';") || googleBroker.includes('✓ Approve all')) fail('Google confirmation broker must not expose approve-all');

@@ -387,6 +387,20 @@ describe("snapshot reconciliation", () => {
     await syncBoard();
     expect(boardStore.getSnapshot().board).toBeNull();
   });
+  it("clears the in-memory board when another tab deletes the current account cache row", async () => {
+    await syncBoard();
+    const stop = startBoardSync();
+    const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });
+    try {
+      await vi.waitFor(() => expect(boardStore.getSnapshot().board?.account).toBe(initial.account));
+      await peer.table('boards').delete(initial.account);
+      await vi.waitFor(() => expect(boardStore.getSnapshot().board).toBeNull());
+    } finally {
+      stop();
+      peer.close();
+      await syncBoard();
+    }
+  });
   it("purges prior-account cache on identity switch and clears Kanban cache on disconnect", async () => {
     await syncBoard();
     await saveRoutine(initial.routines[0], null);

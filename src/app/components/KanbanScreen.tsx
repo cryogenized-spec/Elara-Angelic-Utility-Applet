@@ -215,11 +215,9 @@ function KanbanWorkspace({
     setDragged(null);
     setDropTarget(null);
   }
-  const removalAffectsProviderAssignment = removal?.kind === "task"
-    ? Boolean(removal.task.assignmentInfo)
-    : removal?.kind === "list"
-      ? Boolean(board?.tasks.some((task) => task.listId === removal.list.id && task.assignmentInfo))
-      : false;
+  const removalAffectsProviderAssignment =
+    removal?.kind === "list" ||
+    (removal?.kind === "task" && Boolean(removal.task.assignmentInfo));
   function visible(task: BoardTask) {
     return (
       `${task.title} ${task.notes ?? ""}`

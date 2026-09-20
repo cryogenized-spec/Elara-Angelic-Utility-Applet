@@ -7,6 +7,7 @@ import { expect, test, type Page } from '@playwright/test';
 // itself wrote before the v3 writer existed.
 const GOOGLE_STORAGE_KEY = 'elara.google.authorization.v2';
 const CALENDAR_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
+const TASKS_READ_SCOPE = 'https://www.googleapis.com/auth/tasks.readonly';
 const TASKS_WRITE_SCOPE = 'https://www.googleapis.com/auth/tasks';
 const GMAIL_READ_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly';
 const DRIVE_FILE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
@@ -159,7 +160,7 @@ test('disconnect removes the record the writer created', async ({ page }) => {
   await expect(page.locator('.google-oauth-service')).toHaveCount(0);
 });
 
-test('a genuine v2 record migrates, then bundled consent supersedes it with current provider scope truth', async ({ page }) => {
+test('a genuine v2 record migrates and session refresh preserves its existing least-privilege scope', async ({ page }) => {
   await page.addInitScript(({ key, value }) => {
     window.localStorage.setItem(key, JSON.stringify(value));
   }, {
@@ -187,17 +188,15 @@ test('a genuine v2 record migrates, then bundled consent supersedes it with curr
     account: { email: STUB_EMAIL, displayName: STUB_NAME },
   }));
   const stored = await readStoredAuthorization(page);
-  expect(stored?.enabledCapabilities).toEqual(expect.arrayContaining([
+  expect(stored?.enabledCapabilities).toEqual([
     'google.account',
     'calendar.events.read',
     'tasks.read',
-    'gmail.read',
-    'gmail.send',
-    'drive.library.read',
-  ]));
+  ]);
   expect(stored?.grantedProviderScopes).toEqual(expect.arrayContaining([
     CALENDAR_READ_SCOPE,
-    GMAIL_READ_SCOPE,
-    DRIVE_LIBRARY_SCOPE,
+    TASKS_READ_SCOPE,
   ]));
+  expect(stored?.grantedProviderScopes).not.toContain(GMAIL_READ_SCOPE);
+  expect(stored?.grantedProviderScopes).not.toContain(DRIVE_LIBRARY_SCOPE);
 });

@@ -124,6 +124,35 @@ describe('Gemini provider stream fidelity', () => {
     return collected;
   }
 
+  it('supports the singular legacy tool-result continuation shape', async () => {
+    createInteraction.mockResolvedValue(events(
+      { event_type: 'interaction.created', interaction: { id: 'interaction-legacy-result', model: 'gemini-3.8-flash' } },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-legacy-result', status: 'completed' } },
+    ));
+
+    const collected: unknown[] = [];
+    for await (const event of geminiTurnPort.streamToolResult({
+      model: 'gemini-3.8-flash',
+      previousInteractionId: 'interaction-before-tool',
+      result: {
+        callId: 'call-legacy',
+        name: 'gmail.listLabels',
+        result: { labels: [] },
+      },
+    })) collected.push(event);
+
+    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({
+      previous_interaction_id: 'interaction-before-tool',
+      input: [{
+        type: 'function_result',
+        name: 'gmail.listLabels',
+        call_id: 'call-legacy',
+        result: [{ type: 'text', text: JSON.stringify({ labels: [] }) }],
+      }],
+    }));
+    expect(collected.at(-1)).toMatchObject({ type: 'completed', interactionId: 'interaction-legacy-result' });
+  });
+
   it('preserves provider status and code from streamed SSE error events', async () => {
     const collected = await collect([
       { event_type: 'interaction.created', interaction: { id: 'interaction-1', model: 'gemini-3.8-flash' } },

@@ -17,8 +17,9 @@ vi.mock('../../autonomy/cloud/pairing', () => ({
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 import { requestGoogleAuthorizationCode } from './code-flow';
 import { loadPairing, resolvePairingToken } from '../../autonomy/cloud/pairing';
-import { googleOAuthAuthority } from './authority';
-import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE } from './capability-policy';
+import { authorizeGoogleWorkspace, googleOAuthAuthority } from './authority';
+import { DRIVE_APP_FILE_SCOPE, DRIVE_LIBRARY_SCOPE, GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES } from './capability-policy';
+import { getGoogleScope } from './scope-registry';
 
 const CALENDAR_READ_SCOPE = 'https://www.googleapis.com/auth/calendar.events.readonly';
 const CALENDAR_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
@@ -124,6 +125,71 @@ describe('direct Google OAuth authority', () => {
     expect(stored).not.toContain('account-access-token');
     expect(stored).not.toContain('gmail.');
     expect(stored).not.toContain('calendar.');
+  });
+
+  it('requests the complete Settings Workspace bundle through one interactive GIS token flow', async () => {
+    tokenMock.mockImplementationOnce(async (config) => token('workspace-access-token', config.scope));
+
+    const status = await authorizeGoogleWorkspace();
+
+    expect(tokenMock).toHaveBeenCalledTimes(1);
+    const request = tokenMock.mock.calls[0]?.[0];
+    expect(request).toBeDefined();
+    expect(request?.prompt).toBe('');
+    const requestedScopes = new Set(request?.scope.split(/\s+/));
+    expect(requestedScopes.has(EMAIL_SCOPE)).toBe(true);
+    expect(requestedScopes.has(OPENID_SCOPE)).toBe(true);
+    for (const capability of GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES) {
+      expect(requestedScopes.has(getGoogleScope(capability).scope)).toBe(true);
+    }
+    expect(status.enabledCapabilities).toEqual(expect.arrayContaining([
+      'google.account',
+      ...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES,
+    ]));
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining([
+      'google.account',
+      ...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES,
+    ]));
+    expect(status.state).toBe('connected');
+    expect(status.sessionReady).toBe(true);
+  });
+
+  it('refreshes a known Workspace session without expanding the user\'s existing capability set', async () => {
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['google.account', 'calendar.events.read'],
+      grantedProviderScopes: [EMAIL_SCOPE, CALENDAR_READ_SCOPE],
+      account: { email: 'test@example.com', displayName: 'Test User' },
+      updatedAt: new Date().toISOString(),
+    }));
+    tokenMock.mockResolvedValueOnce(token('refreshed-token', `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE}`));
+
+    const status = await authorizeGoogleWorkspace('refresh');
+
+    expect(tokenMock).toHaveBeenCalledTimes(1);
+    const request = tokenMock.mock.calls[0]?.[0];
+    expect(request?.scope).toBe(`${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE} ${OPENID_SCOPE}`);
+    expect(status.enabledCapabilities).toEqual(['google.account', 'calendar.events.read']);
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
+    expect(status.grantedCapabilities).not.toContain('gmail.send');
+    expect(status.grantedCapabilities).not.toContain('drive.library.read');
+  });
+
+  it('keeps Google granular consent authoritative when bundled onboarding returns only a subset', async () => {
+    tokenMock.mockResolvedValueOnce(token('partial-workspace-token', `${EMAIL_SCOPE} ${CALENDAR_READ_SCOPE}`));
+
+    const status = await authorizeGoogleWorkspace();
+
+    expect(tokenMock).toHaveBeenCalledTimes(1);
+    expect(status.enabledCapabilities).toEqual(expect.arrayContaining([
+      'google.account',
+      ...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES,
+    ]));
+    expect(status.grantedCapabilities).toContain('google.account');
+    expect(status.grantedCapabilities).toContain('calendar.events.read');
+    expect(status.grantedCapabilities).not.toContain('tasks.read');
+    expect(status.grantedCapabilities).not.toContain('gmail.send');
+    expect(status.state).toBe('partially-authorized');
   });
 
   it('refreshes the account session without dropping already-enabled Workspace scopes', async () => {
@@ -422,6 +488,58 @@ describe('direct Google OAuth authority', () => {
     expect(refreshCalls).toBe(1);
     expect(codeMock).not.toHaveBeenCalled();
     expect(tokenMock).not.toHaveBeenCalled();
+  });
+
+  it('refreshes paired Workspace Settings from the durable grant without reopening GIS', async () => {
+    pairingMock.mockReturnValue(TEST_PAIRING);
+    pairingTokenMock.mockResolvedValue('test-installation-secret');
+    localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
+      version: 3,
+      enabledCapabilities: ['google.account', 'calendar.events.read'],
+      grantedProviderScopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+      account: { email: 'durable@example.com' },
+      updatedAt: new Date().toISOString(),
+    }));
+
+    let refreshCalls = 0;
+    let exchangeCalls = 0;
+    globalThis.fetch = vi.fn().mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = requestUrl(input);
+      const method = requestMethod(input, init);
+      if (url === 'https://worker.example/google/oauth/status' && method === 'GET') {
+        return new Response(JSON.stringify({
+          connected: true,
+          scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+          account: { email: 'durable@example.com' },
+          updatedAt: 210,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/token' && method === 'POST') {
+        refreshCalls += 1;
+        return new Response(JSON.stringify({
+          connected: true,
+          accessToken: 'settings-refresh-token',
+          expiresIn: 3600,
+          scopes: [CALENDAR_READ_SCOPE, EMAIL_SCOPE],
+          account: { email: 'durable@example.com' },
+          updatedAt: 210,
+        }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url === 'https://worker.example/google/oauth/exchange' && method === 'POST') {
+        exchangeCalls += 1;
+        return new Response('{}', { status: 500 });
+      }
+      throw new Error(`Unexpected request: ${method} ${url}`);
+    }) as unknown as typeof fetch;
+
+    const status = await authorizeGoogleWorkspace('refresh');
+
+    expect(refreshCalls).toBe(1);
+    expect(exchangeCalls).toBe(0);
+    expect(codeMock).not.toHaveBeenCalled();
+    expect(status.sessionReady).toBe(true);
+    expect(status.enabledCapabilities).toEqual(['google.account', 'calendar.events.read']);
+    expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['google.account', 'calendar.events.read']));
   });
 
   it('invalidates an unexpired paired browser token when the authoritative vault revision changes', async () => {

@@ -545,15 +545,27 @@ export async function authorizeGoogleWorkspace(
   mode: 'onboard' | 'refresh' = 'onboard',
 ): Promise<GoogleOAuthStatusContract> {
   const pairing = activePairing();
-  if (pairing) await synchronizeDurableStatus(pairing);
+  const durableStatus = pairing ? await synchronizeDurableStatus(pairing) : null;
 
   const current = loadStored();
   const capabilities = mode === 'refresh' && current.enabledCapabilities.length
     ? uniqueCapabilities(['google.account', ...current.enabledCapabilities])
     : uniqueCapabilities(['google.account', ...GOOGLE_WORKSPACE_ONBOARDING_CAPABILITIES]);
 
-  if (pairing) await acquireDurableTokenForCapabilities(capabilities, pairing);
-  else await acquireBrowserTokenForCapabilities(capabilities, '');
+  if (pairing) {
+    if (mode === 'refresh' && durableStatus?.connected) {
+      try {
+        await refreshDurableToken(pairing);
+      } catch (error) {
+        if (workerFailureRequiresReauthorization(error)) markReauthorizationRequired();
+        throw error;
+      }
+    } else {
+      await acquireDurableTokenForCapabilities(capabilities, pairing);
+    }
+  } else {
+    await acquireBrowserTokenForCapabilities(capabilities, '');
+  }
   return currentStatus();
 }
 

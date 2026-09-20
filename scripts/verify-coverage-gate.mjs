@@ -200,8 +200,17 @@ try {
   addMutation('deploy job gains unrelated write authority', 'scripts/supply-chain-gate.mjs', 'deploy job permissions changed from the reviewed minimum', (cwd) => {
     mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('      id-token: write\n    environment:', '      id-token: write\n      issues: write\n    environment:'));
   });
+  addMutation('visual evidence no longer depends on runtime certification', 'scripts/supply-chain-gate.mjs', 'visual evidence must depend on Runtime verification', (cwd) => {
+    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace(
+      "  visual-evidence:\n    name: Visual evidence\n    if: github.event_name == 'pull_request'\n    needs: runtime\n",
+      "  visual-evidence:\n    name: Visual evidence\n    if: github.event_name == 'pull_request'\n",
+    ));
+  });
   addMutation('deploy no longer depends on runtime certification', 'scripts/supply-chain-gate.mjs', 'Pages deploy must depend on Runtime verification', (cwd) => {
-    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('    needs: runtime\n', ''));
+    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace(
+      "  deploy:\n    name: Deploy certified Pages artifact\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n    needs: runtime\n",
+      "  deploy:\n    name: Deploy certified Pages artifact\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n",
+    ));
   });
   addMutation('mutable npm install in CI', 'scripts/supply-chain-gate.mjs', 'CI may not use npm install; use npm ci', (cwd) => {
     mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('npm ci --no-audit --no-fund', 'npm install'));

@@ -75,6 +75,20 @@ if (/\bnpm\s+install\b/.test(ci)) fail('CI may not use npm install; use npm ci')
 if (/\b(?:ignore-scripts|dangerously-allow-all-scripts)\b/.test(ci)) fail('CI may not bypass install-script policy');
 if (ci.includes('actions/dependency-review-action@')) fail('dependency-review action requires repository Dependency Graph and is not part of the supported CI surface');
 
+function jobSource(jobName) {
+  const lines = ci.split(/\r?\n/);
+  const jobStart = lines.findIndex((line) => line === `  ${jobName}:`);
+  if (jobStart === -1) return '';
+  let jobEnd = lines.length;
+  for (let index = jobStart + 1; index < lines.length; index += 1) {
+    if (/^ {2}[A-Za-z0-9_-]+:\s*$/.test(lines[index])) {
+      jobEnd = index;
+      break;
+    }
+  }
+  return lines.slice(jobStart, jobEnd).join('\n');
+}
+
 function permissionsForJob(jobName) {
   const lines = ci.split(/\r?\n/);
   const jobStart = lines.findIndex((line) => line === `  ${jobName}:`);
@@ -97,6 +111,10 @@ function permissionsForJob(jobName) {
 const runtimePermissions = permissionsForJob('runtime');
 if (JSON.stringify(runtimePermissions) !== JSON.stringify({ contents: 'read' })) {
   fail('runtime verification job may not have repository write authority');
+}
+const visualEvidencePermissions = permissionsForJob('visual-evidence');
+if (JSON.stringify(visualEvidencePermissions) !== JSON.stringify({ contents: 'read' })) {
+  fail('visual-evidence job may not have repository write authority');
 }
 const deployPermissions = permissionsForJob('deploy');
 if (JSON.stringify(deployPermissions) !== JSON.stringify({ contents: 'read', pages: 'write', 'id-token': 'write' })) {
@@ -124,7 +142,10 @@ for (const marker of ordered) {
   else previous = index;
 }
 if (!ci.includes("if: github.event_name == 'push' && github.ref == 'refs/heads/main'")) fail('Pages artifact must be main-push only');
-if (!ci.includes('needs: runtime')) fail('Pages deploy must depend on Runtime verification');
+const visualEvidenceJob = jobSource('visual-evidence');
+if (!visualEvidenceJob.includes('    needs: runtime')) fail('visual evidence must depend on Runtime verification');
+const deployJob = jobSource('deploy');
+if (!deployJob.includes('    needs: runtime')) fail('Pages deploy must depend on Runtime verification');
 if (!ci.includes('pages: write') || !ci.includes('id-token: write')) fail('deploy-pages job lost explicit Pages/OIDC authority');
 if (!ci.includes('environment:\n      name: github-pages')) fail('deploy-pages job must use the github-pages environment');
 

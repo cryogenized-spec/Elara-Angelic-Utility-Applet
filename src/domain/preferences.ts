@@ -71,6 +71,90 @@ export interface RoleplayPreferences {
   atmosphere: string;
 }
 
+export const MEMORY_CATEGORY_KEYS = [
+  'personal_facts',
+  'likes_dislikes',
+  'people_relationships',
+  'pets',
+  'routines_daily_life',
+  'goals_plans_commitments',
+  'interests_hobbies_projects',
+  'work_study_practical_life',
+  'important_moments_shared_history',
+  'feelings_vulnerabilities_reflections',
+  'values_worldview',
+  'health_wellbeing',
+  'money_finances',
+  'intimacy_sexuality',
+  'religion_spirituality',
+  'politics_civics',
+  'race_ethnicity',
+  'legal_criminal_history',
+  'precise_location_home',
+] as const;
+
+export type MemoryCategoryKey = (typeof MEMORY_CATEGORY_KEYS)[number];
+
+export const SENSITIVE_MEMORY_CATEGORY_KEYS = [
+  'health_wellbeing',
+  'money_finances',
+  'intimacy_sexuality',
+  'religion_spirituality',
+  'politics_civics',
+  'race_ethnicity',
+  'legal_criminal_history',
+  'precise_location_home',
+] as const satisfies readonly MemoryCategoryKey[];
+
+export type MemoryRememberingStyle = 'explicit-only' | 'selective' | 'natural' | 'attentive';
+export type MemoryRecallStyle = 'direct-only' | 'natural' | 'proactive';
+
+export interface MemoryBehaviorPreferences {
+  /**
+   * Master memory-behaviour switch. The Memory Bank remains human-manageable
+   * even when conversational recall/organic formation are disabled.
+   */
+  enabled: boolean;
+  /** Controls how readily future organic memory policy may retain user-grounded observations. */
+  rememberingStyle: MemoryRememberingStyle;
+  /** Controls how readily future conversational recall policy may surface durable memories. */
+  recallStyle: MemoryRecallStyle;
+  /**
+   * Category permissions apply to automatic/organic remembering. Explicit,
+   * confirmed user-directed memory remains a separate authority boundary.
+   */
+  categories: Readonly<Record<MemoryCategoryKey, boolean>>;
+}
+
+export const DEFAULT_MEMORY_CATEGORIES: Readonly<Record<MemoryCategoryKey, boolean>> = {
+  personal_facts: true,
+  likes_dislikes: true,
+  people_relationships: true,
+  pets: true,
+  routines_daily_life: true,
+  goals_plans_commitments: true,
+  interests_hobbies_projects: true,
+  work_study_practical_life: true,
+  important_moments_shared_history: true,
+  feelings_vulnerabilities_reflections: true,
+  values_worldview: true,
+  health_wellbeing: false,
+  money_finances: false,
+  intimacy_sexuality: false,
+  religion_spirituality: false,
+  politics_civics: false,
+  race_ethnicity: false,
+  legal_criminal_history: false,
+  precise_location_home: false,
+};
+
+export const DEFAULT_MEMORY_BEHAVIOR: MemoryBehaviorPreferences = {
+  enabled: true,
+  rememberingStyle: 'natural',
+  recallStyle: 'natural',
+  categories: DEFAULT_MEMORY_CATEGORIES,
+};
+
 export const DEFAULT_APP_UI: AppUiPreferences = {
   font: { kind: 'built-in', family: 'Inter' },
   chatTextSize: 15,

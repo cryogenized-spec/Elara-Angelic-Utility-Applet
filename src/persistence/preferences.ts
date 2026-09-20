@@ -1,6 +1,21 @@
 import Dexie, { type Table } from 'dexie';
 import { BUILT_IN_FONTS, googleFontFamilyFromCss2Url, type FontSelection } from '../ui/fontRegistry';
-import { DEFAULT_APP_UI, DEFAULT_CHAT_APPEARANCE, DEFAULT_AUTONOMY, DEFAULT_ROLEPLAY, MEDIA_PLAYER_SURFACE_PRESETS, type AppUiPreferences, type AutonomyPreferences, type ChatAppearancePreferences, type RoleplayPreferences } from '../domain/preferences';
+import {
+  DEFAULT_APP_UI,
+  DEFAULT_AUTONOMY,
+  DEFAULT_CHAT_APPEARANCE,
+  DEFAULT_MEMORY_BEHAVIOR,
+  DEFAULT_MEMORY_CATEGORIES,
+  DEFAULT_ROLEPLAY,
+  MEMORY_CATEGORY_KEYS,
+  MEDIA_PLAYER_SURFACE_PRESETS,
+  type AppUiPreferences,
+  type AutonomyPreferences,
+  type ChatAppearancePreferences,
+  type MemoryBehaviorPreferences,
+  type MemoryCategoryKey,
+  type RoleplayPreferences,
+} from '../domain/preferences';
 import { DEFAULT_MEDIA_PLAYBACK_PREFERENCE, normalizeMediaPlaybackPreference, type MediaPlaybackPreference } from '../domain/playback';
 import { normalizeGenerationActivityGlyphs } from '../ui/activity-glyphs';
 
@@ -14,6 +29,7 @@ type PreferenceRecord =
   | { id: 'app-ui'; value: AppUiPreferences; updatedAt: number }
   | { id: 'chat-appearance'; value: ChatAppearancePreferences; updatedAt: number }
   | { id: 'roleplay'; value: RoleplayPreferences; updatedAt: number }
+  | { id: 'memory-behavior'; value: MemoryBehaviorPreferences; updatedAt: number }
   | { id: 'autonomy'; value: AutonomyPreferences; updatedAt: number }
   | { id: 'media-playback'; value: MediaPlaybackPreference; updatedAt: number }
   | { id: 'youtube-policy-consent'; value: YouTubePolicyConsent; updatedAt: number }
@@ -124,6 +140,63 @@ export async function loadRoleplayPreferences(): Promise<RoleplayPreferences> {
 export async function saveRoleplayPreferences(value: RoleplayPreferences): Promise<RoleplayPreferences> {
   const nextValue = normalizeRoleplay(value);
   await db.preferences.put({ id: 'roleplay', value: nextValue, updatedAt: Date.now() });
+  return nextValue;
+}
+
+const MEMORY_REMEMBERING_STYLES: readonly MemoryBehaviorPreferences['rememberingStyle'][] = ['explicit-only', 'selective', 'natural', 'attentive'];
+const MEMORY_RECALL_STYLES: readonly MemoryBehaviorPreferences['recallStyle'][] = ['direct-only', 'natural', 'proactive'];
+
+function memoryCategorySource(value: Partial<MemoryBehaviorPreferences> | null | undefined): Partial<Record<MemoryCategoryKey, unknown>> {
+  const categories = value?.categories;
+  return categories && typeof categories === 'object'
+    ? categories as Partial<Record<MemoryCategoryKey, unknown>>
+    : {};
+}
+
+/**
+ * Normalize companion-memory behaviour independently from the durable memory
+ * records themselves. This is preference policy, not a second memory store.
+ */
+export function normalizeMemoryBehaviorPreferences(
+  value: Partial<MemoryBehaviorPreferences> | null | undefined,
+): MemoryBehaviorPreferences {
+  const categories = memoryCategorySource(value);
+  const normalizedCategories = Object.fromEntries(
+    MEMORY_CATEGORY_KEYS.map((key) => [
+      key,
+      typeof categories[key] === 'boolean' ? categories[key] : DEFAULT_MEMORY_CATEGORIES[key],
+    ]),
+  ) as Record<MemoryCategoryKey, boolean>;
+
+  const hasPersistedEnabled = value !== null
+    && value !== undefined
+    && Object.prototype.hasOwnProperty.call(value, 'enabled');
+  const enabled = hasPersistedEnabled
+    ? (typeof value!.enabled === 'boolean' ? value!.enabled : false)
+    : DEFAULT_MEMORY_BEHAVIOR.enabled;
+
+  return {
+    enabled,
+    rememberingStyle: MEMORY_REMEMBERING_STYLES.includes(value?.rememberingStyle as MemoryBehaviorPreferences['rememberingStyle'])
+      ? value!.rememberingStyle!
+      : DEFAULT_MEMORY_BEHAVIOR.rememberingStyle,
+    recallStyle: MEMORY_RECALL_STYLES.includes(value?.recallStyle as MemoryBehaviorPreferences['recallStyle'])
+      ? value!.recallStyle!
+      : DEFAULT_MEMORY_BEHAVIOR.recallStyle,
+    categories: normalizedCategories,
+  };
+}
+
+export async function loadMemoryBehaviorPreferences(): Promise<MemoryBehaviorPreferences> {
+  const record = await db.preferences.get('memory-behavior');
+  return record?.id === 'memory-behavior'
+    ? normalizeMemoryBehaviorPreferences(record.value)
+    : normalizeMemoryBehaviorPreferences(DEFAULT_MEMORY_BEHAVIOR);
+}
+
+export async function saveMemoryBehaviorPreferences(value: MemoryBehaviorPreferences): Promise<MemoryBehaviorPreferences> {
+  const nextValue = normalizeMemoryBehaviorPreferences(value);
+  await db.preferences.put({ id: 'memory-behavior', value: nextValue, updatedAt: Date.now() });
   return nextValue;
 }
 

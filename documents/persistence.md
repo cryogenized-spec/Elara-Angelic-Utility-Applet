@@ -45,6 +45,8 @@ Related correctness-sensitive writes use Dexie transactions, for example message
 
 Chat Appearance preferences remain authoritative for Generation Activity glyph selection. The selected twelve Unicode graphemes live in the existing `elara-preferences` / `chat-appearance` record and are normalized on every load/save, so no schema bump is required for older rows. Noto Emoji WOFF2 bytes live separately in CacheStorage as disposable derived data keyed by the final glyph subset. Preview never writes that cache; only the Settings-exit commit may replace the committed subset. A missing/corrupt cache is recoverable from preferences and must not change the selected glyph values.
 
+Companion memory behavior uses the same `elara-preferences` authority under record id `memory-behavior`. It stores only policy/preferences (master state, remembering/recall style, and automatic-memory category choices); canonical memories remain exclusively in `db.memories`. Missing or older partial preference shapes are normalized field-by-field, with sensitive automatic-memory categories falling back to disabled. Adding this record requires no Dexie schema bump because the existing keyed preference table already admits new ids.
+
 ## 5. Invariants
 
 - Each domain has one state authority; no shadow localStorage/IndexedDB copy may compete with it.

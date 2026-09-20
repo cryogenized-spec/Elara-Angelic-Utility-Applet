@@ -47,27 +47,27 @@ test('Memory & continuity preferences persist without erasing subordinate choice
   await expect(page.getByRole('heading', { name: 'Memory & continuity' })).toBeVisible();
 
   const master = page.getByRole('switch', { name: 'Use memory in conversation' });
-  await expect(master).toBeChecked();
+  await expect(master).toHaveAttribute('aria-checked', 'true');
   await page.getByRole('radio', { name: /Attentive/ }).click();
 
   const recallGroup = page.getByRole('radiogroup', { name: 'How Elara uses memories' });
   await recallGroup.getByRole('radio', { name: /Make connections/ }).click();
 
   const health = page.getByRole('switch', { name: 'Health & wellbeing' });
-  await expect(health).not.toBeChecked();
+  await expect(health).toHaveAttribute('aria-checked', 'false');
   await health.click();
   await master.click();
-  await expect(master).not.toBeChecked();
+  await expect(master).toHaveAttribute('aria-checked', 'false');
 
   // Persistence is local/transactional; give the serialized preference queue
   // one browser turn to settle before reconstructing the Settings tree.
   await page.waitForTimeout(120);
   await openMemoryBank(page);
 
-  await expect(page.getByRole('switch', { name: 'Use memory in conversation' })).not.toBeChecked();
-  await expect(page.getByRole('radio', { name: /Attentive/ })).toBeChecked();
-  await expect(page.getByRole('radiogroup', { name: 'How Elara uses memories' }).getByRole('radio', { name: /Make connections/ })).toBeChecked();
-  await expect(page.getByRole('switch', { name: 'Health & wellbeing' })).toBeChecked();
+  await expect(page.getByRole('switch', { name: 'Use memory in conversation' })).toHaveAttribute('aria-checked', 'false');
+  await expect(page.getByRole('radio', { name: /Attentive/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('radiogroup', { name: 'How Elara uses memories' }).getByRole('radio', { name: /Make connections/ })).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByRole('switch', { name: 'Health & wellbeing' })).toHaveAttribute('aria-checked', 'true');
   await expect(page.getByText('Existing memories stay in the Memory Bank', { exact: false })).toBeVisible();
 });
 

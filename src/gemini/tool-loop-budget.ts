@@ -74,10 +74,12 @@ export function decideToolLoopBudget(snapshot: ToolLoopBudgetSnapshot, policy: T
 }
 
 const SECRET_KEY = /(authorization|cookie|password|passwd|secret|token|api.?key|credential)/i;
+const PAGINATION_KEYS = new Set(['pageToken', 'nextPageToken', 'page_token', 'next_page_token', 'cursor', 'nextCursor']);
 const PRIORITY_KEYS = [
   'ok', 'error', 'code', 'id', 'name', 'title', 'subject', 'snippet', 'summary', 'status',
   'count', 'total', 'threadId', 'messageId', 'taskListId', 'taskId', 'scheduledDate',
-  'modifiedTime', 'createdTime', 'webViewLink', 'nextPageToken', 'trust', 'source',
+  'modifiedTime', 'createdTime', 'webViewLink', 'pageToken', 'nextPageToken', 'page_token',
+  'next_page_token', 'cursor', 'nextCursor', 'trust', 'source',
   // Bounded result collections: their children are projected recursively.
   'files', 'messages', 'threads', 'tasks', 'taskLists', 'events', 'items', 'values',
 ];
@@ -95,7 +97,7 @@ function projectValue(value: unknown, depth = 0): unknown {
   if (!value || typeof value !== 'object') return undefined;
 
   const source = value as Record<string, unknown>;
-  const keys = Object.keys(source).filter((key) => !SECRET_KEY.test(key));
+  const keys = Object.keys(source).filter((key) => PAGINATION_KEYS.has(key) || !SECRET_KEY.test(key));
   const prioritized = PRIORITY_KEYS.filter((key) => keys.includes(key)).slice(0, 10);
 
   const projected: Record<string, unknown> = {};

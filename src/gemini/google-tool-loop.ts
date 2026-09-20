@@ -414,7 +414,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           if (externalRead) {
             untrustedExternalSeen = true;
             untrustedContextSeen = true;
-          } else if (call.name === 'memory.lookup') {
+          } else if (call.name === 'memory.lookup' || call.name === 'memory.recall') {
             // Durable memory is contextual evidence. It may inform prose, but a
             // later mutation proposal must be visibly elevated for the human.
             untrustedContextSeen = true;

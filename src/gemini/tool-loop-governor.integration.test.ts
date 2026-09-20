@@ -101,16 +101,24 @@ describe('Gemini tool-loop gross-input governor', () => {
     )) collected.push(event);
 
     expect(streamReply).toHaveBeenCalledTimes(2);
-    expect(streamReply.mock.calls[1]?.[0]).toMatchObject({
+    const compactedRequest = streamReply.mock.calls[1]?.[0] as {
+      previousInteractionId?: string;
+      attachments?: readonly string[];
+      tools?: readonly string[];
+      memoryContext?: string;
+      untrustedExternalContext?: boolean;
+      input?: string;
+    };
+    expect(compactedRequest).toMatchObject({
       previousInteractionId: undefined,
       attachments: undefined,
       tools,
       memoryContext: 'none',
       untrustedExternalContext: true,
     });
-    expect(streamReply.mock.calls[1]?.[0]?.input).toContain('[APPLICATION-GENERATED INVESTIGATION CHECKPOINT]');
-    expect(streamReply.mock.calls[1]?.[0]?.input).toContain('GitHub PR #79');
-    expect(streamReply.mock.calls[1]?.[0]?.input).not.toContain('accessToken');
+    expect(compactedRequest.input).toContain('[APPLICATION-GENERATED INVESTIGATION CHECKPOINT]');
+    expect(compactedRequest.input).toContain('GitHub PR #79');
+    expect(compactedRequest.input).not.toContain('accessToken');
     expect(confirm).toHaveBeenCalledWith(expect.objectContaining({
       tool: 'tasks.createTask',
       untrustedContext: true,
@@ -192,7 +200,7 @@ describe('Gemini tool-loop gross-input governor', () => {
 
     expect(streamReply).toHaveBeenCalledOnce();
     expect(streamToolResult).toHaveBeenCalledOnce();
-    expect(collected).toContainEqual(expect.objectContaining({ type: 'text-delta', text: expect.stringContaining('local exploration budget') }));
+    expect(collected).toContainEqual(expect.objectContaining({ type: 'text-delta', text: expect.stringContaining('local exploration budget') as string }));
     expect(collected.at(-1)).toMatchObject({ type: 'completed', status: 'budget_exhausted' });
   });
 });

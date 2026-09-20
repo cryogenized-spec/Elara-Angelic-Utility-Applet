@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { FolderState } from '../persistence/folders';
-import { formatMemoryContext, isMemoryRetrievable, memoryScopeForConversation, rankAndBudgetMemories } from './retrieval';
+import { formatMemoryContext, isContinuityAnchor, isMemoryRetrievable, lexicalMemoryRelevance, memoryScopeForConversation, rankAndBudgetMemories } from './retrieval';
 import type { DurableMemory } from './types';
 
 const makeMemory = (overrides: Partial<DurableMemory>): DurableMemory => ({
@@ -38,6 +38,78 @@ describe('canonical memory retrieval engine', () => {
       makeMemory({ id: 'recent', title: 'Unrelated note', body: 'A different topic entirely.', updatedAt: 9_000 }),
     ], { query: 'dark mode', now: 10_000 });
     expect(result[0]?.id).toBe('relevant');
+  });
+
+  it('excludes zero-overlap memories from query-bearing retrieval regardless of generic salience', () => {
+    const result = rankAndBudgetMemories([
+      makeMemory({ id: 'relevant', title: 'Mother visit', body: 'The user plans to visit their mother this weekend.', importance: 0.4, confidence: 0.6 }),
+      makeMemory({ id: 'unrelated-core', kind: 'CORE', title: 'Favorite game', body: 'The user loves old role-playing games.', importance: 1, confidence: 1, pinned: true }),
+    ], { query: 'mother weekend', includeGlobal: true });
+
+    expect(result.map((memory) => memory.id)).toEqual(['relevant']);
+  });
+
+  it('ignores conversational stopwords when deciding whether memory is relevant', () => {
+    const mother = makeMemory({ id: 'mother', title: 'Mother', body: 'The user mentioned their mother.' });
+    const cat = makeMemory({ id: 'cat', title: 'Cat', body: 'The user said my cat likes tuna.' });
+
+    expect(lexicalMemoryRelevance(mother, 'what do you remember about my mother')).toBeGreaterThan(0);
+    expect(lexicalMemoryRelevance(cat, 'what do you remember about my mother')).toBe(0);
+    expect(rankAndBudgetMemories([mother, cat], { query: 'what do you remember about my mother' }).map((memory) => memory.id))
+      .toEqual(['mother']);
+  });
+
+  it('keeps query-less ranking unfiltered for explicit non-conversational ranking authorities', () => {
+    const result = rankAndBudgetMemories([
+      makeMemory({ id: 'important', importance: 1, confidence: 1 }),
+      makeMemory({ id: 'ordinary', importance: 0.1, confidence: 0.1 }),
+    ], { includeGlobal: true, query: '' });
+
+    expect(result).toHaveLength(2);
+    expect(result[0]?.id).toBe('important');
+  });
+
+  it('adds at most one established unrelated continuity anchor in proactive mode after relevant memories', () => {
+    const result = rankAndBudgetMemories([
+      makeMemory({ id: 'relevant', title: 'Garden plan', body: 'The user is planting basil in the garden.' }),
+      makeMemory({ id: 'anchor', kind: 'CORE', title: 'Long-term identity', body: 'The user values gentle daily reflection.', importance: 1, confidence: 1 }),
+      makeMemory({ id: 'second-anchor', kind: 'CORE', title: 'Another landmark', body: 'The user loves elaborate fantasy worlds.', importance: 0.8, confidence: 0.9 }),
+      makeMemory({ id: 'micro', kind: 'MICRO_OBSERVATION', title: 'Tentative note', body: 'Possibly likes red mugs.', pinned: true }),
+      makeMemory({ id: 'conflicted', kind: 'CORE', title: 'Conflicted landmark', body: 'Old uncertain identity note.', conflictingMemoryIds: ['conflict'] }),
+    ], { query: 'garden basil', includeGlobal: true, mode: 'proactive' });
+
+    expect(result[0]?.id).toBe('relevant');
+    expect(result).toHaveLength(2);
+    expect(result.map((memory) => memory.id)).toContain('anchor');
+    expect(result.map((memory) => memory.id)).not.toContain('second-anchor');
+    expect(result.map((memory) => memory.id)).not.toContain('micro');
+    expect(result.map((memory) => memory.id)).not.toContain('conflicted');
+  });
+
+  it('never lets a proactive anchor displace relevant memories from a full item budget', () => {
+    const relevant = Array.from({ length: 2 }, (_, index) => makeMemory({
+      id: `relevant-${index}`,
+      title: `Garden ${index}`,
+      body: 'Garden basil plan.',
+    }));
+    const anchor = makeMemory({ id: 'anchor', kind: 'CORE', title: 'Identity', body: 'Unrelated enduring context.', importance: 1, confidence: 1 });
+
+    const result = rankAndBudgetMemories([...relevant, anchor], {
+      query: 'garden basil',
+      mode: 'proactive',
+      maxItems: 2,
+    });
+
+    expect(result.map((memory) => memory.id).sort()).toEqual(['relevant-0', 'relevant-1']);
+  });
+
+  it('defines continuity anchors conservatively', () => {
+    expect(isContinuityAnchor(makeMemory({ kind: 'CORE' }))).toBe(true);
+    expect(isContinuityAnchor(makeMemory({ kind: 'CONTEXTUAL', importance: 0.9, confidence: 0.9 }))).toBe(true);
+    expect(isContinuityAnchor(makeMemory({ kind: 'EPISODIC', pinned: true }))).toBe(true);
+    expect(isContinuityAnchor(makeMemory({ kind: 'MICRO_OBSERVATION', pinned: true }))).toBe(false);
+    expect(isContinuityAnchor(makeMemory({ kind: 'CORE', lifecycle: 'dormant' }))).toBe(false);
+    expect(isContinuityAnchor(makeMemory({ kind: 'CORE', conflictingMemoryIds: ['x'] }))).toBe(false);
   });
 
   it('uses reinforcement and importance as bounded secondary relevance signals', () => {

@@ -121,6 +121,22 @@ describe('MemoryContinuitySettings', () => {
     expect(stored.recallStyle).toBe('proactive');
   });
 
+  it('serializes rapid changes so the newest choice wins', async () => {
+    await act(async () => {
+      radio('Selective').click();
+      radio('Attentive').click();
+      switchByLabel('Health & wellbeing').click();
+      switchByLabel('Health & wellbeing').click();
+    });
+    await waitForSaved();
+
+    const stored = await loadMemoryBehaviorPreferences();
+    expect(stored.rememberingStyle).toBe('attentive');
+    expect(stored.categories.health_wellbeing).toBe(false);
+    expect(radio('Attentive').getAttribute('aria-checked')).toBe('true');
+    expect(switchByLabel('Health & wellbeing').getAttribute('aria-checked')).toBe('false');
+  });
+
   it('preserves detailed choices while the master switch is off', async () => {
     await act(async () => { switchByLabel('Health & wellbeing').click(); });
     await waitForSaved();

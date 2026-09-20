@@ -158,10 +158,35 @@ function containsUntrustedExternal(value: unknown, depth = 0): boolean {
   return Object.values(record).some((item) => containsUntrustedExternal(item, depth + 1));
 }
 
-const UNTRUSTED_EXTERNAL_READ_PREFIXES = ['calendar.', 'tasks.', 'gmail.', 'drive.', 'docs.', 'sheets.', 'youtube.'] as const;
+const EXTERNAL_EVIDENCE_READ_PREFIXES = ['calendar.', 'tasks.', 'gmail.', 'drive.', 'docs.', 'sheets.', 'youtube.'] as const;
+const PRIVATE_EXTERNAL_READ_PREFIXES = ['calendar.', 'tasks.', 'gmail.', 'drive.', 'docs.', 'sheets.'] as const;
+const registryDescriptorByName = new Map(googleToolRegistry.map((descriptor) => [descriptor.name, descriptor]));
 
-function isUntrustedExternalReadTool(tool: string): boolean {
-  return isRegistryReadTool(tool) && UNTRUSTED_EXTERNAL_READ_PREFIXES.some((prefix) => tool.startsWith(prefix));
+function isExternalEvidenceReadTool(tool: string): boolean {
+  return isRegistryReadTool(tool) && EXTERNAL_EVIDENCE_READ_PREFIXES.some((prefix) => tool.startsWith(prefix));
+}
+
+function isPrivateExternalReadTool(tool: string): boolean {
+  return isRegistryReadTool(tool) && PRIVATE_EXTERNAL_READ_PREFIXES.some((prefix) => tool.startsWith(prefix));
+}
+
+function collectDriveSearchCandidateIds(tool: string, value: unknown, target: Set<string>): void {
+  if (tool !== 'drive.searchFiles' && tool !== 'drive.searchLibrary') return;
+  if (!value || typeof value !== 'object') return;
+  const files = (value as { files?: unknown }).files;
+  if (!Array.isArray(files)) return;
+  for (const item of files.slice(0, 200)) {
+    if (!item || typeof item !== 'object') continue;
+    const id = (item as { id?: unknown }).id;
+    if (typeof id === 'string' && id.trim()) target.add(id.trim());
+  }
+}
+
+function taintedReadContinuationAllowed(call: PendingToolCall, driveSearchCandidateIds: ReadonlySet<string>): boolean {
+  const descriptor = registryDescriptorByName.get(call.name);
+  if (descriptor?.taintedReadContinuation !== 'drive-search-file') return false;
+  const fileId = call.arguments.fileId;
+  return typeof fileId === 'string' && driveSearchCandidateIds.has(fileId.trim());
 }
 
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
@@ -215,6 +240,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   let stream = geminiTurnPort.streamReply({ ...request, tools, systemInstruction, memoryContext: 'none' }, signal);
   let executedCalls = 0;
   let toolBudgetExhausted = false;
+  const driveSearchCandidateIds = new Set<string>();
 
   while (true) {
     const pendingCalls: PendingToolCall[] = [];
@@ -275,7 +301,11 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         // may not recursively authorize broader external reads. Calls emitted
         // in the same pre-taint batch remain valid because the model had not
         // seen the returned content when it proposed them.
-        if (batchStartedExternalTainted && isUntrustedExternalReadTool(call.name)) {
+        if (
+          batchStartedExternalTainted
+          && isPrivateExternalReadTool(call.name)
+          && !taintedReadContinuationAllowed(call, driveSearchCandidateIds)
+        ) {
           results.push(errorToolResult(call, UNTRUSTED_CONTEXT_READ_BLOCK));
           continue;
         }
@@ -379,7 +409,8 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         }
         if (result.ok) {
           results.push({ callId: call.callId, name: call.name, result: result.result });
-          const externalRead = isUntrustedExternalReadTool(call.name) || containsUntrustedExternal(result.result);
+          collectDriveSearchCandidateIds(call.name, result.result, driveSearchCandidateIds);
+          const externalRead = isExternalEvidenceReadTool(call.name) || containsUntrustedExternal(result.result);
           if (externalRead) {
             untrustedExternalSeen = true;
             untrustedContextSeen = true;

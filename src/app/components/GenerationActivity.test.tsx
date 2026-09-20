@@ -251,6 +251,18 @@ describe('Generation Activity live lifecycle', () => {
 });
 
 describe('Generation Activity human-facing presentation', () => {
+  it('keeps the Lucide fallback at the same reduced scale as the Noto glyph contract', () => {
+    let state = createGenerationState('glyph-fallback-scale', { startedAt: 0 });
+    state = send(state, { type: 'step-start', index: 0, stepType: 'thought' }, 10);
+    now = 20;
+    renderLive(state);
+
+    const fallback = container.querySelector('.generation-activity__step-icon svg');
+    if (!fallback) throw new Error('expected the pre-font activity icon fallback');
+    expect(fallback.getAttribute('width')).toBe('11.55');
+    expect(fallback.getAttribute('height')).toBe('11.55');
+  });
+
   it('summarizes completed work by structural steps and tool count', () => {
     const markup = renderToStaticMarkup(<GenerationActivity record={{
       id: 'summary-counts',

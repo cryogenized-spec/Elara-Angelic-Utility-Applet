@@ -120,9 +120,10 @@ export function MemoryContinuitySettings() {
           setSaveState('saved');
         } catch (cause) {
           if (revision !== revisionRef.current) return;
-          valueRef.current = previous;
+          const restored = await loadMemoryBehaviorPreferences().catch(() => previous);
+          valueRef.current = restored;
           if (!mountedRef.current) return;
-          setValue(previous);
+          setValue(restored);
           setSaveState('error');
           setError(cause instanceof Error ? cause.message : 'Memory preferences could not be saved.');
         } finally {

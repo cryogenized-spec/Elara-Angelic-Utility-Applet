@@ -64,6 +64,7 @@ type SaveState = 'loading' | 'idle' | 'saving' | 'saved' | 'error';
 export function MemoryContinuitySettings() {
   const [value, setValue] = useState<MemoryBehaviorPreferences | null>(null);
   const valueRef = useRef<MemoryBehaviorPreferences | null>(null);
+  const mountedRef = useRef(true);
   const saveTailRef = useRef<Promise<void>>(Promise.resolve());
   const revisionRef = useRef(0);
   const [saveState, setSaveState] = useState<SaveState>('loading');
@@ -91,6 +92,7 @@ export function MemoryContinuitySettings() {
     window.addEventListener('focus', refresh);
     return () => {
       cancelled = true;
+      mountedRef.current = false;
       window.removeEventListener('focus', refresh);
     };
   }, []);
@@ -106,12 +108,14 @@ export function MemoryContinuitySettings() {
         const saved = await saveMemoryBehaviorPreferences(next);
         if (revision !== revisionRef.current) return;
         valueRef.current = saved;
+        if (!mountedRef.current) return;
         setValue(saved);
         setSaveState('saved');
       })
       .catch((cause) => {
         if (revision !== revisionRef.current) return;
         valueRef.current = previous;
+        if (!mountedRef.current) return;
         setValue(previous);
         setSaveState('error');
         setError(cause instanceof Error ? cause.message : 'Memory preferences could not be saved.');

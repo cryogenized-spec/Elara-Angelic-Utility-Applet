@@ -60,14 +60,36 @@ async function waitForServer(url, child) {
   throw new Error(`Timed out waiting for ${url}.\n${serverLog.join('')}`);
 }
 
+function signalServerTree(child, signal) {
+  if (!child || child.exitCode !== null) return;
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal);
+      return;
+    } catch {
+      // Fall through to the direct child when the process group is already gone.
+    }
+  }
+  try { child.kill(signal); } catch { /* process already exited */ }
+}
+
 async function stopServer(child) {
   if (!child || child.exitCode !== null) return;
-  child.kill('SIGTERM');
+  signalServerTree(child, 'SIGTERM');
   const stopped = await Promise.race([
     new Promise((resolveStopped) => child.once('exit', () => resolveStopped(true))),
     delay(5_000).then(() => false),
   ]);
-  if (!stopped && child.exitCode === null) child.kill('SIGKILL');
+  if (!stopped && child.exitCode === null) {
+    signalServerTree(child, 'SIGKILL');
+    await Promise.race([
+      new Promise((resolveStopped) => child.once('exit', () => resolveStopped(true))),
+      delay(2_000),
+    ]);
+  }
+  child.stdout?.destroy();
+  child.stderr?.destroy();
+  child.unref();
 }
 
 function thoughtStep(index, text) {
@@ -221,12 +243,17 @@ async function main() {
         VITE_GOOGLE_CLOUD_PROJECT_NUMBER: '123456789012',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
+      // npm spawns Vite as a child. Give the dev server its own process group
+      // so cleanup terminates the entire tree instead of leaving Vite holding
+      // the stdout/stderr pipes and keeping this evidence process alive.
+      detached: process.platform !== 'win32',
     },
   );
   server.stdout?.on('data', rememberServerLog);
   server.stderr?.on('data', rememberServerLog);
 
   await waitForServer(appUrl, server);
+  process.stdout.write(`[${label}] dev server ready at ${appUrl}\n`);
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: VIEWPORT,
@@ -242,6 +269,7 @@ async function main() {
 
   try {
     await captureGenerationActivity(page);
+    process.stdout.write(`[${label}] visual evidence captured in ${outputDir}\n`);
   } finally {
     await context.close();
     await browser.close();

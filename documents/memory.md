@@ -127,7 +127,7 @@ The preference contract contains:
 
 Everyday categories default on for personal facts, likes/dislikes, people/relationships, pets, routines/daily life, goals/plans/commitments, interests/hobbies/projects, work/study/practical life, important/shared moments, feelings/vulnerabilities/reflections, and values/worldview.
 
-Sensitive automatic-memory categories default off: health/wellbeing, money/finances, intimacy/sexuality, religion/spirituality, politics/civics, race/ethnicity, legal/criminal history, and precise location/home. Credential material remains outside this preference surface entirely and is never made eligible for organic memory.
+Sensitive automatic-memory categories default off: health/wellbeing, money/finances, intimacy/sexuality, religion/spirituality, politics/civics, race/ethnicity, legal/criminal history, and precise location/home. Credential material remains outside this preference surface entirely. A shared deterministic safety gate rejects obvious password, PIN, API-key, bearer/access-token, refresh-token and private-key material from both organic observation and model-initiated durable writes.
 
 A present but malformed persisted master switch fails closed to disabled; a genuinely absent legacy field keeps the compatibility default. Category permission governs future automatic/organic formation policy. Explicit, user-directed durable memory remains a separate confirmed authority boundary. Disabling conversational memory must not delete Memory Bank records or create a shadow copy.
 
@@ -168,6 +168,7 @@ Shared read-modify-write primitives are transactional. `updateMemory`, reinforce
 - `memory.recall` and `memory.lookup` are reads. `memory.recall` is conversational and returns no mutation reference; `memory.lookup` is management-only and may issue turn-bound opaque refs. `memory.save` and `memory.reconcile` are confirmed writes through the central executor.
 - Model arguments never control durable IDs, app provenance, conversation/message lineage, timestamps, folder scope, lifecycle, relationship arrays, expiry or autonomy consent.
 - Model-visible hard delete/forget/raw update/promote/reinforce/observe/consolidate do not exist.
+- Durable memory is not a credential vault: obvious credential-shaped content is rejected by application code for organic and model-initiated writes.
 - A model write may commit only while its originating generation remains elected.
 - One logical provider call converges on at most one logical mutation. Reusing a call identity with changed mutation arguments fails closed.
 - Tool continuations reuse one frozen memory instruction for the elected turn.

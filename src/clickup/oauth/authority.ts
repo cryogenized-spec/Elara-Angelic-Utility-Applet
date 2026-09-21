@@ -21,7 +21,7 @@ export class ClickUpOAuthError extends Error {
 function activePairing(): AutonomyPairing {
   if (typeof window === 'undefined') throw new ClickUpOAuthError('pairing', 'ClickUp requires a paired self-hosted Worker.', 0);
   const pairing = loadPairing();
-  if (!pairing) throw new ClickUpOAuthError('pairing', 'Pair this Elara installation with its Worker before connecting ClickUp.', 0);
+  if (!pairing) throw new ClickUpOAuthError('pairing', 'ClickUp requires a paired self-hosted Worker. Pair this Elara installation before connecting ClickUp.', 0);
   return pairing;
 }
 

@@ -11,6 +11,7 @@ const API = 'https://api.clickup.com/api/v2';
 let grantRevision = 0;
 
 type ProviderCounters = {
+  resourceReads: number;
   taskComments: number;
   createTask: number;
   updateTask: number;
@@ -72,8 +73,26 @@ async function internalCommand(command: unknown, revision = grantRevision): Prom
   }));
 }
 
+async function internalAttachment(workspaceId: string, taskId: string): Promise<Response> {
+  const form = new FormData();
+  form.set('workspaceId', workspaceId);
+  form.set('taskId', taskId);
+  form.set('artifactId', 'artifact-redteam');
+  form.set('filename', 'probe.txt');
+  form.set('file', new Blob(['probe'], { type: 'text/plain' }), 'probe.txt');
+  return doFetch(new Request('https://clickup-oauth-vault/internal/clickup/attachment', {
+    method: 'POST',
+    headers: {
+      'X-Elara-Internal': await internalWakeMarker(TOKEN),
+      [CLICKUP_GRANT_REVISION_HEADER]: String(grantRevision),
+    },
+    body: form,
+  }));
+}
+
 function providerFixture(): ProviderCounters {
   const counters: ProviderCounters = {
+    resourceReads: 0,
     taskComments: 0,
     createTask: 0,
     updateTask: 0,
@@ -113,12 +132,14 @@ function providerFixture(): ProviderCounters {
     }
 
     if (url.pathname === '/api/v2/team/111/space') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({
         spaces: [{ id: '1111', name: 'A Space', archived: url.searchParams.get('archived') === 'true' }],
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
 
     if (url.pathname === '/api/v2/task/task-a' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({
         id: 'task-a',
         name: 'A task',
@@ -128,6 +149,7 @@ function providerFixture(): ProviderCounters {
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.pathname === '/api/v2/task/task-b' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({
         id: 'task-b',
         name: 'SECRET_B_TASK',
@@ -138,12 +160,14 @@ function providerFixture(): ProviderCounters {
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.pathname === '/api/v2/task/missing-task' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({ ECODE: 'TASK_404', err: 'Not found' }), {
         status: 404,
         headers: { 'content-type': 'application/json' },
       });
     }
     if (url.pathname === '/api/v2/task/no-ancestry' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({
         id: 'no-ancestry',
         name: 'Provider task without Workspace ancestry',
@@ -151,6 +175,7 @@ function providerFixture(): ProviderCounters {
     }
 
     if (url.pathname === '/api/v2/folder/2223' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({
         id: '2223',
         name: 'SECRET_B_FOLDER',
@@ -158,6 +183,7 @@ function providerFixture(): ProviderCounters {
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
     if (url.pathname === '/api/v2/folder/missing-folder' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({ ECODE: 'FOLDER_404', err: 'Not found' }), {
         status: 404,
         headers: { 'content-type': 'application/json' },
@@ -165,18 +191,21 @@ function providerFixture(): ProviderCounters {
     }
 
     if (url.pathname === '/api/v2/list/1112' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({ id: '1112', name: 'A List', space: { id: '1111' } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
     }
     if (url.pathname === '/api/v2/list/2221' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({ id: '2221', name: 'SECRET_B_LIST', space: { id: '2222' } }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
     }
     if (url.pathname === '/api/v2/list/missing-list' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({ ECODE: 'LIST_404', err: 'Not found' }), {
         status: 404,
         headers: { 'content-type': 'application/json' },
@@ -184,6 +213,7 @@ function providerFixture(): ProviderCounters {
     }
 
     if (url.pathname === '/api/v2/list/1112/field' && request.method === 'GET') {
+      counters.resourceReads += 1;
       return new Response(JSON.stringify({ fields: [{ id: 'field-a', name: 'A Field' }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -193,6 +223,13 @@ function providerFixture(): ProviderCounters {
     if (url.pathname === '/api/v2/task/task-b/comment' && request.method === 'GET') {
       counters.taskComments += 1;
       return new Response(JSON.stringify({ comments: [{ id: 991, comment_text: 'SECRET_B_COMMENT' }] }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.pathname === '/api/v2/task/task-a/comment' && request.method === 'GET') {
+      counters.taskComments += 1;
+      return new Response(JSON.stringify({ comments: [{ id: 100, comment_text: 'A comment', date: 1_790_000_000_000 }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -315,8 +352,18 @@ describe('ClickUp Workspace-scoped resource authority', () => {
       fieldId: 'field-a',
       value: 'leak',
     });
+    const reply = await internalCommand({
+      operation: 'replyToComment',
+      arguments: {
+        workspaceId: '111',
+        taskId: 'task-a',
+        commentId: '991',
+        text: 'Should not reply',
+      },
+    });
+    const attachment = await internalAttachment('111', 'task-b');
 
-    for (const response of [comments, update, createInB, field]) {
+    for (const response of [comments, update, createInB, field, reply, attachment]) {
       expect(response.status).toBe(403);
       expect(await responseBody(response)).toEqual(expect.objectContaining({ code: 'resource_workspace_mismatch' }));
     }
@@ -324,6 +371,8 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     expect(counters.updateTask).toBe(0);
     expect(counters.createTask).toBe(0);
     expect(counters.setField).toBe(0);
+    expect(counters.replyComment).toBe(0);
+    expect(counters.attachment).toBe(0);
   });
 
   it('rejects cross-Workspace assignee and mention ids before writes leave the vault', async () => {
@@ -356,14 +405,25 @@ describe('ClickUp Workspace-scoped resource authority', () => {
         mentionUserIds: ['9999'],
       },
     });
+    const reply = await internalCommand({
+      operation: 'replyToComment',
+      arguments: {
+        workspaceId: '111',
+        taskId: 'task-a',
+        commentId: '100',
+        text: 'hello',
+        mentionUserIds: ['9999'],
+      },
+    });
 
-    for (const response of [create, update, comment]) {
+    for (const response of [create, update, comment, reply]) {
       expect(response.status).toBe(403);
       expect(await responseBody(response)).toEqual(expect.objectContaining({ code: 'resource_workspace_mismatch' }));
     }
     expect(counters.createTask).toBe(0);
     expect(counters.updateTask).toBe(0);
     expect(counters.createComment).toBe(0);
+    expect(counters.replyComment).toBe(0);
   });
 
   it('rejects stale grant revisions and forged internal authority before any provider resource call', async () => {

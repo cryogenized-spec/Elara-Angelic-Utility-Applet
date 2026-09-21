@@ -2,7 +2,8 @@ import type { ClickUpToolArguments } from '../../../src/clickup/tool-schema';
 
 const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
 const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token';
-const MAX_PROVIDER_BODY_CHARS = 1_250_000;
+const MAX_PROVIDER_BODY_BYTES = 1_250_000;
+const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;
 
 export interface ClickUpOAuthServerEnv {
   readonly CLICKUP_OAUTH_CLIENT_ID?: string;
@@ -42,6 +43,30 @@ export interface ClickUpWorkspaceIdentity {
   readonly id: string;
   readonly name: string;
   readonly members: readonly ClickUpUserIdentity[];
+}
+
+const EMPTY_RATE_LIMIT: ClickUpRateLimitSnapshot = Object.freeze({ limit: null, remaining: null, resetAt: null });
+
+async function providerFetch(
+  fetcher: typeof fetch,
+  input: RequestInfo | URL,
+  init: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), CLICKUP_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetcher(input, { ...init, signal: controller.signal });
+  } catch (error) {
+    const timedOut = controller.signal.aborted;
+    throw new ClickUpProviderError(
+      502,
+      timedOut ? 'timeout' : 'network',
+      timedOut ? 'ClickUp did not respond before the request deadline.' : 'ClickUp could not be reached.',
+      EMPTY_RATE_LIMIT,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function required(value: string | undefined, name: string): string {
@@ -104,7 +129,7 @@ function providerMessage(payload: unknown, status: number): string {
 async function readJsonResponse(response: Response): Promise<unknown> {
   const rateLimit = rateLimitFromHeaders(response.headers);
   const declared = Number(response.headers.get('content-length') ?? '0');
-  if (Number.isFinite(declared) && declared > MAX_PROVIDER_BODY_CHARS) {
+  if (Number.isFinite(declared) && declared > MAX_PROVIDER_BODY_BYTES) {
     throw new ClickUpProviderError(
       502,
       'response-too-large',
@@ -117,7 +142,7 @@ async function readJsonResponse(response: Response): Promise<unknown> {
   let text = '';
   if (!reader) {
     const raw = new Uint8Array(await response.arrayBuffer());
-    if (raw.byteLength > MAX_PROVIDER_BODY_CHARS) {
+    if (raw.byteLength > MAX_PROVIDER_BODY_BYTES) {
       throw new ClickUpProviderError(502, 'response-too-large', 'ClickUp returned a response larger than Elara allows.', rateLimit);
     }
     text = new TextDecoder().decode(raw);
@@ -130,7 +155,7 @@ async function readJsonResponse(response: Response): Promise<unknown> {
         if (done) break;
         if (!value?.byteLength) continue;
         total += value.byteLength;
-        if (total > MAX_PROVIDER_BODY_CHARS) {
+        if (total > MAX_PROVIDER_BODY_BYTES) {
           throw new ClickUpProviderError(502, 'response-too-large', 'ClickUp returned a response larger than Elara allows.', rateLimit);
         }
         text += decoder.decode(value, { stream: true });
@@ -165,7 +190,7 @@ async function clickupRequest<T>(
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${boundedToken(accessToken, 'access token')}`);
   headers.set('Accept', 'application/json');
-  const response = await fetcher(`${CLICKUP_API_BASE}${path}`, { ...init, headers });
+  const response = await providerFetch(fetcher, `${CLICKUP_API_BASE}${path}`, { ...init, headers });
   const payload = await readJsonResponse(response);
   const rateLimit = rateLimitFromHeaders(response.headers);
   if (!response.ok) {
@@ -179,7 +204,7 @@ export async function exchangeClickUpAuthorizationCode(
   code: string,
   fetcher: typeof fetch = fetch,
 ): Promise<string> {
-  const response = await fetcher(CLICKUP_TOKEN_ENDPOINT, {
+  const response = await providerFetch(fetcher, CLICKUP_TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({

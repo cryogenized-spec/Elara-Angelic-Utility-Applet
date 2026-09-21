@@ -1017,6 +1017,9 @@ export class ClickUpOAuthVault extends DurableObject {
     });
     if (!acceptedState) return json({ code: 'oauth_state', message: 'ClickUp OAuth state is missing, expired, replayed, or does not match this redirect.' }, 409);
 
+    const previousAccessToken = await this.accessToken().catch(() => null);
+    await this.clearStoredWebhooks(previousAccessToken);
+
     const accessToken = await exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code);
     const [account, workspaces] = await Promise.all([
       fetchAuthorizedClickUpUser(accessToken),
@@ -1044,6 +1047,11 @@ export class ClickUpOAuthVault extends DurableObject {
     this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
     clearClickUpTaskIndex(this.ctx.storage.sql);
     this.recordRateLimit(mergeRateLimits(account.rateLimit, workspaces.rateLimit));
+    await this.registerTaskIndexWebhooks(
+      accessToken,
+      workspaces.data,
+      validWebhookEndpoint(request.headers.get(CLICKUP_WEBHOOK_ENDPOINT_HEADER)),
+    );
 
     return json(this.status());
   }
@@ -1052,9 +1060,12 @@ export class ClickUpOAuthVault extends DurableObject {
     if (!emptySchema.safeParse(parseJson(body)).success) {
       return json({ code: 'validation', message: 'ClickUp disconnect payload was invalid.' }, 400);
     }
+    const token = await this.accessToken().catch(() => null);
+    await this.clearStoredWebhooks(token);
     this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
     this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
     this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+    clearClickUpTaskIndex(this.ctx.storage.sql);
     return json({ disconnected: true, providerRevoked: false });
   }
 

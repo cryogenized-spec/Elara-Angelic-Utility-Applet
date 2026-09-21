@@ -864,7 +864,7 @@ describe('direct Google OAuth authority', () => {
     expect(status.account?.email).toBe('test@example.com');
   });
 
-  it('clears stale account when interactive browser userinfo fails', async () => {
+  it('fails interactive authorization when userinfo is unavailable without treating it as an account switch', async () => {
     localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
       version: 3,
       enabledCapabilities: ['calendar.events.read'],
@@ -875,8 +875,12 @@ describe('direct Google OAuth authority', () => {
     }));
     tokenMock.mockResolvedValueOnce(token('access-new', CALENDAR_READ_SCOPE));
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
-    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    await expect(googleOAuthAuthority.authorize('calendar.events.read'))
+      .rejects.toThrow('Google account identity could not be verified');
+
     const status = await googleOAuthAuthority.getStatus();
-    expect(status.account).toBeUndefined();
+    expect(status.account?.email).toBe('old@example.com');
+    expect(status.enabledCapabilities).toContain('calendar.events.read');
   });
 });

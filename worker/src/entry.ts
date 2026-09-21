@@ -1,8 +1,10 @@
 import coreWorker, { type Env as CoreEnv } from './index';
 import { googleOAuthPreflight, handleGoogleOAuthRoute } from './google/oauth-routes';
+import { clickUpOAuthPreflight, handleClickUpOAuthRoute } from './clickup/oauth-routes';
 
 export { AutonomyEngine, RoutineRunWorkflow } from './index';
 export { GoogleOAuthVault } from './google/oauth-vault';
+export { ClickUpOAuthVault } from './clickup/oauth-vault';
 
 export interface Env extends CoreEnv {
   /** Dedicated encrypted Google refresh-token authority, one instance per installation. */
@@ -13,6 +15,14 @@ export interface Env extends CoreEnv {
   GOOGLE_OAUTH_CLIENT_SECRET?: string;
   /** High-entropy AES-GCM vault material. Wrangler secret only. */
   GOOGLE_OAUTH_VAULT_KEY?: string;
+  /** Dedicated encrypted ClickUp access-token authority, one instance per installation. */
+  CLICKUP_OAUTH?: DurableObjectNamespace;
+  /** ClickUp OAuth application client identifier. */
+  CLICKUP_OAUTH_CLIENT_ID?: string;
+  /** ClickUp OAuth application client secret. Wrangler secret only. */
+  CLICKUP_OAUTH_CLIENT_SECRET?: string;
+  /** High-entropy AES-GCM vault material. Wrangler secret only. */
+  CLICKUP_OAUTH_VAULT_KEY?: string;
 }
 
 function configuredOrigins(env: Env): readonly string[] {
@@ -40,6 +50,18 @@ function json(body: unknown, status: number, origin: string | null): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
+    if (pathname.startsWith('/clickup/oauth/')) {
+      const origin = request.headers.get('Origin');
+      const corsOrigin = allowedOrigin(request, env);
+      if (origin && !corsOrigin) return json({ code: 'authz', message: 'Origin is not authorized.' }, 403, null);
+      if (request.method === 'OPTIONS') return clickUpOAuthPreflight(corsOrigin);
+      try {
+        const response = await handleClickUpOAuthRoute(pathname, request, env, corsOrigin);
+        return response ?? json({ code: 'not_found', message: 'Not found.' }, 404, corsOrigin);
+      } catch {
+        return json({ code: 'internal', message: 'The ClickUp OAuth Worker boundary could not complete the request.' }, 500, corsOrigin);
+      }
+    }
     if (pathname.startsWith('/google/oauth/')) {
       const origin = request.headers.get('Origin');
       const corsOrigin = allowedOrigin(request, env);

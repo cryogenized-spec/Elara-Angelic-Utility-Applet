@@ -329,16 +329,15 @@ describe('ClickUpOAuthVault', () => {
   });
 
   it('does not let an in-flight OAuth exchange resurrect a grant after disconnect', async () => {
-    let tokenStarted!: () => void;
-    let releaseToken!: () => void;
-    const tokenStartedPromise = new Promise<void>((resolve) => { tokenStarted = resolve; });
-    const releaseTokenPromise = new Promise<void>((resolve) => { releaseToken = resolve; });
+    let tokenFetchStarted = false;
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
       if (request.url === TOKEN_ENDPOINT) {
-        tokenStarted();
-        await releaseTokenPromise;
+        tokenFetchStarted = true;
+        // Keep the provider request in flight using a timer owned by the same
+        // request context. Cross-context promise resolvers are illegal in workerd.
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
         return new Response(JSON.stringify({ access_token: 'late-token' }), { status: 200 });
       }
       if (request.url === USER_ENDPOINT) {
@@ -352,11 +351,13 @@ describe('ClickUpOAuthVault', () => {
 
     const begun = await start();
     const pendingExchange = exchange(begun.state, 'slow-code');
-    await tokenStartedPromise;
+    for (let attempt = 0; attempt < 100 && !tokenFetchStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(tokenFetchStarted).toBe(true);
 
     const disconnected = await doFetch(await signedWrite('/clickup/oauth/disconnect', '{}'));
     expect(disconnected.status).toBe(200);
-    releaseToken();
 
     const lateExchange = await pendingExchange;
     expect(lateExchange.status).toBe(409);

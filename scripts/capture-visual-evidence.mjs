@@ -541,11 +541,10 @@ async function captureKanban(page) {
 
   const editorMetrics = await page.evaluate(() => {
     const dialogElement = globalThis.document.querySelector('[role="dialog"]');
-    const title = globalThis.document.querySelector('input[aria-label="Title"]');
-    const dueTime = globalThis.document.querySelector('[aria-label="Due time"]');
+    const title = globalThis.document.querySelector('input[name="title"]');
+    const dueTime = globalThis.document.querySelector('input[name="dueTime"]');
     const newLabel = globalThis.document.querySelector('[aria-label="New label"]');
-    const backdrop = dialogElement?.parentElement;
-    const backdropStyle = backdrop ? globalThis.getComputedStyle(backdrop) : null;
+    const backdropStyle = dialogElement ? globalThis.getComputedStyle(dialogElement, '::backdrop') : null;
     return {
       dueTime: Boolean(dueTime),
       labels: Boolean(newLabel),

@@ -346,6 +346,13 @@ export class ClickUpOAuthVault extends DurableObject {
         received_at INTEGER NOT NULL
       )
     `);
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS clickup_connection_epoch (
+        slot INTEGER PRIMARY KEY CHECK (slot = 1),
+        epoch INTEGER NOT NULL
+      )
+    `);
+    this.ctx.storage.sql.exec('INSERT OR IGNORE INTO clickup_connection_epoch (slot, epoch) VALUES (1, 0)');
     initializeClickUpTaskIndex(this.ctx.storage.sql);
   }
 
@@ -353,6 +360,30 @@ export class ClickUpOAuthVault extends DurableObject {
     return this.ctx.storage.sql.exec<CredentialRow>(
       'SELECT access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
     ).toArray()[0] ?? null;
+  }
+
+  private connectionEpoch(): number {
+    return this.ctx.storage.sql.exec<{ epoch: number }>(
+      'SELECT epoch FROM clickup_connection_epoch WHERE slot = 1',
+    ).toArray()[0]?.epoch ?? 0;
+  }
+
+  private advanceConnectionEpoch(): number {
+    return this.ctx.storage.transactionSync(() => {
+      const next = this.connectionEpoch() + 1;
+      this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = ? WHERE slot = 1', next);
+      return next;
+    });
+  }
+
+  private deleteCredentialIfRevision(revision: number): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const current = this.credentialRow();
+      if (!current || current.updated_at !== revision) return false;
+      this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
+      this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+      return true;
+    });
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -500,8 +531,8 @@ export class ClickUpOAuthVault extends DurableObject {
   private async providerData<T>(
     run: (accessToken: string) => Promise<ClickUpProviderResult<T>>,
   ): Promise<{ ok: true; data: T } | { ok: false; response: Response }> {
-    const token = await this.accessToken();
-    if (!token) {
+    const grant = await this.accessGrant();
+    if (!grant) {
       return { ok: false, response: json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401) };
     }
     const reservation = this.reserveProviderCall();
@@ -516,15 +547,14 @@ export class ClickUpOAuthVault extends DurableObject {
       };
     }
     try {
-      const result = await run(token);
+      const result = await run(grant.token);
       this.recordRateLimit(result.rateLimit);
       return { ok: true, data: result.data };
     } catch (error) {
       if (!(error instanceof ClickUpProviderError)) throw error;
       this.recordRateLimit(error.rateLimit);
-      if (this.providerCredentialRevoked(error)) {
-        this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
-        this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+      if (this.providerCredentialRevoked(error) && this.deleteCredentialIfRevision(grant.revision)) {
+        await this.clearStoredWebhooks(null);
         clearClickUpTaskIndex(this.ctx.storage.sql);
       }
       return {
@@ -1072,6 +1102,7 @@ export class ClickUpOAuthVault extends DurableObject {
     });
     if (!acceptedState) return json({ code: 'oauth_state', message: 'ClickUp OAuth state is missing, expired, replayed, or does not match this redirect.' }, 409);
 
+    const exchangeEpoch = this.advanceConnectionEpoch();
     const previousAccessToken = await this.accessToken().catch(() => null);
     await this.clearStoredWebhooks(previousAccessToken);
 
@@ -1083,7 +1114,13 @@ export class ClickUpOAuthVault extends DurableObject {
     if (!workspaces.data.length) {
       return json({ code: 'no_workspace', message: 'ClickUp authorized no Workspaces for this integration.' }, 409);
     }
+    if (this.connectionEpoch() !== exchangeEpoch) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    }
     const encrypted = await encryptToken(this.vaultSecret(), accessToken);
+    if (this.connectionEpoch() !== exchangeEpoch) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    }
     const previous = this.credentialRow();
     const revision = Math.max(now, (previous?.updated_at ?? 0) + 1);
     this.ctx.storage.sql.exec(`
@@ -1115,6 +1152,7 @@ export class ClickUpOAuthVault extends DurableObject {
     if (!emptySchema.safeParse(parseJson(body)).success) {
       return json({ code: 'validation', message: 'ClickUp disconnect payload was invalid.' }, 400);
     }
+    this.advanceConnectionEpoch();
     const token = await this.accessToken().catch(() => null);
     await this.clearStoredWebhooks(token);
     this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
@@ -1124,10 +1162,17 @@ export class ClickUpOAuthVault extends DurableObject {
     return json({ disconnected: true, providerRevoked: false });
   }
 
-  /** Pass-3 MCP execution consumes the credential only inside this Durable Object. */
-  protected async accessToken(): Promise<string | null> {
+  /** Provider execution consumes credential material only inside this Durable Object. */
+  private async accessGrant(): Promise<{ token: string; revision: number } | null> {
     const row = this.credentialRow();
     if (!row) return null;
-    return decryptToken(this.vaultSecret(), row.access_cipher, row.access_iv);
+    return {
+      token: await decryptToken(this.vaultSecret(), row.access_cipher, row.access_iv),
+      revision: row.updated_at,
+    };
+  }
+
+  protected async accessToken(): Promise<string | null> {
+    return (await this.accessGrant())?.token ?? null;
   }
 }

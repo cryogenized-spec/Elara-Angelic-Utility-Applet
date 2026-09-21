@@ -204,17 +204,17 @@ export const clickupToolCatalog = {
   },
   'clickup.getTask': {
     risk: 'read',
-    description: 'Read one ClickUp task by provider task id inside one authorized Workspace and return a bounded normalized task projection.'
+    description: 'Read one ClickUp task by provider task id inside one authorized Workspace and return a bounded normalized task projection.',
     inputSchema: getTaskSchema,
   },
   'clickup.getTaskContext': {
     risk: 'read',
-    description: 'Read one ClickUp task inside one authorized Workspace together with bounded comments and relevant metadata so Elara can inspect a task efficiently.'
+    description: 'Read one ClickUp task inside one authorized Workspace together with bounded comments and relevant metadata so Elara can inspect a task efficiently.',
     inputSchema: getTaskContextSchema,
   },
   'clickup.getTaskComments': {
     risk: 'read',
-    description: 'Read a bounded page of comments from a task proven to belong to one authorized ClickUp Workspace, using an opaque Elara cursor.'
+    description: 'Read a bounded page of comments from a task proven to belong to one authorized ClickUp Workspace, using an opaque Elara cursor.',
     inputSchema: getTaskCommentsSchema,
   },
   'clickup.resolveAssignees': {
@@ -229,37 +229,37 @@ export const clickupToolCatalog = {
   },
   'clickup.createTask': {
     risk: 'write',
-    description: 'Create a ClickUp task in a List proven to belong to one authorized Workspace using a bounded high-level task payload.'
+    description: 'Create a ClickUp task in a List proven to belong to one authorized Workspace using a bounded high-level task payload.',
     inputSchema: createTaskSchema,
   },
   'clickup.updateTask': {
     risk: 'write',
-    description: 'Update selected fields on a task proven to belong to one authorized ClickUp Workspace, including reversible archive or unarchive. Permanent deletion is not exposed.'
+    description: 'Update selected fields on a task proven to belong to one authorized ClickUp Workspace, including reversible archive or unarchive. Permanent deletion is not exposed.',
     inputSchema: updateTaskSchema,
   },
   'clickup.createTaskComment': {
     risk: 'write',
-    description: 'Post a comment to a task proven to belong to one authorized ClickUp Workspace. Optional resolved user ids become genuine ClickUp @mentions through structured comment segments.'
+    description: 'Post a comment to a task proven to belong to one authorized ClickUp Workspace. Optional resolved user ids become genuine ClickUp @mentions through structured comment segments.',
     inputSchema: taskCommentSchema,
   },
   'clickup.replyToComment': {
     risk: 'write',
-    description: 'Reply to a comment thread after proving both the parent task Workspace and comment-to-task association, with optional genuine ClickUp @mentions.'
+    description: 'Reply to a comment thread after proving both the parent task Workspace and comment-to-task association, with optional genuine ClickUp @mentions.',
     inputSchema: replyCommentSchema,
   },
   'clickup.setCustomField': {
     risk: 'write',
-    description: 'Set or clear one Custom Field on a task proven to belong to one authorized ClickUp Workspace through the field-specific REST authority.'
+    description: 'Set or clear one Custom Field on a task proven to belong to one authorized ClickUp Workspace through the field-specific REST authority.',
     inputSchema: setCustomFieldSchema,
   },
   'clickup.attachArtifact': {
     risk: 'write',
-    description: 'Attach one Elara artifact to a task proven to belong to one authorized ClickUp Workspace. The browser supplies only an artifact reference; provider credentials remain server-side.'
+    description: 'Attach one Elara artifact to a task proven to belong to one authorized ClickUp Workspace. The browser supplies only an artifact reference; provider credentials remain server-side.',
     inputSchema: attachArtifactSchema,
   },
 } as const satisfies Record<ClickUpToolName, {
   readonly risk: ClickUpToolRisk;
-  readonly description: string;
+  readonly description: string;,
   readonly inputSchema: z.ZodType;
 }>;
 

@@ -920,26 +920,26 @@ function KanbanWorkspace({
                           ...patch,
                           scheduledDate: due || undefined,
                         });
-                    // Once Google accepted a create, convert this dialog to an
-                    // edit immediately. A later IndexedDB failure can then be
-                    // retried without issuing a second provider POST.
-                    if (isCreate) {
-                      setEditor({
-                        kind: "task",
+                    // Once Google accepts a provider write, immediately retain
+                    // its returned task/ETag in the open editor before the
+                    // fallible IndexedDB metadata commit. That makes both create
+                    // and edit retries safe after local persistence failures.
+                    setEditor({
+                      kind: "task",
+                      listId,
+                      task: {
+                        ...providerTask,
                         listId,
-                        task: {
-                          ...providerTask,
-                          listId,
-                          local: {
-                            createdAt,
-                            firstSeenAt: createdAt,
-                            dueTime: due && dueTime ? dueTime : undefined,
-                            timeZone: timeZone ?? undefined,
-                            labelIds: draftLabelIds,
-                          },
+                        local: {
+                          ...(editor.task?.local ?? {}),
+                          createdAt,
+                          firstSeenAt: editor.task?.local?.firstSeenAt ?? createdAt,
+                          dueTime: due && dueTime ? dueTime : undefined,
+                          timeZone: timeZone ?? undefined,
+                          labelIds: draftLabelIds,
                         },
-                      });
-                    }
+                      },
+                    });
                     await saveTaskLocalMetadata(
                       listId,
                       providerTask.id,

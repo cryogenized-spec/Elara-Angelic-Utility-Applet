@@ -78,7 +78,6 @@ describe('ClickUp provider wire mapping', () => {
       pull(controller) {
         emitted += 1;
         controller.enqueue(chunk);
-        if (emitted >= 3) controller.close();
       },
       cancel() {
         cancelled = true;

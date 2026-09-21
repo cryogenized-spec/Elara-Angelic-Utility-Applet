@@ -37,10 +37,19 @@ import {
   overdueMemo,
   saveRoutine,
   removeRoutine,
+  saveTaskLocalMetadata,
   syncBoard,
   type BoardTask,
   type Subroutine,
+  type TaskLabel,
 } from "../../kanban/store";
+import {
+  labelColorForName,
+  normalizeLabelName,
+  sortTasksForView,
+  type SortDirection,
+  type TaskSortField,
+} from "../../kanban/view";
 import "./kanban-screen.css";
 
 type Editor =
@@ -103,18 +112,24 @@ function KanbanWorkspace({
   );
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [sortField, setSortField] = useState<TaskSortField>("provider");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [labelFilter, setLabelFilter] = useState("all");
   const [focusedKey, setFocusedKey] = useState<string | null>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const [palette, setPalette] = useState(false);
   const [memoOpen, setMemoOpen] = useState(false);
   const [editor, setEditor] = useState<Editor>(null);
+  const [draftLabelIds, setDraftLabelIds] = useState<string[]>([]);
+  const [draftNewLabels, setDraftNewLabels] = useState<TaskLabel[]>([]);
+  const [newLabelName, setNewLabelName] = useState("");
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [removal, setRemoval] = useState<Removal | null>(null);
   const [dragged, setDragged] = useState<BoardTask | null>(null);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
-  const canReorder = !saving && !busy && filter === "all" && !query;
+  const canReorder = !saving && !busy && filter === "all" && !query && sortField === "provider" && labelFilter === "all";
   const [actionError, setActionError] = useState<string | null>(null);
   const [clock, setClock] = useState(() => Date.now());
   useEffect(() => {
@@ -191,15 +206,47 @@ function KanbanWorkspace({
       const group = groups.get(task.listId);
       if (group) group.push(task); else groups.set(task.listId, [task]);
     }
-    for (const [id, tasks] of groups) groups.set(id, orderedTasks(tasks));
+    for (const [id, tasks] of groups) {
+      groups.set(id, sortTasksForView(tasks, sortField, sortDirection, board?.syncedAt ?? 0));
+    }
     return groups;
-  }, [board?.tasks]);
+  }, [board?.tasks, board?.syncedAt, sortField, sortDirection]);
   const openCount = useMemo(() => board?.tasks.filter((task) => task.status !== 'completed').length ?? 0, [board?.tasks]);
   const openEditor = (next: Editor) => {
     setPalette(false);
     setActionError(null);
+    if (next?.kind === "task") {
+      setDraftLabelIds(next.task?.local?.labelIds ?? []);
+      setDraftNewLabels([]);
+      setNewLabelName("");
+    }
     setEditor(next);
   };
+
+  function addDraftLabel() {
+    if (!board) return;
+    const name = normalizeLabelName(newLabelName);
+    if (!name) return;
+    const allLabels = [...(board.labels ?? []), ...draftNewLabels];
+    const existing = allLabels.find((label) => label.name.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (existing) {
+      setDraftLabelIds((ids) => ids.includes(existing.id) ? ids : [...ids, existing.id].slice(0, 12));
+      setNewLabelName("");
+      return;
+    }
+    if (draftLabelIds.length >= 12) {
+      setActionError("A task can have at most 12 labels.");
+      return;
+    }
+    const label: TaskLabel = {
+      id: crypto.randomUUID(),
+      name,
+      color: labelColorForName(name),
+    };
+    setDraftNewLabels((labels) => [...labels, label]);
+    setDraftLabelIds((ids) => [...ids, label.id]);
+    setNewLabelName("");
+  }
   async function run(action: (service: ReturnType<typeof taskServiceForAccount>) => Promise<unknown>, close = false, reconcile = true) {
     if (savingRef.current || !board) return;
     const expectedAccount = board.account;
@@ -270,7 +317,8 @@ function KanbanWorkspace({
         (filter === "done" && task.status === "completed") ||
         (filter === "overdue" &&
           task.status !== "completed" &&
-          overdueDays(task.scheduledDate) > 0))
+          overdueDays(task.scheduledDate) > 0)) &&
+      (labelFilter === "all" || task.local?.labelIds.includes(labelFilter))
     );
   }
   return (
@@ -333,6 +381,34 @@ function KanbanWorkspace({
           <option value="open">Open tasks</option>
           <option value="overdue">Overdue</option>
           <option value="done">Completed</option>
+        </select>
+        <select
+          aria-label="Filter by label"
+          value={labelFilter}
+          onChange={(event) => setLabelFilter(event.target.value)}
+        >
+          <option value="all">All labels</option>
+          {(board?.labels ?? []).map((label) => (
+            <option key={label.id} value={label.id}>#{label.name}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Sort tasks by"
+          value={sortField}
+          onChange={(event) => setSortField(event.target.value as TaskSortField)}
+        >
+          <option value="provider">Google order</option>
+          <option value="created">Created / first seen</option>
+          <option value="due">Due date & time</option>
+        </select>
+        <select
+          aria-label="Sort direction"
+          value={sortDirection}
+          onChange={(event) => setSortDirection(event.target.value as SortDirection)}
+          disabled={sortField === "provider"}
+        >
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
         </select>
         <div className="kb-sync-label" role="status">
           {phase === 'waiting' ? 'Another tab is refreshing · ' : phase === 'backoff' && nextRetryAt !== null && nextRetryAt > clock ? 'Provider cooldown · ' : phase === 'offline' ? 'Offline · ' : phase === 'paused' ? 'Auto-sync paused · ' : ''}
@@ -437,6 +513,11 @@ function KanbanWorkspace({
                           }}
                           data-kanban-task-id={task.id}
                           className={`kb-card${task.status === "completed" ? " is-complete" : ""}${task.parent ? " is-child" : ""}${focusedKey === `task:${task.listId}/${task.id}` ? " is-agent-focused" : ""}`}
+                          onClick={(event) => {
+                            const target = event.target as HTMLElement;
+                            if (target.closest("button, a, input, select, textarea, [data-no-card-open]")) return;
+                            openEditor({ kind: "task", task, listId: list.id });
+                          }}
                         >
                           {task.parent && (
                             <small className="kb-parent">
@@ -509,6 +590,16 @@ function KanbanWorkspace({
                             </button>
                           </div>
                           {task.notes && <p>{task.notes}</p>}
+                          {!!task.local?.labelIds.length && (
+                            <div className="kb-card-labels" aria-label="Task labels">
+                              {task.local.labelIds.map((labelId) => {
+                                const label = (board.labels ?? []).find((item) => item.id === labelId);
+                                return label ? (
+                                  <span key={label.id} className="kb-label" data-color={label.color}>#{label.name}</span>
+                                ) : null;
+                              })}
+                            </div>
+                          )}
                           <footer>
                             {task.scheduledDate ? (
                               <span
@@ -516,6 +607,7 @@ function KanbanWorkspace({
                               >
                                 <Clock3 size={12} />
                                 {task.scheduledDate.slice(0, 10)}
+                                {task.local?.dueTime ? ` · ${task.local.dueTime}` : ""}
                                 {late ? " · Overdue" : ""}
                               </span>
                             ) : (
@@ -798,6 +890,11 @@ function KanbanWorkspace({
                 );
               } else {
                 const due = String(data.get("due") ?? "");
+                const dueTime = String(data.get("dueTime") ?? "");
+                if (dueTime && !due) {
+                  setActionError("Choose a due date before adding a due time.");
+                  return;
+                }
                 const patch = {
                   title,
                   notes: String(data.get("notes") ?? ""),
@@ -805,20 +902,37 @@ function KanbanWorkspace({
                 };
                 const listId =
                   editor.task?.listId ?? String(data.get("listId"));
+                const createdAt = editor.task ? undefined : new Date().toISOString();
+                const timeZone = due && dueTime
+                  ? Intl.DateTimeFormat().resolvedOptions().timeZone
+                  : null;
                 void run(
-                  (service) =>
-                    editor.task
-                      ? patchBoardTask(
+                  async (service) => {
+                    const providerTask = editor.task
+                      ? await patchBoardTask(
                           service,
                           listId,
                           editor.task.id,
                           patch,
                           editor.task.etag,
                         )
-                      : createBoardTask(service, listId, {
+                      : await createBoardTask(service, listId, {
                           ...patch,
                           scheduledDate: due || undefined,
-                        }),
+                        });
+                    await saveTaskLocalMetadata(
+                      listId,
+                      editor.task?.id ?? providerTask.id,
+                      {
+                        dueTime: due && dueTime ? dueTime : null,
+                        timeZone,
+                        labelIds: draftLabelIds,
+                        createdAt,
+                        upsertLabels: draftNewLabels,
+                        providerTask: editor.task ? undefined : providerTask,
+                      },
+                    );
+                  },
                   true,
                 );
               }
@@ -827,7 +941,7 @@ function KanbanWorkspace({
             <label>
               {editor.kind === "routine" ? "Subroutine name" : "Title"}
               <input
-                autoFocus
+                autoFocus={editor.kind !== "task" || !editor.task}
                 name="title"
                 required
                 maxLength={editor.kind === "task" ? 1024 : 256}
@@ -881,17 +995,77 @@ function KanbanWorkspace({
                     placeholder="Details, next steps, or a link to the source email…"
                   />
                 </label>
-                <label>
-                  Due date
-                  <input
-                    type="date"
-                    name="due"
-                    defaultValue={editor.task?.scheduledDate?.slice(0, 10)}
-                  />
-                </label>
+                <div className="kb-form-row">
+                  <label>
+                    Due date
+                    <input
+                      type="date"
+                      name="due"
+                      defaultValue={editor.task?.scheduledDate?.slice(0, 10)}
+                    />
+                  </label>
+                  <label>
+                    Due time
+                    <input
+                      type="time"
+                      name="dueTime"
+                      defaultValue={editor.task?.local?.dueTime ?? ""}
+                    />
+                  </label>
+                </div>
+                <div className="kb-label-editor">
+                  <span className="kb-label-editor__title">Labels</span>
+                  <div className="kb-label-options">
+                    {[...(board.labels ?? []), ...draftNewLabels].map((label) => {
+                      const selected = draftLabelIds.includes(label.id);
+                      return (
+                        <button
+                          key={label.id}
+                          type="button"
+                          className={selected ? "kb-label is-selected" : "kb-label"}
+                          data-color={label.color}
+                          aria-pressed={selected}
+                          onClick={() => setDraftLabelIds((ids) =>
+                            selected ? ids.filter((id) => id !== label.id) : [...ids, label.id].slice(0, 12)
+                          )}
+                        >
+                          #{label.name}
+                        </button>
+                      );
+                    })}
+                    {!board.labels?.length && !draftNewLabels.length && (
+                      <small>No labels yet. Create one below.</small>
+                    )}
+                  </div>
+                  <div className="kb-label-create">
+                    <input
+                      aria-label="New label"
+                      value={newLabelName}
+                      onChange={(event) => setNewLabelName(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          addDraftLabel();
+                        }
+                      }}
+                      placeholder="#supplier"
+                      maxLength={49}
+                    />
+                    <button type="button" onClick={addDraftLabel}>Add label</button>
+                  </div>
+                </div>
+                {editor.task && (
+                  <p className="kb-dialog-copy">
+                    Created / first seen: {new Date(
+                      editor.task.local?.createdAt
+                        ?? editor.task.local?.firstSeenAt
+                        ?? editor.task.updated
+                        ?? board.syncedAt
+                    ).toLocaleString()}
+                  </p>
+                )}
                 <p className="kb-dialog-copy">
-                  Dates follow Google Tasks’ date-only semantics. Changes save
-                  directly to Google; offline edits are not queued.
+                  Google Tasks stores the due date only. Elara keeps the due time and labels in this app’s account-scoped Kanban metadata and restores them after sync.
                 </p>
               </>
             )}

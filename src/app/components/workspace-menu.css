@@ -7,7 +7,7 @@
   align-items: center;
   justify-content: space-between;
   /* Shares the shell control cluster's geometry (layout.css): the launcher is
-     always exactly the same height as the hamburger above it. */
+     exactly the same height as the hamburger and Kanban controls above it. */
   width: 100%;
   height: var(--control-size);
   gap: 10px;

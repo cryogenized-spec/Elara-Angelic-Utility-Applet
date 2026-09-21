@@ -180,10 +180,11 @@ export function clearPairing(): void {
 }
 
 function installPairingCrossTabInvalidation(): void {
-  if (typeof window === 'undefined') return;
-  window.addEventListener('storage', (event) => {
-    if (event.key === PAIRING_KEY) sessionToken = '';
-  });
+  if (typeof window !== 'undefined') {
+    window.addEventListener('storage', (event) => {
+      if (event.key === PAIRING_KEY) sessionToken = '';
+    });
+  }
 }
 
 installPairingCrossTabInvalidation();

@@ -1,4 +1,4 @@
-import { patchBoardTask, createBoardTask } from "../../kanban/task-writes";
+import { acceptedBoardTask, patchBoardTask, createBoardTask } from "../../kanban/task-writes";
 import type { KanbanFocusTarget } from "../../kanban/focus";
 import { moveBefore, moveOne, type TaskMove } from "../../kanban/reordering";
 import { taskServiceForAccount, type TaskListSummary } from "../../kanban/google-port";
@@ -927,18 +927,15 @@ function KanbanWorkspace({
                     setEditor({
                       kind: "task",
                       listId,
-                      task: {
-                        ...providerTask,
+                      task: acceptedBoardTask(
+                        providerTask,
                         listId,
-                        local: {
-                          ...(editor.task?.local ?? {}),
-                          createdAt,
-                          firstSeenAt: editor.task?.local?.firstSeenAt ?? createdAt,
-                          dueTime: due && dueTime ? dueTime : undefined,
-                          timeZone: timeZone ?? undefined,
-                          labelIds: draftLabelIds,
-                        },
-                      },
+                        editor.task?.local,
+                        createdAt,
+                        due && dueTime ? dueTime : undefined,
+                        timeZone ?? undefined,
+                        draftLabelIds,
+                      ),
                     });
                     await saveTaskLocalMetadata(
                       listId,

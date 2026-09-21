@@ -10,6 +10,7 @@ import {
 } from '../../src/clickup/mcp-protocol';
 import { CLICKUP_TOOL_NAMES } from '../../src/clickup/tool-schema';
 import { TOKEN } from './helpers';
+import { boundedClickUpMcpResult } from '../src/clickup/mcp-route';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
 
@@ -165,6 +166,14 @@ describe('ClickUp MCP Worker boundary', () => {
         error: expect.objectContaining({ code: 'authorization_required', status: 401 }),
       }),
     }));
+  });
+
+  it('rejects aggregate structured MCP results above the Worker ceiling before transport', () => {
+    expect(() => boundedClickUpMcpResult({
+      trust: 'untrusted-external',
+      provider: 'clickup',
+      tasks: [{ description: 'x'.repeat(950 * 1024) }],
+    })).toThrowError(expect.objectContaining({ code: 'result_too_large', status: 502 }));
   });
 
   it('keeps attachArtifact fail-closed until authenticated staging exists', async () => {

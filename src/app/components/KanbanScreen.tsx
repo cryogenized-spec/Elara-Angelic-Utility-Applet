@@ -150,6 +150,7 @@ function KanbanWorkspace({
       // the target in the next frame.
       setQuery("");
       setFilter("all");
+      setLabelFilter("all");
       setFocusedKey(key);
       secondFrame = window.requestAnimationFrame(() => {
         const root = viewportRef.current;

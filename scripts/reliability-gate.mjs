@@ -217,17 +217,19 @@ while (workerStack.length) {
 }
 
 // Worker runtime must never import the browser memory store, browser
-// persistence, or browser Google OAuth authority. Server-side Google OAuth is
-// allowed only in worker/src/google/oauth-* and is pinned below as a reviewed
-// credential authority.
-const forbiddenWorkerImports = /memory\/store|persistence\/|(?:\.\.\/)+src\/google\/oauth|retrieveMemories|dexie/i;
-const serverGoogleOauthMarker = /accounts\.google\.com|googleapis\.com\/oauth|refresh_token|authorization.?code/i;
+// persistence, or browser OAuth authorities. Server-side provider OAuth is
+// allowed only inside the explicitly reviewed Google/ClickUp OAuth modules
+// pinned below as credential authorities.
+const forbiddenWorkerImports = /memory\/store|persistence\/|(?:\.\.\/)+src\/(?:google|clickup)\/oauth|retrieveMemories|dexie/i;
+const serverOauthMarker = /accounts\.google\.com|googleapis\.com\/oauth|api\.clickup\.com\/api\/v2\/oauth|refresh_token|authorization.?code/i;
 for (const path of workerSourceFiles) {
   const source = readFileSync(path, 'utf8');
   const importLines = source.split('\n').filter((line) => /^\s*(?:import|export)\s.*from\s+['"]/.test(line) || /^\s*import\s+['"]/.test(line)).join('\n');
   if (forbiddenWorkerImports.test(importLines)) throw new Error(`Reliability gate: worker module must not import browser-only concerns (memory store / persistence / browser OAuth / Dexie): ${path}`);
-  const reviewedServerOauthFile = path.includes(join('worker', 'src', 'google', 'oauth-'));
-  if (!reviewedServerOauthFile && serverGoogleOauthMarker.test(source)) throw new Error(`Reliability gate: server-side Google OAuth markers are allowed only in the reviewed worker/src/google/oauth-* authority: ${path}`);
+  const reviewedServerOauthFile = path.includes(join('worker', 'src', 'google', 'oauth-'))
+    || path.includes(join('worker', 'src', 'clickup', 'oauth-'))
+    || path.includes(join('worker', 'src', 'clickup', 'provider.ts'));
+  if (!reviewedServerOauthFile && serverOauthMarker.test(source)) throw new Error(`Reliability gate: server-side provider OAuth markers are allowed only in reviewed provider OAuth authorities: ${path}`);
   if (/from ['"]agents['"]|@cloudflare\/agents/.test(source)) throw new Error(`Reliability gate: Agents SDK must not appear: ${path}`);
   if (/cloudflare:workflows/.test(source)) throw new Error(`Reliability gate: do not import cloudflare:workflows (${path}); bind Workflows via wrangler.`);
   if (/vapid|web-push|pushManager|PushSubscription/i.test(source)) throw new Error(`Reliability gate: Web Push must not appear before Phase D: ${path}`);
@@ -243,6 +245,14 @@ if (!googleOauthVaultSource.includes("name: 'AES-GCM'") || !googleOauthVaultSour
 if (!googleOauthVaultSource.includes('google_oauth_nonces') || !googleOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: Google OAuth vault writes must be independently signed and replay-protected durably.');
 if (!googleOauthRoutesSource.includes('verifySignedWrite') || !googleOauthRoutesSource.includes('X-Requested-With')) throw new Error('Reliability gate: public Google OAuth writes must retain signed admission and popup CSRF protection.');
 if (!workerCompositionSource.includes('handleGoogleOAuthRoute') || !workerCompositionSource.includes('return coreWorker.fetch(request, env)')) throw new Error('Reliability gate: Worker composition must isolate Google OAuth routing and delegate all existing runtime traffic unchanged.');
+
+const clickUpOauthProviderSource = readFileSync(join(root, 'worker', 'src', 'clickup', 'provider.ts'), 'utf8');
+const clickUpOauthVaultSource = readFileSync(join(root, 'worker', 'src', 'clickup', 'oauth-vault.ts'), 'utf8');
+const clickUpOauthRoutesSource = readFileSync(join(root, 'worker', 'src', 'clickup', 'oauth-routes.ts'), 'utf8');
+if (!clickUpOauthProviderSource.includes('https://api.clickup.com/api/v2/oauth/token') || !clickUpOauthProviderSource.includes('CLICKUP_OAUTH_CLIENT_SECRET')) throw new Error('Reliability gate: ClickUp OAuth token exchange must remain in the reviewed Worker provider.');
+if (!clickUpOauthVaultSource.includes("name: 'AES-GCM'") || !clickUpOauthVaultSource.includes('CLICKUP_OAUTH_VAULT_KEY')) throw new Error('Reliability gate: ClickUp access tokens must remain AES-GCM encrypted with the dedicated vault key.');
+if (!clickUpOauthVaultSource.includes('clickup_oauth_nonces') || !clickUpOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: ClickUp OAuth vault writes must remain signed and replay-protected durably.');
+if (!clickUpOauthRoutesSource.includes('verifySignedWrite') || !workerCompositionSource.includes('handleClickUpOAuthRoute')) throw new Error('Reliability gate: public ClickUp OAuth writes must retain signed admission through the reviewed route.');
 
 // The scheduler seam exists and names its contracts.
 const portsSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'ports.ts'), 'utf8');

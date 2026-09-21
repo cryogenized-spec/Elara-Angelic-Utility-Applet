@@ -7,10 +7,39 @@
  */
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TopToolRail } from './TopToolRail';
 import { DEFAULT_QUICK_ACTIONS } from '../quick-actions/defaults';
 import { shortcutsForService, type WorkspaceShortcutDefinition } from '../quick-actions/shortcuts';
+import type { GoogleOAuthStatus } from '../../google/oauth/contracts';
+import { authorizeGoogleWorkspace, googleOAuthAuthority } from '../../google/oauth/authority';
+
+vi.mock('../../google/oauth/authority', () => ({
+  authorizeGoogleWorkspace: vi.fn(),
+  googleOAuthAuthority: { getStatus: vi.fn() },
+}));
+
+const disconnectedGoogleStatus = {
+  state: 'disconnected',
+  grantedCapabilities: [],
+  enabledCapabilities: [],
+  grantedProviderScopes: [],
+  sessionReady: false,
+} satisfies GoogleOAuthStatus;
+
+const staleGoogleStatus = {
+  state: 'connected',
+  grantedCapabilities: ['google.account'],
+  enabledCapabilities: ['google.account'],
+  grantedProviderScopes: ['https://www.googleapis.com/auth/userinfo.email'],
+  sessionReady: false,
+  account: { email: 'test@example.com' },
+} satisfies GoogleOAuthStatus;
+
+const onlineGoogleStatus = {
+  ...staleGoogleStatus,
+  sessionReady: true,
+} satisfies GoogleOAuthStatus;
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -33,6 +62,9 @@ function service(name: string): HTMLButtonElement {
 function shortcutButtons(): HTMLButtonElement[] { return Array.from(container.querySelectorAll('.workspace-menu__item')); }
 
 beforeEach(() => {
+  vi.mocked(googleOAuthAuthority).getStatus.mockReset();
+  vi.mocked(googleOAuthAuthority).getStatus.mockResolvedValue(disconnectedGoogleStatus);
+  vi.mocked(authorizeGoogleWorkspace).mockReset();
   container = document.createElement('div');
   document.body.appendChild(container);
   root = createRoot(container);
@@ -61,6 +93,32 @@ describe('default state', () => {
     expect(panel()).not.toBeNull();
     act(() => { trigger().click(); });
     expect(panel()).toBeNull();
+  });
+});
+
+describe('Google session indicator', () => {
+  it('refreshes a stale session from the Workspace trigger before opening shortcuts', async () => {
+    vi.mocked(googleOAuthAuthority).getStatus.mockResolvedValue(staleGoogleStatus);
+    let completeRefresh!: (status: GoogleOAuthStatus) => void;
+    vi.mocked(authorizeGoogleWorkspace).mockImplementation(() => new Promise((resolve) => {
+      completeRefresh = resolve;
+    }));
+
+    render();
+    await act(async () => { await Promise.resolve(); });
+    const indicator = container.querySelector('.workspace-trigger__google-state')!;
+    expect(indicator.getAttribute('data-state')).toBe('stale');
+
+    act(() => { trigger().click(); });
+    expect(indicator.getAttribute('data-state')).toBe('refreshing');
+    expect(panel()).toBeNull();
+
+    await act(async () => { completeRefresh(onlineGoogleStatus); });
+    expect(indicator.getAttribute('data-state')).toBe('online');
+    expect(panel()).toBeNull();
+
+    act(() => { trigger().click(); });
+    expect(panel()).not.toBeNull();
   });
 });
 

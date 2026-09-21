@@ -70,4 +70,12 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
       workspaceId,
     );
   }
+
+  forceTaskIndexIndexedAt(workspaceId: string, value: number): void {
+    this.ctx.storage.sql.exec(
+      'UPDATE clickup_task_index SET indexed_at = ? WHERE workspace_id = ?',
+      value,
+      workspaceId,
+    );
+  }
 }

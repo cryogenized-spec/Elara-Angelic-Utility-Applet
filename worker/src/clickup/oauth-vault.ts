@@ -95,6 +95,7 @@ const exchangeSchema = z.object({
 }).strict();
 
 const emptySchema = z.object({}).strict();
+const MAX_WEBHOOK_HISTORY_ITEMS = 100;
 
 const webhookPayloadSchema = z.object({
   webhook_id: z.string().trim().min(1).max(500),
@@ -165,7 +166,6 @@ const TASK_INDEX_INCREMENTAL_PAGES = 3;
 const TASK_INDEX_PROVIDER_PAGE_SIZE = 100;
 const TASK_INDEX_REFRESH_OVERLAP_MS = 5_000;
 const WEBHOOK_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60_000;
-const MAX_WEBHOOK_HISTORY_ITEMS = 100;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

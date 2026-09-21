@@ -12,6 +12,7 @@ export interface ClickUpAttachmentRouteEnv {
 }
 
 const ATTACHMENT_PATH = '/clickup/attachment';
+const INTERNAL_ATTACHMENT_PATH = '/internal/clickup/attachment';
 const MAX_MULTIPART_OVERHEAD_BYTES = 512 * 1024;
 
 function json(body: unknown, status: number, corsOrigin: string | null): Response {
@@ -71,7 +72,7 @@ export async function handleClickUpAttachmentRoute(
     const internal = new Headers();
     internal.set('Content-Type', contentType);
     internal.set(ELARA_INTERNAL_HEADER, await internalWakeMarker(installationToken));
-    const forwarded = new Request('https://clickup-oauth-vault/internal/clickup/attachment', {
+    const forwarded = new Request(`https://clickup-oauth-vault${INTERNAL_ATTACHMENT_PATH}`, {
       method: 'POST',
       headers: internal,
       body: request.body,

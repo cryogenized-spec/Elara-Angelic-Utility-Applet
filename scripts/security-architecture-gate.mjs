@@ -208,6 +208,7 @@ const oauthAuthority = read('src/google/oauth/authority.ts');
 const clickUpOAuthAuthority = read('src/clickup/oauth/authority.ts');
 const clickUpMcpClient = read('src/clickup/mcp-client.ts');
 const clickUpAttachmentUpload = read('src/clickup/attachment-upload.ts');
+const clickUpAttachmentAuthority = read('src/clickup/attachment-authority.ts');
 const clickUpOAuthVault = read('worker/src/clickup/oauth-vault.ts');
 const clickUpProvider = read('worker/src/clickup/provider.ts');
 const clickUpMcpRoute = read('worker/src/clickup/mcp-route.ts');
@@ -332,13 +333,23 @@ for (const marker of [
 }
 for (const marker of [
   "CLICKUP_ATTACHMENT_PATH = '/clickup/attachment'",
-  'artifactRepository.get',
-  'ARTIFACT_LIMITS.maxAttachmentBytes',
   'resolvePairingToken',
   "Authorization: `Bearer ${token}`",
+  'assertClickUpArtifactSnapshotCurrent',
+  'approvedArtifact.blob',
   'FormData',
 ]) {
-  if (!clickUpAttachmentUpload.includes(marker)) fail(`ClickUp browser attachment boundary is missing: ${marker}`);
+  if (!clickUpAttachmentUpload.includes(marker)) fail(`ClickUp browser attachment transport boundary is missing: ${marker}`);
+}
+for (const marker of [
+  'artifactRepository.get',
+  'ARTIFACT_LIMITS.maxAttachmentBytes',
+  "crypto.subtle.digest('SHA-256'",
+  'captureClickUpArtifactApprovalSnapshot',
+  'assertClickUpArtifactSnapshotCurrent',
+  'artifact.status !== \'ready\'',
+]) {
+  if (!clickUpAttachmentAuthority.includes(marker)) fail(`ClickUp artifact approval authority is missing: ${marker}`);
 }
 for (const marker of [
   "ATTACHMENT_PATH = '/clickup/attachment'",

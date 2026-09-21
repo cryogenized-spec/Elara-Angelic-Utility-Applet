@@ -52,6 +52,7 @@ describe('ClickUp browser artifact upload', () => {
       expect(headers.get(CLICKUP_GRANT_REVISION_HEADER)).toBe('123');
       expect(init?.body).toBeInstanceOf(FormData);
       const form = init?.body as FormData;
+      expect(form.get('workspaceId')).toBe('999');
       expect(form.get('taskId')).toBe('86task');
       expect(form.get('artifactId')).toBe('artifact-1');
       expect(form.get('filename')).toBe('repair-note.txt');
@@ -68,6 +69,7 @@ describe('ClickUp browser artifact upload', () => {
     }) as unknown as typeof fetch;
 
     const args = {
+      workspaceId: '999',
       taskId: '86task',
       artifactId: 'artifact-1',
       filename: 'repair-note.txt',
@@ -79,6 +81,7 @@ describe('ClickUp browser artifact upload', () => {
       authorityBinding: 'https://worker.example#test-installation',
     }, approvedArtifact)).resolves.toEqual({
       provider: 'clickup',
+      workspaceId: '999',
       taskId: '86task',
       artifactId: 'artifact-1',
       attachmentId: '77',
@@ -110,7 +113,7 @@ describe('ClickUp browser artifact upload', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }) as unknown as typeof fetch;
 
-    const args = { taskId: '86task', artifactId: 'artifact-generated' };
+    const args = { workspaceId: '999', taskId: '86task', artifactId: 'artifact-generated' };
     const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
     await uploadClickUpArtifact(
       args,
@@ -138,6 +141,7 @@ describe('ClickUp browser artifact upload', () => {
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
     await expect(captureClickUpArtifactApprovalSnapshot({
+      workspaceId: '999',
       taskId: '86task',
       artifactId: 'artifact-1',
     })).rejects.toMatchObject({
@@ -173,7 +177,7 @@ describe('ClickUp browser artifact upload', () => {
         data: new Blob(['replaced'], { type: 'text/plain' }),
       });
 
-    const args = { taskId: '86task', artifactId: 'artifact-1' };
+    const args = { workspaceId: '999', taskId: '86task', artifactId: 'artifact-1' };
     const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -205,7 +209,7 @@ describe('ClickUp browser artifact upload', () => {
     };
     artifactGet.mockResolvedValue(approvedArtifactRecord);
 
-    const args = { taskId: '86task', artifactId: 'artifact-1' };
+    const args = { workspaceId: '999', taskId: '86task', artifactId: 'artifact-1' };
     const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
 
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {

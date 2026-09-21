@@ -325,6 +325,18 @@ export const clickUpMcpToolDefinitions: readonly ClickUpMcpToolDefinition[] = CL
   inputSchema: clickUpToolJsonSchema(name),
 }));
 
+let clickUpCatalogFingerprintPromise: Promise<string> | null = null;
+
+export function clickUpToolCatalogFingerprint(): Promise<string> {
+  clickUpCatalogFingerprintPromise ??= crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(clickUpMcpToolDefinitions)),
+  ).then((digest) => [...new Uint8Array(digest)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join(''));
+  return clickUpCatalogFingerprintPromise;
+}
+
 /**
  * Gemini declarations generated from the exact same ClickUp catalog and Zod
  * authority as MCP tools/list. Elara's existing executable registry consumes

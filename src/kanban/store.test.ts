@@ -14,6 +14,7 @@ import {
   overdueMemo,
   saveRoutine,
   removeRoutine,
+  saveTaskLocalMetadata,
   cancelBoardSync,
   syncBoard,
   startBoardSync,
@@ -165,6 +166,64 @@ describe("snapshot reconciliation", () => {
       expect(mocks.lists).toHaveBeenCalledOnce();
     } finally { cancelBoardSync(); await pending; peer.close(); }
   });
+  it('preserves app metadata across an unambiguous cross-list move', async () => {
+    await syncBoard();
+    await saveTaskLocalMetadata('a', 't', {
+      createdAt: '2026-09-21T10:00:00.000Z',
+      dueTime: '08:30',
+      timeZone: 'Africa/Johannesburg',
+      upsertLabels: [{ id: 'label-repair', name: 'repair', color: 'violet' }],
+      labelIds: ['label-repair'],
+    });
+
+    mocks.lists.mockResolvedValue({
+      items: [
+        { id: 'a', title: 'Work' },
+        { id: 'b', title: 'Moved' },
+      ],
+    });
+    mocks.tasks.mockImplementation(async (listId: string) => ({
+      items: listId === 'b' ? [{ ...task, id: 't' }] : [],
+    }));
+
+    await syncBoard();
+    const moved = boardStore.getSnapshot().board?.tasks.find(({ id }) => id === 't');
+    expect(moved).toMatchObject({
+      listId: 'b',
+      local: {
+        createdAt: '2026-09-21T10:00:00.000Z',
+        dueTime: '08:30',
+        timeZone: 'Africa/Johannesburg',
+        labelIds: ['label-repair'],
+      },
+    });
+  });
+
+  it('clears app-only time metadata when Google removes the due date', async () => {
+    await syncBoard();
+    await saveTaskLocalMetadata('a', 't', {
+      createdAt: '2026-09-21T10:00:00.000Z',
+      dueTime: '08:30',
+      timeZone: 'Africa/Johannesburg',
+      labelIds: [],
+    });
+
+    mocks.tasks.mockResolvedValue({
+      items: [{ ...task, scheduledDate: undefined }],
+    });
+    await syncBoard();
+
+    expect(boardStore.getSnapshot().board?.tasks[0]).toMatchObject({
+      id: 't',
+      local: {
+        createdAt: '2026-09-21T10:00:00.000Z',
+        dueTime: undefined,
+        timeZone: undefined,
+        labelIds: [],
+      },
+    });
+  });
+
   it('cannot commit a stale read after another connection takes over an expired lease', async () => {
     await syncBoard();
     const peer = new Dexie('elara-kanban'); peer.version(2).stores({ boards: '&account', readSchedules: '&account' });

@@ -210,6 +210,7 @@ async function captureGenerationActivity(page) {
   const panelPath = join(outputDir, 'generation-activity-panel.png');
   await page.screenshot({ path: pagePath, fullPage: false });
   await activity.screenshot({ path: panelPath });
+  const glyphSettings = await captureGlyphSettings(page);
 
   const evidence = {
     schemaVersion: 1,
@@ -220,14 +221,82 @@ async function captureGenerationActivity(page) {
     headSha,
     viewport: VIEWPORT,
     notoEmojiReady: notoReady,
-    metrics,
+    metrics: {
+      generationActivity: metrics,
+      glyphSettings: {
+        previewReady: glyphSettings.previewReady,
+        previewStatus: glyphSettings.previewStatus,
+        rows: glyphSettings.rows,
+      },
+    },
     files: {
       page: `${label}/generation-activity-page.png`,
       panel: `${label}/generation-activity-panel.png`,
+      glyphSettingsPage: glyphSettings.files.page,
+      glyphSettingsPanel: glyphSettings.files.panel,
     },
   };
   await writeFile(join(outputDir, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
 }
+
+async function captureGlyphSettings(page) {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Appearance' }).click();
+
+  const settings = page.locator('.generation-glyph-settings');
+  await settings.waitFor({ state: 'visible', timeout: 10_000 });
+  const previewStatus = settings.getByRole('status');
+  await previewStatus
+    .filter({ hasText: /Preview renders glyphs|Noto preview is unavailable/ })
+    .waitFor({ state: 'visible', timeout: 10_000 });
+  const previewStatusText = (await previewStatus.textContent())?.trim() ?? '';
+  const previewReady = await settings.locator('.generation-glyph-setting__preview-glyph').first()
+    .getAttribute('data-ready') === 'true';
+
+  const rows = await settings.locator('.generation-glyph-setting').evaluateAll((elements) => elements.map((row) => {
+    const circle = row.querySelector('.generation-glyph-setting__preview');
+    const glyph = row.querySelector('.generation-glyph-setting__preview-glyph');
+    const label = row.querySelector('label')?.textContent?.trim() ?? '';
+    const circleBox = circle?.getBoundingClientRect();
+    const glyphBox = glyph?.getBoundingClientRect();
+    const glyphStyle = glyph ? globalThis.getComputedStyle(glyph) : null;
+    return {
+      label,
+      circle: circleBox ? {
+        width: Number(circleBox.width.toFixed(2)),
+        height: Number(circleBox.height.toFixed(2)),
+      } : null,
+      glyph: glyphBox && glyphStyle ? {
+        width: Number(glyphBox.width.toFixed(2)),
+        height: Number(glyphBox.height.toFixed(2)),
+        centerOffsetX: circleBox ? Number(((glyphBox.left + glyphBox.width / 2) - (circleBox.left + circleBox.width / 2)).toFixed(2)) : null,
+        centerOffsetY: circleBox ? Number(((glyphBox.top + glyphBox.height / 2) - (circleBox.top + circleBox.height / 2)).toFixed(2)) : null,
+        fontSize: glyphStyle.fontSize,
+        lineHeight: glyphStyle.lineHeight,
+        fontFamily: glyphStyle.fontFamily,
+        fontWeight: glyphStyle.fontWeight,
+        transform: glyphStyle.transform,
+      } : null,
+    };
+  }));
+
+  const pagePath = join(outputDir, 'generation-glyph-settings-page.png');
+  const panelPath = join(outputDir, 'generation-glyph-settings-panel.png');
+  await page.screenshot({ path: pagePath, fullPage: false });
+  await settings.screenshot({ path: panelPath });
+
+  return {
+    rows,
+    previewReady,
+    previewStatus: previewStatusText,
+    files: {
+      page: `${label}/generation-glyph-settings-page.png`,
+      panel: `${label}/generation-glyph-settings-panel.png`,
+    },
+  };
+}
+
 
 async function captureSettingsMemory(page) {
   // Deterministic Memory settings scenario: one canonical memory (present on

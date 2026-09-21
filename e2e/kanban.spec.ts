@@ -2,6 +2,35 @@ import { expect, test, type Page } from "@playwright/test";
 
 type FixtureTask = { id: string; title: string; notes?: string; due?: string | null; status: string; etag: string; position: string; assignmentInfo?: { surfaceType: 'DOCUMENT'; linkToTask?: string } };
 
+function kanbanToolTurn(interactionId: string, toolId: string, name: string, args: Record<string, unknown>): string {
+  return [
+    `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: interactionId, status: 'in_progress', model: 'gemini-3.8-flash' } })}\n\n`,
+    `event: step.start\ndata: ${JSON.stringify({ event_type: 'step.start', index: 0, step: { index: 0, type: 'function_call', id: toolId, name, arguments: args } })}\n\n`,
+    `event: step.stop\ndata: ${JSON.stringify({ event_type: 'step.stop', index: 0 })}\n\n`,
+    `event: interaction.requires_action\ndata: ${JSON.stringify({ event_type: 'interaction.requires_action', interaction_id: interactionId, status: 'requires_action' })}\n\n`,
+  ].join('');
+}
+
+function kanbanTextTurn(interactionId: string, text: string): string {
+  return [
+    `event: interaction.created\ndata: ${JSON.stringify({ event_type: 'interaction.created', interaction: { id: interactionId, status: 'in_progress', model: 'gemini-3.8-flash' } })}\n\n`,
+    `event: step.delta\ndata: ${JSON.stringify({ event_type: 'step.delta', index: 0, delta: { type: 'text', text } })}\n\n`,
+    `event: interaction.completed\ndata: ${JSON.stringify({ event_type: 'interaction.completed', interaction: { id: interactionId, status: 'completed' } })}\n\n`,
+  ].join('');
+}
+
+async function unlockKanbanGemini(page: Page) {
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Lockbox', exact: true }).click();
+  await page.getByLabel('Gemini API key').fill('e2e-kanban-agent-key');
+  await page.getByRole('textbox', { name: 'Lockbox PIN', exact: true }).fill('2846197531');
+  await page.getByRole('textbox', { name: 'Confirm Lockbox PIN', exact: true }).fill('2846197531');
+  await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
+  await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
+}
+
 async function seedWorkspace(page: Page) {
   const lists = [{ id: 'studio', title: 'Studio projects' }, { id: 'personal', title: 'Personal' }, { id: 'reading', title: 'Reading list' }, { id: 'later', title: 'Someday' }];
   const tasks: FixtureTask[] = [{ id: 'review', title: 'Review the launch proposal', notes: 'Read the source email and confirm the next steps.', due: '2020-01-01T00:00:00Z', status: 'needsAction', etag: 'one', position: '0001', assignmentInfo: { surfaceType: 'DOCUMENT', linkToTask: 'https://tasks.google.com/task/review' } }, ...Array.from({ length: 8 }, (_, index) => ({ id: `task-${index}`, title: `Project milestone ${index + 1}`, status: 'needsAction', etag: 'one', position: `000${index + 2}` }))];
@@ -41,6 +70,56 @@ async function seedWorkspace(page: Page) {
   await expect(service.getByLabel('Google Tasks write granted')).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
 }
+
+test('Gemini can focus the existing Kanban without gaining a second task mutation path', async ({ page }) => {
+  const interactionPayloads: Array<Record<string, unknown>> = [];
+  await page.route('**/v1/interactions*', async (route) => {
+    const payload = route.request().postDataJSON() as Record<string, unknown>;
+    interactionPayloads.push(payload);
+    const hasFunctionResult = Array.isArray(payload.input)
+      && (payload.input as Array<{ type?: string }>).some((entry) => entry?.type === 'function_result');
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: hasFunctionResult
+        ? kanbanTextTurn('kanban-focus-complete', 'I opened the launch proposal on your Kanban.')
+        : kanbanToolTurn('kanban-focus-call', 'focus-review', 'kanban.focus', { listId: 'studio', taskId: 'review' }),
+    });
+  });
+
+  await page.goto('');
+  await seedWorkspace(page);
+  // Materialize the canonical board projection before asking the model to focus it.
+  await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Back to chat' }).click();
+  await unlockKanbanGemini(page);
+
+  await page.getByRole('textbox', { name: 'Message Elara' }).fill('Show me the launch proposal on my Kanban.');
+  await page.getByRole('button', { name: 'Send message' }).click();
+
+  await expect(page.getByRole('region', { name: 'Task orchestration workspace' })).toBeVisible({ timeout: 15_000 });
+  const focused = page.locator('[data-kanban-task-id="review"].is-agent-focused');
+  await expect(focused).toBeVisible();
+  await expect.poll(() => interactionPayloads.length).toBeGreaterThanOrEqual(2);
+
+  const continuation = interactionPayloads.find((payload) => Array.isArray(payload.input)
+    && (payload.input as Array<{ type?: string }>).some((entry) => entry?.type === 'function_result'));
+  expect(continuation).toBeDefined();
+  const functionResult = (continuation?.input as Array<{
+    type?: string;
+    result?: Array<{ type?: string; text?: string }>;
+  }>).find((entry) => entry.type === 'function_result');
+  const resultText = functionResult?.result?.find((item) => item.type === 'text')?.text;
+  expect(resultText).toBeDefined();
+  expect(JSON.parse(resultText!)).toMatchObject({
+    workspace: 'kanban',
+    focused: true,
+    listId: 'studio',
+    taskId: 'review',
+    providerMutation: false,
+  });
+});
 
 test("kanban command palette, Google writes, memo resolution and two-axis canvas", async ({
   page,

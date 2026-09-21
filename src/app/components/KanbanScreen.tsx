@@ -1,4 +1,5 @@
 import { patchBoardTask, createBoardTask } from "../../kanban/task-writes";
+import type { KanbanFocusTarget } from "../../kanban/focus";
 import { moveBefore, moveOne, type TaskMove } from "../../kanban/reordering";
 import { taskServiceForAccount, type TaskListSummary } from "../../kanban/google-port";
 import {
@@ -90,9 +91,11 @@ function Modal({
 function KanbanWorkspace({
   onBack,
   onSettings,
+  focusTarget,
 }: {
   onBack: () => void;
   onSettings: () => void;
+  focusTarget?: KanbanFocusTarget | null;
 }) {
   const { board, busy, error, phase, nextRetryAt } = useSyncExternalStore(
     boardStore.subscribe,
@@ -100,6 +103,8 @@ function KanbanWorkspace({
   );
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState("all");
+  const [focusedKey, setFocusedKey] = useState<string | null>(null);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const [palette, setPalette] = useState(false);
   const [memoOpen, setMemoOpen] = useState(false);
   const [editor, setEditor] = useState<Editor>(null);
@@ -115,6 +120,42 @@ function KanbanWorkspace({
   useEffect(() => {
     void syncBoard("automatic");
   }, []);
+  useEffect(() => {
+    if (!focusTarget || !board) return;
+    if (!board.lists.some((list) => list.id === focusTarget.listId)) return;
+    if (focusTarget.taskId && !board.tasks.some((task) => task.listId === focusTarget.listId && task.id === focusTarget.taskId)) return;
+
+    const key = focusTarget.taskId
+      ? `task:${focusTarget.listId}/${focusTarget.taskId}`
+      : `list:${focusTarget.listId}`;
+    let secondFrame = 0;
+    let clear = 0;
+    const firstFrame = window.requestAnimationFrame(() => {
+      // Focus requests are external UI events. Apply their local presentation
+      // state from the animation callback, then let React render before finding
+      // the target in the next frame.
+      setQuery("");
+      setFilter("all");
+      setFocusedKey(key);
+      secondFrame = window.requestAnimationFrame(() => {
+        const root = viewportRef.current;
+        if (!root) return;
+        const target = focusTarget.taskId
+          ? [...root.querySelectorAll<HTMLElement>("[data-kanban-task-id]")].find((node) =>
+              node.dataset.kanbanTaskId === focusTarget.taskId &&
+              (node.closest("[data-kanban-list-id]") as HTMLElement | null)?.dataset.kanbanListId === focusTarget.listId)
+          : [...root.querySelectorAll<HTMLElement>("[data-kanban-list-id]")].find((node) =>
+              node.dataset.kanbanListId === focusTarget.listId);
+        target?.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+        clear = window.setTimeout(() => setFocusedKey((current) => current === key ? null : current), 2600);
+      });
+    });
+    return () => {
+      window.cancelAnimationFrame(firstFrame);
+      if (secondFrame) window.cancelAnimationFrame(secondFrame);
+      if (clear) window.clearTimeout(clear);
+    };
+  }, [board, focusTarget]);
   useEffect(() => {
     const now = Date.now();
     const nextDay = new Date(now);
@@ -318,6 +359,7 @@ function KanbanWorkspace({
       )}
       <div className="kb-body">
         <div
+          ref={viewportRef}
           className="kb-viewport"
           tabIndex={0}
           aria-label="Kanban canvas. Scroll horizontally and vertically to explore lists."
@@ -328,8 +370,9 @@ function KanbanWorkspace({
               const matches = tasks.filter(visible);
               return (
                 <section
-                  className="kb-column"
+                  className={`kb-column${focusedKey === `list:${list.id}` ? " is-agent-focused" : ""}`}
                   key={list.id}
+                  data-kanban-list-id={list.id}
                   aria-label={list.title}
                   style={
                     {
@@ -392,7 +435,8 @@ function KanbanWorkspace({
                             event.preventDefault();
                             dropBefore(task);
                           }}
-                          className={`kb-card${task.status === "completed" ? " is-complete" : ""}${task.parent ? " is-child" : ""}`}
+                          data-kanban-task-id={task.id}
+                          className={`kb-card${task.status === "completed" ? " is-complete" : ""}${task.parent ? " is-child" : ""}${focusedKey === `task:${task.listId}/${task.id}` ? " is-agent-focused" : ""}`}
                         >
                           {task.parent && (
                             <small className="kb-parent">
@@ -1011,7 +1055,7 @@ function KanbanWorkspace({
   );
 }
 
-export function KanbanScreen(props: { onBack: () => void; onSettings: () => void }) {
+export function KanbanScreen(props: { onBack: () => void; onSettings: () => void; focusTarget?: KanbanFocusTarget | null }) {
   const { board } = useSyncExternalStore(boardStore.subscribe, boardStore.getSnapshot);
   return <KanbanWorkspace key={board?.account ?? 'disconnected'} {...props} />;
 }

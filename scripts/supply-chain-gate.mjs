@@ -54,9 +54,11 @@ const expectedInstallScripts = [...baseline.installScriptIdentities].sort();
 same(actualInstallScripts, expectedInstallScripts, 'reviewed install-script capability inventory');
 
 const workflowFiles = readdirSync(join(root, '.github/workflows')).filter((name) => /\.ya?ml$/.test(name)).sort();
-same(workflowFiles, ['ci.yml'], 'workflow file inventory');
+same(workflowFiles, ['ci.yml', 'visual-evidence.yml'], 'workflow file inventory');
 const ci = read('.github/workflows/ci.yml');
-const actionUses = [...ci.matchAll(/\buses:\s*([^\s#]+)/g)].map((match) => match[1]);
+const visualEvidence = read('.github/workflows/visual-evidence.yml');
+const workflows = `${ci}\n${visualEvidence}`;
+const actionUses = [...workflows.matchAll(/\buses:\s*([^\s#]+)/g)].map((match) => match[1]);
 for (const action of actionUses) {
   if (!/^[^\s@]+@[0-9a-f]{40}$/.test(action)) fail(`GitHub Action is not pinned to a full SHA: ${action}`);
   if (!reviewedActions.has(action)) fail(`unreviewed GitHub Action authority: ${action}`);
@@ -65,18 +67,19 @@ for (const action of reviewedActions) if (!actionUses.includes(action)) fail(`re
 
 const checkout = 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1';
 const checkoutCount = actionUses.filter((action) => action === checkout).length;
-const persistedOff = (ci.match(/persist-credentials:\s*false/g) ?? []).length;
-const exactRefCount = (ci.match(/ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/g) ?? []).length;
-if (checkoutCount !== persistedOff || checkoutCount !== exactRefCount) fail('every checkout must use the exact event SHA and persist-credentials: false');
+const persistedOff = (workflows.match(/persist-credentials:\s*false/g) ?? []).length;
+const exactCiRefCount = (workflows.match(/ref:\s*\$\{\{ github\.event\.pull_request\.head\.sha \|\| github\.sha \}\}/g) ?? []).length;
+const exactVisualRefCount = (workflows.match(/ref:\s*\$\{\{ steps\.pr\.outputs\.head_sha \}\}/g) ?? []).length;
+if (checkoutCount !== persistedOff || checkoutCount !== exactCiRefCount + exactVisualRefCount) fail('every checkout must use an exact resolved SHA and persist-credentials: false');
 if (!ci.includes(`test "$(node --version)" = "v${baseline.node}"`)) fail('CI must assert the exact Node runtime');
 if (!ci.includes(`test "$(npm --version)" = "${baseline.npm}"`)) fail('CI must assert the exact npm runtime');
-if (/check-latest:\s*true/.test(ci)) fail('CI may not float Node via check-latest');
-if (/\bnpm\s+install\b/.test(ci)) fail('CI may not use npm install; use npm ci');
-if (/\b(?:ignore-scripts|dangerously-allow-all-scripts)\b/.test(ci)) fail('CI may not bypass install-script policy');
-if (ci.includes('actions/dependency-review-action@')) fail('dependency-review action requires repository Dependency Graph and is not part of the supported CI surface');
+if (/check-latest:\s*true/.test(workflows)) fail('workflows may not float Node via check-latest');
+if (/\bnpm\s+install\b/.test(workflows)) fail('workflows may not use npm install; use npm ci');
+if (/\b(?:ignore-scripts|dangerously-allow-all-scripts)\b/.test(workflows)) fail('workflows may not bypass install-script policy');
+if (workflows.includes('actions/dependency-review-action@')) fail('dependency-review action requires repository Dependency Graph and is not part of the supported CI surface');
 
-function jobSource(jobName) {
-  const lines = ci.split(/\r?\n/);
+function jobSource(source, jobName) {
+  const lines = source.split(/\r?\n/);
   const jobStart = lines.findIndex((line) => line === `  ${jobName}:`);
   if (jobStart === -1) return '';
   let jobEnd = lines.length;
@@ -89,8 +92,8 @@ function jobSource(jobName) {
   return lines.slice(jobStart, jobEnd).join('\n');
 }
 
-function permissionsForJob(jobName) {
-  const lines = ci.split(/\r?\n/);
+function permissionsForJob(source, jobName) {
+  const lines = source.split(/\r?\n/);
   const jobStart = lines.findIndex((line) => line === `  ${jobName}:`);
   if (jobStart === -1) return null;
   const permissionStart = lines.findIndex((line, index) => index > jobStart && line === '    permissions:');
@@ -108,24 +111,25 @@ function permissionsForJob(jobName) {
   return result;
 }
 
-const runtimePermissions = permissionsForJob('runtime');
+const runtimePermissions = permissionsForJob(ci, 'runtime');
 if (JSON.stringify(runtimePermissions) !== JSON.stringify({ contents: 'read' })) {
   fail('runtime verification job may not have repository write authority');
 }
-const visualEvidencePermissions = permissionsForJob('visual-evidence');
-if (JSON.stringify(visualEvidencePermissions) !== JSON.stringify({ contents: 'read' })) {
-  fail('visual-evidence job may not have repository write authority');
+const visualEvidencePermissions = permissionsForJob(visualEvidence, 'capture');
+if (JSON.stringify(visualEvidencePermissions) !== JSON.stringify({ contents: 'read', 'pull-requests': 'read' })) {
+  fail('visual-evidence job permissions changed from the reviewed read-only minimum');
 }
-const deployPermissions = permissionsForJob('deploy');
+const deployPermissions = permissionsForJob(ci, 'deploy');
 if (JSON.stringify(deployPermissions) !== JSON.stringify({ contents: 'read', pages: 'write', 'id-token': 'write' })) {
   fail('deploy job permissions changed from the reviewed minimum');
 }
 
-const runsOn = (ci.match(/^\s+runs-on:/gm) ?? []).length;
-const timeouts = (ci.match(/^\s+timeout-minutes:/gm) ?? []).length;
-if (runsOn !== timeouts) fail(`every CI job needs an explicit timeout: ${runsOn} jobs, ${timeouts} timeouts`);
-if (!ci.includes('permissions: {}')) fail('workflow-wide token permissions must default to none');
+const runsOn = (workflows.match(/^\s+runs-on:/gm) ?? []).length;
+const timeouts = (workflows.match(/^\s+timeout-minutes:/gm) ?? []).length;
+if (runsOn !== timeouts) fail(`every workflow job needs an explicit timeout: ${runsOn} jobs, ${timeouts} timeouts`);
+if (!ci.includes('permissions: {}') || !visualEvidence.includes('permissions: {}')) fail('workflow-wide token permissions must default to none');
 if (!ci.includes('group: ci-${{ github.workflow }}-${{ github.ref }}') || !ci.includes('cancel-in-progress: true')) fail('CI concurrency policy changed');
+if (!visualEvidence.includes('group: visual-evidence-pr-${{ github.event.issue.number || inputs.pr_number }}') || !visualEvidence.includes('cancel-in-progress: true')) fail('visual-evidence concurrency policy changed');
 
 const ordered = [
   'npm run supply-chain:check',
@@ -142,9 +146,24 @@ for (const marker of ordered) {
   else previous = index;
 }
 if (!ci.includes("if: github.event_name == 'push' && github.ref == 'refs/heads/main'")) fail('Pages artifact must be main-push only');
-const visualEvidenceJob = jobSource('visual-evidence');
-if (!visualEvidenceJob.includes('    needs: runtime')) fail('visual evidence must depend on Runtime verification');
-const deployJob = jobSource('deploy');
+const visualEvidenceJob = jobSource(visualEvidence, 'capture');
+if (!visualEvidenceJob.includes('    name: Visual evidence')) fail('visual-evidence capture job disappeared or was renamed');
+if (/^ {2}pull_request:/m.test(visualEvidence) || /^ {2}push:/m.test(visualEvidence)) fail('visual evidence must not run automatically on PR or push events');
+for (const marker of [
+  'workflow_dispatch:',
+  'issue_comment:',
+  "github.event.comment.body == '/visual-evidence'",
+  "github.event.comment.author_association == 'OWNER'",
+  "github.event.comment.author_association == 'MEMBER'",
+  "github.event.comment.author_association == 'COLLABORATOR'",
+  'gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}"',
+  'ref: ${{ steps.pr.outputs.head_sha }}',
+  'git worktree add --detach "$RUNNER_TEMP/elara-visual-base" "$BASE_SHA"',
+  'node scripts/capture-visual-evidence.mjs',
+]) {
+  if (!visualEvidence.includes(marker)) fail(`visual evidence lost explicit remote-trigger control: ${marker}`);
+}
+const deployJob = jobSource(ci, 'deploy');
 if (!deployJob.includes('    needs: runtime')) fail('Pages deploy must depend on Runtime verification');
 if (!ci.includes('pages: write') || !ci.includes('id-token: write')) fail('deploy-pages job lost explicit Pages/OIDC authority');
 if (!ci.includes('environment:\n      name: github-pages')) fail('deploy-pages job must use the github-pages environment');

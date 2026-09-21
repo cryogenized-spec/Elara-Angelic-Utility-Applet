@@ -773,7 +773,12 @@ Visual evidence is mandatory when a PR materially changes user-visible presentat
 
 Use the repository's existing visual-evidence path rather than committing screenshots to the branch.
 
-For pull requests, CI captures the same deterministic scenario against both:
+Visual evidence is **opt-in and remotely triggered only**. Ordinary PR/push CI must not generate screenshot artifacts. When a pull request materially changes presentation, explicitly trigger the dedicated visual-evidence workflow after choosing the HEAD to inspect. The supported remote triggers are:
+
+- comment exactly `/visual-evidence` on the pull request from a trusted repository collaborator; or
+- manually dispatch the `Visual Evidence` workflow with the pull-request number.
+
+The visual workflow is independent of Runtime Verification so screenshot iteration can happen immediately rather than waiting for the full certification pipeline. It resolves and records the exact PR SHAs at trigger time, then captures the same deterministic scenario against both:
 
 ```text
 BASE_SHA -> before/
@@ -801,7 +806,7 @@ Rules:
 8. If Noto/other reviewed presentation assets fail to load, record that explicitly; do not pretend a fallback screenshot proves the intended font/icon rendering.
 9. For a required visual gate, missing, unreadable, wrong-SHA or non-comparable evidence is `INCOMPLETE`, not PASS.
 
-The reviewer should retrieve the successful CI artifact when available and inspect both `before` and `after` images. When local review creates equivalent evidence instead, record the exact commands, SHAs, viewport and output paths.
+The reviewer should retrieve the successful remote visual-evidence artifact and inspect both `before` and `after` images. For material presentation changes, the absence of an explicitly triggered artifact is missing required evidence; for non-visual PRs the visual gate is `NOT_APPLICABLE`. When local review creates equivalent evidence instead, record the exact commands, SHAs, viewport and output paths.
 
 ---
 

@@ -12,6 +12,7 @@ type PwaUpdateCallback = () => void;
 let applyPendingUpdate: PwaUpdateCallback | null = null;
 let refreshCallback: PwaUpdateCallback | null = null;
 let updaterInitialized = false;
+let controllerReloadScheduled = false;
 
 /**
  * Register the service worker (prompt strategy, see vite.config.ts) with
@@ -27,6 +28,26 @@ export function initPwaUpdater(onNeedRefresh: PwaUpdateCallback): void {
   refreshCallback = onNeedRefresh;
   if (updaterInitialized) return;
   updaterInitialized = true;
+
+  // Workbox/vite-plugin-pwa's controlling event has historically depended on
+  // an isUpdate flag that can be false on a real first update. Own the browser
+  // invariant directly: if this document already had a controller, any later
+  // controllerchange means new service-worker code has claimed an old JS
+  // runtime. Reload to prevent mixed-version lazy chunks/protocol code. A
+  // first-ever installation has no prior controller and remains non-disruptive.
+  if ('serviceWorker' in navigator && navigator.serviceWorker) {
+    let hadController = Boolean(navigator.serviceWorker.controller);
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (!hadController) {
+        hadController = true;
+        return;
+      }
+      if (controllerReloadScheduled) return;
+      controllerReloadScheduled = true;
+      window.location.reload();
+    });
+  }
+
   const updateSW = registerSW({
     immediate: true,
     onNeedRefresh() {

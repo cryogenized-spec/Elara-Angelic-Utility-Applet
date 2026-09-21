@@ -66,6 +66,12 @@ export interface GeminiTurnRequest {
    * it is not serialized as a Gemini provider argument.
    */
   untrustedExternalContext?: boolean;
+  /**
+   * Untrusted application context that should elevate later mutations but must
+   * not, by itself, suppress a user-explicit private read on every fresh turn.
+   * Used for persistent ambient projections such as the Kanban overdue memo.
+   */
+  untrustedAmbientContext?: boolean;
   /** Existing app generation arbiter context for artifact-producing work. */
   generationId?: string;
   isGenerationActive?: () => boolean;

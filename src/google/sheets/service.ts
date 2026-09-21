@@ -1,7 +1,9 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
 import { boundedGoogleTransferLimit, readBoundedGoogleContent } from '../drive/transfer-boundary';
+import { readBoundedProviderJson } from '../provider-json-boundary';
 
 const SHEETS_API = 'https://sheets.googleapis.com/v4/spreadsheets';
+const MAX_PROVIDER_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_ID_LENGTH = 500;
 const MAX_RANGE_LENGTH = 500;
 const MAX_TITLE_LENGTH = 500;
@@ -11,6 +13,7 @@ const MAX_COLUMNS_PER_ROW = 100;
 const MAX_CELLS = 10_000;
 const MAX_CELL_STRING_LENGTH = 50_000;
 const MAX_REQUEST_BODY_BYTES = 1_000_000;
+const MAX_PROVIDER_SHEETS = 200;
 
 interface SpreadsheetResponse {
   spreadsheetId?: unknown;
@@ -30,6 +33,8 @@ export interface GoogleSheetValuesResult {
   range?: string;
   majorDimension?: 'ROWS' | 'COLUMNS';
   values: readonly (readonly GoogleSheetCellValue[])[];
+  readonly truncated?: boolean;
+  readonly truncationReasons?: readonly string[];
 }
 
 export type GoogleSheetCellValue = string | number | boolean | null;
@@ -63,6 +68,8 @@ export interface GoogleSpreadsheetSummary {
     rowCount?: number;
     columnCount?: number;
   }[];
+  readonly truncated?: boolean;
+  readonly truncationReasons?: readonly string[];
 }
 
 function requireText(value: string, field: string, maxLength = MAX_ID_LENGTH): string {
@@ -122,6 +129,54 @@ function normalizeValues(values: readonly (readonly unknown[])[]): readonly (rea
   return normalized;
 }
 
+function normalizeReadValues(value: unknown): {
+  values: readonly (readonly GoogleSheetCellValue[])[];
+  truncated: boolean;
+  reasons: readonly string[];
+} {
+  if (!Array.isArray(value)) return { values: [], truncated: false, reasons: [] };
+  const reasons = new Set<string>();
+  const values: GoogleSheetCellValue[][] = [];
+  let cells = 0;
+
+  if (value.length > MAX_ROWS) reasons.add('rows');
+  for (const rawRow of value.slice(0, MAX_ROWS)) {
+    if (!Array.isArray(rawRow)) {
+      reasons.add('row-shape');
+      continue;
+    }
+    if (rawRow.length > MAX_COLUMNS_PER_ROW) reasons.add('columns');
+    const row: GoogleSheetCellValue[] = [];
+    for (const rawCellValue of rawRow.slice(0, MAX_COLUMNS_PER_ROW)) {
+      const rawCell: unknown = rawCellValue;
+      if (cells >= MAX_CELLS) {
+        reasons.add('cells');
+        break;
+      }
+      cells += 1;
+      if (rawCell === null || typeof rawCell === 'boolean') {
+        row.push(rawCell);
+      } else if (typeof rawCell === 'number') {
+        if (Number.isFinite(rawCell)) row.push(rawCell);
+        else {
+          reasons.add('cell-type');
+          row.push(null);
+        }
+      } else if (typeof rawCell === 'string') {
+        if (rawCell.length > MAX_CELL_STRING_LENGTH) reasons.add('cell-text');
+        row.push(rawCell.slice(0, MAX_CELL_STRING_LENGTH));
+      } else {
+        reasons.add('cell-type');
+        row.push(null);
+      }
+    }
+    values.push(row);
+    if (cells >= MAX_CELLS) break;
+  }
+  if (cells >= MAX_CELLS && value.length > values.length) reasons.add('cells');
+  return { values, truncated: reasons.size > 0, reasons: [...reasons].sort() };
+}
+
 function boundedBatchRequests(requests: readonly Record<string, unknown>[]): readonly Record<string, unknown>[] {
   if (!requests.length) throw new Error('Google Sheets batch update requires at least one request.');
   if (requests.length > 100) throw new Error('Google Sheets batch update is limited to 100 requests per operation.');
@@ -131,18 +186,34 @@ function boundedBatchRequests(requests: readonly Record<string, unknown>[]): rea
   return requests;
 }
 
-function sheetSummaries(payload: SpreadsheetResponse): GoogleSpreadsheetSummary['sheets'] {
-  if (!Array.isArray(payload.sheets)) return [];
+function sheetSummaries(payload: SpreadsheetResponse): {
+  sheets: GoogleSpreadsheetSummary['sheets'];
+  truncated: boolean;
+  reasons: readonly string[];
+} {
+  if (!Array.isArray(payload.sheets)) return { sheets: [], truncated: false, reasons: [] };
+  const reasons = new Set<string>();
+  if (payload.sheets.length > MAX_PROVIDER_SHEETS) reasons.add('sheets');
   const result: GoogleSpreadsheetSummary['sheets'][number][] = [];
-  for (const raw of payload.sheets) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue;
+  for (const raw of payload.sheets.slice(0, MAX_PROVIDER_SHEETS)) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      reasons.add('sheet-shape');
+      continue;
+    }
     const properties = (raw as { properties?: unknown }).properties;
-    if (!properties || typeof properties !== 'object' || Array.isArray(properties)) continue;
+    if (!properties || typeof properties !== 'object' || Array.isArray(properties)) {
+      reasons.add('sheet-shape');
+      continue;
+    }
     const source = properties as Record<string, unknown>;
-    if (!Number.isInteger(source.sheetId) || typeof source.title !== 'string') continue;
+    if (!Number.isInteger(source.sheetId) || typeof source.title !== 'string') {
+      reasons.add('sheet-identity');
+      continue;
+    }
     const grid = source.gridProperties && typeof source.gridProperties === 'object' && !Array.isArray(source.gridProperties)
       ? source.gridProperties as Record<string, unknown>
       : {};
+    if (source.title.length > MAX_SHEET_TITLE_LENGTH) reasons.add('sheet-title');
     result.push({
       sheetId: source.sheetId as number,
       title: source.title.slice(0, MAX_SHEET_TITLE_LENGTH),
@@ -151,7 +222,7 @@ function sheetSummaries(payload: SpreadsheetResponse): GoogleSpreadsheetSummary[
       ...(Number.isInteger(grid.columnCount) ? { columnCount: grid.columnCount as number } : {}),
     });
   }
-  return result;
+  return { sheets: result, truncated: reasons.size > 0, reasons: [...reasons].sort() };
 }
 
 function spreadsheetSummary(payload: SpreadsheetResponse, fallbackId?: string, fallbackTitle = 'Untitled spreadsheet'): GoogleSpreadsheetSummary {
@@ -165,6 +236,12 @@ function spreadsheetSummary(payload: SpreadsheetResponse, fallbackId?: string, f
   const title = typeof properties.title === 'string' && properties.title.trim()
     ? properties.title.trim().slice(0, MAX_TITLE_LENGTH)
     : fallbackTitle;
+  const projectedSheets = sheetSummaries(payload);
+  const reasons = new Set(projectedSheets.reasons);
+  if (typeof properties.title === 'string' && properties.title.trim().length > MAX_TITLE_LENGTH) reasons.add('title');
+  if (typeof payload.spreadsheetUrl === 'string' && (!/^https:\/\/docs\.google\.com\/spreadsheets\//.test(payload.spreadsheetUrl) || payload.spreadsheetUrl.length > 2_000)) {
+    reasons.add('spreadsheetUrl');
+  }
   return {
     trust: 'untrusted-external',
     source: 'sheets',
@@ -174,7 +251,8 @@ function spreadsheetSummary(payload: SpreadsheetResponse, fallbackId?: string, f
     ...(typeof payload.spreadsheetUrl === 'string' && /^https:\/\/docs\.google\.com\/spreadsheets\//.test(payload.spreadsheetUrl) && payload.spreadsheetUrl.length <= 2_000
       ? { spreadsheetUrl: payload.spreadsheetUrl }
       : {}),
-    sheets: sheetSummaries(payload),
+    sheets: projectedSheets.sheets,
+    ...(reasons.size ? { truncated: true, truncationReasons: [...reasons].sort() } : {}),
   };
 }
 
@@ -197,14 +275,17 @@ export class GoogleSheetsService {
     const access = await this.oauth.authorize('sheets.read');
     const response = await access.fetch(`${SHEETS_API}/${id}/values/${range}?majorDimension=ROWS`);
     const payload = await this.readJson<{ range?: unknown; majorDimension?: unknown; values?: unknown }>(response);
-    const rawValues = Array.isArray(payload.values) ? payload.values.filter(Array.isArray) as readonly (readonly unknown[])[] : [];
-    const values = rawValues.length ? normalizeValues(rawValues) : [];
+    const normalized = normalizeReadValues(payload.values);
+    const reasons = new Set(normalized.reasons);
+    const projectedRange = typeof payload.range === 'string' ? payload.range.slice(0, MAX_RANGE_LENGTH) : undefined;
+    if (typeof payload.range === 'string' && payload.range.length > MAX_RANGE_LENGTH) reasons.add('range');
     return {
       trust: 'untrusted-external',
       source: 'sheets',
-      ...(typeof payload.range === 'string' ? { range: payload.range.slice(0, MAX_RANGE_LENGTH) } : {}),
+      ...(projectedRange ? { range: projectedRange } : {}),
       ...(payload.majorDimension === 'ROWS' || payload.majorDimension === 'COLUMNS' ? { majorDimension: payload.majorDimension } : {}),
-      values,
+      values: normalized.values,
+      ...(reasons.size ? { truncated: true, truncationReasons: [...reasons].sort() } : {}),
     };
   }
 
@@ -401,6 +482,6 @@ export class GoogleSheetsService {
 
   private async readJson<T>(response: Response): Promise<T> {
     if (!response.ok) throw new Error(`Google Sheets request failed (${response.status}).`);
-    return response.json() as Promise<T>;
+    return readBoundedProviderJson<T>(response, { operation: 'Google Sheets request', maxBytes: MAX_PROVIDER_JSON_BYTES });
   }
 }

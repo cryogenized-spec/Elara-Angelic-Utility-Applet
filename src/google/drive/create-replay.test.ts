@@ -38,14 +38,24 @@ describe('Google Drive create replay fence', () => {
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
-  it('fails closed when a concurrent copy of the same call id changes its arguments', async () => {
+  it('fails closed when concurrent copies of the same call id disagree on arguments', async () => {
     const operation = vi.fn(async () => ({ id: 'file-1' }));
 
-    const first = runDriveCreateOnce(baseContext, { name: 'Plan' }, operation, 1000);
-    const secondAssertion = expect(runDriveCreateOnce(baseContext, { name: 'Other' }, operation, 1000)).rejects.toThrow(/changed arguments/i);
+    // SHA-256 signatures are computed asynchronously, so either concurrent
+    // caller may establish the canonical replay entry first. The invariant is
+    // one provider create and one fail-closed changed-arguments result.
+    const results = await Promise.allSettled([
+      runDriveCreateOnce(baseContext, { name: 'Plan' }, operation, 1000),
+      runDriveCreateOnce(baseContext, { name: 'Other' }, operation, 1000),
+    ]);
 
-    await expect(first).resolves.toEqual({ id: 'file-1' });
-    await secondAssertion;
+    expect(results.filter((result) => result.status === 'fulfilled')).toEqual([
+      expect.objectContaining({ status: 'fulfilled', value: { id: 'file-1' } }),
+    ]);
+    const rejected = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0]?.reason).toBeInstanceOf(Error);
+    expect((rejected[0]?.reason as Error).message).toMatch(/changed arguments/i);
     expect(operation).toHaveBeenCalledTimes(1);
   });
 

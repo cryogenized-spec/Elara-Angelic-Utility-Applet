@@ -14,6 +14,7 @@ vi.mock('@google/genai', () => ({
 }));
 
 import worker from '../src/index';
+import { GEMINI_STREAM_LIMITS } from '../../src/gemini/stream-limits';
 
 describe('Gemini Worker boundary', () => {
   const baseEnv = {
@@ -300,4 +301,68 @@ describe('Gemini Worker boundary', () => {
     expect(deleteFile).toHaveBeenCalledWith({ name: 'files/vtt-test' });
     expect(JSON.stringify(body)).not.toContain('test-secret-key');
   });
+
+  it('rejects an oversized authenticated Gemini request before JSON parsing or provider execution', async () => {
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-installation-token',
+      },
+      body: 'x'.repeat((2 * 1024 * 1024) + 1),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      code: 'validation',
+      message: 'Gemini request body is too large.',
+    });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('keeps an oversized Worker function-argument stream invalid after later valid JSON fragments', async () => {
+    createInteraction.mockResolvedValue((async function* () {
+      yield { event_type: 'interaction.created', interaction: { id: 'interaction-arg-limit', status: 'in_progress', model: 'gemini-3-flash-preview' } };
+      yield { event_type: 'step.start', interaction_id: 'interaction-arg-limit', index: 0, step: { type: 'function_call', id: 'call-arg-limit', name: 'tasks.listTaskLists' } };
+      yield { event_type: 'step.delta', interaction_id: 'interaction-arg-limit', index: 0, delta: { type: 'arguments_delta', arguments: 'x'.repeat(GEMINI_STREAM_LIMITS.maxFunctionArgumentChars + 1) } };
+      yield { event_type: 'step.delta', interaction_id: 'interaction-arg-limit', index: 0, delta: { type: 'arguments_delta', arguments: '{}' } };
+      yield { event_type: 'step.stop', interaction_id: 'interaction-arg-limit', index: 0 };
+    })());
+
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona', tools: ['tasks.listTaskLists'] }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain('Gemini produced an invalid or oversized function-call argument stream.');
+    expect(text).not.toContain('event: tool-call');
+  });
+
+  it('fails the Worker relay closed before emitting an oversized provider text delta', async () => {
+    createInteraction.mockResolvedValue((async function* () {
+      yield { event_type: 'interaction.created', interaction: { id: 'interaction-limit', status: 'in_progress', model: 'gemini-3-flash-preview' } };
+      yield { event_type: 'step.delta', interaction_id: 'interaction-limit', index: 0, delta: { type: 'text', text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxTextChars + 1) } };
+    })());
+
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain('Gemini response exceeded the live text safety limit.');
+    expect(text).not.toContain('x'.repeat(1024));
+  });
+
 });

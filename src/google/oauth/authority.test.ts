@@ -297,6 +297,23 @@ describe('direct Google OAuth authority', () => {
     expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['drive.files.app.read', 'docs.read', 'sheets.read', 'calendar.events.read']));
   });
 
+  it('keeps an equivalent sibling-tab grant from discarding a valid browser token', async () => {
+    installUserinfoFetch('same-account@example.com');
+    tokenMock.mockResolvedValueOnce(token('access-same-account', CALENDAR_READ_SCOPE));
+    await googleOAuthAuthority.authorize('calendar.events.read');
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(true);
+
+    const key = 'elara.google.authorization.v2';
+    const priorRaw = localStorage.getItem(key) ?? '';
+    const shared = JSON.parse(priorRaw) as { updatedAt?: string };
+    shared.updatedAt = new Date(Date.now() + 1_000).toISOString();
+    const nextRaw = JSON.stringify(shared);
+    localStorage.setItem(key, nextRaw);
+    window.dispatchEvent(new StorageEvent('storage', { key, oldValue: priorRaw, newValue: nextRaw }));
+
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(true);
+  });
+
   it('invalidates a browser token when another tab changes the shared Google account', async () => {
     installUserinfoFetch('account-a@example.com');
     tokenMock.mockResolvedValueOnce(token('access-account-a', CALENDAR_READ_SCOPE));
@@ -864,7 +881,7 @@ describe('direct Google OAuth authority', () => {
     expect(status.account?.email).toBe('test@example.com');
   });
 
-  it('clears stale account when interactive browser userinfo fails', async () => {
+  it('fails interactive authorization when userinfo is unavailable without treating it as an account switch', async () => {
     localStorage.setItem('elara.google.authorization.v2', JSON.stringify({
       version: 3,
       enabledCapabilities: ['calendar.events.read'],
@@ -875,8 +892,12 @@ describe('direct Google OAuth authority', () => {
     }));
     tokenMock.mockResolvedValueOnce(token('access-new', CALENDAR_READ_SCOPE));
     globalThis.fetch = vi.fn().mockResolvedValue(new Response('forbidden', { status: 403 })) as unknown as typeof fetch;
-    await googleOAuthAuthority.authorize('calendar.events.read');
+
+    await expect(googleOAuthAuthority.authorize('calendar.events.read'))
+      .rejects.toThrow('Google account identity could not be verified');
+
     const status = await googleOAuthAuthority.getStatus();
-    expect(status.account).toBeUndefined();
+    expect(status.account?.email).toBe('old@example.com');
+    expect(status.enabledCapabilities).toContain('calendar.events.read');
   });
 });

@@ -15,6 +15,8 @@ import { memoryToolHandlers } from '../memory/tool-handler';
 import { kanbanToolHandlers } from '../kanban/agent-tools';
 import { clickUpToolHandlers } from '../clickup/tool-handlers';
 import { clickUpOAuthAuthority } from '../clickup/oauth/authority';
+import { clickupToolNameSchema } from '../clickup/tool-schema';
+import type { ClickUpExecutionGrant } from '../clickup/oauth/contracts';
 import { isMediaItem, isMediaProviderId } from '../domain/media';
 import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
 import { isConfirmationFresh } from '../google/confirmation/policy';
@@ -500,9 +502,25 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     // Admission for the entire mutation batch finishes before any confirmation
     // timestamp is minted. A later OAuth consent flow must not age an earlier
     // confirmation before the user has even seen the grouped approval UI.
-    const mutationEntries: Array<{ call: PendingToolCall; confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>> }> = [];
+    const mutationEntries: Array<{
+      call: PendingToolCall;
+      confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>>;
+      clickupGrant?: ClickUpExecutionGrant;
+    }> = [];
     const confirmationNow = executeOptions.now?.() ?? new Date();
     for (const call of admittedMutationCalls) {
+      let clickupGrant: ClickUpExecutionGrant | undefined;
+      if (clickupToolNameSchema.safeParse(call.name).success) {
+        try {
+          clickupGrant = await executeOptions.clickupOAuth?.getExecutionGrant();
+        } catch {
+          clickupGrant = undefined;
+        }
+        if (!clickupGrant?.status.connected || clickupGrant.revision <= 0) {
+          results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
+          continue;
+        }
+      }
       const baseConfirmation = confirmationRequestForCall(call, confirmationNow, {
         conversationId: executeOptions.conversationId,
         messageId: executeOptions.messageId,
@@ -511,7 +529,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       const confirmation = baseConfirmation && batchStartedTainted
         ? { ...baseConfirmation, untrustedContext: true as const }
         : baseConfirmation;
-      if (confirmation) mutationEntries.push({ call, confirmation });
+      if (confirmation) mutationEntries.push({ call, confirmation, ...(clickupGrant ? { clickupGrant } : {}) });
       else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));
     }
 
@@ -615,7 +633,11 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(entry.call, 'USER_DECLINED'));
         continue;
       }
-      const result = await executeGoogleTool(entry.call, { ...executeOptions, confirm: async () => true });
+      const result = await executeGoogleTool(entry.call, {
+        ...executeOptions,
+        ...(entry.clickupGrant ? { expectedClickUpGrant: entry.clickupGrant } : {}),
+        confirm: async () => true,
+      });
       if (signal?.aborted || request.isGenerationActive?.() === false) {
         yield { type: 'cancelled', ...(interactionId ? { interactionId } : {}) };
         return;

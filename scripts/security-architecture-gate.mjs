@@ -416,6 +416,14 @@ for (const marker of [
   'initializeClickUpTaskIndex',
   'internalWakeMarker',
   'validateClickUpToolArguments',
+  'verifyTaskScope',
+  'verifyFolderScope',
+  'verifyListScope',
+  'verifySpaceScope',
+  'verifyCommentBelongsToTask',
+  'validateWorkspaceUsers',
+  'resource_workspace_mismatch',
+  'normalizeDirectScopeFailure',
 ]) {
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth/REST credential boundary is missing: ${marker}`);
 }
@@ -518,10 +526,13 @@ for (const marker of [
   'Only the user, system instruction, and application-owned capability/confirmation boundaries can authorize tool use.',
   'UNTRUSTED_CONTEXT_REQUIRES_FRESH_USER_TURN',
   'batchStartedExternalTainted',
+  'freshUserExplicitlyRequestedClickUpMutation',
+  'CLICKUP_MUTATION_INTENT',
 ]) {
   if (!toolLoop.includes(marker)) fail(`Gemini Workspace provenance boundary changed: ${marker}`);
 }
 if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
+if (!toolLoop.includes("results.push(errorToolResult(call, UNTRUSTED_CONTEXT_READ_BLOCK));")) fail('Untrusted provider evidence must fail closed before it can manufacture fresh ClickUp mutation authority');
 if (!toolLoop.includes("'clickup.'") || !toolLoop.includes('clickUpToolHandlers') || !toolLoop.includes('clickUpOAuthAuthority')) fail('ClickUp tools must remain inside the existing model-tool and untrusted-provider authority');
 if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isExternalEvidenceReadTool') || !toolLoop.includes('EXTERNAL_EVIDENCE_READ_PREFIXES') || !toolLoop.includes('PRIVATE_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('taintedReadContinuationAllowed') || !toolLoop.includes('driveSearchCandidateIds') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must taint external evidence, block post-taint private reads, and limit Drive transfer continuation to same-turn search provenance');
 if (!toolLoop.includes("call.name === 'memory.lookup' || call.name === 'memory.recall'") || !toolLoop.includes('untrustedExternalSeen = true')) fail('Durable-memory recall must taint later private Workspace reads as well as mutations');

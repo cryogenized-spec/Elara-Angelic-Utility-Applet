@@ -6,8 +6,6 @@ import { TOKEN, resetClickUpTestState, signedWrite } from './helpers';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
 const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
-const API = 'https://api.clickup.com/api/v2';
-
 let grantRevision = 0;
 
 type ProviderCounters = {

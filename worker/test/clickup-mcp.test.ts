@@ -46,19 +46,20 @@ function meta() {
 }
 
 function request(method: string, params: Record<string, unknown>, name?: string, overrides: HeadersInit = {}) {
+  const headers = new Headers({
+    Origin: ORIGIN,
+    Accept: 'application/json, text/event-stream',
+    Authorization: `Bearer ${TOKEN}`,
+    'Content-Type': 'application/json',
+    'MCP-Protocol-Version': CLICKUP_MCP_PROTOCOL_VERSION,
+    'Mcp-Method': method,
+    ...(name ? { 'Mcp-Name': name } : {}),
+    ...(method === 'tools/call' ? { [CLICKUP_GRANT_REVISION_HEADER]: '1' } : {}),
+  });
+  for (const [key, value] of new Headers(overrides)) headers.set(key, value);
   return SELF.fetch(`https://worker.example${CLICKUP_MCP_PATH}`, {
     method: 'POST',
-    headers: {
-      Origin: ORIGIN,
-      Accept: 'application/json, text/event-stream',
-      Authorization: `Bearer ${TOKEN}`,
-      'Content-Type': 'application/json',
-      'MCP-Protocol-Version': CLICKUP_MCP_PROTOCOL_VERSION,
-      'Mcp-Method': method,
-      ...(name ? { 'Mcp-Name': name } : {}),
-      ...(method === 'tools/call' ? { [CLICKUP_GRANT_REVISION_HEADER]: '1' } : {}),
-      ...Object.fromEntries(new Headers(overrides)),
-    },
+    headers,
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: 'rpc-1',

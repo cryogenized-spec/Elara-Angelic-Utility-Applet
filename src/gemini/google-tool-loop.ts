@@ -228,6 +228,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   let budgetSnapshot: ToolLoopBudgetSnapshot = {
     cumulativeGrossInputTokens: 0,
     lastGrossInputTokens: 0,
+    lastResponseTokens: 0,
     interactions: 0,
     compactions: 0,
   };

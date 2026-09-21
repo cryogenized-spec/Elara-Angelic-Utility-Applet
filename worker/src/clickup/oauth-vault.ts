@@ -572,10 +572,24 @@ export class ClickUpOAuthVault extends DurableObject {
     }
     try {
       const result = await run(grant.token);
+      if (this.credentialRow()?.updated_at !== grant.revision) {
+        return {
+          ok: false,
+          response: json({ code: 'grant_changed', message: 'ClickUp authorization changed while this provider request was in flight.' }, 409),
+          grantRevision: grant.revision,
+        };
+      }
       this.recordRateLimit(result.rateLimit);
       return { ok: true, data: result.data, grantRevision: grant.revision };
     } catch (error) {
       if (!(error instanceof ClickUpProviderError)) throw error;
+      if (this.credentialRow()?.updated_at !== grant.revision) {
+        return {
+          ok: false,
+          response: json({ code: 'grant_changed', message: 'ClickUp authorization changed while this provider request was in flight.' }, 409),
+          grantRevision: grant.revision,
+        };
+      }
       this.recordRateLimit(error.rateLimit);
       if (this.providerCredentialRevoked(error) && this.deleteCredentialIfRevision(grant.revision)) {
         await this.clearStoredWebhooks(null);

@@ -24,9 +24,10 @@ async function taskSearchPayload(response: Response): Promise<TaskSearchPayload>
   if (!Array.isArray(resultRecord.tasks) || !resultRecord.index || typeof resultRecord.index !== 'object' || Array.isArray(resultRecord.index)) {
     throw new Error('Expected ClickUp search tasks and index.');
   }
+  const tasks = resultRecord.tasks as unknown[];
   return {
     result: {
-      tasks: resultRecord.tasks.map((task) => {
+      tasks: tasks.map((task) => {
         if (!task || typeof task !== 'object' || Array.isArray(task)) throw new Error('Expected indexed task object.');
         return task as Record<string, unknown>;
       }),

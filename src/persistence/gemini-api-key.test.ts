@@ -67,6 +67,19 @@ describe('encrypted Gemini API Lockbox', () => {
     expect(await getGeminiApiKey()).toBe(TEST_KEY);
   });
 
+  it('revokes an unlocked plaintext session when a sibling tab broadcasts a Lockbox revocation', async () => {
+    await saveGeminiApiKey(TEST_KEY, PASSWORD);
+    expect(await getGeminiLockboxStatus()).toBe('unlocked');
+
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'elara.gemini.lockbox.session-revocation.v1',
+      newValue: 'remote-tab-revocation',
+    }));
+
+    expect(await getGeminiLockboxStatus()).toBe('locked');
+    expect(await getGeminiApiKey()).toBe('');
+  });
+
   it('validates PIN shape', () => {
     expect(isGeminiLockboxPin('12345')).toBe(false);
     expect(isGeminiLockboxPin('123456')).toBe(true);

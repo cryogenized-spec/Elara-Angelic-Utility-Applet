@@ -143,6 +143,12 @@ function providerFixture(): ProviderCounters {
         headers: { 'content-type': 'application/json' },
       });
     }
+    if (url.pathname === '/api/v2/task/no-ancestry' && request.method === 'GET') {
+      return new Response(JSON.stringify({
+        id: 'no-ancestry',
+        name: 'Provider task without Workspace ancestry',
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
 
     if (url.pathname === '/api/v2/folder/2223' && request.method === 'GET') {
       return new Response(JSON.stringify({
@@ -392,12 +398,16 @@ describe('ClickUp Workspace-scoped resource authority', () => {
 
   it('fails closed when direct task ancestry is absent instead of guessing Workspace ownership', async () => {
     providerFixture();
-    vi.mocked(globalThis.fetch).mockImplementationOnce(async (input, init) => {
-      const request = input instanceof Request ? input : new Request(input, init);
-      if (new URL(request.url).pathname === '/api/v2/oauth/token') {
-        return new Response(JSON.stringify({ access_token: 'token-can-see-a-and-b' }), { status: 200 });
-      }
-      throw new Error('temporary override should only serve the token call');
+    await connect();
+
+    const response = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '111', taskId: 'no-ancestry' },
     });
+
+    expect(response.status).toBe(502);
+    expect(await responseBody(response)).toEqual(expect.objectContaining({
+      code: 'resource_scope_unverifiable',
+    }));
   });
 });

@@ -1,4 +1,4 @@
-import { clickUpOAuthAuthority, type ClickUpOAuthError } from './authority';
+import { clickUpOAuthAuthority } from './authority';
 import type { ClickUpOAuthStatus } from './contracts';
 
 const MESSAGE_TYPE = 'elara-clickup-oauth-callback-v1';

@@ -3,6 +3,7 @@ import {
   deriveInstallationId,
   internalWakeMarker,
 } from '../../../src/autonomy/protocol';
+import { CLICKUP_GRANT_REVISION_HEADER } from '../../../src/clickup/mcp-protocol';
 import {
   validateClickUpToolArguments,
   type ClickUpToolArguments,
@@ -240,7 +241,11 @@ async function vaultStub(env: ClickUpToolServiceEnv): Promise<DurableObjectStub>
   return env.CLICKUP_OAUTH.get(env.CLICKUP_OAUTH.idFromName(installationId));
 }
 
-async function command<T>(env: ClickUpToolServiceEnv, body: Record<string, unknown>): Promise<T> {
+async function command<T>(
+  env: ClickUpToolServiceEnv,
+  body: Record<string, unknown>,
+  expectedRevision?: number,
+): Promise<T> {
   const token = env.ELARA_INSTALLATION_TOKEN?.trim() ?? '';
   if (!token) throw new ClickUpToolServiceError('configuration', 'ClickUp is not configured on this Worker.', 503);
   const response = await (await vaultStub(env)).fetch(new Request('https://clickup-oauth-vault/internal/clickup/command', {
@@ -248,6 +253,9 @@ async function command<T>(env: ClickUpToolServiceEnv, body: Record<string, unkno
     headers: {
       'content-type': 'application/json',
       [ELARA_INTERNAL_HEADER]: await internalWakeMarker(token),
+      ...(expectedRevision !== undefined ? {
+        [CLICKUP_GRANT_REVISION_HEADER]: String(expectedRevision),
+      } : {}),
     },
     body: JSON.stringify(body),
   }));
@@ -268,6 +276,7 @@ async function comments(
   taskId: string,
   cursorValue: string | undefined,
   limit: number,
+  expectedRevision?: number,
 ) {
   let cursor = decodeCursor(cursorValue);
   const output: ReturnType<typeof normalizeComment>[] = [];
@@ -279,7 +288,7 @@ async function comments(
       operation: 'getTaskComments',
       taskId,
       ...(cursor ? { start: cursor.start, startId: cursor.startId } : {}),
-    });
+    }, expectedRevision);
     const entries = Array.isArray(raw.comments) ? raw.comments : [];
     for (const entry of entries) {
       const record = objectValue(entry);
@@ -348,11 +357,11 @@ function normalizeMutationResult(value: unknown) {
   };
 }
 
-async function searchTasks(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.searchTasks'>) {
+async function searchTasks(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.searchTasks'>, expectedRevision?: number) {
   const raw = await command<Record<string, unknown>>(env, {
     operation: 'searchTaskIndex',
     arguments: args,
-  });
+  }, expectedRevision);
   const tasks = Array.isArray(raw.tasks) ? raw.tasks : [];
   const index = objectValue(raw.index) ?? {};
   return {
@@ -371,14 +380,14 @@ async function searchTasks(env: ClickUpToolServiceEnv, args: ClickUpToolArgument
   };
 }
 
-async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.listHierarchy'>) {
+async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.listHierarchy'>, expectedRevision?: number) {
   const archived = args.includeArchived ?? false;
   if (args.folderId) {
     const raw = await command<Record<string, unknown>>(env, {
       operation: 'getFolder',
       folderId: args.folderId,
       includeSubfolders: true,
-    });
+    }, expectedRevision);
     const root = normalizedHierarchyItem(raw, 'folder');
     return {
       trust: 'untrusted-external' as const,
@@ -391,8 +400,8 @@ async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArgume
 
   if (args.spaceId) {
     const [foldersRaw, listsRaw] = await Promise.all([
-      command<Record<string, unknown>>(env, { operation: 'listFolders', spaceId: args.spaceId, archived }),
-      command<Record<string, unknown>>(env, { operation: 'listFolderlessLists', spaceId: args.spaceId, archived }),
+      command<Record<string, unknown>>(env, { operation: 'listFolders', spaceId: args.spaceId, archived }, expectedRevision),
+      command<Record<string, unknown>>(env, { operation: 'listFolderlessLists', spaceId: args.spaceId, archived }, expectedRevision),
     ]);
     return {
       trust: 'untrusted-external' as const,
@@ -407,7 +416,7 @@ async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArgume
     operation: 'listSpaces',
     workspaceId: args.workspaceId,
     archived,
-  });
+  }, expectedRevision);
   return {
     trust: 'untrusted-external' as const,
     provider: 'clickup' as const,
@@ -416,8 +425,8 @@ async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArgume
   };
 }
 
-async function resolveAssignees(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.resolveAssignees'>) {
-  const context = await command<Record<string, unknown>>(env, { operation: 'getAuthorizationContext' });
+async function resolveAssignees(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.resolveAssignees'>, expectedRevision?: number) {
+  const context = await command<Record<string, unknown>>(env, { operation: 'getAuthorizationContext' }, expectedRevision);
   const workspaces = Array.isArray(context.workspaces) ? context.workspaces : [];
   const workspace = workspaces.find((candidate) => providerId(objectValue(candidate)?.id) === args.workspaceId);
   const members = Array.isArray(objectValue(workspace)?.members) ? objectValue(workspace)!.members as unknown[] : [];
@@ -453,40 +462,41 @@ export async function executeClickUpTool(
   env: ClickUpToolServiceEnv,
   tool: ClickUpToolName,
   rawArguments: unknown,
+  expectedRevision?: number,
 ): Promise<unknown> {
   const args = validateClickUpToolArguments(tool, rawArguments);
 
   switch (tool) {
     case 'clickup.searchTasks':
-      return searchTasks(env, args as ClickUpToolArguments<'clickup.searchTasks'>);
+      return searchTasks(env, args as ClickUpToolArguments<'clickup.searchTasks'>, expectedRevision);
     case 'clickup.getTask': {
       const value = args as ClickUpToolArguments<'clickup.getTask'>;
       const raw = await command<Record<string, unknown>>(env, {
         operation: 'getTask',
         arguments: value,
-      });
+      }, expectedRevision);
       return normalizeClickUpTask(raw);
     }
     case 'clickup.getTaskComments': {
       const value = args as ClickUpToolArguments<'clickup.getTaskComments'>;
-      return comments(env, value.taskId, value.cursor, value.limit ?? 25);
+      return comments(env, value.taskId, value.cursor, value.limit ?? 25, expectedRevision);
     }
     case 'clickup.getTaskContext': {
       const value = args as ClickUpToolArguments<'clickup.getTaskContext'>;
       const rawTask = await command<Record<string, unknown>>(env, {
         operation: 'getTask',
         arguments: { taskId: value.taskId, includeSubtasks: value.includeSubtasks },
-      });
+      }, expectedRevision);
       const task = normalizeClickUpTask(rawTask, { includeAttachments: value.includeAttachments });
       const taskComments = value.commentsLimit === 0
         ? { trust: 'untrusted-external' as const, provider: 'clickup' as const, comments: [], nextCursor: null }
-        : await comments(env, value.taskId, undefined, value.commentsLimit ?? 25);
+        : await comments(env, value.taskId, undefined, value.commentsLimit ?? 25, expectedRevision);
       let customFieldDefinitions: unknown[] | undefined;
       if (value.includeCustomFieldDefinitions && task.list?.id) {
         const rawFields = await command<Record<string, unknown>>(env, {
           operation: 'getListCustomFields',
           listId: task.list.id,
-        });
+        }, expectedRevision);
         const fields = Array.isArray(rawFields.fields) ? rawFields.fields : [];
         customFieldDefinitions = fields.slice(0, 50).flatMap((field) => {
           const record = objectValue(field);
@@ -511,23 +521,23 @@ export async function executeClickUpTool(
       };
     }
     case 'clickup.resolveAssignees':
-      return resolveAssignees(env, args as ClickUpToolArguments<'clickup.resolveAssignees'>);
+      return resolveAssignees(env, args as ClickUpToolArguments<'clickup.resolveAssignees'>, expectedRevision);
     case 'clickup.listHierarchy':
-      return listHierarchy(env, args as ClickUpToolArguments<'clickup.listHierarchy'>);
+      return listHierarchy(env, args as ClickUpToolArguments<'clickup.listHierarchy'>, expectedRevision);
     case 'clickup.createTask': {
-      const raw = await command<Record<string, unknown>>(env, { operation: 'createTask', arguments: args });
+      const raw = await command<Record<string, unknown>>(env, { operation: 'createTask', arguments: args }, expectedRevision);
       return normalizeMutationResult(raw);
     }
     case 'clickup.updateTask': {
-      const raw = await command<Record<string, unknown>>(env, { operation: 'updateTask', arguments: args });
+      const raw = await command<Record<string, unknown>>(env, { operation: 'updateTask', arguments: args }, expectedRevision);
       return normalizeMutationResult(raw);
     }
     case 'clickup.createTaskComment': {
-      const raw = await command<Record<string, unknown>>(env, { operation: 'createTaskComment', arguments: args });
+      const raw = await command<Record<string, unknown>>(env, { operation: 'createTaskComment', arguments: args }, expectedRevision);
       return normalizeMutationResult(raw);
     }
     case 'clickup.replyToComment': {
-      const raw = await command<Record<string, unknown>>(env, { operation: 'replyToComment', arguments: args });
+      const raw = await command<Record<string, unknown>>(env, { operation: 'replyToComment', arguments: args }, expectedRevision);
       return normalizeMutationResult(raw);
     }
     case 'clickup.setCustomField': {

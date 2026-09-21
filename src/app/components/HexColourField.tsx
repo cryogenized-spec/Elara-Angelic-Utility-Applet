@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react';
 
 const HEX_ERROR = 'Enter a 6-digit hex colour, e.g. #7C3AED.';
-const INVISIBLE_TEXT_FORMATTING = /[\u200B-\u200D\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g;
+const INVISIBLE_TEXT_FORMATTING = /[\u061C\u200B-\u200F\u2060\uFEFF\u202A-\u202E\u2066-\u2069]/g;
 const DECORATED_HEX_TOKEN = /(?:^|[^0-9a-fA-F])#?([0-9a-fA-F]{6})(?=$|[^0-9a-fA-F])/;
 
 /**

@@ -305,12 +305,20 @@ export function syncBoard(reason: 'manual' | 'automatic' | 'poll' | 'mutation' =
           const latest = await db.boards.get(account);
           const syncedAt = Date.now();
           const firstSeenAt = new Date(syncedAt).toISOString();
+          const previous = latest ?? (state.board?.account === account ? state.board : undefined);
+          const mergedTasks = mergeRemoteTaskMetadata(remote.tasks, previous?.tasks ?? [], firstSeenAt);
+          const lists = previous && JSON.stringify(remote.lists) === JSON.stringify(previous.lists)
+            ? previous.lists
+            : remote.lists;
+          const tasks = previous && JSON.stringify(mergedTasks) === JSON.stringify(previous.tasks)
+            ? previous.tasks
+            : mergedTasks;
           board = {
             account,
-            lists: remote.lists,
-            tasks: mergeRemoteTaskMetadata(remote.tasks, latest?.tasks ?? state.board?.tasks ?? [], firstSeenAt),
-            routines: latest?.routines ?? [],
-            labels: latest?.labels ?? [],
+            lists,
+            tasks,
+            routines: previous?.routines ?? [],
+            labels: previous?.labels ?? [],
             syncedAt,
           };
           signal.throwIfAborted();

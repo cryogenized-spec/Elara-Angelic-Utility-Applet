@@ -5,6 +5,7 @@ import {
   verifyBearerToken,
 } from '../../../src/autonomy/protocol';
 import { ARTIFACT_LIMITS } from '../../../src/artifacts/limits';
+import { CLICKUP_GRANT_REVISION_HEADER } from '../../../src/clickup/mcp-protocol';
 
 export interface ClickUpAttachmentRouteEnv {
   readonly ELARA_INSTALLATION_TOKEN?: string;
@@ -31,6 +32,13 @@ function json(body: unknown, status: number, corsOrigin: string | null): Respons
 
 function bearer(request: Request): string | null {
   return request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? null;
+}
+
+function admittedGrantRevision(request: Request): number | null {
+  const raw = request.headers.get(CLICKUP_GRANT_REVISION_HEADER)?.trim() ?? '';
+  if (!/^\d+$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 async function vaultStub(env: ClickUpAttachmentRouteEnv): Promise<DurableObjectStub> {
@@ -89,6 +97,10 @@ export async function handleClickUpAttachmentRoute(
   if (!(await verifyBearerToken(bearer(request), installationToken))) {
     return json({ code: 'auth', message: 'A valid Elara installation credential is required.' }, 401, corsOrigin);
   }
+  const grantRevision = admittedGrantRevision(request);
+  if (grantRevision === null) {
+    return json({ code: 'grant_required', message: 'ClickUp attachment upload requires the admitted provider grant revision.' }, 409, corsOrigin);
+  }
 
   const contentType = request.headers.get('Content-Type') ?? '';
   if (!contentType.toLocaleLowerCase().startsWith('multipart/form-data;')) {
@@ -105,6 +117,7 @@ export async function handleClickUpAttachmentRoute(
     const internal = new Headers();
     internal.set('Content-Type', contentType);
     internal.set(ELARA_INTERNAL_HEADER, await internalWakeMarker(installationToken));
+    internal.set(CLICKUP_GRANT_REVISION_HEADER, String(grantRevision));
     const forwarded = new Request(`https://clickup-oauth-vault${INTERNAL_ATTACHMENT_PATH}`, {
       method: 'POST',
       headers: internal,
@@ -130,7 +143,7 @@ export async function handleClickUpAttachmentRoute(
 export function clickUpAttachmentPreflight(corsOrigin: string | null): Response {
   const headers = new Headers({
     'Access-Control-Allow-Methods': 'POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'Accept, Authorization, Content-Type',
+    'Access-Control-Allow-Headers': `Accept, Authorization, Content-Type, ${CLICKUP_GRANT_REVISION_HEADER}`,
     Vary: 'Origin',
   });
   if (corsOrigin) {

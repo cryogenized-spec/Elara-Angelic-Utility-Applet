@@ -1,0 +1,588 @@
+import {
+  ELARA_INTERNAL_HEADER,
+  deriveInstallationId,
+  internalWakeMarker,
+} from '../../../src/autonomy/protocol';
+import {
+  validateClickUpToolArguments,
+  type ClickUpToolArguments,
+  type ClickUpToolName,
+} from '../../../src/clickup/tool-schema';
+
+export interface ClickUpToolServiceEnv {
+  readonly ELARA_INSTALLATION_TOKEN?: string;
+  readonly CLICKUP_OAUTH?: DurableObjectNamespace;
+}
+
+export class ClickUpToolServiceError extends Error {
+  constructor(
+    readonly code: string,
+    message: string,
+    readonly status = 502,
+    readonly retryAt?: number,
+  ) {
+    super(message);
+  }
+}
+
+const MAX_TASK_TEXT_CHARS = 12_000;
+const MAX_COMMENT_TEXT_CHARS = 8_000;
+const MAX_PROVIDER_ARRAY = 100;
+const SEARCH_SCAN_PAGES = 5;
+const TASKS_PER_PROVIDER_PAGE = 100;
+
+function boundedText(value: unknown, maxChars: number): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  return normalized.length > maxChars ? `${normalized.slice(0, maxChars - 1)}…` : normalized;
+}
+
+function providerId(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 500);
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  return undefined;
+}
+
+function providerMillis(value: unknown): number | undefined {
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value;
+  if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+    const parsed = Number(value);
+    if (Number.isSafeInteger(parsed)) return parsed;
+  }
+  return undefined;
+}
+
+function objectValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function boundedPreview(value: unknown, maxChars = 1_000): unknown {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') return boundedText(value, maxChars) ?? '';
+  try {
+    const rendered = JSON.stringify(value);
+    if (rendered.length <= maxChars) return value;
+    return `${rendered.slice(0, maxChars - 1)}…`;
+  } catch {
+    return '[unavailable]';
+  }
+}
+
+function normalizedUser(value: unknown) {
+  const record = objectValue(value);
+  const id = providerId(record?.id);
+  if (!record || !id) return null;
+  return {
+    id,
+    ...(boundedText(record.username, 300) ? { username: boundedText(record.username, 300) } : {}),
+    ...(boundedText(record.email, 320) ? { email: boundedText(record.email, 320) } : {}),
+  };
+}
+
+function normalizedStatus(value: unknown) {
+  if (typeof value === 'string') return boundedText(value, 300);
+  const record = objectValue(value);
+  return boundedText(record?.status, 300);
+}
+
+function normalizeAttachments(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 25).flatMap((entry) => {
+    const record = objectValue(entry);
+    const id = providerId(record?.id);
+    const title = boundedText(record?.title, 500) ?? boundedText(record?.name, 500);
+    if (!record || (!id && !title)) return [];
+    return [{
+      ...(id ? { id } : {}),
+      ...(title ? { title } : {}),
+      ...(boundedText(record.extension, 30) ? { extension: boundedText(record.extension, 30) } : {}),
+      ...(boundedText(record.mimetype, 200) ? { mimeType: boundedText(record.mimetype, 200) } : {}),
+      ...(providerMillis(record.date) !== undefined ? { date: providerMillis(record.date) } : {}),
+      ...(providerId(record.user_id) ? { userId: providerId(record.user_id) } : {}),
+    }];
+  });
+}
+
+function normalizeCustomFields(value: unknown) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(0, 50).flatMap((entry) => {
+    const record = objectValue(entry);
+    const id = providerId(record?.id);
+    if (!record || !id) return [];
+    return [{
+      id,
+      ...(boundedText(record.name, 500) ? { name: boundedText(record.name, 500) } : {}),
+      ...(boundedText(record.type, 100) ? { type: boundedText(record.type, 100) } : {}),
+      ...(Object.prototype.hasOwnProperty.call(record, 'value') ? { value: boundedPreview(record.value) } : {}),
+    }];
+  });
+}
+
+export function normalizeClickUpTask(value: unknown, options: { includeAttachments?: boolean } = {}) {
+  const record = objectValue(value);
+  const id = providerId(record?.id);
+  if (!record || !id) throw new ClickUpToolServiceError('provider_shape', 'ClickUp returned a task without a usable id.');
+
+  const list = objectValue(record.list);
+  const folder = objectValue(record.folder);
+  const space = objectValue(record.space);
+  const priority = objectValue(record.priority);
+  const assignees = Array.isArray(record.assignees)
+    ? record.assignees.slice(0, 50).map(normalizedUser).filter((user): user is NonNullable<ReturnType<typeof normalizedUser>> => Boolean(user))
+    : [];
+  const tags = Array.isArray(record.tags)
+    ? record.tags.slice(0, 50).flatMap((tag) => {
+        const tagRecord = objectValue(tag);
+        const name = boundedText(tagRecord?.name ?? tag, 200);
+        return name ? [name] : [];
+      })
+    : [];
+
+  return {
+    trust: 'untrusted-external' as const,
+    provider: 'clickup' as const,
+    id,
+    ...(providerId(record.custom_id) ? { customId: providerId(record.custom_id) } : {}),
+    name: boundedText(record.name, 1_000) ?? '(untitled task)',
+    ...(boundedText(record.markdown_description, MAX_TASK_TEXT_CHARS)
+      ? { markdownDescription: boundedText(record.markdown_description, MAX_TASK_TEXT_CHARS) }
+      : boundedText(record.text_content ?? record.description, MAX_TASK_TEXT_CHARS)
+        ? { textDescription: boundedText(record.text_content ?? record.description, MAX_TASK_TEXT_CHARS) }
+        : {}),
+    ...(normalizedStatus(record.status) ? { status: normalizedStatus(record.status) } : {}),
+    archived: record.archived === true,
+    ...(providerId(record.parent) ? { parentTaskId: providerId(record.parent) } : {}),
+    ...(providerMillis(record.date_created) !== undefined ? { createdAtMs: providerMillis(record.date_created) } : {}),
+    ...(providerMillis(record.date_updated) !== undefined ? { updatedAtMs: providerMillis(record.date_updated) } : {}),
+    ...(providerMillis(record.date_closed) !== undefined ? { closedAtMs: providerMillis(record.date_closed) } : {}),
+    ...(providerMillis(record.date_done) !== undefined ? { doneAtMs: providerMillis(record.date_done) } : {}),
+    ...(providerMillis(record.due_date) !== undefined ? { dueAtMs: providerMillis(record.due_date) } : {}),
+    ...(providerMillis(record.start_date) !== undefined ? { startAtMs: providerMillis(record.start_date) } : {}),
+    ...(typeof record.time_estimate === 'number' ? { timeEstimateMs: record.time_estimate } : {}),
+    ...(typeof record.points === 'number' ? { points: record.points } : {}),
+    ...(priority && boundedText(priority.priority, 100) ? { priority: boundedText(priority.priority, 100) } : {}),
+    ...(assignees.length ? { assignees } : {}),
+    ...(tags.length ? { tags } : {}),
+    ...(list && providerId(list.id) ? { list: { id: providerId(list.id)!, ...(boundedText(list.name, 500) ? { name: boundedText(list.name, 500) } : {}) } } : {}),
+    ...(folder && providerId(folder.id) ? { folder: { id: providerId(folder.id)!, ...(boundedText(folder.name, 500) ? { name: boundedText(folder.name, 500) } : {}) } } : {}),
+    ...(space && providerId(space.id) ? { space: { id: providerId(space.id)! } } : {}),
+    ...(boundedText(record.url, 2_048) ? { url: boundedText(record.url, 2_048) } : {}),
+    customFields: normalizeCustomFields(record.custom_fields),
+    ...(options.includeAttachments ? { attachments: normalizeAttachments(record.attachments) } : {}),
+  };
+}
+
+function commentText(record: Record<string, unknown>): string {
+  const direct = boundedText(record.comment_text, MAX_COMMENT_TEXT_CHARS);
+  if (direct) return direct;
+  if (!Array.isArray(record.comment)) return '';
+  const parts: string[] = [];
+  for (const segment of record.comment.slice(0, 200)) {
+    const item = objectValue(segment);
+    if (!item) continue;
+    const text = boundedText(item.text, 2_000);
+    if (text) parts.push(text);
+    else {
+      const user = objectValue(item.user);
+      const username = boundedText(user?.username, 300);
+      if (username) parts.push(`@${username}`);
+    }
+    if (parts.join(' ').length >= MAX_COMMENT_TEXT_CHARS) break;
+  }
+  return boundedText(parts.join(' '), MAX_COMMENT_TEXT_CHARS) ?? '';
+}
+
+function normalizeComment(value: unknown) {
+  const record = objectValue(value);
+  const id = providerId(record?.id);
+  if (!record || !id) return null;
+  const user = normalizedUser(record.user);
+  return {
+    trust: 'untrusted-external' as const,
+    provider: 'clickup' as const,
+    id,
+    text: commentText(record),
+    ...(providerMillis(record.date) !== undefined ? { dateMs: providerMillis(record.date) } : {}),
+    ...(user ? { user } : {}),
+    ...(record.resolved === true ? { resolved: true } : {}),
+  };
+}
+
+function encodeCursor(start: number, startId: string): string {
+  const raw = JSON.stringify({ v: 1, start, startId });
+  const bytes = new TextEncoder().encode(raw);
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeCursor(value: string | undefined): { start: number; startId: string } | undefined {
+  if (!value) return undefined;
+  try {
+    const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+    const binary = atob(base64);
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const start = providerMillis(parsed.start);
+    const startId = providerId(parsed.startId);
+    if (parsed.v !== 1 || start === undefined || !startId) throw new Error('invalid');
+    return { start, startId };
+  } catch {
+    throw new ClickUpToolServiceError('validation', 'The ClickUp comments cursor is invalid.', 400);
+  }
+}
+
+async function vaultStub(env: ClickUpToolServiceEnv): Promise<DurableObjectStub> {
+  const token = env.ELARA_INSTALLATION_TOKEN?.trim() ?? '';
+  if (!token || !env.CLICKUP_OAUTH) throw new ClickUpToolServiceError('configuration', 'ClickUp is not configured on this Worker.', 503);
+  const installationId = await deriveInstallationId(token);
+  return env.CLICKUP_OAUTH.get(env.CLICKUP_OAUTH.idFromName(installationId));
+}
+
+async function command<T>(env: ClickUpToolServiceEnv, body: Record<string, unknown>): Promise<T> {
+  const token = env.ELARA_INSTALLATION_TOKEN?.trim() ?? '';
+  if (!token) throw new ClickUpToolServiceError('configuration', 'ClickUp is not configured on this Worker.', 503);
+  const response = await (await vaultStub(env)).fetch(new Request('https://clickup-oauth-vault/internal/clickup/command', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      [ELARA_INTERNAL_HEADER]: await internalWakeMarker(token),
+    },
+    body: JSON.stringify(body),
+  }));
+  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+  if (!response.ok || payload?.ok !== true) {
+    throw new ClickUpToolServiceError(
+      typeof payload?.code === 'string' ? payload.code : `http-${response.status}`,
+      typeof payload?.message === 'string' ? payload.message : `ClickUp provider command failed with HTTP ${response.status}.`,
+      response.status,
+      typeof payload?.retryAt === 'number' ? payload.retryAt : undefined,
+    );
+  }
+  return payload.result as T;
+}
+
+async function comments(
+  env: ClickUpToolServiceEnv,
+  taskId: string,
+  cursorValue: string | undefined,
+  limit: number,
+) {
+  let cursor = decodeCursor(cursorValue);
+  const output: ReturnType<typeof normalizeComment>[] = [];
+  let lastRaw: Record<string, unknown> | undefined;
+  let providerHasMore = false;
+
+  while (output.length < limit) {
+    const raw = await command<Record<string, unknown>>(env, {
+      operation: 'getTaskComments',
+      taskId,
+      ...(cursor ? { start: cursor.start, startId: cursor.startId } : {}),
+    });
+    const entries = Array.isArray(raw.comments) ? raw.comments : [];
+    for (const entry of entries) {
+      const record = objectValue(entry);
+      const normalized = normalizeComment(entry);
+      if (!record || !normalized) continue;
+      if (output.length < limit) {
+        output.push(normalized);
+        lastRaw = record;
+      }
+    }
+    providerHasMore = entries.length >= 25;
+    if (output.length >= limit || !providerHasMore || !lastRaw) break;
+    const start = providerMillis(lastRaw.date);
+    const startId = providerId(lastRaw.id);
+    if (start === undefined || !startId) break;
+    cursor = { start, startId };
+  }
+
+  let nextCursor: string | null = null;
+  if (providerHasMore && lastRaw) {
+    const start = providerMillis(lastRaw.date);
+    const startId = providerId(lastRaw.id);
+    if (start !== undefined && startId) nextCursor = encodeCursor(start, startId);
+  }
+
+  return {
+    trust: 'untrusted-external' as const,
+    provider: 'clickup' as const,
+    comments: output.filter(Boolean).slice(0, limit),
+    nextCursor,
+  };
+}
+
+function normalizedHierarchyItem(value: unknown, kind: 'space' | 'folder' | 'list') {
+  const record = objectValue(value);
+  const id = providerId(record?.id);
+  if (!record || !id) return null;
+  return {
+    trust: 'untrusted-external' as const,
+    provider: 'clickup' as const,
+    kind,
+    id,
+    name: boundedText(record.name, 500) ?? '(unnamed)',
+    ...(record.archived === true ? { archived: true } : {}),
+  };
+}
+
+function listFrom(value: unknown, key: string, kind: 'space' | 'folder' | 'list') {
+  const record = objectValue(value);
+  const items = Array.isArray(record?.[key]) ? record![key] as unknown[] : [];
+  return items.slice(0, MAX_PROVIDER_ARRAY)
+    .map((item) => normalizedHierarchyItem(item, kind))
+    .filter((item): item is NonNullable<ReturnType<typeof normalizedHierarchyItem>> => Boolean(item));
+}
+
+function normalizeMutationResult(value: unknown) {
+  const record = objectValue(value);
+  if (!record) return { ok: true };
+  if (providerId(record.id) && boundedText(record.name, 1_000)) return normalizeClickUpTask(record);
+  return {
+    provider: 'clickup' as const,
+    ok: true,
+    ...(providerId(record.id) ? { id: providerId(record.id) } : {}),
+    ...(providerId(record.hist_id) ? { historyId: providerId(record.hist_id) } : {}),
+    ...(providerMillis(record.date) !== undefined ? { dateMs: providerMillis(record.date) } : {}),
+  };
+}
+
+function searchableTaskText(value: unknown): string {
+  const record = objectValue(value);
+  if (!record) return '';
+  return [
+    record.name,
+    record.markdown_description,
+    record.text_content,
+    record.description,
+    record.custom_id,
+  ].filter((item): item is string => typeof item === 'string').join('\n').toLocaleLowerCase();
+}
+
+async function searchTasks(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.searchTasks'>) {
+  const query = args.query.toLocaleLowerCase();
+  const limit = args.limit ?? 20;
+  const matches: ReturnType<typeof normalizeClickUpTask>[] = [];
+  let scanned = 0;
+  let lastPageFull = false;
+
+  for (let page = 0; page < SEARCH_SCAN_PAGES && matches.length < limit; page += 1) {
+    const raw = await command<Record<string, unknown>>(env, {
+      operation: 'listWorkspaceTasks',
+      workspaceId: args.workspaceId,
+      page,
+      includeClosed: args.includeClosed,
+      includeSubtasks: args.includeSubtasks,
+      spaceIds: args.spaceIds,
+      folderIds: args.folderIds,
+      listIds: args.listIds,
+      assigneeIds: args.assigneeIds,
+      statuses: args.statuses,
+    });
+    const tasks = Array.isArray(raw.tasks) ? raw.tasks : [];
+    scanned += tasks.length;
+    lastPageFull = tasks.length >= TASKS_PER_PROVIDER_PAGE;
+    for (const task of tasks) {
+      if (searchableTaskText(task).includes(query)) matches.push(normalizeClickUpTask(task));
+      if (matches.length >= limit) break;
+    }
+    if (!lastPageFull) break;
+  }
+
+  return {
+    trust: 'untrusted-external' as const,
+    provider: 'clickup' as const,
+    searchMode: 'bounded-live-scan' as const,
+    query: args.query,
+    tasks: matches.slice(0, limit),
+    scannedTasks: scanned,
+    incomplete: lastPageFull && scanned >= SEARCH_SCAN_PAGES * TASKS_PER_PROVIDER_PAGE,
+  };
+}
+
+async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.listHierarchy'>) {
+  const archived = args.includeArchived ?? false;
+  if (args.folderId) {
+    const raw = await command<Record<string, unknown>>(env, {
+      operation: 'getFolder',
+      folderId: args.folderId,
+      includeSubfolders: true,
+    });
+    const root = normalizedHierarchyItem(raw, 'folder');
+    return {
+      trust: 'untrusted-external' as const,
+      provider: 'clickup' as const,
+      root,
+      lists: listFrom(raw, 'lists', 'list'),
+      folders: listFrom(raw, 'folders', 'folder'),
+    };
+  }
+
+  if (args.spaceId) {
+    const [foldersRaw, listsRaw] = await Promise.all([
+      command<Record<string, unknown>>(env, { operation: 'listFolders', spaceId: args.spaceId, archived }),
+      command<Record<string, unknown>>(env, { operation: 'listFolderlessLists', spaceId: args.spaceId, archived }),
+    ]);
+    return {
+      trust: 'untrusted-external' as const,
+      provider: 'clickup' as const,
+      root: { kind: 'space' as const, id: args.spaceId },
+      folders: listFrom(foldersRaw, 'folders', 'folder'),
+      lists: listFrom(listsRaw, 'lists', 'list'),
+    };
+  }
+
+  const spacesRaw = await command<Record<string, unknown>>(env, {
+    operation: 'listSpaces',
+    workspaceId: args.workspaceId,
+    archived,
+  });
+  return {
+    trust: 'untrusted-external' as const,
+    provider: 'clickup' as const,
+    root: { kind: 'workspace' as const, id: args.workspaceId },
+    spaces: listFrom(spacesRaw, 'spaces', 'space'),
+  };
+}
+
+async function resolveAssignees(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.resolveAssignees'>) {
+  const context = await command<Record<string, unknown>>(env, { operation: 'getAuthorizationContext' });
+  const workspaces = Array.isArray(context.workspaces) ? context.workspaces : [];
+  const workspace = workspaces.find((candidate) => providerId(objectValue(candidate)?.id) === args.workspaceId);
+  const members = Array.isArray(objectValue(workspace)?.members) ? objectValue(workspace)!.members as unknown[] : [];
+  const limit = args.limitPerName ?? 5;
+
+  const results = args.names.map((name) => {
+    const needle = name.normalize('NFKC').trim().toLocaleLowerCase();
+    const ranked = members.flatMap((entry) => {
+      const userRecord = objectValue(objectValue(entry)?.user) ?? objectValue(entry);
+      const user = normalizedUser(userRecord);
+      if (!user) return [];
+      const username = user.username?.normalize('NFKC').toLocaleLowerCase() ?? '';
+      const email = user.email?.normalize('NFKC').toLocaleLowerCase() ?? '';
+      const local = email.split('@')[0] ?? '';
+      const exact = username === needle || email === needle || local === needle;
+      const contains = username.includes(needle) || email.includes(needle);
+      if (!exact && !contains) return [];
+      return [{ ...user, match: exact ? 'exact' as const : 'partial' as const }];
+    }).sort((left, right) => Number(right.match === 'exact') - Number(left.match === 'exact'));
+
+    return { query: name, matches: ranked.slice(0, limit) };
+  });
+
+  return {
+    trust: 'untrusted-external' as const,
+    provider: 'clickup' as const,
+    workspaceId: args.workspaceId,
+    results,
+  };
+}
+
+export async function executeClickUpTool(
+  env: ClickUpToolServiceEnv,
+  tool: ClickUpToolName,
+  rawArguments: unknown,
+): Promise<unknown> {
+  const args = validateClickUpToolArguments(tool, rawArguments);
+
+  switch (tool) {
+    case 'clickup.searchTasks':
+      return searchTasks(env, args as ClickUpToolArguments<'clickup.searchTasks'>);
+    case 'clickup.getTask': {
+      const value = args as ClickUpToolArguments<'clickup.getTask'>;
+      const raw = await command<Record<string, unknown>>(env, {
+        operation: 'getTask',
+        arguments: value,
+      });
+      return normalizeClickUpTask(raw);
+    }
+    case 'clickup.getTaskComments': {
+      const value = args as ClickUpToolArguments<'clickup.getTaskComments'>;
+      return comments(env, value.taskId, value.cursor, value.limit ?? 25);
+    }
+    case 'clickup.getTaskContext': {
+      const value = args as ClickUpToolArguments<'clickup.getTaskContext'>;
+      const rawTask = await command<Record<string, unknown>>(env, {
+        operation: 'getTask',
+        arguments: { taskId: value.taskId, includeSubtasks: value.includeSubtasks },
+      });
+      const task = normalizeClickUpTask(rawTask, { includeAttachments: value.includeAttachments });
+      const taskComments = value.commentsLimit === 0
+        ? { trust: 'untrusted-external' as const, provider: 'clickup' as const, comments: [], nextCursor: null }
+        : await comments(env, value.taskId, undefined, value.commentsLimit ?? 25);
+      let customFieldDefinitions: unknown[] | undefined;
+      if (value.includeCustomFieldDefinitions && task.list?.id) {
+        const rawFields = await command<Record<string, unknown>>(env, {
+          operation: 'getListCustomFields',
+          listId: task.list.id,
+        });
+        const fields = Array.isArray(rawFields.fields) ? rawFields.fields : [];
+        customFieldDefinitions = fields.slice(0, 50).flatMap((field) => {
+          const record = objectValue(field);
+          const id = providerId(record?.id);
+          if (!record || !id) return [];
+          return [{
+            trust: 'untrusted-external' as const,
+            id,
+            ...(boundedText(record.name, 500) ? { name: boundedText(record.name, 500) } : {}),
+            ...(boundedText(record.type, 100) ? { type: boundedText(record.type, 100) } : {}),
+            ...(record.type_config !== undefined ? { typeConfig: boundedPreview(record.type_config, 2_000) } : {}),
+          }];
+        });
+      }
+      return {
+        trust: 'untrusted-external' as const,
+        provider: 'clickup' as const,
+        task,
+        comments: taskComments.comments,
+        nextCommentsCursor: taskComments.nextCursor,
+        ...(customFieldDefinitions ? { customFieldDefinitions } : {}),
+      };
+    }
+    case 'clickup.resolveAssignees':
+      return resolveAssignees(env, args as ClickUpToolArguments<'clickup.resolveAssignees'>);
+    case 'clickup.listHierarchy':
+      return listHierarchy(env, args as ClickUpToolArguments<'clickup.listHierarchy'>);
+    case 'clickup.createTask': {
+      const raw = await command<Record<string, unknown>>(env, { operation: 'createTask', arguments: args });
+      return normalizeMutationResult(raw);
+    }
+    case 'clickup.updateTask': {
+      const raw = await command<Record<string, unknown>>(env, { operation: 'updateTask', arguments: args });
+      return normalizeMutationResult(raw);
+    }
+    case 'clickup.createTaskComment': {
+      const raw = await command<Record<string, unknown>>(env, { operation: 'createTaskComment', arguments: args });
+      return normalizeMutationResult(raw);
+    }
+    case 'clickup.replyToComment': {
+      const raw = await command<Record<string, unknown>>(env, { operation: 'replyToComment', arguments: args });
+      return normalizeMutationResult(raw);
+    }
+    case 'clickup.setCustomField': {
+      const value = args as ClickUpToolArguments<'clickup.setCustomField'>;
+      const raw = value.mode === 'clear'
+        ? await command<Record<string, unknown>>(env, {
+            operation: 'clearCustomField',
+            taskId: value.taskId,
+            fieldId: value.fieldId,
+          })
+        : await command<Record<string, unknown>>(env, {
+            operation: 'setCustomField',
+            taskId: value.taskId,
+            fieldId: value.fieldId,
+            value: value.value,
+          });
+      return normalizeMutationResult(raw);
+    }
+    case 'clickup.attachArtifact':
+      throw new ClickUpToolServiceError(
+        'attachment_staging_required',
+        'ClickUp artifact attachment is not available until the authenticated artifact staging path is connected.',
+        501,
+      );
+  }
+}

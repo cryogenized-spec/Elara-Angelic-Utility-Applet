@@ -1,7 +1,7 @@
 ---
 id: SYS-SEC
 status: active
-verified_commit: 85f2c3bca5193775b31ac3347e4938ebb40f262e
+verified_commit: 9c3ddd82851eb0c1f8d7e6680e54414481b53a6e
 scope: browser credential boundaries and security architecture enforcement
 paths: [src/persistence/gemini-api-key.ts, src/persistence/gemini-passkey.ts, src/persistence/gemini-lockbox-settings.ts, src/autonomy/cloud/credential.ts, src/autonomy/cloud/pairing.ts, src/gemini/google-tool-loop.ts, scripts/security-architecture-gate.mjs]
 keywords: [lockbox, credential, secret, pin, passkey, encryption, capability, egress, confirmation, oauth, fail-closed]
@@ -11,7 +11,7 @@ keywords: [lockbox, credential, secret, pin, passkey, encryption, capability, eg
 
 ## 1. Purpose and boundary
 
-`SYS-SEC` defines credential handling and repository-level capability change control. The browser Lockbox stores Gemini and named secondary API credentials behind one security authority. The self-hosted Worker installation token is a separate device credential. Google refresh credentials are a third boundary owned by the user's Worker OAuth vault and never enter browser persistence.
+`SYS-SEC` defines credential handling and repository-level capability change control. The browser Lockbox stores Gemini and named secondary API credentials behind one security authority. The self-hosted Worker installation token is a separate device credential. Google refresh credentials and ClickUp access credentials are provider-specific Worker vault boundaries and never enter browser persistence.
 
 Elara is self-hosted shareware: deployment owners supply and control their own provider credentials and Worker. There is no shared Elara credential service.
 
@@ -34,6 +34,7 @@ self-hosted Worker installation token
 -> reviewed runtime consumers only:
    - autonomy cloud transport
    - Google OAuth browser authority
+   - ClickUp OAuth browser authority
 ```
 
 ```text
@@ -46,6 +47,20 @@ Google refresh credential
 -> only short-lived access token returns to browser memory
 ```
 
+```text
+ClickUp access credential
+-> signed browser request for one-time OAuth state
+-> official ClickUp authorization screen
+-> code + state return to registered Elara redirect URI
+-> signed browser -> Worker exchange
+-> ClickUpOAuthVault verifies/consumes state
+-> Worker-only client secret exchanges code
+-> identity + authorized Workspaces verified
+-> access token AES-GCM encrypted in Worker persistence
+-> provider REST executes inside the vault
+-> access token never returns to the browser
+```
+
 ## 3. Source map
 
 | Concern | Authority |
@@ -56,9 +71,12 @@ Google refresh credential
 | Lockbox UI | `src/app/components/GeminiApiLockbox.tsx` |
 | Autonomy/Worker credential store | `src/autonomy/cloud/credential.ts` |
 | Pairing metadata/runtime resolver | `src/autonomy/cloud/pairing.ts` |
-| Reviewed installation-token consumers | `src/autonomy/cloud/client.ts`, `src/google/oauth/authority.ts` |
+| Reviewed installation-token consumers | `src/autonomy/cloud/client.ts`, `src/google/oauth/authority.ts`, `src/clickup/oauth/authority.ts` |
 | Durable Google refresh vault | `worker/src/google/oauth-vault.ts` |
-| Worker OAuth admission | `worker/src/google/oauth-routes.ts` |
+| Google Worker OAuth admission | `worker/src/google/oauth-routes.ts` |
+| Durable ClickUp access-token vault | `worker/src/clickup/oauth-vault.ts` |
+| ClickUp Worker OAuth admission | `worker/src/clickup/oauth-routes.ts` |
+| ClickUp REST egress | `worker/src/clickup/provider.ts` |
 | Model tool authority/confirmation | `src/gemini/google-tool-loop.ts` |
 | Capability expansion gate | `scripts/security-architecture-gate.mjs` |
 | Gate/CI integrity | `scripts/check-verification-integrity.mjs` |
@@ -71,20 +89,22 @@ The Worker installation token uses a dedicated Dexie store, AES-GCM-256 and a no
 
 The Google refresh token is not a browser secret at all. `GoogleOAuthVault` derives an AES-GCM key from the deployment-owned `GOOGLE_OAUTH_VAULT_KEY` using a domain-separation context, encrypts with a random 12-byte IV and stores ciphertext/IV in the SQLite-backed Durable Object. The refresh token is decrypted only inside the Worker when exchanging for a new short-lived access token or revoking the grant.
 
-Browser Google access tokens remain memory-only. Browser localStorage contains only non-secret capability/scope/account metadata.
+Browser Google access tokens remain memory-only. Browser localStorage contains only non-secret capability/scope/account metadata. ClickUp access tokens do not enter browser memory at all; only schema-validated non-secret account/Workspace connection metadata may persist locally.
 
 ## 5. Credential invariants
 
 - Gemini credentials are never `VITE_*` build variables.
 - `VITE_GOOGLE_CLIENT_ID` is public OAuth client identification, not a secret.
 - Google client secret and vault key remain Worker-only deployment secrets.
+- ClickUp client secret, access token and vault key remain Worker-only; the access token stays inside `ClickUpOAuthVault` even during provider execution.
 - Secrets never appear in model-visible schemas, conversation records, cache keys, URLs, analytics or diagnostic exports.
 - Lockbox consumers use named minimum-capability accessors.
 - The installation token is never serialized into new pairing JSON or placed in a network target.
 - Only `src/autonomy/cloud/pairing.ts` directly imports the installation credential store.
-- Only `src/autonomy/cloud/client.ts` and `src/google/oauth/authority.ts` may consume `resolvePairingToken` at runtime.
+- Only `src/autonomy/cloud/client.ts`, `src/google/oauth/authority.ts` and `src/clickup/oauth/authority.ts` may consume `resolvePairingToken` at runtime.
 - Credential-bearing modules do not gain `console.*` logging authority without explicit security review.
 - Google refresh tokens never return to the browser, Gemini, Workspace tool schemas or autonomy storage.
+- ClickUp access tokens never return to the browser, Gemini, MCP schemas, conversation state or autonomy storage.
 - Lock/idle enforcement clears in-memory Lockbox plaintext.
 - Corrupt/undecryptable sealed material fails closed.
 - Cryptographic/storage migration failures preserve recoverable legacy state instead of deleting the only credential.
@@ -102,6 +122,7 @@ Browser Google access tokens remain memory-only. Browser localStorage contains o
 - installation-token store and runtime consumers;
 - global outbound fetch owners/references and reviewed provider destinations;
 - the durable Google OAuth browser brokerage markers (`requestGoogleAuthorizationCode`, signed Worker write, paired credential resolution and refresh route);
+- the ClickUp paired-Worker OAuth authority, encrypted vault, internal provider-command boundary and exact ClickUp API origins;
 - Google service import boundaries;
 - shared Google mutation confirmation-broker consumers.
 
@@ -109,9 +130,9 @@ The verification-integrity gate pins `security:check`, CI ordering and the guard
 
 ## 7. Network, OAuth and confirmation boundaries
 
-Global `fetch` is the reviewed ordinary request transport. Google Workspace API calls receive an authorized fetch from `src/google/oauth/authority.ts`, which enforces HTTPS and an explicit Google API hostname set.
+Global `fetch` is the reviewed ordinary request transport. Google Workspace API calls receive an authorized fetch from `src/google/oauth/authority.ts`, which enforces HTTPS and an explicit Google API hostname set. ClickUp browser egress is restricted to the paired HTTPS Worker; ClickUp provider egress is server-side and fixed to `https://api.clickup.com/api/v2` plus the documented OAuth token endpoint.
 
-For a paired installation, the same authority may contact only the paired self-hosted Worker URL after validating HTTPS and URL shape. Protected OAuth writes are HMAC-signed with method/path/timestamp/nonce/body. The public Worker verifies admission and the `GoogleOAuthVault` independently verifies the write and records the nonce durably. Authorization-code exchange additionally requires `X-Requested-With: XmlHttpRequest` and exact request-origin/redirect-origin equality.
+For a paired installation, the Google and ClickUp browser authorities may contact only the paired self-hosted Worker URL after validating HTTPS and URL shape. Protected OAuth writes are HMAC-signed with method/path/timestamp/nonce/body. The public Worker verifies admission and the `GoogleOAuthVault` independently verifies the write and records the nonce durably. Authorization-code exchange additionally requires `X-Requested-With: XmlHttpRequest` and exact request-origin/redirect-origin equality.
 
 A mutation confirmation is time-bounded application authority, not an OAuth grant. Google scopes do not bypass the shared confirmation policy. Confirmation freshness is rechecked around delayed OAuth or grouped-approval flows. External provider reads taint later model continuations; mutations proposed after that taint receive an `untrustedContext` warning, start unselected, and cannot be approved until the human explicitly selects them. Tainted content also cannot recursively widen private Workspace reads. Automatic relevant/proactive memory recall is treated as ambient context for the user's fresh-turn request: it elevates later mutations but does not permanently suppress an explicit Workspace read on every new turn; explicit mid-turn `memory.lookup`/`memory.recall` results do taint subsequent private reads. Public YouTube discovery remains repeatable, while the only reviewed private-read continuation is a Drive download whose file ID was surfaced by a same-turn Drive search and whose bytes remain outside model context. Multi-action batches likewise start unselected and expose no approve-all shortcut. Confirmation review payloads are schema-validated and bounded at 1,250,000 characters; if a valid confirmation request cannot be constructed, the mutation fails closed rather than falling through to another execution path.
 
@@ -127,7 +148,7 @@ The optional Worker Gemini endpoint authenticates before body processing, reads 
 
 Primary checks are `npm run security:check`, `npm run verify:gates`, unit/Worker/E2E tests and `npm run reliability:check`.
 
-Google durable-auth verification covers encrypted-at-rest persistence, refresh without browser interaction, signed admission, durable replay rejection, popup CSRF, origin mismatch, CORS, disconnect/revocation and proof that browser persistence contains no access/refresh/installation credential material.
+Google durable-auth verification covers encrypted-at-rest persistence, refresh without browser interaction, signed admission, durable replay rejection, popup CSRF, origin mismatch, CORS, disconnect/revocation and proof that browser persistence contains no access/refresh/installation credential material. ClickUp verification covers encrypted token persistence, one-time state, signed-write replay rejection, redirect/origin binding, binding-internal provider admission, adaptive rate-limit suppression, provider-revocation cleanup and proof that browser persistence contains only non-secret metadata.
 
 Existing Lockbox/adversarial tests continue to cover corrupt ciphertext, stale protection stamps, rotation/orphan prevention and locked-session write refusal. Autonomy credential tests continue to require a fail-closed empty read from corrupt sealed material.
 
@@ -135,4 +156,4 @@ Existing Lockbox/adversarial tests continue to cover corrupt ciphertext, stale p
 
 A repository cannot externally protect its own workflow/ruleset configuration from an actor authorized to rewrite every guard simultaneously; CI/supply-chain/ruleset hardening remains a separate layer.
 
-The existence of durable Google credentials is not permission for autonomous Google execution. Future orchestration must add explicit tool/execution authority rather than treating credential availability as consent.
+The existence of durable Google or ClickUp credentials is not permission for autonomous provider execution. Future orchestration and model-visible ClickUp MCP tools must add explicit tool/execution authority and preserve the existing confirmation boundary rather than treating credential availability as consent.

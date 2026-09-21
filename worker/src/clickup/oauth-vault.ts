@@ -344,6 +344,8 @@ export class ClickUpOAuthVault extends DurableObject {
   private async runProvider<T>(
     run: (accessToken: string) => Promise<ClickUpProviderResult<T>>,
   ): Promise<Response> {
+    const token = await this.accessToken();
+    if (!token) return json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401);
     const reservation = this.reserveProviderCall();
     if (reservation.blocked) {
       return json({
@@ -352,8 +354,6 @@ export class ClickUpOAuthVault extends DurableObject {
         ...(reservation.retryAt ? { retryAt: reservation.retryAt } : {}),
       }, 429);
     }
-    const token = await this.accessToken();
-    if (!token) return json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401);
     try {
       const result = await run(token);
       this.recordRateLimit(result.rateLimit);
@@ -377,7 +377,8 @@ export class ClickUpOAuthVault extends DurableObject {
     const parsed = providerCommandSchema.safeParse(parseJson(body));
     if (!parsed.success) return json({ code: 'validation', message: 'ClickUp internal provider command was invalid.' }, 400);
     const command = parsed.data;
-    switch (command.operation) {
+    try {
+      switch (command.operation) {
       case 'listSpaces':
         return this.runProvider((token) => listClickUpSpaces(token, command.workspaceId, command.archived ?? false));
       case 'listFolders':
@@ -434,6 +435,12 @@ export class ClickUpOAuthVault extends DurableObject {
         return this.runProvider((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value));
       case 'clearCustomField':
         return this.runProvider((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId));
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        return json({ code: 'validation', message: 'ClickUp semantic command arguments were invalid.' }, 400);
+      }
+      throw error;
     }
   }
 

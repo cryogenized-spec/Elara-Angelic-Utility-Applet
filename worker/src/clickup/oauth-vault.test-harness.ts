@@ -1,7 +1,7 @@
 import { ClickUpOAuthVault } from './oauth-vault';
 
 export class TestClickUpOAuthVault extends ClickUpOAuthVault {
-  credentialSnapshot(): {
+  async credentialSnapshot(): Promise<{
     accessCipher: string;
     accessIv: string;
     userId: string;
@@ -9,7 +9,7 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     email: string | null;
     workspacesJson: string;
     updatedAt: number;
-  } | null {
+  } | null> {
     const row = this.credentialRow();
     if (!row) return null;
     return {
@@ -23,18 +23,18 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     };
   }
 
-  forceCredentialUpdatedAt(updatedAt: number): void {
+  async forceCredentialUpdatedAt(updatedAt: number): Promise<void> {
     this.ctx.storage.sql.exec('UPDATE clickup_oauth_credential SET updated_at = ? WHERE slot = 1', updatedAt);
   }
 
-  rateLimitSnapshot(): { limit: number | null; remaining: number | null; resetAt: number | null } | null {
+  async rateLimitSnapshot(): Promise<{ limit: number | null; remaining: number | null; resetAt: number | null } | null> {
     const row = this.ctx.storage.sql.exec<{ limit_count: number | null; remaining: number | null; reset_at: number | null }>(
       'SELECT limit_count, remaining, reset_at FROM clickup_rate_limit WHERE slot = 1',
     ).toArray()[0];
     return row ? { limit: row.limit_count, remaining: row.remaining, resetAt: row.reset_at } : null;
   }
 
-  taskIndexSnapshot(workspaceId: string): {
+  async taskIndexSnapshot(workspaceId: string): Promise<{
     fullSyncComplete: boolean;
     nextPage: number;
     lastRefreshAt: number;
@@ -43,7 +43,7 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     incrementalSince: number;
     incrementalNextPage: number;
     incrementalMaxUpdatedAt: number;
-  } {
+  }> {
     const row = this.ctx.storage.sql.exec<{
       full_sync_complete: number;
       next_page: number;
@@ -72,7 +72,7 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     };
   }
 
-  webhookSnapshot(): Array<{ webhookId: string; workspaceId: string; updatedAt: number }> {
+  async webhookSnapshot(): Promise<Array<{ webhookId: string; workspaceId: string; updatedAt: number }>> {
     return this.ctx.storage.sql.exec<{ webhook_id: string; workspace_id: string; updated_at: number }>(
       'SELECT webhook_id, workspace_id, updated_at FROM clickup_webhooks ORDER BY workspace_id ASC',
     ).toArray().map((row) => ({
@@ -82,7 +82,7 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     }));
   }
 
-  taskJsonLength(workspaceId: string, taskId: string): number | null {
+  async taskJsonLength(workspaceId: string, taskId: string): Promise<number | null> {
     const row = this.ctx.storage.sql.exec<{ task_json: string }>(
       'SELECT task_json FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
       workspaceId,
@@ -91,7 +91,7 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     return row ? row.task_json.length : null;
   }
 
-  forceTaskIndexRefreshAt(workspaceId: string, value: number): void {
+  async forceTaskIndexRefreshAt(workspaceId: string, value: number): Promise<void> {
     this.ctx.storage.sql.exec(
       'UPDATE clickup_task_index_state SET last_refresh_at = ? WHERE workspace_id = ?',
       value,
@@ -99,7 +99,7 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     );
   }
 
-  forceTaskIndexIndexedAt(workspaceId: string, value: number): void {
+  async forceTaskIndexIndexedAt(workspaceId: string, value: number): Promise<void> {
     this.ctx.storage.sql.exec(
       'UPDATE clickup_task_index SET indexed_at = ? WHERE workspace_id = ?',
       value,

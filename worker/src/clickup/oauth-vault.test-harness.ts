@@ -72,6 +72,25 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     };
   }
 
+  webhookSnapshot(): Array<{ webhookId: string; workspaceId: string; updatedAt: number }> {
+    return this.ctx.storage.sql.exec<{ webhook_id: string; workspace_id: string; updated_at: number }>(
+      'SELECT webhook_id, workspace_id, updated_at FROM clickup_webhooks ORDER BY workspace_id ASC',
+    ).toArray().map((row) => ({
+      webhookId: row.webhook_id,
+      workspaceId: row.workspace_id,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  taskJsonLength(workspaceId: string, taskId: string): number | null {
+    const row = this.ctx.storage.sql.exec<{ task_json: string }>(
+      'SELECT task_json FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
+      workspaceId,
+      taskId,
+    ).toArray()[0];
+    return row ? row.task_json.length : null;
+  }
+
   forceTaskIndexRefreshAt(workspaceId: string, value: number): void {
     this.ctx.storage.sql.exec(
       'UPDATE clickup_task_index_state SET last_refresh_at = ? WHERE workspace_id = ?',

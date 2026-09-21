@@ -14,6 +14,7 @@ export interface ClickUpAttachmentRouteEnv {
 const ATTACHMENT_PATH = '/clickup/attachment';
 const INTERNAL_ATTACHMENT_PATH = '/internal/clickup/attachment';
 const MAX_MULTIPART_OVERHEAD_BYTES = 512 * 1024;
+const MAX_ATTACHMENT_REQUEST_BYTES = ARTIFACT_LIMITS.maxAttachmentBytes + MAX_MULTIPART_OVERHEAD_BYTES;
 
 function json(body: unknown, status: number, corsOrigin: string | null): Response {
   const headers = new Headers({
@@ -39,6 +40,39 @@ async function vaultStub(env: ClickUpAttachmentRouteEnv): Promise<DurableObjectS
   return env.CLICKUP_OAUTH.get(env.CLICKUP_OAUTH.idFromName(installationId));
 }
 
+async function readBoundedBytes(request: Request): Promise<Uint8Array> {
+  const declared = Number(request.headers.get('Content-Length') ?? '0');
+  if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_REQUEST_BYTES) throw new Error('too-large');
+  const reader = request.body?.getReader();
+  if (!reader) {
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (bytes.byteLength > MAX_ATTACHMENT_REQUEST_BYTES) throw new Error('too-large');
+    return bytes;
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      total += value.byteLength;
+      if (total > MAX_ATTACHMENT_REQUEST_BYTES) throw new Error('too-large');
+      chunks.push(value);
+    }
+  } catch (cause) {
+    await reader.cancel().catch(() => undefined);
+    throw cause;
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return bytes;
+}
+
 export async function handleClickUpAttachmentRoute(
   pathname: string,
   request: Request,
@@ -60,12 +94,11 @@ export async function handleClickUpAttachmentRoute(
   if (!contentType.toLocaleLowerCase().startsWith('multipart/form-data;')) {
     return json({ code: 'validation', message: 'ClickUp attachment upload requires multipart/form-data.' }, 415, corsOrigin);
   }
-  const declared = Number(request.headers.get('Content-Length') ?? '0');
-  if (
-    Number.isFinite(declared)
-    && declared > ARTIFACT_LIMITS.maxAttachmentBytes + MAX_MULTIPART_OVERHEAD_BYTES
-  ) {
-    return json({ code: 'artifact-too-large', message: 'The attachment exceeds Elara\'s upload limit.' }, 413, corsOrigin);
+  let body: Uint8Array;
+  try {
+    body = await readBoundedBytes(request);
+  } catch {
+    return json({ code: 'artifact-too-large', message: 'The attachment request exceeds Elara\'s upload limit.' }, 413, corsOrigin);
   }
 
   try {
@@ -75,7 +108,7 @@ export async function handleClickUpAttachmentRoute(
     const forwarded = new Request(`https://clickup-oauth-vault${INTERNAL_ATTACHMENT_PATH}`, {
       method: 'POST',
       headers: internal,
-      body: request.body,
+      body,
     });
     const response = await (await vaultStub(env)).fetch(forwarded);
     const body = await response.text();

@@ -2,8 +2,9 @@ import { googleToolRegistry, googleToolsForPlane } from './registry';
 import type { GoogleToolDescriptor, GoogleToolExecutionPlane } from './contracts';
 import { MAX_MEDIA_QUERIES_PER_CALL } from '../../domain/media';
 import { DRIVE_LIMITS } from '../drive/limits';
+import { clickUpToolJsonSchema, clickupToolNameSchema } from '../../clickup/tool-schema';
 
-export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly name: string; readonly description: string; readonly parameters: { readonly type: 'object'; readonly properties: Record<string, unknown>; readonly additionalProperties: boolean; readonly required?: readonly string[]; }; }
+export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly name: string; readonly description: string; readonly parameters: Readonly<Record<string, unknown>>; }
 
 const stringProperty = (description: string) => ({ type: 'string', description });
 const objectProperty = (description: string) => ({ type: 'object', description });
@@ -236,6 +237,16 @@ const requiredByTool: Record<string, readonly string[]> = {
 const geminiVisibleTools = googleToolRegistry.filter((descriptor) => descriptor.exposure === 'gemini');
 
 function toFunctionDeclaration(descriptor: GoogleToolDescriptor): GeminiFunctionDeclaration {
+  const clickUpName = clickupToolNameSchema.safeParse(descriptor.name);
+  if (clickUpName.success) {
+    return {
+      type: 'function',
+      name: descriptor.name,
+      description: descriptor.description,
+      parameters: clickUpToolJsonSchema(clickUpName.data),
+    };
+  }
+
   const properties = toolProperties[descriptor.name] ?? {};
   const required = requiredByTool[descriptor.name];
   return {

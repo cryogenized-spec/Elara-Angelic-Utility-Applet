@@ -15,8 +15,10 @@ import { validateMemoryToolArguments, memoryToolArgumentSchemas, type MemoryTool
 import { describeMemoryReconcileTarget } from '../../memory/tool-handler';
 import { kanbanToolArgumentSchemas, validateKanbanToolArguments, type KanbanToolName } from '../../kanban/tool-schema';
 import { loadRoleplayPreferences } from '../../persistence/preferences';
+import { clickupToolNameSchema, validateClickUpToolArguments, type ClickUpToolName } from '../../clickup/tool-schema';
+import type { ClickUpOAuthAuthority } from '../../clickup/oauth/contracts';
 
-export type LocalToolCapability = 'documents.local' | 'media.youtube.read' | 'memory.durable.local';
+export type LocalToolCapability = 'documents.local' | 'media.youtube.read' | 'memory.durable.local' | 'clickup.read' | 'clickup.write';
 export type ToolCapability = GoogleCapabilityKey | LocalToolCapability;
 export type GoogleToolInvocation = GoogleToolCall & { readonly callId?: string };
 
@@ -25,7 +27,7 @@ export type GoogleToolInvocation = GoogleToolCall & { readonly callId?: string }
  * scope. They are not members of `googleCapabilityKeySchema`, so `safeCapability`
  * must recognize them before it parses.
  */
-const LOCAL_TOOL_CAPABILITIES: ReadonlySet<string> = new Set<string>(['documents.local', 'media.youtube.read', 'memory.durable.local']);
+const LOCAL_TOOL_CAPABILITIES: ReadonlySet<string> = new Set<string>(['documents.local', 'media.youtube.read', 'memory.durable.local', 'clickup.read', 'clickup.write']);
 
 /**
  * Capabilities that need no OAuth authorization check. This is the local set plus
@@ -51,6 +53,7 @@ export type GoogleToolHandler = (context: GoogleToolExecutionContext) => Promise
 export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandler>>;
 export interface GoogleToolExecutorOptions {
   readonly oauth: GoogleOAuthAuthority;
+  readonly clickupOAuth?: ClickUpOAuthAuthority;
   readonly handlers: GoogleToolHandlers;
   readonly confirm?: (request: WriteConfirmationRequest) => Promise<boolean>;
   readonly now?: () => Date;
@@ -77,6 +80,8 @@ function safeCapability(value: string): ToolCapability {
 }
 function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Record<string, unknown>> {
   // Schema modules remain validation-only; provider/cache/runtime work stays in handlers.
+  const clickUpName = clickupToolNameSchema.safeParse(tool);
+  if (clickUpName.success) return validateClickUpToolArguments(clickUpName.data, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(memoryToolArgumentSchemas, tool)) return validateMemoryToolArguments(tool as MemoryToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(kanbanToolArgumentSchemas, tool)) return validateKanbanToolArguments(tool as KanbanToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(youtubeToolArgumentSchemas, tool)) return validateYouTubeToolArguments(tool as YouTubeToolName, value) as Readonly<Record<string, unknown>>;
@@ -109,19 +114,41 @@ function oauthCapabilitiesForDescriptor(descriptor: GoogleToolDescriptor): reado
  * confirmation. It validates the tool shape and returns the first missing
  * Google capability without running a handler or confirmation broker.
  */
-export async function googleToolAuthorizationRequirement(
+export type ToolAuthorizationRequirement =
+  | { readonly provider: 'google'; readonly capability: GoogleCapabilityKey }
+  | { readonly provider: 'clickup' };
+
+export async function toolAuthorizationRequirement(
   call: GoogleToolCall,
   oauth: GoogleOAuthAuthority,
-): Promise<GoogleCapabilityKey | null> {
+  clickupOAuth?: ClickUpOAuthAuthority,
+): Promise<ToolAuthorizationRequirement | null> {
   const parsed = googleToolCallSchema.safeParse(call);
   if (!parsed.success) return null;
   const descriptor = findDescriptor(parsed.data.tool);
   if (!descriptor) return null;
   try { validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
+
+  if (clickupToolNameSchema.safeParse(parsed.data.tool).success) {
+    if (!clickupOAuth) return { provider: 'clickup' };
+    const status = await clickupOAuth.getStatus();
+    return status.connected ? null : { provider: 'clickup' };
+  }
+
   const required = oauthCapabilitiesForDescriptor(descriptor);
   if (!required.length) return null;
   const status = await oauth.getStatus();
-  return required.find((capability) => authorizationNeeded(status, capability)) ?? null;
+  const capability = required.find((candidate) => authorizationNeeded(status, candidate));
+  return capability ? { provider: 'google', capability } : null;
+}
+
+/** Backward-compatible Google-only admission probe for existing callers/tests. */
+export async function googleToolAuthorizationRequirement(
+  call: GoogleToolCall,
+  oauth: GoogleOAuthAuthority,
+): Promise<GoogleCapabilityKey | null> {
+  const requirement = await toolAuthorizationRequirement(call, oauth);
+  return requirement?.provider === 'google' ? requirement.capability : null;
 }
 function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
@@ -228,6 +255,12 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'roleplay_setting.delete': return `Delete ${id ?? 'selected entity'} and any child entities beneath it.`;
     case 'memory.save': return `Save durable memory “${value(args, 'title') ?? 'Untitled'}”. Review the full proposed body below before approving.`;
     case 'memory.reconcile': return `Reconcile the selected durable memory as ${value(args, 'relation') ?? 'related'} using new evidence “${value(args, 'title') ?? 'Untitled evidence'}”. Review the full proposed body below before approving.`;
+    case 'clickup.createTask': return `Create ClickUp task “${value(args, 'name') ?? 'Untitled'}” in list ${value(args, 'listId') ?? 'selected list'}.`;
+    case 'clickup.updateTask': return `Update ClickUp task ${value(args, 'taskId') ?? 'selected task'} with the reviewed field changes.`;
+    case 'clickup.createTaskComment': return `Post the reviewed comment to ClickUp task ${value(args, 'taskId') ?? 'selected task'}.`;
+    case 'clickup.replyToComment': return `Post the reviewed reply to ClickUp comment ${value(args, 'commentId') ?? 'selected comment'}.`;
+    case 'clickup.setCustomField': return `${value(args, 'mode') === 'clear' ? 'Clear' : 'Set'} ClickUp Custom Field ${value(args, 'fieldId') ?? 'selected field'} on task ${value(args, 'taskId') ?? 'selected task'}.`;
+    case 'clickup.attachArtifact': return `Attach Elara artifact ${value(args, 'artifactId') ?? 'selected artifact'} to ClickUp task ${value(args, 'taskId') ?? 'selected task'}.`;
     default: return fallback;
   }
 }
@@ -289,6 +322,15 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   const capability = safeCapability(descriptor.capability);
   const isRoleplayTool = validCall.tool.startsWith('roleplay_setting.');
   if (isRoleplayTool && !(await loadRoleplayPreferences()).enabled) return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
+  if (clickupToolNameSchema.safeParse(validCall.tool).success) {
+    if (!options.clickupOAuth) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+    try {
+      const status = await options.clickupOAuth.getStatus();
+      if (!status.connected) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+    } catch {
+      return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) };
+    }
+  }
   const oauthCapabilities = oauthCapabilitiesForDescriptor(descriptor);
   if (oauthCapabilities.length) {
     let status: GoogleOAuthStatus;

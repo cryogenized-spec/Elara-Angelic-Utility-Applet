@@ -185,6 +185,7 @@ test.describe('Portrait artwork layout', () => {
       const trigger = rail.getByRole('button', { name: 'Workspace', exact: true });
       const portrait = page.locator('.elara-banner__portrait-float');
       const banner = page.locator('.elara-banner');
+      const conversation = page.getByRole('region', { name: 'Conversation' });
       await expect(trigger).toBeVisible();
       await expect(kanban).toBeVisible();
       await expect(page.locator('.elara-banner__copy')).toHaveCount(0);
@@ -198,7 +199,8 @@ test.describe('Portrait artwork layout', () => {
       const triggerBox = await trigger.boundingBox();
       const portraitBox = await portrait.boundingBox();
       const bannerBox = await banner.boundingBox();
-      expect(stackBox && topRowBox && hamburgerBox && kanbanBox && triggerBox && portraitBox && bannerBox).toBeTruthy();
+      const conversationBox = await conversation.boundingBox();
+      expect(stackBox && topRowBox && hamburgerBox && kanbanBox && triggerBox && portraitBox && bannerBox && conversationBox).toBeTruthy();
 
       // First row: hamburger + Kanban, with one deliberate shared gap.
       expect(Math.abs(kanbanBox!.y - hamburgerBox!.y)).toBeLessThan(2);
@@ -219,6 +221,18 @@ test.describe('Portrait artwork layout', () => {
       expect(stackBox!.x).toBeLessThan(width / 3);
       expect(stackBox!.x + stackBox!.width).toBeLessThan(width - 24);
       expect(portraitBox!.x).toBeGreaterThanOrEqual(stackBox!.x + stackBox!.width);
+
+      // Portrait chrome no longer reserves vertical space: the conversation
+      // viewport starts behind the foreground controls/artwork at the shell top.
+      expect(conversationBox!.y).toBeLessThanOrEqual(stackBox!.y + 1);
+      expect(conversationBox!.y).toBeLessThan(portraitBox!.y + portraitBox!.height);
+      const layerOrder = await page.evaluate(() => ({
+        conversation: Number.parseInt(getComputedStyle(document.querySelector('.conversation')!).zIndex || '0', 10),
+        portrait: Number.parseInt(getComputedStyle(document.querySelector('.elara-banner.artwork-mode-portrait')!).zIndex || '0', 10),
+        controls: Number.parseInt(getComputedStyle(document.querySelector('.control-stack')!).zIndex || '0', 10),
+      }));
+      expect(layerOrder.portrait).toBeGreaterThan(layerOrder.conversation);
+      expect(layerOrder.controls).toBeGreaterThan(layerOrder.portrait);
 
       // Character presentation is now frameless: only the portrait remains.
       const bannerChrome = await banner.evaluate((element) => {

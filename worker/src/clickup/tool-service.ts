@@ -28,8 +28,6 @@ export class ClickUpToolServiceError extends Error {
 const MAX_TASK_TEXT_CHARS = 12_000;
 const MAX_COMMENT_TEXT_CHARS = 8_000;
 const MAX_PROVIDER_ARRAY = 100;
-const SEARCH_SCAN_PAGES = 5;
-const TASKS_PER_PROVIDER_PAGE = 100;
 
 function boundedText(value: unknown, maxChars: number): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -350,56 +348,26 @@ function normalizeMutationResult(value: unknown) {
   };
 }
 
-function searchableTaskText(value: unknown): string {
-  const record = objectValue(value);
-  if (!record) return '';
-  return [
-    record.name,
-    record.markdown_description,
-    record.text_content,
-    record.description,
-    record.custom_id,
-  ].filter((item): item is string => typeof item === 'string').join('\n').toLocaleLowerCase();
-}
-
 async function searchTasks(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.searchTasks'>) {
-  const query = args.query.toLocaleLowerCase();
-  const limit = args.limit ?? 20;
-  const matches: ReturnType<typeof normalizeClickUpTask>[] = [];
-  let scanned = 0;
-  let lastPageFull = false;
-
-  for (let page = 0; page < SEARCH_SCAN_PAGES && matches.length < limit; page += 1) {
-    const raw = await command<Record<string, unknown>>(env, {
-      operation: 'listWorkspaceTasks',
-      workspaceId: args.workspaceId,
-      page,
-      includeClosed: args.includeClosed,
-      includeSubtasks: args.includeSubtasks,
-      spaceIds: args.spaceIds,
-      folderIds: args.folderIds,
-      listIds: args.listIds,
-      assigneeIds: args.assigneeIds,
-      statuses: args.statuses,
-    });
-    const tasks = Array.isArray(raw.tasks) ? raw.tasks : [];
-    scanned += tasks.length;
-    lastPageFull = tasks.length >= TASKS_PER_PROVIDER_PAGE;
-    for (const task of tasks) {
-      if (searchableTaskText(task).includes(query)) matches.push(normalizeClickUpTask(task));
-      if (matches.length >= limit) break;
-    }
-    if (!lastPageFull) break;
-  }
-
+  const raw = await command<Record<string, unknown>>(env, {
+    operation: 'searchTaskIndex',
+    arguments: args,
+  });
+  const tasks = Array.isArray(raw.tasks) ? raw.tasks : [];
+  const index = objectValue(raw.index) ?? {};
   return {
     trust: 'untrusted-external' as const,
     provider: 'clickup' as const,
-    searchMode: 'bounded-live-scan' as const,
+    searchMode: 'persistent-sqlite-index' as const,
     query: args.query,
-    tasks: matches.slice(0, limit),
-    scannedTasks: scanned,
-    incomplete: lastPageFull && scanned >= SEARCH_SCAN_PAGES * TASKS_PER_PROVIDER_PAGE,
+    tasks: tasks.slice(0, args.limit ?? 20).map((task) => normalizeClickUpTask(task)),
+    index: {
+      indexedTasks: typeof index.indexedTasks === 'number' ? index.indexedTasks : 0,
+      fullSyncComplete: index.fullSyncComplete === true,
+      lastRefreshAt: typeof index.lastRefreshAt === 'number' ? index.lastRefreshAt : 0,
+      refreshIncomplete: index.refreshIncomplete === true,
+      ...(objectValue(index.refreshError) ? { refreshError: objectValue(index.refreshError) } : {}),
+    },
   };
 }
 

@@ -1,6 +1,7 @@
 import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../autonomy/cloud/pairing';
 import {
   CLICKUP_GRANT_REVISION_HEADER,
+  CLICKUP_TOOL_CATALOG_HEADER,
   CLICKUP_MCP_CLIENT_INFO,
   CLICKUP_MCP_PATH,
   CLICKUP_MCP_PROTOCOL_VERSION,
@@ -12,6 +13,7 @@ import { clickUpPairingAuthorityBinding } from './oauth/authority';
 import {
   CLICKUP_TOOL_NAMES,
   clickUpToolJsonSchema,
+  clickUpToolCatalogFingerprint,
   clickupToolCatalog,
   clickupToolNameSchema,
   validateClickUpToolArguments,
@@ -204,6 +206,9 @@ async function mcpPost(
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
   const id = crypto.randomUUID();
+  const catalogFingerprint = method === 'tools/call'
+    ? await clickUpToolCatalogFingerprint()
+    : undefined;
   const body = JSON.stringify({
     jsonrpc: '2.0',
     id,
@@ -227,6 +232,9 @@ async function mcpPost(
         ...(name ? { 'Mcp-Name': name } : {}),
         ...(session.grantRevision !== undefined ? {
           [CLICKUP_GRANT_REVISION_HEADER]: String(session.grantRevision),
+        } : {}),
+        ...(catalogFingerprint ? {
+          [CLICKUP_TOOL_CATALOG_HEADER]: catalogFingerprint,
         } : {}),
       },
       body,

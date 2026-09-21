@@ -78,6 +78,8 @@ afterEach(() => {
 describe('hex colour sanitation', () => {
   it('strips whitespace and invisible formatting from plain text', () => {
     expect(sanitizeHexColourInput('  #FF 00\u00a0AA\u200b  ')).toBe('#FF00AA');
+    expect(sanitizeHexColourInput('#12\u200E34\u200F56')).toBe('#123456');
+    expect(sanitizeHexColourInput('#AB\u061CCD\u2060EF')).toBe('#ABCDEF');
   });
 
   it('extracts one complete colour from common pasted rich-text debris', () => {

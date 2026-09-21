@@ -530,10 +530,21 @@ export class ClickUpOAuthVault extends DurableObject {
 
   private async providerData<T>(
     run: (accessToken: string) => Promise<ClickUpProviderResult<T>>,
-  ): Promise<{ ok: true; data: T } | { ok: false; response: Response }> {
+    expectedRevision?: number,
+  ): Promise<
+    | { ok: true; data: T; grantRevision: number }
+    | { ok: false; response: Response; grantRevision: number }
+  > {
     const grant = await this.accessGrant();
     if (!grant) {
-      return { ok: false, response: json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401) };
+      return { ok: false, response: json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401), grantRevision: 0 };
+    }
+    if (expectedRevision !== undefined && grant.revision !== expectedRevision) {
+      return {
+        ok: false,
+        response: json({ code: 'grant_changed', message: 'ClickUp authorization changed after this operation was admitted.' }, 409),
+        grantRevision: grant.revision,
+      };
     }
     const reservation = this.reserveProviderCall();
     if (reservation.blocked) {
@@ -544,12 +555,13 @@ export class ClickUpOAuthVault extends DurableObject {
           message: 'ClickUp request budget is exhausted for the current provider window.',
           ...(reservation.retryAt ? { retryAt: reservation.retryAt } : {}),
         }, 429),
+        grantRevision: grant.revision,
       };
     }
     try {
       const result = await run(grant.token);
       this.recordRateLimit(result.rateLimit);
-      return { ok: true, data: result.data };
+      return { ok: true, data: result.data, grantRevision: grant.revision };
     } catch (error) {
       if (!(error instanceof ClickUpProviderError)) throw error;
       this.recordRateLimit(error.rateLimit);
@@ -564,18 +576,20 @@ export class ClickUpOAuthVault extends DurableObject {
           message: error.message,
           ...(error.rateLimit.resetAt ? { retryAt: error.rateLimit.resetAt * 1000 } : {}),
         }, error.status),
+        grantRevision: grant.revision,
       };
     }
   }
 
   private async runProvider<T>(
     run: (accessToken: string) => Promise<ClickUpProviderResult<T>>,
+    expectedRevision?: number,
   ): Promise<Response> {
-    const result = await this.providerData(run);
+    const result = await this.providerData(run, expectedRevision);
     return result.ok ? json({ ok: true, result: result.data }) : result.response;
   }
 
-  private async searchTaskIndex(argumentsValue: unknown): Promise<Response> {
+  private async searchTaskIndex(argumentsValue: unknown, expectedRevision?: number): Promise<Response> {
     const args = validateClickUpToolArguments('clickup.searchTasks', argumentsValue);
     if (!this.workspaceAuthorized(args.workspaceId)) {
       return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
@@ -586,7 +600,8 @@ export class ClickUpOAuthVault extends DurableObject {
 
     const fullSnapshotAgeOrigin = state.indexedTasks > 0 ? state.oldestIndexedAt : state.lastRefreshAt;
     if (
-      state.fullSyncComplete
+      state.incrementalSince === 0
+      && state.fullSyncComplete
       && fullSnapshotAgeOrigin > 0
       && now - fullSnapshotAgeOrigin >= TASK_INDEX_FULL_RECONCILE_MS
     ) {
@@ -594,7 +609,7 @@ export class ClickUpOAuthVault extends DurableObject {
       state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
     }
 
-    let refreshIncomplete = false;
+    let refreshIncomplete = state.incrementalSince > 0;
     let refreshError: { code: string; message: string } | undefined;
 
     const providerPage = async (page: number, dateUpdatedGt?: number) => {
@@ -603,10 +618,20 @@ export class ClickUpOAuthVault extends DurableObject {
         includeClosed: true,
         includeSubtasks: true,
         ...(dateUpdatedGt !== undefined ? { dateUpdatedGt } : {}),
-      }));
+      }), expectedRevision);
     };
 
-    if (state.indexedTasks === 0 || now - state.lastRefreshAt >= TASK_INDEX_STALE_MS) {
+    const handleWorkspaceDenial = (status: number, revision: number): boolean => {
+      if (status !== 403) return false;
+      this.revokeWorkspaceIfRevision(args.workspaceId, revision);
+      return true;
+    };
+
+    if (
+      state.incrementalSince > 0
+      || state.indexedTasks === 0
+      || now - state.lastRefreshAt >= TASK_INDEX_STALE_MS
+    ) {
       if (!state.fullSyncComplete) {
         let nextPage = state.nextPage;
         let maxUpdatedAt = state.lastProviderUpdatedAt;
@@ -616,6 +641,7 @@ export class ClickUpOAuthVault extends DurableObject {
         for (let offset = 0; offset < TASK_INDEX_COLD_PAGES_PER_SEARCH; offset += 1) {
           const pageResult = await providerPage(nextPage);
           if (!pageResult.ok) {
+            if (handleWorkspaceDenial(pageResult.response.status, pageResult.grantRevision)) return pageResult.response;
             if (state.indexedTasks === 0 && !fetchedAnyPage) return pageResult.response;
             const body = await pageResult.response.json().catch(() => null) as Record<string, unknown> | null;
             refreshError = {
@@ -645,20 +671,30 @@ export class ClickUpOAuthVault extends DurableObject {
           workspaceId: args.workspaceId,
           fullSyncComplete,
           nextPage,
-          lastRefreshAt: now,
+          lastRefreshAt: fullSyncComplete ? now : 0,
           lastProviderUpdatedAt: maxUpdatedAt,
+          oldestIndexedAt: 0,
+          incrementalSince: 0,
+          incrementalNextPage: 0,
+          incrementalMaxUpdatedAt: 0,
         });
       } else {
-        const threshold = Math.max(
-          0,
-          (state.lastProviderUpdatedAt || state.lastRefreshAt || now) - TASK_INDEX_REFRESH_OVERLAP_MS,
-        );
-        let maxUpdatedAt = state.lastProviderUpdatedAt;
-        let pageWasFull = false;
+        const continuing = state.incrementalSince > 0;
+        const threshold = continuing
+          ? state.incrementalSince
+          : Math.max(
+              0,
+              (state.lastProviderUpdatedAt || state.lastRefreshAt || now) - TASK_INDEX_REFRESH_OVERLAP_MS,
+            );
+        let nextPage = continuing ? state.incrementalNextPage : 0;
+        let maxUpdatedAt = continuing ? state.incrementalMaxUpdatedAt : state.lastProviderUpdatedAt;
+        let completed = false;
+        let fetchedPage = false;
 
-        for (let page = 0; page < TASK_INDEX_INCREMENTAL_PAGES; page += 1) {
-          const pageResult = await providerPage(page, threshold);
+        for (let offset = 0; offset < TASK_INDEX_INCREMENTAL_PAGES; offset += 1) {
+          const pageResult = await providerPage(nextPage, threshold);
           if (!pageResult.ok) {
+            if (handleWorkspaceDenial(pageResult.response.status, pageResult.grantRevision)) return pageResult.response;
             const body = await pageResult.response.json().catch(() => null) as Record<string, unknown> | null;
             refreshError = {
               code: typeof body?.code === 'string' ? body.code : `http-${pageResult.response.status}`,
@@ -666,22 +702,50 @@ export class ClickUpOAuthVault extends DurableObject {
             };
             break;
           }
+
+          fetchedPage = true;
           const source = pageResult.data && typeof pageResult.data === 'object' ? pageResult.data as Record<string, unknown> : {};
           const tasks = Array.isArray(source.tasks) ? source.tasks : [];
           const indexed = upsertClickUpTaskIndexPage(this.ctx.storage.sql, args.workspaceId, tasks, now);
           maxUpdatedAt = Math.max(maxUpdatedAt, indexed.maxProviderUpdatedAt);
-          pageWasFull = tasks.length >= TASK_INDEX_PROVIDER_PAGE_SIZE;
-          if (!pageWasFull) break;
+          nextPage += 1;
+
+          if (tasks.length < TASK_INDEX_PROVIDER_PAGE_SIZE) {
+            completed = true;
+            break;
+          }
         }
 
-        refreshIncomplete = pageWasFull;
-        setTaskIndexState(this.ctx.storage.sql, {
-          workspaceId: args.workspaceId,
-          fullSyncComplete: true,
-          nextPage: 0,
-          lastRefreshAt: now,
-          lastProviderUpdatedAt: maxUpdatedAt,
-        });
+        if (completed) {
+          refreshIncomplete = false;
+          setTaskIndexState(this.ctx.storage.sql, {
+            workspaceId: args.workspaceId,
+            fullSyncComplete: true,
+            nextPage: 0,
+            lastRefreshAt: now,
+            lastProviderUpdatedAt: maxUpdatedAt,
+            oldestIndexedAt: state.oldestIndexedAt,
+            incrementalSince: 0,
+            incrementalNextPage: 0,
+            incrementalMaxUpdatedAt: 0,
+          });
+        } else {
+          refreshIncomplete = true;
+          setTaskIndexState(this.ctx.storage.sql, {
+            workspaceId: args.workspaceId,
+            fullSyncComplete: true,
+            nextPage: 0,
+            lastRefreshAt: 0,
+            lastProviderUpdatedAt: state.lastProviderUpdatedAt,
+            oldestIndexedAt: state.oldestIndexedAt,
+            incrementalSince: threshold,
+            incrementalNextPage: nextPage,
+            incrementalMaxUpdatedAt: maxUpdatedAt,
+          });
+          if (!fetchedPage && !refreshError && state.indexedTasks === 0) {
+            return json({ code: 'refresh_incomplete', message: 'ClickUp task-index refresh did not return a usable page.' }, 502);
+          }
+        }
       }
     }
 
@@ -695,7 +759,7 @@ export class ClickUpOAuthVault extends DurableObject {
           indexedTasks: state.indexedTasks,
           fullSyncComplete: state.fullSyncComplete,
           lastRefreshAt: state.lastRefreshAt,
-          refreshIncomplete,
+          refreshIncomplete: state.incrementalSince > 0 || refreshIncomplete,
           ...(refreshError ? { refreshError } : {}),
         },
       },

@@ -13,6 +13,7 @@ export interface ClickUpOAuthRouteEnv {
 }
 
 export const CLICKUP_WEBHOOK_ENDPOINT_HEADER = 'X-Elara-ClickUp-Webhook-Endpoint';
+const MAX_OAUTH_BODY_BYTES = 16 * 1024;
 
 const CLICKUP_OAUTH_PATHS = new Set([
   '/clickup/oauth/status',
@@ -49,6 +50,39 @@ function attachCors(response: Response, corsOrigin: string | null): Response {
 
 function bearer(request: Request): string | null {
   return request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? null;
+}
+
+async function readBoundedBody(request: Request): Promise<string> {
+  const declared = Number(request.headers.get('Content-Length') ?? '0');
+  if (Number.isFinite(declared) && declared > MAX_OAUTH_BODY_BYTES) throw new Error('too-large');
+  const reader = request.body?.getReader();
+  if (!reader) {
+    const bytes = new Uint8Array(await request.arrayBuffer());
+    if (bytes.byteLength > MAX_OAUTH_BODY_BYTES) throw new Error('too-large');
+    return new TextDecoder().decode(bytes);
+  }
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      total += value.byteLength;
+      if (total > MAX_OAUTH_BODY_BYTES) throw new Error('too-large');
+      chunks.push(value);
+    }
+  } catch (cause) {
+    await reader.cancel().catch(() => undefined);
+    throw cause;
+  }
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
 }
 
 async function vaultStub(env: ClickUpOAuthRouteEnv): Promise<DurableObjectStub> {
@@ -103,7 +137,12 @@ export async function handleClickUpOAuthRoute(
     return json({ code: 'method', message: 'Method not allowed.' }, 405, corsOrigin);
   }
 
-  const body = await request.text();
+  let body: string;
+  try {
+    body = await readBoundedBody(request);
+  } catch {
+    return json({ code: 'request_too_large', message: 'ClickUp OAuth request exceeds Elara\'s byte limit.' }, 413, corsOrigin);
+  }
   const verified = await verifySignedWrite({
     method: request.method,
     path: pathname,

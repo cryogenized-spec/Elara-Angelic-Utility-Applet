@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { SELF, reset } from 'cloudflare:test';
+import { SELF } from 'cloudflare:test';
 import {
   CLICKUP_GRANT_REVISION_HEADER,
   CLICKUP_MCP_PATH,
@@ -9,7 +9,7 @@ import {
   MCP_META_PROTOCOL_VERSION,
 } from '../../src/clickup/mcp-protocol';
 import { CLICKUP_TOOL_NAMES } from '../../src/clickup/tool-schema';
-import { TOKEN } from './helpers';
+import { resetClickUpTestState, TOKEN } from './helpers';
 import { boundedClickUpMcpResult } from '../src/clickup/mcp-route';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';

@@ -1,0 +1,368 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { createInteraction, uploadFile, deleteFile } = vi.hoisted(() => ({
+  createInteraction: vi.fn(),
+  uploadFile: vi.fn(),
+  deleteFile: vi.fn(),
+}));
+
+vi.mock('@google/genai', () => ({
+  GoogleGenAI: class {
+    interactions = { create: createInteraction };
+    files = { upload: uploadFile, delete: deleteFile };
+  },
+}));
+
+import worker from '../src/index';
+import { GEMINI_STREAM_LIMITS } from '../../src/gemini/stream-limits';
+
+describe('Gemini Worker boundary', () => {
+  const baseEnv = {
+    GEMINI_API_KEY: 'test-secret-key',
+    ALLOWED_ORIGINS: 'https://cryogenized-spec.github.io',
+    ELARA_INSTALLATION_TOKEN: 'test-installation-token',
+  };
+
+  beforeEach(() => {
+    createInteraction.mockReset();
+    uploadFile.mockReset();
+    deleteFile.mockReset();
+    deleteFile.mockResolvedValue(undefined);
+  });
+
+  it('reports a healthy service without exposing protected values', async () => {
+    const request = new Request('https://worker.example/health', {
+      headers: { Origin: 'https://cryogenized-spec.github.io' },
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://cryogenized-spec.github.io');
+    expect(body).toEqual({
+      service: 'elara-gemini',
+      status: 'healthy',
+      api: true,
+      credentialConfigured: true,
+      originPolicyConfigured: true,
+      admissionConfigured: true,
+    });
+    expect(JSON.stringify(body)).not.toContain('test-secret-key');
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('reports a degraded health state when protected configuration is incomplete', async () => {
+    const request = new Request('https://worker.example/health');
+
+    const response = await worker.fetch(request, { ...baseEnv, ALLOWED_ORIGINS: '' });
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({
+      service: 'elara-gemini',
+      status: 'degraded',
+      api: true,
+      credentialConfigured: true,
+      originPolicyConfigured: false,
+      admissionConfigured: true,
+    });
+  });
+
+  it('reports degraded health when provider admission is not configured', async () => {
+    const response = await worker.fetch(new Request('https://worker.example/health'), { ...baseEnv, ELARA_INSTALLATION_TOKEN: '' });
+    await expect(response.json()).resolves.toMatchObject({ status: 'degraded', admissionConfigured: false });
+  });
+
+  it('rejects a missing Worker credential before invoking Gemini', async () => {
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
+    });
+
+    const response = await worker.fetch(request, { ...baseEnv, GEMINI_API_KEY: '' });
+
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({
+      code: 'configuration',
+      message: 'Gemini Worker credential is not configured.',
+    });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects an originless provider request without the installation credential', async () => {
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toEqual({ code: 'auth', message: 'A valid installation token is required.' });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects an origin that is outside the configured allowlist', async () => {
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token',
+        Origin: 'https://attacker.example',
+      },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ code: 'authz', message: 'Origin is not authorized.' });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed requests before they reach Gemini', async () => {
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ code: 'validation', message: 'Request did not satisfy the approved Gemini contract.' });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a Gemini turn when the master instruction is missing', async () => {
+    createInteraction.mockResolvedValue({});
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({ code: 'validation', message: 'Request did not satisfy the approved Gemini contract.' });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('passes the configured master instruction to Gemini unchanged', async () => {
+    createInteraction.mockResolvedValue({});
+    const customInstruction = 'PERSONA PROTOCOL: ELARA\nRemain in character and follow this exact instruction.';
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: customInstruction }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    expect(response.status).toBe(200);
+    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({ system_instruction: customInstruction }));
+    await response.text();
+  });
+
+  it('returns only allow-listed streaming events and keeps the credential out of the response', async () => {
+    const events = [
+      { event_type: 'interaction.created', interaction: { id: 'interaction-1', status: 'in_progress', model: 'gemini-3-flash-preview' } },
+      { event_type: 'step.start', interaction_id: 'interaction-1', index: 0, step: { index: 0, id: 'step-1', name: 'answer', type: 'text' } },
+      { event_type: 'step.delta', interaction_id: 'interaction-1', index: 0, delta: { type: 'text', text: 'Hello' } },
+      { event_type: 'unknown.secret', secret: 'test-secret-key' },
+      { event_type: 'step.stop', interaction_id: 'interaction-1', index: 0 },
+      { event_type: 'interaction.completed', interaction: { id: 'interaction-1', status: 'completed', usage: { total_tokens: 7 } } },
+    ];
+    createInteraction.mockResolvedValue((async function* () { for (const event of events) yield event; })());
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain('event: interaction.created');
+    expect(text).toContain('event: step.delta');
+    expect(text).not.toContain('unknown.secret');
+    expect(text).not.toContain('test-secret-key');
+  });
+
+  it('answers preflight requests without touching Gemini', async () => {
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'https://cryogenized-spec.github.io',
+        'Access-Control-Request-Method': 'POST',
+        'Access-Control-Request-Headers': 'content-type, authorization',
+      },
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(204);
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('https://cryogenized-spec.github.io');
+    expect(response.headers.get('Access-Control-Allow-Headers')?.toLowerCase()).toContain('authorization');
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unauthorized origin at the VTT boundary', async () => {
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://attacker.example' },
+      body: new Uint8Array(3_000),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({ code: 'authz', message: 'Origin is not authorized.' });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects unsupported VTT MIME types before invoking Gemini', async () => {
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/mp4', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
+      body: new Uint8Array(3_000),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(415);
+    await expect(response.json()).resolves.toEqual({ code: 'validation', message: 'Unsupported VTT audio type.' });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects oversized VTT captures using the request header before reading the body', async () => {
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'audio/webm',
+        'Content-Length': String((2 * 1024 * 1024) + 1),
+        Authorization: 'Bearer test-installation-token',
+        Origin: 'https://cryogenized-spec.github.io',
+      },
+      body: new Uint8Array(10),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      code: 'validation',
+      message: 'VTT audio capture is too large.',
+    });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('rejects a tiny VTT capture without uploading audio to Gemini', async () => {
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
+      body: new Uint8Array(100),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(422);
+    await expect(response.json()).resolves.toEqual({ code: 'empty', message: 'No speech was detected.' });
+    expect(uploadFile).not.toHaveBeenCalled();
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('uses the transcription model and smart mode for accepted VTT audio', async () => {
+    uploadFile.mockResolvedValue({ name: 'files/vtt-test', uri: 'https://example.invalid/vtt-test', mimeType: 'audio/webm' });
+    createInteraction.mockResolvedValue({ output_text: 'hello from voice' });
+    const request = new Request('https://worker.example/api/transcribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'audio/webm', Authorization: 'Bearer test-installation-token', Origin: 'https://cryogenized-spec.github.io' },
+      body: new Uint8Array(3_000),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body).toEqual({ transcript: 'hello from voice' });
+    expect(uploadFile).toHaveBeenCalledWith(expect.objectContaining({ config: { mimeType: 'audio/webm' } }));
+    expect(createInteraction).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'gemini-3.5-transcribe',
+      input: [{ type: 'audio', uri: 'https://example.invalid/vtt-test', mime_type: 'audio/webm' }],
+      generation_config: { transcription_config: { mode: 'smart', language_codes: [] } },
+      store: false,
+    }));
+    expect(deleteFile).toHaveBeenCalledWith({ name: 'files/vtt-test' });
+    expect(JSON.stringify(body)).not.toContain('test-secret-key');
+  });
+
+  it('rejects an oversized authenticated Gemini request before JSON parsing or provider execution', async () => {
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer test-installation-token',
+      },
+      body: 'x'.repeat((2 * 1024 * 1024) + 1),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+
+    expect(response.status).toBe(413);
+    await expect(response.json()).resolves.toEqual({
+      code: 'validation',
+      message: 'Gemini request body is too large.',
+    });
+    expect(createInteraction).not.toHaveBeenCalled();
+  });
+
+  it('keeps an oversized Worker function-argument stream invalid after later valid JSON fragments', async () => {
+    createInteraction.mockResolvedValue((async function* () {
+      yield { event_type: 'interaction.created', interaction: { id: 'interaction-arg-limit', status: 'in_progress', model: 'gemini-3-flash-preview' } };
+      yield { event_type: 'step.start', interaction_id: 'interaction-arg-limit', index: 0, step: { type: 'function_call', id: 'call-arg-limit', name: 'tasks.listTaskLists' } };
+      yield { event_type: 'step.delta', interaction_id: 'interaction-arg-limit', index: 0, delta: { type: 'arguments_delta', arguments: 'x'.repeat(GEMINI_STREAM_LIMITS.maxFunctionArgumentChars + 1) } };
+      yield { event_type: 'step.delta', interaction_id: 'interaction-arg-limit', index: 0, delta: { type: 'arguments_delta', arguments: '{}' } };
+      yield { event_type: 'step.stop', interaction_id: 'interaction-arg-limit', index: 0 };
+    })());
+
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona', tools: ['tasks.listTaskLists'] }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain('Gemini produced an invalid or oversized function-call argument stream.');
+    expect(text).not.toContain('event: tool-call');
+  });
+
+  it('fails the Worker relay closed before emitting an oversized provider text delta', async () => {
+    createInteraction.mockResolvedValue((async function* () {
+      yield { event_type: 'interaction.created', interaction: { id: 'interaction-limit', status: 'in_progress', model: 'gemini-3-flash-preview' } };
+      yield { event_type: 'step.delta', interaction_id: 'interaction-limit', index: 0, delta: { type: 'text', text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxTextChars + 1) } };
+    })());
+
+    const request = new Request('https://worker.example/api/gemini', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer test-installation-token' },
+      body: JSON.stringify({ model: 'gemini-3-flash-preview', input: 'hello', systemInstruction: 'custom persona' }),
+    });
+
+    const response = await worker.fetch(request, baseEnv);
+    const text = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(text).toContain('Gemini response exceeded the live text safety limit.');
+    expect(text).not.toContain('x'.repeat(1024));
+  });
+
+});

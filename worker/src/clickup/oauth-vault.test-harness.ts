@@ -36,6 +36,25 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     if (!url.pathname.startsWith('/__test/clickup/')) return super.fetch(request);
 
     try {
+      if (request.method === 'POST' && url.pathname === '/__test/clickup/reset') {
+        this.ctx.storage.transactionSync(() => {
+          for (const table of [
+            'clickup_oauth_states',
+            'clickup_oauth_nonces',
+            'clickup_oauth_credential',
+            'clickup_rate_limit',
+            'clickup_webhooks',
+            'clickup_webhook_deliveries',
+            'clickup_task_index',
+            'clickup_task_index_state',
+          ]) {
+            this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
+          }
+          this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = 0 WHERE slot = 1');
+        });
+        return json({ ok: true });
+      }
+
       if (request.method === 'GET' && url.pathname === '/__test/clickup/credential') {
         const row = this.ctx.storage.sql.exec<{
           access_cipher: string;

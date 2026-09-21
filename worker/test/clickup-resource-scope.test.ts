@@ -47,13 +47,13 @@ async function doFetch(request: Request): Promise<Response> {
   });
 }
 
-async function connect(): Promise<void> {
+async function connect(code = 'one-time-code'): Promise<void> {
   const startBody = JSON.stringify({ redirectUri: REDIRECT_URI });
   const started = await doFetch(await signedWrite('/clickup/oauth/start', startBody));
   expect(started.status).toBe(200);
   const { state } = await started.json() as { state: string };
 
-  const exchangeBody = JSON.stringify({ code: 'one-time-code', state, redirectUri: REDIRECT_URI });
+  const exchangeBody = JSON.stringify({ code, state, redirectUri: REDIRECT_URI });
   const exchanged = await doFetch(await signedWrite('/clickup/oauth/exchange', exchangeBody));
   expect(exchanged.status).toBe(200);
   const status = await exchanged.json() as { updatedAt?: number };
@@ -481,6 +481,80 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     expect(forged.status).toBe(401);
     expect(await responseBody(forged)).toEqual(expect.objectContaining({ code: 'auth' }));
     expect(counters).toEqual(before);
+  });
+
+  it('drops Workspace B immediately after reconnect while the provider token can still resolve B', async () => {
+    let bTaskReads = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      const auth = request.headers.get('Authorization') ?? '';
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        const body = await request.clone().json() as { code?: string };
+        return new Response(JSON.stringify({
+          access_token: body.code === 'second-code' ? 'token-a-only' : 'token-a-and-b',
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/team') {
+        const teams = auth.endsWith('token-a-only')
+          ? [{ id: '111', name: 'Workspace A', members: [{ user: { id: 183, username: 'Gareth' } }] }]
+          : [
+              { id: '111', name: 'Workspace A', members: [{ user: { id: 183, username: 'Gareth' } }] },
+              { id: '222', name: 'Workspace B', members: [{ user: { id: 9999, username: 'Other' } }] },
+            ];
+        return new Response(JSON.stringify({ teams }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/task/task-b' && request.method === 'GET') {
+        bTaskReads += 1;
+        return new Response(JSON.stringify({
+          id: 'task-b',
+          name: 'SECRET_B_TASK',
+          team_id: '222',
+          list: { id: '2221' },
+          space: { id: '2222' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unexpected reconnect-scope provider request: ${request.method} ${request.url}`);
+    });
+
+    await connect('first-code');
+    const before = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '222', taskId: 'task-b' },
+    });
+    expect(before.status).toBe(200);
+    expect(JSON.stringify(await responseBody(before))).toContain('SECRET_B_TASK');
+    expect(bTaskReads).toBe(1);
+
+    await connect('second-code');
+
+    const removedWorkspace = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '222', taskId: 'task-b' },
+    });
+    expect(removedWorkspace.status).toBe(403);
+    expect(await responseBody(removedWorkspace)).toEqual(expect.objectContaining({ code: 'workspace_forbidden' }));
+    expect(bTaskReads).toBe(1);
+
+    const smuggledUnderA = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '111', taskId: 'task-b' },
+    });
+    expect(smuggledUnderA.status).toBe(403);
+    expect(await responseBody(smuggledUnderA)).toEqual(expect.objectContaining({ code: 'resource_workspace_mismatch' }));
+    expect(bTaskReads).toBe(2);
   });
 
   it('fails closed when direct task ancestry is absent instead of guessing Workspace ownership', async () => {

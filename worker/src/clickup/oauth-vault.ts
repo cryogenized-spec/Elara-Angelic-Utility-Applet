@@ -43,8 +43,11 @@ import { validateClickUpToolArguments } from '../../../src/clickup/tool-schema';
 import { ARTIFACT_LIMITS } from '../../../src/artifacts/limits';
 import {
   clearClickUpTaskIndex,
+  clearClickUpWorkspaceTaskIndex,
   initializeClickUpTaskIndex,
+  markAllClickUpTaskIndexesStale,
   markClickUpWorkspaceTaskIndexStale,
+  removeClickUpTaskFromAllIndexes,
   removeClickUpTaskFromIndex,
   searchClickUpTaskIndex,
   setTaskIndexState,
@@ -161,6 +164,7 @@ const STATE_TTL_MS = 10 * 60_000;
 const NONCE_RETENTION_MS = 10 * 60_000;
 const VAULT_KEY_CONTEXT = 'elara-clickup-oauth-vault-v1';
 const TASK_INDEX_STALE_MS = 60_000;
+const TASK_INDEX_FULL_RECONCILE_MS = 6 * 60 * 60_000;
 const TASK_INDEX_COLD_PAGES_PER_SEARCH = 5;
 const TASK_INDEX_INCREMENTAL_PAGES = 3;
 const TASK_INDEX_PROVIDER_PAGE_SIZE = 100;
@@ -516,6 +520,17 @@ export class ClickUpOAuthVault extends DurableObject {
 
     let state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
     const now = Date.now();
+
+    const fullSnapshotAgeOrigin = state.indexedTasks > 0 ? state.oldestIndexedAt : state.lastRefreshAt;
+    if (
+      state.fullSyncComplete
+      && fullSnapshotAgeOrigin > 0
+      && now - fullSnapshotAgeOrigin >= TASK_INDEX_FULL_RECONCILE_MS
+    ) {
+      clearClickUpWorkspaceTaskIndex(this.ctx.storage.sql, args.workspaceId);
+      state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
+    }
+
     let refreshIncomplete = false;
     let refreshError: { code: string; message: string } | undefined;
 
@@ -682,11 +697,18 @@ export class ClickUpOAuthVault extends DurableObject {
         return this.runProvider((token) => getClickUpListCustomFields(token, command.listId));
       case 'createTask': {
         const args = validateClickUpToolArguments('clickup.createTask', command.arguments);
-        return this.runProvider((token) => createClickUpTask(token, args));
+        const result = await this.providerData((token) => createClickUpTask(token, args));
+        if (!result.ok) return result.response;
+        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
+        return json({ ok: true, result: result.data });
       }
       case 'updateTask': {
         const args = validateClickUpToolArguments('clickup.updateTask', command.arguments);
-        return this.runProvider((token) => updateClickUpTask(token, args));
+        const result = await this.providerData((token) => updateClickUpTask(token, args));
+        if (!result.ok) return result.response;
+        removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, args.taskId);
+        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
+        return json({ ok: true, result: result.data });
       }
       case 'createTaskComment': {
         const args = validateClickUpToolArguments('clickup.createTaskComment', command.arguments);

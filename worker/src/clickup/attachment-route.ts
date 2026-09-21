@@ -48,13 +48,13 @@ async function vaultStub(env: ClickUpAttachmentRouteEnv): Promise<DurableObjectS
   return env.CLICKUP_OAUTH.get(env.CLICKUP_OAUTH.idFromName(installationId));
 }
 
-async function readBoundedBytes(request: Request): Promise<Uint8Array> {
+export async function readClickUpAttachmentBytes(request: Request, maxBytes = MAX_ATTACHMENT_REQUEST_BYTES): Promise<Uint8Array> {
   const declared = Number(request.headers.get('Content-Length') ?? '0');
-  if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_REQUEST_BYTES) throw new Error('too-large');
+  if (Number.isFinite(declared) && declared > maxBytes) throw new Error('too-large');
   const reader = request.body?.getReader();
   if (!reader) {
     const bytes = new Uint8Array(await request.arrayBuffer());
-    if (bytes.byteLength > MAX_ATTACHMENT_REQUEST_BYTES) throw new Error('too-large');
+    if (bytes.byteLength > maxBytes) throw new Error('too-large');
     return bytes;
   }
   const chunks: Uint8Array[] = [];
@@ -65,7 +65,7 @@ async function readBoundedBytes(request: Request): Promise<Uint8Array> {
       if (done) break;
       if (!value?.byteLength) continue;
       total += value.byteLength;
-      if (total > MAX_ATTACHMENT_REQUEST_BYTES) throw new Error('too-large');
+      if (total > maxBytes) throw new Error('too-large');
       chunks.push(value);
     }
   } catch (cause) {
@@ -108,7 +108,7 @@ export async function handleClickUpAttachmentRoute(
   }
   let body: Uint8Array;
   try {
-    body = await readBoundedBytes(request);
+    body = await readClickUpAttachmentBytes(request, MAX_ATTACHMENT_REQUEST_BYTES);
   } catch {
     return json({ code: 'artifact-too-large', message: 'The attachment request exceeds Elara\'s upload limit.' }, 413, corsOrigin);
   }

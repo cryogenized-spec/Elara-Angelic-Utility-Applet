@@ -40,6 +40,40 @@ describe('Gemini rolling quota ledger', () => {
     expect(textEstimate).toBeGreaterThan(200_000);
   });
 
+  it('does not mistake inline PDF base64 transport for prompt text', () => {
+    const encodedPdf = 'A'.repeat(200_000);
+    const estimate = estimateSerializedInputTokens({
+      input: [{ type: 'document', mime_type: 'application/pdf', data: encodedPdf }],
+    });
+    const transportAsText = estimateSerializedInputTokens({
+      input: [{ type: 'text', text: encodedPdf }],
+    });
+
+    expect(estimate).toBeGreaterThanOrEqual(16_000);
+    expect(estimate).toBeLessThan(40_000);
+    expect(transportAsText).toBeGreaterThan(200_000);
+  });
+
+  it('charges decoded text-document content without charging its base64 expansion', () => {
+    const encodedText = 'A'.repeat(200_000);
+    const estimate = estimateSerializedInputTokens({
+      input: [{ type: 'document', mime_type: 'text/plain', data: encodedText }],
+    });
+    expect(estimate).toBeGreaterThan(140_000);
+    expect(estimate).toBeLessThan(170_000);
+  });
+
+  it('reserves for URI-backed documents whose transport bytes are no longer inline', () => {
+    const pdf = estimateSerializedInputTokens({
+      input: [{ type: 'document', mime_type: 'application/pdf', uri: 'https://example.test/file.pdf' }],
+    });
+    const text = estimateSerializedInputTokens({
+      input: [{ type: 'document', mime_type: 'text/plain', uri: 'https://example.test/file.txt' }],
+    });
+    expect(pdf).toBeGreaterThanOrEqual(96_000);
+    expect(text).toBeGreaterThanOrEqual(160_000);
+  });
+
   it('reserves for remote image inputs even when only a provider URI is present', () => {
     const estimate = estimateSerializedInputTokens({
       input: [{ type: 'image', mime_type: 'image/png', uri: 'https://example.test/provider-file' }],

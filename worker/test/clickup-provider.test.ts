@@ -91,11 +91,16 @@ describe('ClickUp provider wire mapping', () => {
 
     expect(caught).toBeInstanceOf(ClickUpProviderError);
     expect(caught).toMatchObject({
-      code: 'ACCESS_403',
+      code: 'http-403',
+      providerCode: 'ACCESS_403',
       status: 403,
       message: 'ClickUp denied access to the requested resource.',
     });
-    expect(String((caught as Error).message)).not.toContain(secret);
+    expect(JSON.stringify({
+      code: (caught as ClickUpProviderError).code,
+      message: (caught as ClickUpProviderError).message,
+    })).not.toContain(secret);
+    expect((caught as ClickUpProviderError).providerCode).toBe('ACCESS_403');
   });
 
   it('cancels chunked provider JSON as soon as it crosses the hard byte ceiling', async () => {

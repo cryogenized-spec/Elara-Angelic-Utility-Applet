@@ -61,6 +61,23 @@ describe('ClickUp artifact attachment boundary', () => {
           },
         });
       }
+      if (url.pathname === '/api/v2/task/86task' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: '86task',
+          name: 'Repair S56',
+          team_id: '999',
+          list: { id: '123' },
+          space: { id: '789' },
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '97',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        });
+      }
       if (url.pathname === '/api/v2/task/86task/attachment' && request.method === 'POST') {
         attachmentCalls += 1;
         expect(request.headers.get('Authorization')).toBe('Bearer clickup-provider-token-secret');
@@ -87,6 +104,7 @@ describe('ClickUp artifact attachment boundary', () => {
     const grantRevision = await connect();
 
     const form = new FormData();
+    form.set('workspaceId', '999');
     form.set('taskId', '86task');
     form.set('artifactId', 'artifact-local-1');
     form.set('filename', 'repair-note.txt');
@@ -123,6 +141,7 @@ describe('ClickUp artifact attachment boundary', () => {
 
   it('rejects a disallowed browser origin before the attachment reaches the vault', async () => {
     const form = new FormData();
+    form.set('workspaceId', '999');
     form.set('taskId', '86task');
     form.set('artifactId', 'artifact-local-1');
     form.set('file', new Blob(['x'], { type: 'text/plain' }), 'x.txt');
@@ -147,6 +166,7 @@ describe('ClickUp artifact attachment boundary', () => {
 
   it('requires the installation bearer before accepting multipart bytes', async () => {
     const form = new FormData();
+    form.set('workspaceId', '999');
     form.set('taskId', '86task');
     form.set('artifactId', 'artifact-local-1');
     form.set('file', new Blob(['x'], { type: 'text/plain' }), 'x.txt');
@@ -176,6 +196,7 @@ describe('ClickUp artifact attachment boundary', () => {
     const grantRevision = await connect();
 
     const form = new FormData();
+    form.set('workspaceId', '999');
     form.set('taskId', '');
     form.set('artifactId', 'artifact-local-1');
     form.set('file', new Blob(['x'], { type: 'text/plain' }), 'x.txt');

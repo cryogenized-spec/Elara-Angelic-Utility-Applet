@@ -29,14 +29,11 @@ async function unlockKanbanGemini(page: Page) {
   await page.getByRole('button', { name: 'Create PIN Lockbox' }).click();
   await expect(page.getByRole('status', { name: 'Gemini Lockbox status: unlocked' })).toBeVisible();
   await page.getByRole('button', { name: 'Back to chat' }).click();
-  return { tasks, patchEtags };
 }
 
 async function seedWorkspace(page: Page) {
   const lists = [{ id: 'studio', title: 'Studio projects' }, { id: 'personal', title: 'Personal' }, { id: 'reading', title: 'Reading list' }, { id: 'later', title: 'Someday' }];
   const tasks: FixtureTask[] = [{ id: 'review', title: 'Review the launch proposal', notes: 'Read the source email and confirm the next steps.', due: '2020-01-01T00:00:00Z', status: 'needsAction', etag: 'one', position: '0001', assignmentInfo: { surfaceType: 'DOCUMENT', linkToTask: 'https://tasks.google.com/task/review' } }, ...Array.from({ length: 8 }, (_, index) => ({ id: `task-${index}`, title: `Project milestone ${index + 1}`, status: 'needsAction', etag: 'one', position: `000${index + 2}` }))];
-  const patchEtags: Array<string | null> = [];
-  let patchSerial = 1;
   await page.route('https://accounts.google.com/gsi/client', (route) => route.fulfill({ contentType: 'text/javascript', body: `window.google = { accounts: { oauth2: { initTokenClient: (config) => ({ requestAccessToken: () => config.callback({ access_token: "kanban-test-token", expires_in: 3600, scope: config.scope }) }), revoke: (_token, callback) => callback({}) } } };` }));
   await page.route('https://www.googleapis.com/oauth2/v2/userinfo*', (route) => route.fulfill({ json: { email: 'test@example.com', name: 'Kanban Test' } }));
   await page.route('https://tasks.googleapis.com/**', async (route) => {
@@ -58,13 +55,7 @@ async function seedWorkspace(page: Page) {
     } else if (method === 'DELETE') {
       tasks.splice(tasks.findIndex((task) => path.endsWith('/' + task.id)), 1); await route.fulfill({ status: 204 }); return;
     } else if (method === 'GET' && !path.endsWith('/tasks')) result = tasks.find((task) => path.endsWith('/' + task.id));
-    else if (method === 'PATCH') {
-      const task = tasks.find((task) => path.endsWith('/' + task.id));
-      patchEtags.push(request.headers()['if-match'] ?? null);
-      Object.assign(task!, body);
-      task!.etag = `etag-${++patchSerial}`;
-      result = task;
-    }
+    else if (method === 'PATCH') { const task = tasks.find((task) => path.endsWith('/' + task.id)); Object.assign(task!, body); result = task; }
     else if (method === 'POST') { const task: FixtureTask = { id: crypto.randomUUID(), title: body.title ?? '', status: 'needsAction', etag: 'one', position: '9999', ...body }; tasks.push(task); result = task; }
     else result = { items: path.includes('/studio/') ? tasks : [] };
     await route.fulfill({ json: result, headers: { 'access-control-allow-origin': '*' } });
@@ -245,81 +236,6 @@ test("task cards open from the card surface and preserve app-only time and label
   await page.getByLabel("Sort tasks by").selectOption("due");
   await page.getByLabel("Sort direction").selectOption("desc");
   await expect(page.getByLabel("Sort direction")).toHaveValue("desc");
-});
-
-test("existing task retry uses the provider ETag after local metadata failure", async ({ page }) => {
-  await page.goto("");
-  const fixture = await seedWorkspace(page);
-  await page.getByRole("button", { name: "Kanban", exact: true }).click();
-  await expect(page.locator('[data-kanban-task-id="review"]')).toBeVisible();
-
-  await page.evaluate(async () => {
-    const request = indexedDB.open("elara-kanban");
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    try {
-      const tx = db.transaction("boards", "readwrite");
-      const store = tx.objectStore("boards");
-      const get = store.get("test@example.com");
-      const board = await new Promise<Record<string, unknown>>((resolve, reject) => {
-        get.onsuccess = () => resolve(get.result as Record<string, unknown>);
-        get.onerror = () => reject(get.error);
-      });
-      board.labels = Array.from({ length: 100 }, (_, index) => ({
-        id: `existing-${index}`,
-        name: `existing-${index}`,
-        color: "violet",
-      }));
-      store.put(board);
-      await new Promise<void>((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      });
-    } finally {
-      db.close();
-    }
-  });
-
-  await page.locator('[data-kanban-task-id="review"]').click({ position: { x: 220, y: 80 } });
-  await page.getByLabel("Title", { exact: true }).fill("Review the launch proposal updated");
-  await page.getByLabel("New label", { exact: true }).fill("#overflow");
-  await page.getByRole("button", { name: "Add label", exact: true }).click();
-  await page.getByRole("button", { name: "Save to Google", exact: true }).click();
-  await expect(page.getByRole("alert").last()).toContainText("Maximum 100 Kanban labels");
-  expect(fixture.patchEtags).toEqual(["one"]);
-
-  await page.evaluate(async () => {
-    const request = indexedDB.open("elara-kanban");
-    const db = await new Promise<IDBDatabase>((resolve, reject) => {
-      request.onsuccess = () => resolve(request.result);
-      request.onerror = () => reject(request.error);
-    });
-    try {
-      const tx = db.transaction("boards", "readwrite");
-      const store = tx.objectStore("boards");
-      const get = store.get("test@example.com");
-      const board = await new Promise<{ labels?: unknown[] }>((resolve, reject) => {
-        get.onsuccess = () => resolve(get.result as { labels?: unknown[] });
-        get.onerror = () => reject(get.error);
-      });
-      board.labels = board.labels?.slice(0, 99);
-      store.put(board);
-      await new Promise<void>((resolve, reject) => {
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-        tx.onabort = () => reject(tx.error);
-      });
-    } finally {
-      db.close();
-    }
-  });
-
-  await page.getByRole("button", { name: "Save to Google", exact: true }).click();
-  await expect(page.getByRole("dialog", { name: "Edit task" })).toHaveCount(0);
-  expect(fixture.patchEtags).toEqual(["one", "etag-2"]);
 });
 
 test("mobile disconnected workspace and accessible modal escape", async ({

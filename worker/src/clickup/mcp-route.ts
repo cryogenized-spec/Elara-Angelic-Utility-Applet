@@ -5,6 +5,7 @@ import {
   clickupToolNameSchema,
 } from '../../../src/clickup/tool-schema';
 import {
+  CLICKUP_GRANT_REVISION_HEADER,
   CLICKUP_MCP_PATH,
   CLICKUP_MCP_PROTOCOL_VERSION,
   MCP_MCP_META_CLIENT_CAPABILITIES,
@@ -131,6 +132,13 @@ function acceptsMcp(request: Request): boolean {
 
 function isJsonRequest(request: Request): boolean {
   return (request.headers.get('Content-Type') ?? '').toLocaleLowerCase().split(';', 1)[0]?.trim() === 'application/json';
+}
+
+function admittedGrantRevision(request: Request): number | null {
+  const raw = request.headers.get(CLICKUP_GRANT_REVISION_HEADER)?.trim() ?? '';
+  if (!/^\d+$/.test(raw)) return null;
+  const parsed = Number(raw);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
 async function readBoundedRequestJson(request: Request): Promise<unknown> {
@@ -295,8 +303,12 @@ export async function handleClickUpMcpRoute(
   if (method === 'tools/call') {
     const valid = toolsCallParamsSchema.safeParse(params);
     if (!valid.success) return rpcError(id, -32602, 'Invalid tools/call parameters.', 400, corsOrigin);
+    const grantRevision = admittedGrantRevision(request);
+    if (grantRevision === null) {
+      return rpcError(id, -32023, 'ClickUp tools/call requires the admitted provider grant revision.', 409, corsOrigin);
+    }
     try {
-      const value = await executeClickUpTool(env, valid.data.name, valid.data.arguments);
+      const value = await executeClickUpTool(env, valid.data.name, valid.data.arguments, grantRevision);
       return rpcResult(id, {
         resultType: 'complete',
         ...toolResultContent(value),
@@ -332,6 +344,7 @@ export function clickUpMcpPreflight(corsOrigin: string | null): Response {
       'MCP-Protocol-Version',
       'Mcp-Method',
       'Mcp-Name',
+      CLICKUP_GRANT_REVISION_HEADER,
     ].join(', '),
     Vary: 'Origin',
   });

@@ -47,4 +47,17 @@ describe('image preprocessing policy', () => {
 
     expect(decode).toHaveBeenCalledTimes(2);
   });
+
+  it('refuses oversized decoded raster dimensions before allocating a transform canvas', async () => {
+    const source = new Blob(['original'], { type: 'image/png' });
+    const close = vi.fn();
+    const canvas = vi.fn();
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({ width: 6000, height: 5000, close })));
+    vi.stubGlobal('OffscreenCanvas', canvas);
+
+    await expect(preprocessImage(source, { stripMetadata: true })).rejects.toMatchObject({ code: 'FILE_TOO_LARGE' });
+    expect(canvas).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+  });
+
 });

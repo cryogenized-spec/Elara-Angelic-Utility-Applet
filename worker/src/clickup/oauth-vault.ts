@@ -640,6 +640,26 @@ export class ClickUpOAuthVault extends DurableObject {
       : response;
   }
 
+  private async normalizeHierarchicalScopeFailure(
+    response: Response,
+    workspaceId: string,
+    expectedRevision: number,
+  ): Promise<Response> {
+    if (response.status !== 403 && response.status !== 404) return response;
+
+    // A direct Folder/List lookup can reveal whether an otherwise-denied ID
+    // exists through latency/rate-budget shape if only real resources proceed
+    // to Workspace ancestry verification. Spend the same two Space-list probes
+    // for a missing/forbidden direct ID, then return the same generic denial.
+    const padded = await this.verifySpaceScope(
+      workspaceId,
+      '__elara_denied_hierarchy_scope_probe__',
+      expectedRevision,
+    );
+    if (!padded.ok && padded.response.status !== 403) return padded.response;
+    return this.scopeDenied();
+  }
+
   private workspaceMemberIds(workspaceId: string): Set<string> | null {
     const context = this.authorizationContext();
     const workspace = context?.workspaces.find((entry) => String(entry.id ?? '') === workspaceId);
@@ -749,7 +769,12 @@ export class ClickUpOAuthVault extends DurableObject {
       (token) => getClickUpFolder(token, folderId, includeSubfolders),
       expectedRevision,
     );
-    if (!result.ok) return { ok: false, response: this.normalizeDirectScopeFailure(result.response) };
+    if (!result.ok) {
+      return {
+        ok: false,
+        response: await this.normalizeHierarchicalScopeFailure(result.response, workspaceId, expectedRevision),
+      };
+    }
     const folder = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
     const space = folder.space && typeof folder.space === 'object' && !Array.isArray(folder.space)
       ? folder.space as Record<string, unknown>
@@ -769,7 +794,12 @@ export class ClickUpOAuthVault extends DurableObject {
       return { ok: false, response: json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403) };
     }
     const result = await this.providerData((token) => getClickUpList(token, listId), expectedRevision);
-    if (!result.ok) return { ok: false, response: this.normalizeDirectScopeFailure(result.response) };
+    if (!result.ok) {
+      return {
+        ok: false,
+        response: await this.normalizeHierarchicalScopeFailure(result.response, workspaceId, expectedRevision),
+      };
+    }
     const list = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
     const space = list.space && typeof list.space === 'object' && !Array.isArray(list.space)
       ? list.space as Record<string, unknown>

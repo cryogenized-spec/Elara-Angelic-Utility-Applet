@@ -60,7 +60,7 @@ Authorization remains capability-driven even though Settings onboarding is bundl
 | Public Worker OAuth route boundary | `worker/src/google/oauth-routes.ts`, `worker/src/entry.ts` |
 | OAuth structural certification | `scripts/google-oauth-lifecycle-gate.mjs` |
 | OAuth behavioral mutation certification | `scripts/verify-google-oauth-lifecycle-mutations.mjs` |
-| Settings UI | `src/app/components/GoogleOAuthSettings.tsx` |
+| Settings + chat Workspace session UI | `src/app/components/GoogleOAuthSettings.tsx`, `src/app/components/TopToolRail.tsx` |
 
 `SYS-WORKER / worker.md` owns the Worker execution/runtime boundary; this document owns the Google authorization semantics that cross it.
 
@@ -93,6 +93,7 @@ Effective authorization remains the intersection of locally enabled Elara capabi
 - Direct `google.account` authorization remains identity-only; the Settings **Connect Google Workspace** action deliberately requests the current Workspace onboarding bundle instead.
 - Account-session refresh may re-request only Workspace capabilities already enabled by the user so a fresh token does not silently narrow prior local choices.
 - A known account with no live browser token is not presented as session-ready; the Google screen requires an explicit session refresh before Workspace permission controls unlock.
+- The main chat Workspace launcher mirrors the live session state: green means a usable access-token session is present, red means the known authorization is stale, and tapping a stale known session invokes the existing Workspace refresh authority before opening shortcuts. The launcher shows an in-place busy indicator while that refresh is in flight.
 - Existing durable refresh credentials are reused only when stable Google subject identity proves account continuity.
 - Provider `invalid_grant` during refresh deletes the unusable durable credential and becomes explicit reauthorization state.
 - Provider scopes never insert a locally disabled Elara capability into `enabledCapabilities`.

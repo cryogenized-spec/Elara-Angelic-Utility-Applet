@@ -968,16 +968,29 @@ export class ClickUpOAuthVault extends DurableObject {
           return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
         }
         return this.runProvider((token) => listClickUpSpaces(token, command.workspaceId, command.archived ?? false), expectedRevision);
-      case 'listFolders':
+      case 'listFolders': {
+        const scoped = await this.verifySpaceScope(command.workspaceId, command.spaceId, expectedRevision);
+        if (!scoped.ok) return scoped.response;
         return this.runProvider((token) => listClickUpFolders(token, command.spaceId, command.archived ?? false), expectedRevision);
-      case 'getFolder':
-        return this.runProvider((token) => getClickUpFolder(token, command.folderId, command.includeSubfolders ?? true), expectedRevision);
-      case 'listFolderLists':
+      }
+      case 'getFolder': {
+        const scoped = await this.verifyFolderScope(command.workspaceId, command.folderId, command.includeSubfolders ?? true, expectedRevision);
+        return scoped.ok ? json({ ok: true, result: scoped.folder }) : scoped.response;
+      }
+      case 'listFolderLists': {
+        const scoped = await this.verifyFolderScope(command.workspaceId, command.folderId, false, expectedRevision);
+        if (!scoped.ok) return scoped.response;
         return this.runProvider((token) => listClickUpFolderLists(token, command.folderId, command.archived ?? false), expectedRevision);
-      case 'listFolderlessLists':
+      }
+      case 'listFolderlessLists': {
+        const scoped = await this.verifySpaceScope(command.workspaceId, command.spaceId, expectedRevision);
+        if (!scoped.ok) return scoped.response;
         return this.runProvider((token) => listClickUpFolderlessLists(token, command.spaceId, command.archived ?? false), expectedRevision);
-      case 'getList':
-        return this.runProvider((token) => getClickUpList(token, command.listId), expectedRevision);
+      }
+      case 'getList': {
+        const scoped = await this.verifyListScope(command.workspaceId, command.listId, expectedRevision);
+        return scoped.ok ? json({ ok: true, result: scoped.list }) : scoped.response;
+      }
       case 'listWorkspaceTasks':
         if (!this.workspaceAuthorized(command.workspaceId)) {
           return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
@@ -997,18 +1010,31 @@ export class ClickUpOAuthVault extends DurableObject {
         return await this.searchTaskIndex(command.arguments, expectedRevision);
       case 'getTask': {
         const args = validateClickUpToolArguments('clickup.getTask', command.arguments);
-        return this.runProvider((token) => getClickUpTask(token, args.taskId, args.includeSubtasks ?? false), expectedRevision);
+        const scoped = await this.verifyTaskScope(args.workspaceId, args.taskId, args.includeSubtasks ?? false, expectedRevision);
+        return scoped.ok ? json({ ok: true, result: scoped.task }) : scoped.response;
       }
-      case 'getTaskComments':
+      case 'getTaskComments': {
+        const scoped = await this.verifyTaskScope(command.workspaceId, command.taskId, false, expectedRevision);
+        if (!scoped.ok) return scoped.response;
         return this.runProvider((token) => getClickUpTaskComments(
           token,
           command.taskId,
           command.start !== undefined && command.startId ? { start: command.start, startId: command.startId } : undefined,
         ), expectedRevision);
-      case 'getListCustomFields':
+      }
+      case 'getListCustomFields': {
+        const scoped = await this.verifyListScope(command.workspaceId, command.listId, expectedRevision);
+        if (!scoped.ok) return scoped.response;
         return this.runProvider((token) => getClickUpListCustomFields(token, command.listId), expectedRevision);
+      }
       case 'createTask': {
         const args = validateClickUpToolArguments('clickup.createTask', command.arguments);
+        const listScope = await this.verifyListScope(args.workspaceId, args.listId, expectedRevision);
+        if (!listScope.ok) return listScope.response;
+        if (args.parentTaskId) {
+          const parentScope = await this.verifyTaskScope(args.workspaceId, args.parentTaskId, false, expectedRevision);
+          if (!parentScope.ok) return parentScope.response;
+        }
         const result = await this.providerData((token) => createClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
         markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
@@ -1016,6 +1042,12 @@ export class ClickUpOAuthVault extends DurableObject {
       }
       case 'updateTask': {
         const args = validateClickUpToolArguments('clickup.updateTask', command.arguments);
+        const taskScope = await this.verifyTaskScope(args.workspaceId, args.taskId, false, expectedRevision);
+        if (!taskScope.ok) return taskScope.response;
+        if (args.parentTaskId) {
+          const parentScope = await this.verifyTaskScope(args.workspaceId, args.parentTaskId, false, expectedRevision);
+          if (!parentScope.ok) return parentScope.response;
+        }
         const result = await this.providerData((token) => updateClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
         removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, args.taskId);
@@ -1024,16 +1056,39 @@ export class ClickUpOAuthVault extends DurableObject {
       }
       case 'createTaskComment': {
         const args = validateClickUpToolArguments('clickup.createTaskComment', command.arguments);
+        const taskScope = await this.verifyTaskScope(args.workspaceId, args.taskId, false, expectedRevision);
+        if (!taskScope.ok) return taskScope.response;
         return this.runProvider((token) => createClickUpTaskComment(token, args), expectedRevision);
       }
       case 'replyToComment': {
         const args = validateClickUpToolArguments('clickup.replyToComment', command.arguments);
+        const commentScope = await this.verifyCommentBelongsToTask(args.workspaceId, args.taskId, args.commentId, expectedRevision);
+        if (!commentScope.ok) return commentScope.response;
         return this.runProvider((token) => replyToClickUpComment(token, args), expectedRevision);
       }
       case 'setCustomField':
-        return this.runProvider((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value), expectedRevision);
-      case 'clearCustomField':
-        return this.runProvider((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId), expectedRevision);
+      case 'clearCustomField': {
+        const taskScope = await this.verifyTaskScope(command.workspaceId, command.taskId, false, expectedRevision);
+        if (!taskScope.ok) return taskScope.response;
+        const list = taskScope.task.list && typeof taskScope.task.list === 'object' && !Array.isArray(taskScope.task.list)
+          ? taskScope.task.list as Record<string, unknown>
+          : undefined;
+        const listId = safeProviderId(list?.id);
+        if (!listId) return json({ code: 'resource_scope_unverifiable', message: 'ClickUp did not return the task List needed to validate its Custom Field.' }, 502);
+        const fieldsResult = await this.providerData((token) => getClickUpListCustomFields(token, listId), expectedRevision);
+        if (!fieldsResult.ok) return fieldsResult.response;
+        const fieldsRoot = fieldsResult.data && typeof fieldsResult.data === 'object' ? fieldsResult.data as Record<string, unknown> : {};
+        const fields = Array.isArray(fieldsRoot.fields) ? fieldsRoot.fields : [];
+        const fieldAllowed = fields.some((entry) => safeProviderId(
+          entry && typeof entry === 'object' && !Array.isArray(entry)
+            ? (entry as Record<string, unknown>).id
+            : undefined,
+        ) === command.fieldId);
+        if (!fieldAllowed) return this.scopeDenied('The requested ClickUp Custom Field is not available on the admitted task.');
+        return command.operation === 'setCustomField'
+          ? this.runProvider((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value), expectedRevision)
+          : this.runProvider((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId), expectedRevision);
+      }
       }
     } catch (error) {
       if (error instanceof z.ZodError) {

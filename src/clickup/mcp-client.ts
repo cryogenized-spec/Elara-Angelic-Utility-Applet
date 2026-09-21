@@ -328,6 +328,9 @@ export async function callClickUpMcpTool<T extends ClickUpToolName>(
   admittedGrant?: ClickUpAdmittedGrant,
 ): Promise<unknown> {
   const argumentsValue = validateClickUpToolArguments(tool, rawArguments);
+  if (!admittedGrant || !Number.isSafeInteger(admittedGrant.revision) || admittedGrant.revision <= 0) {
+    throw new ClickUpMcpError('grant_required', 'ClickUp MCP execution requires an admitted provider grant.', 409);
+  }
   const session = await currentSession(admittedGrant);
   await listToolsForSession(session, signal);
   const result = completeResult(await mcpPost(session, 'tools/call', {

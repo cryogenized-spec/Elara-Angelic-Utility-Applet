@@ -203,8 +203,8 @@ test.describe('Generation Activity', () => {
     await unlockTestGemini(page);
     await openAppearance(page);
     const accentInput = page.getByLabel('Generation activity accent hex');
-    await accentInput.fill(accent);
-    await accentInput.blur();
+    await accentInput.fill('•  #34 D3 99  ');
+    // Complete formatted text commits immediately; no blur/leave-menu delay.
     await expect(accentInput).toHaveValue(accent);
     await page.getByRole('button', { name: 'Back to chat' }).click();
 
@@ -240,8 +240,7 @@ test.describe('Generation Activity', () => {
     await expect(accentInput).toHaveValue('#A855F7');
     await expect(page.getByRole('alert')).toContainText('Enter a 6-digit hex colour');
 
-    await accentInput.fill(' 34d399 ');
-    await accentInput.blur();
+    await accentInput.fill(' 34 d3 99 ');
     await expect(accentInput).toHaveValue('#34D399');
     await expect(page.getByRole('alert')).toHaveCount(0);
 

@@ -9,6 +9,8 @@ import {
 } from './mcp-protocol';
 import {
   CLICKUP_TOOL_NAMES,
+  clickUpToolJsonSchema,
+  clickupToolCatalog,
   clickupToolNameSchema,
   validateClickUpToolArguments,
   type ClickUpMcpToolDefinition,
@@ -249,8 +251,18 @@ function parseToolDefinitions(value: unknown): readonly ClickUpMcpToolDefinition
     });
   }
   const returnedNames = new Set(tools.map((tool) => tool.name));
+  if (tools.length !== CLICKUP_TOOL_NAMES.length || returnedNames.size !== CLICKUP_TOOL_NAMES.length) {
+    throw new ClickUpMcpError('protocol', 'ClickUp MCP tools/list does not match Elara\'s canonical tool count.');
+  }
   for (const expected of CLICKUP_TOOL_NAMES) {
-    if (!returnedNames.has(expected)) throw new ClickUpMcpError('protocol', `ClickUp MCP is missing canonical tool ${expected}.`);
+    const remote = tools.find((tool) => tool.name === expected);
+    if (!remote) throw new ClickUpMcpError('protocol', `ClickUp MCP is missing canonical tool ${expected}.`);
+    if (remote.description !== clickupToolCatalog[expected].description) {
+      throw new ClickUpMcpError('protocol', `ClickUp MCP description drifted for ${expected}.`);
+    }
+    if (JSON.stringify(remote.inputSchema) !== JSON.stringify(clickUpToolJsonSchema(expected))) {
+      throw new ClickUpMcpError('protocol', `ClickUp MCP input schema drifted for ${expected}.`);
+    }
   }
   return tools;
 }
@@ -272,8 +284,8 @@ export async function callClickUpMcpTool<T extends ClickUpToolName>(
   rawArguments: unknown,
   signal?: AbortSignal,
 ): Promise<unknown> {
-  await ensureDiscovery(signal);
   const argumentsValue = validateClickUpToolArguments(tool, rawArguments);
+  await ensureDiscovery(signal);
   const result = completeResult(await mcpPost('tools/call', {
     name: tool,
     arguments: argumentsValue,

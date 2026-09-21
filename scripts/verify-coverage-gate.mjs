@@ -191,7 +191,7 @@ try {
   addMutation('unpinned GitHub Action', 'scripts/supply-chain-gate.mjs', 'GitHub Action is not pinned to a full SHA', (cwd) => {
     mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'actions/checkout@v7'));
   });
-  addMutation('checkout persists credentials', 'scripts/supply-chain-gate.mjs', 'every checkout must use the exact event SHA and persist-credentials: false', (cwd) => {
+  addMutation('checkout persists credentials', 'scripts/supply-chain-gate.mjs', 'every checkout must use an exact resolved SHA and persist-credentials: false', (cwd) => {
     mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('persist-credentials: false', 'persist-credentials: true'));
   });
   addMutation('runtime job gains repository write authority', 'scripts/supply-chain-gate.mjs', 'runtime verification job may not have repository write authority', (cwd) => {
@@ -200,10 +200,10 @@ try {
   addMutation('deploy job gains unrelated write authority', 'scripts/supply-chain-gate.mjs', 'deploy job permissions changed from the reviewed minimum', (cwd) => {
     mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('      id-token: write\n    environment:', '      id-token: write\n      issues: write\n    environment:'));
   });
-  addMutation('visual evidence no longer depends on runtime certification', 'scripts/supply-chain-gate.mjs', 'visual evidence must depend on Runtime verification', (cwd) => {
-    mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace(
-      "  visual-evidence:\n    name: Visual evidence\n    if: github.event_name == 'pull_request'\n    needs: runtime\n",
-      "  visual-evidence:\n    name: Visual evidence\n    if: github.event_name == 'pull_request'\n",
+  addMutation('visual evidence becomes automatic PR CI', 'scripts/supply-chain-gate.mjs', 'visual evidence must not run automatically on PR or push events', (cwd) => {
+    mutateRelative(cwd, '.github/workflows/visual-evidence.yml', (source) => source.replace(
+      "  issue_comment:\n    types: [created]\n",
+      "  pull_request:\n    branches: [main]\n",
     ));
   });
   addMutation('deploy no longer depends on runtime certification', 'scripts/supply-chain-gate.mjs', 'Pages deploy must depend on Runtime verification', (cwd) => {
@@ -212,7 +212,7 @@ try {
       "  deploy:\n    name: Deploy certified Pages artifact\n    if: github.event_name == 'push' && github.ref == 'refs/heads/main'\n",
     ));
   });
-  addMutation('mutable npm install in CI', 'scripts/supply-chain-gate.mjs', 'CI may not use npm install; use npm ci', (cwd) => {
+  addMutation('mutable npm install in CI', 'scripts/supply-chain-gate.mjs', 'workflows may not use npm install; use npm ci', (cwd) => {
     mutateRelative(cwd, '.github/workflows/ci.yml', (source) => source.replace('npm ci --no-audit --no-fund', 'npm install'));
   });
 

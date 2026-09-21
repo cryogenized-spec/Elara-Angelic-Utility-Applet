@@ -46,6 +46,17 @@ describe('Google tool registry', () => {
     expect(googleToolRegistry.find((tool) => tool.name === 'sheets.writeRange')).toMatchObject({ risk: 'write', capability: 'sheets.write' });
   });
 
+  it('registers Kanban awareness as read-only browser tools over Tasks authority', () => {
+    for (const name of ['kanban.inspect', 'kanban.refresh', 'kanban.locate', 'kanban.focus'] as const) {
+      expect(googleToolRegistry.find((tool) => tool.name === name)).toMatchObject({
+        risk: 'read',
+        capability: 'tasks.read',
+        exposure: 'gemini',
+        executionPlane: 'browser',
+      });
+    }
+  });
+
   it('does not expose an arbitrary Google HTTP tool', () => {
     const registeredToolNames: readonly string[] = googleToolRegistry.map((tool) => tool.name);
     expect(registeredToolNames.includes('google.request')).toBe(false);

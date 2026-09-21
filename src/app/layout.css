@@ -12,10 +12,10 @@
    Region map
    --------------------------------------------------------------------------
      .app-shell                    flex column; padding: top --gutter bottom
-     ├── .control-stack            absolute overlay, top-left of the header
-     │     ├── .glass-menu-button  --control-size square
-     │     └── .tool-rail          Workspace launcher, --control-size tall
-     ├── .elara-banner             header band (portrait-banner.css)
+     ├── .control-stack            absolute overlay, top-left
+     │     ├── .control-stack__top hamburger + Kanban
+     │     └── .tool-rail          Workspace launcher below
+     ├── .elara-banner             frameless character artwork region
      ├── .conversation             flex: 1 1 auto
      │     └── .conversation__stream
      ├── .error
@@ -34,12 +34,11 @@
   --gutter: 14px;
 
   /* Left control cluster --------------------------------------------------
-     The hamburger and the Workspace launcher share one column, one control
-     height and one gap. Nothing else may invent a control size.
+     Row one is hamburger + Kanban; Workspace occupies row two. All three
+     controls share the same 44px touch-target height and the same 10px gap.
 
      44px, not 42px: this is a touch target, and the Android portrait suite
-     asserts a >=44px minimum (e2e/mobile-reliability.spec.ts). One token
-     keeps the hamburger and the launcher identical. */
+     asserts a >=44px minimum (e2e/mobile-reliability.spec.ts). */
   --control-size: 44px;
   --control-gap: 10px;
   --control-width: 132px;
@@ -72,10 +71,10 @@ html, body, #root { min-height: 100%; margin: 0; overflow: hidden; }
 }
 
 /* Left control cluster ------------------------------------------------------
-   hamburger
+   hamburger  Kanban
    Workspace
-   Both are --control-size tall and left-aligned in one column. The cluster
-   overlays the header; it is never a layout ruler. */
+   The first-row controls share one baseline; Workspace sits directly below.
+   The cluster overlays the character region and is never a layout ruler. */
 .control-stack {
   position: absolute;
   top: max(12px, env(safe-area-inset-top));
@@ -90,7 +89,16 @@ html, body, #root { min-height: 100%; margin: 0; overflow: hidden; }
   pointer-events: none;
 }
 
-.control-stack > .glass-menu-button,
+.control-stack__top {
+  display: grid;
+  grid-template-columns: var(--control-size) calc(var(--control-width) - var(--control-size) - var(--control-gap));
+  align-items: center;
+  gap: var(--control-gap);
+  width: var(--control-width);
+  pointer-events: auto;
+}
+
+.control-stack__top > *,
 .control-stack > .tool-rail { pointer-events: auto; }
 
 /* The hamburger is a shell control, so layout.css owns it completely — the
@@ -111,6 +119,26 @@ html, body, #root { min-height: 100%; margin: 0; overflow: hidden; }
 }
 
 .glass-menu-button:hover { transform: translateY(-1px); border-color: rgba(110,168,255,.36); background: rgba(29,31,43,.86); }
+
+.kanban-launcher {
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: var(--control-size);
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  color: var(--text);
+  background: rgba(21, 22, 31, .68);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: var(--glow);
+  font-size: 12px;
+  font-weight: 600;
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+.kanban-launcher:hover { transform: translateY(-1px); border-color: rgba(110,168,255,.36); background: rgba(29,31,43,.86); }
 
 /* Conversation --------------------------------------------------------------
    Horizontal padding is zero because the shell already provides the gutter.

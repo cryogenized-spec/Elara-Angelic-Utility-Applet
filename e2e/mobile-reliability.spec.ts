@@ -167,7 +167,7 @@ test.describe('Android portrait reliability', () => {
   });
 });
 test.describe('Portrait artwork layout', () => {
-  test('stacks the Workspace launcher under the hamburger in one left control cluster', async ({ page }) => {
+  test('places Kanban beside the hamburger with Workspace directly below', async ({ page }) => {
     await page.goto('');
     await openSettings(page);
     await page.getByRole('button', { name: 'Character' }).click();
@@ -178,38 +178,68 @@ test.describe('Portrait artwork layout', () => {
     for (const width of [412, 360, 320]) {
       await page.setViewportSize({ width, height: 800 });
       const rail = page.getByRole('navigation', { name: 'Quick actions' });
+      const stack = page.locator('.control-stack');
+      const topRow = page.locator('.control-stack__top');
       const hamburger = page.getByRole('button', { name: 'Open sidebar' });
+      const kanban = page.getByRole('button', { name: 'Kanban', exact: true });
       const trigger = rail.getByRole('button', { name: 'Workspace', exact: true });
       const portrait = page.locator('.elara-banner__portrait-float');
       const banner = page.locator('.elara-banner');
       await expect(trigger).toBeVisible();
+      await expect(kanban).toBeVisible();
+      await expect(page.locator('.elara-banner__copy')).toHaveCount(0);
+      await expect(page.getByText('Online · ready', { exact: true })).toHaveCount(0);
+      await expect(page.getByRole('heading', { level: 1, name: 'Elara' })).toBeAttached();
 
-      const stackBox = await page.locator('.control-stack').boundingBox();
+      const stackBox = await stack.boundingBox();
+      const topRowBox = await topRow.boundingBox();
       const hamburgerBox = await hamburger.boundingBox();
+      const kanbanBox = await kanban.boundingBox();
       const triggerBox = await trigger.boundingBox();
       const portraitBox = await portrait.boundingBox();
       const bannerBox = await banner.boundingBox();
-      expect(stackBox && hamburgerBox && triggerBox && portraitBox && bannerBox).toBeTruthy();
+      expect(stackBox && topRowBox && hamburgerBox && kanbanBox && triggerBox && portraitBox && bannerBox).toBeTruthy();
 
-      // One column: the launcher sits directly under the hamburger, sharing
-      // its left edge and its control height.
+      // First row: hamburger + Kanban, with one deliberate shared gap.
+      expect(Math.abs(kanbanBox!.y - hamburgerBox!.y)).toBeLessThan(2);
+      expect(Math.abs(kanbanBox!.height - hamburgerBox!.height)).toBeLessThan(2);
+      const topGap = kanbanBox!.x - (hamburgerBox!.x + hamburgerBox!.width);
+      expect(topGap).toBeGreaterThanOrEqual(8);
+      expect(topGap).toBeLessThanOrEqual(12);
+      expect(hamburgerBox!.height).toBeGreaterThanOrEqual(44);
+      expect(kanbanBox!.height).toBeGreaterThanOrEqual(44);
+
+      // Second row: Workspace is left-aligned below the complete top row.
       expect(Math.abs(triggerBox!.x - hamburgerBox!.x)).toBeLessThan(2);
-      expect(triggerBox!.y).toBeGreaterThan(hamburgerBox!.y + hamburgerBox!.height - 2);
+      expect(triggerBox!.y).toBeGreaterThanOrEqual(topRowBox!.y + topRowBox!.height + 8);
       expect(Math.abs(triggerBox!.height - hamburgerBox!.height)).toBeLessThan(2);
       expect(triggerBox!.height).toBeGreaterThanOrEqual(44);
 
-      // The cluster stays in the left third and never reaches the right gutter.
+      // The compact cluster stays on the left and clear of the portrait.
       expect(stackBox!.x).toBeLessThan(width / 3);
       expect(stackBox!.x + stackBox!.width).toBeLessThan(width - 24);
+      expect(portraitBox!.x).toBeGreaterThanOrEqual(stackBox!.x + stackBox!.width);
 
-      // The portrait keeps its 4:5 ratio, hugs the top-right corner, and stays
-      // inside the banner now that its scale is a real layout width.
+      // Character presentation is now frameless: only the portrait remains.
+      const bannerChrome = await banner.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          backgroundImage: style.backgroundImage,
+          backgroundColor: style.backgroundColor,
+          borderTopWidth: style.borderTopWidth,
+          boxShadow: style.boxShadow,
+        };
+      });
+      expect(bannerChrome.backgroundImage).toBe('none');
+      expect(bannerChrome.backgroundColor).toBe('rgba(0, 0, 0, 0)');
+      expect(bannerChrome.borderTopWidth).toBe('0px');
+      expect(bannerChrome.boxShadow).toBe('none');
+
+      // The portrait keeps its 4:5 ratio and remains pinned top-right.
       expect(Math.abs(portraitBox!.height / portraitBox!.width - 1.25)).toBeLessThan(0.02);
       expect(bannerBox!.x + bannerBox!.width - (portraitBox!.x + portraitBox!.width)).toBeLessThanOrEqual(9);
       expect(portraitBox!.y - bannerBox!.y).toBeLessThanOrEqual(9);
       expect(portraitBox!.y + portraitBox!.height).toBeLessThanOrEqual(bannerBox!.y + bannerBox!.height + 1);
-      // …and it never overlaps the control cluster.
-      expect(portraitBox!.x).toBeGreaterThanOrEqual(stackBox!.x + stackBox!.width);
     }
   });
 });

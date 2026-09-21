@@ -13,6 +13,7 @@ import { validateRoleplayWorldToolArguments, roleplayWorldToolArgumentSchemas, t
 import { validateYouTubeToolArguments, youtubeToolArgumentSchemas, type YouTubeToolName } from '../../media/youtube-schema';
 import { validateMemoryToolArguments, memoryToolArgumentSchemas, type MemoryToolName } from '../../memory/tool-schema';
 import { describeMemoryReconcileTarget } from '../../memory/tool-handler';
+import { kanbanToolArgumentSchemas, validateKanbanToolArguments, type KanbanToolName } from '../../kanban/tool-schema';
 import { loadRoleplayPreferences } from '../../persistence/preferences';
 
 export type LocalToolCapability = 'documents.local' | 'media.youtube.read' | 'memory.durable.local';
@@ -77,6 +78,7 @@ function safeCapability(value: string): ToolCapability {
 function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Record<string, unknown>> {
   // Schema modules remain validation-only; provider/cache/runtime work stays in handlers.
   if (Object.prototype.hasOwnProperty.call(memoryToolArgumentSchemas, tool)) return validateMemoryToolArguments(tool as MemoryToolName, value) as Readonly<Record<string, unknown>>;
+  if (Object.prototype.hasOwnProperty.call(kanbanToolArgumentSchemas, tool)) return validateKanbanToolArguments(tool as KanbanToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(youtubeToolArgumentSchemas, tool)) return validateYouTubeToolArguments(tool as YouTubeToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(roleplayWorldToolArgumentSchemas, tool)) return validateRoleplayWorldToolArguments(tool as RoleplayWorldToolName, value) as Readonly<Record<string, unknown>>;
   if (Object.prototype.hasOwnProperty.call(gmailToolArgumentSchemas, tool)) return validateGmailToolArguments(tool as GmailToolName, value) as Readonly<Record<string, unknown>>;

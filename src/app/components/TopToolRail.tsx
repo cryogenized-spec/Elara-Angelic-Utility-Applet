@@ -10,7 +10,7 @@ export type QuickTool = typeof DEFAULT_QUICK_ACTIONS[number];
 
 /**
  * The Workspace launcher is a single disclosure button rendered as the second
- * row of the shell's left control cluster, directly under the hamburger.
+ * row of the shell's left control cluster, beneath the hamburger + Kanban row.
  * Calendar / Tasks / Gmail never occupy visible rail positions: they live
  * inside the flyout that opens to the right of this trigger.
  */

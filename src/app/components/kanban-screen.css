@@ -657,6 +657,12 @@
   border-top: 2px solid var(--blue);
   box-shadow: 0 -3px 0 #6ea8ff30;
 }
+.kb-column.is-agent-focused,
+.kb-card.is-agent-focused {
+  outline: 2px solid color-mix(in srgb, var(--generation-activity-accent, #6EA8FF) 72%, white 8%);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px color-mix(in srgb, var(--generation-activity-accent, #6EA8FF) 12%, transparent);
+}
 .kb-card-top .kb-grip {
   padding: 2px 0;
   background: none;
@@ -690,4 +696,3 @@
   flex: none;
 }
 
-.kanban-launcher { position: absolute; top: max(12px, env(safe-area-inset-top)); right: var(--gutter); z-index: 20; padding: 10px 14px; border: 1px solid var(--line); border-radius: 13px; color: var(--text); background: var(--surface-strong); font: inherit; }

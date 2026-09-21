@@ -8,7 +8,7 @@ describe('Gemini capability declarations', () => {
     expect(googleGeminiFunctionNames()).toEqual(expect.arrayContaining([
       'calendar.listCalendars', 'calendar.listEvents', 'calendar.getEvent', 'calendar.getSettings', 'calendar.queryFreeBusy',
       'calendar.createEvent', 'calendar.updateEvent', 'calendar.deleteEvent',
-      'tasks.createTask', 'gmail.sendMessage', 'sheets.writeRange',
+      'tasks.createTask', 'kanban.inspect', 'kanban.refresh', 'kanban.locate', 'kanban.focus', 'gmail.sendMessage', 'sheets.writeRange',
     ]));
     expect(googleGeminiFunctionNames()).not.toContain('docs.batchUpdate');
     expect(googleGeminiFunctionNames()).not.toContain('sheets.batchUpdate');
@@ -59,6 +59,19 @@ describe('Gemini capability declarations', () => {
     const writeRange = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'sheets.writeRange');
     expect(writeRange?.parameters.required).toEqual(['spreadsheetId', 'range', 'values']);
     expect(writeRange?.parameters.properties).toHaveProperty('values');
+  });
+
+  it('declares the Kanban workspace as a bounded browser tool surface', () => {
+    const inspect = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'kanban.inspect');
+    expect(inspect?.parameters.properties).toHaveProperty('listId');
+    expect(inspect?.parameters.properties).toHaveProperty('limit');
+
+    const locate = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'kanban.locate');
+    expect(locate?.parameters.required).toEqual(['query']);
+
+    const focus = googleGeminiFunctionDeclarations.find((tool) => tool.name === 'kanban.focus');
+    expect(focus?.parameters.required).toEqual(['listId']);
+    expect(focus?.description).toContain('Presentation only');
   });
 
   it('keeps declaration data free of execution-policy wording', () => {

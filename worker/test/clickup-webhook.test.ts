@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SELF, env, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
+import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, signedWrite } from './helpers';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
 const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
 const WEBHOOK_ID = '7fa3ec74-69a8-4530-a251-8a13730bd204';
 const WEBHOOK_SECRET = 'unit-test-clickup-webhook-secret';
+let grantRevision = 0;
 
 beforeEach(async () => {
   vi.restoreAllMocks();
+  grantRevision = 0;
   await reset();
 });
 
@@ -18,14 +21,19 @@ async function stub() {
   return env.CLICKUP_OAUTH!.get(env.CLICKUP_OAUTH!.idFromName(installationId));
 }
 
-async function connectThroughPublicWorker() {
+async function connectThroughPublicWorker(code = 'one-time-code') {
   const startBody = JSON.stringify({ redirectUri: REDIRECT_URI });
   const started = await SELF.fetch(await signedWrite('/clickup/oauth/start', startBody));
   expect(started.status).toBe(200);
   const { state } = await started.json() as { state: string };
-  const exchangeBody = JSON.stringify({ code: 'one-time-code', state, redirectUri: REDIRECT_URI });
+  const exchangeBody = JSON.stringify({ code, state, redirectUri: REDIRECT_URI });
   const exchanged = await SELF.fetch(await signedWrite('/clickup/oauth/exchange', exchangeBody));
-  expect(exchanged.status).toBe(200);
+  if (exchanged.status === 200) {
+    const status = await exchanged.clone().json() as { updatedAt?: number };
+    grantRevision = status.updatedAt ?? 0;
+    expect(grantRevision).toBeGreaterThan(0);
+  }
+  return exchanged;
 }
 
 async function internalSearch() {
@@ -34,12 +42,25 @@ async function internalSearch() {
     headers: {
       'content-type': 'application/json',
       'X-Elara-Internal': await internalWakeMarker(TOKEN),
+      [CLICKUP_GRANT_REVISION_HEADER]: String(grantRevision),
     },
     body: JSON.stringify({
       operation: 'searchTaskIndex',
       arguments: { workspaceId: '999', query: 'repair' },
     }),
   }));
+}
+
+async function webhookSnapshot() {
+  return (await stub() as DurableObjectStub & {
+    webhookSnapshot(): Promise<Array<{ webhookId: string; workspaceId: string; updatedAt: number }>>;
+  }).webhookSnapshot();
+}
+
+async function credentialSnapshot() {
+  return (await stub() as DurableObjectStub & {
+    credentialSnapshot(): Promise<{ userId: string; updatedAt: number } | null>;
+  }).credentialSnapshot();
 }
 
 async function indexSnapshot() {
@@ -234,6 +255,130 @@ describe('ClickUp signed webhook cache invalidation', () => {
 
     expect(response.status).toBe(401);
     expect((await indexSnapshot()).lastRefreshAt).toBe(before.lastRefreshAt);
+  });
+
+  it('keeps the old grant and webhook registration intact when a reconnect fails', async () => {
+    let deleteCalls = 0;
+    let tokenCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        tokenCalls += 1;
+        const body = await request.clone().json() as { code?: string };
+        if (body.code === 'bad-code') {
+          return new Response(JSON.stringify({ ECODE: 'OAUTH_017', err: 'Bad code' }), {
+            status: 400,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({ access_token: 'provider-token' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && request.method === 'POST') {
+        return new Response(JSON.stringify({
+          webhook: { id: WEBHOOK_ID, secret: WEBHOOK_SECRET },
+        }), { status: 200 });
+      }
+      if (url.pathname === `/api/v2/webhook/${WEBHOOK_ID}` && request.method === 'DELETE') {
+        deleteCalls += 1;
+        return new Response('{}', { status: 200 });
+      }
+      throw new Error(`Unexpected provider request: ${request.method} ${request.url}`);
+    });
+
+    expect((await connectThroughPublicWorker()).status).toBe(200);
+    const originalCredential = await credentialSnapshot();
+    expect(await webhookSnapshot()).toEqual([
+      expect.objectContaining({ webhookId: WEBHOOK_ID, workspaceId: '999' }),
+    ]);
+
+    const failedReconnect = await connectThroughPublicWorker('bad-code');
+    expect(failedReconnect.status).toBe(400);
+    expect(tokenCalls).toBe(2);
+    expect(deleteCalls).toBe(0);
+    expect(await credentialSnapshot()).toEqual(originalCredential);
+    expect(await webhookSnapshot()).toEqual([
+      expect.objectContaining({ webhookId: WEBHOOK_ID, workspaceId: '999' }),
+    ]);
+  });
+
+  it('cleans up a webhook created by a superseded exchange after disconnect', async () => {
+    let webhookCreateStarted!: () => void;
+    let releaseWebhookCreate!: () => void;
+    const webhookCreateStartedPromise = new Promise<void>((resolve) => { webhookCreateStarted = resolve; });
+    const releaseWebhookCreatePromise = new Promise<void>((resolve) => { releaseWebhookCreate = resolve; });
+    let deleteCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'provider-token' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && request.method === 'POST') {
+        webhookCreateStarted();
+        await releaseWebhookCreatePromise;
+        return new Response(JSON.stringify({
+          webhook: { id: WEBHOOK_ID, secret: WEBHOOK_SECRET },
+        }), { status: 200 });
+      }
+      if (url.pathname === `/api/v2/webhook/${WEBHOOK_ID}` && request.method === 'DELETE') {
+        deleteCalls += 1;
+        return new Response('{}', { status: 200 });
+      }
+      throw new Error(`Unexpected provider request: ${request.method} ${request.url}`);
+    });
+
+    const pendingExchange = connectThroughPublicWorker();
+    await webhookCreateStartedPromise;
+
+    const disconnected = await SELF.fetch(await signedWrite('/clickup/oauth/disconnect', '{}'));
+    expect(disconnected.status).toBe(200);
+    expect(await credentialSnapshot()).toBeNull();
+    expect(await webhookSnapshot()).toEqual([]);
+
+    releaseWebhookCreate();
+    const exchangeResult = await pendingExchange;
+    expect(exchangeResult.status).toBe(409);
+    expect(await exchangeResult.json()).toEqual(expect.objectContaining({ code: 'oauth_superseded' }));
+    expect(deleteCalls).toBe(1);
+    expect(await credentialSnapshot()).toBeNull();
+    expect(await webhookSnapshot()).toEqual([]);
+
+    const orphanPayload = JSON.stringify({
+      event: 'taskUpdated',
+      task_id: 'task-repair',
+      webhook_id: WEBHOOK_ID,
+      history_items: [{ id: 'history-orphan' }],
+    });
+    const orphanDelivery = await SELF.fetch('https://worker.example/clickup/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Signature': '0'.repeat(64),
+      },
+      body: orphanPayload,
+    });
+    expect(orphanDelivery.status).toBe(200);
+    expect(await orphanDelivery.json()).toEqual({ accepted: true, ignored: true });
   });
 
   it('evicts a deleted task immediately without trusting webhook task content', async () => {

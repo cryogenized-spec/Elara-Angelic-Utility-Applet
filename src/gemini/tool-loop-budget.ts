@@ -28,6 +28,8 @@ export const DEFAULT_TOOL_LOOP_BUDGET_POLICY: ToolLoopBudgetPolicy = {
 export interface ToolLoopBudgetSnapshot {
   readonly cumulativeGrossInputTokens: number;
   readonly lastGrossInputTokens: number;
+  /** Provider response tokens that become inherited prompt context on continuation. */
+  readonly lastResponseTokens: number;
   readonly interactions: number;
   readonly compactions: number;
 }
@@ -50,10 +52,22 @@ function safeEstimate(value: number | undefined): number {
 export function addGrossUsage(snapshot: ToolLoopBudgetSnapshot, usage: GeminiUsage | undefined): ToolLoopBudgetSnapshot {
   const input = usage?.inputTokens;
   if (input === undefined || !Number.isFinite(input) || input < 0) return snapshot;
+
+  const output = safeEstimate(usage?.outputTokens);
+  const thoughts = safeEstimate(usage?.thoughtsTokens);
+  const explicitResponse = output + thoughts;
+  const total = safeEstimate(usage?.totalTokens);
+  const derivedResponse = total >= input ? total - input : 0;
+  // Function-call / thought tokens may be represented differently across SDK
+  // versions. Keep the larger observed response footprint: all of it is part of
+  // the server-managed history inherited through previous_interaction_id.
+  const response = Math.max(explicitResponse, derivedResponse);
+
   return {
     ...snapshot,
     cumulativeGrossInputTokens: snapshot.cumulativeGrossInputTokens + input,
     lastGrossInputTokens: input,
+    lastResponseTokens: response,
   };
 }
 
@@ -65,7 +79,10 @@ export function projectedNextGross(
   // Server-managed continuation context is at least as large as the latest
   // measured interaction. Add the serialized pending continuation payload on
   // top so large tool results cannot hide behind a history-only heuristic.
-  const inherited = Math.max(snapshot.lastGrossInputTokens, policy.minNextInteractionReserve);
+  const inherited = Math.max(
+    snapshot.lastGrossInputTokens + snapshot.lastResponseTokens,
+    policy.minNextInteractionReserve,
+  );
   return snapshot.cumulativeGrossInputTokens + inherited + safeEstimate(continuationInputTokens);
 }
 

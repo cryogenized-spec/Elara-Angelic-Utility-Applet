@@ -1156,6 +1156,7 @@ export class ClickUpOAuthVault extends DurableObject {
       ok: true,
       result: {
         provider: 'clickup',
+        workspaceId: args.workspaceId,
         taskId: args.taskId,
         artifactId: args.artifactId,
         filename: args.filename ?? file.name,

@@ -31,7 +31,7 @@ type SearchRow = {
   assignee_ids_json: string;
 };
 
-const MAX_INDEXED_TASK_JSON_CHARS = 64_000;
+export const MAX_INDEXED_TASK_JSON_CHARS = 64_000;
 const MAX_SEARCH_CANDIDATES = 1_000;
 
 function record(value: unknown): Record<string, unknown> | undefined {
@@ -74,10 +74,101 @@ function boundedArray(value: unknown, max = 100): unknown[] {
   return Array.isArray(value) ? value.slice(0, max) : [];
 }
 
+function normalizedIndexedUser(value: unknown): Record<string, unknown> | null {
+  const source = record(value);
+  const userId = id(source?.id);
+  if (!source || !userId) return null;
+  return {
+    id: userId,
+    ...(text(source.username, 300) ? { username: text(source.username, 300) } : {}),
+    ...(text(source.email, 320) ? { email: text(source.email, 320) } : {}),
+    ...(text(source.initials, 20) ? { initials: text(source.initials, 20) } : {}),
+  };
+}
+
+function normalizedIndexedRelation(value: unknown): Record<string, unknown> | undefined {
+  const source = record(value);
+  const relationId = id(source?.id);
+  if (!source || !relationId) return undefined;
+  return {
+    id: relationId,
+    ...(text(source.name, 500) ? { name: text(source.name, 500) } : {}),
+  };
+}
+
+function normalizedIndexedStatus(value: unknown): string | Record<string, unknown> | undefined {
+  if (typeof value === 'string') return text(value, 500);
+  const source = record(value);
+  if (!source) return undefined;
+  const status = text(source.status, 500);
+  const type = text(source.type, 100);
+  if (!status && !type) return undefined;
+  return {
+    ...(status ? { status } : {}),
+    ...(type ? { type } : {}),
+  };
+}
+
+function normalizedIndexedPriority(value: unknown): Record<string, unknown> | undefined {
+  const source = record(value);
+  if (!source) return undefined;
+  const priority = text(source.priority, 100);
+  const priorityId = id(source.id);
+  if (!priority && !priorityId) return undefined;
+  return {
+    ...(priorityId ? { id: priorityId } : {}),
+    ...(priority ? { priority } : {}),
+  };
+}
+
+function normalizedIndexedTag(value: unknown): Record<string, unknown> | null {
+  const source = record(value);
+  const name = text(source?.name ?? value, 200);
+  return name ? { name } : null;
+}
+
+function boundedIndexedValue(value: unknown, max = 1_000): unknown {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') return text(value, max) ?? '';
+  try {
+    const rendered = JSON.stringify(value);
+    return rendered.length <= max ? value : `${rendered.slice(0, max - 1)}…`;
+  } catch {
+    return '[unavailable]';
+  }
+}
+
+function normalizedIndexedCustomField(value: unknown): Record<string, unknown> | null {
+  const source = record(value);
+  const fieldId = id(source?.id);
+  if (!source || !fieldId) return null;
+  return {
+    id: fieldId,
+    ...(text(source.name, 500) ? { name: text(source.name, 500) } : {}),
+    ...(text(source.type, 100) ? { type: text(source.type, 100) } : {}),
+    ...(Object.prototype.hasOwnProperty.call(source, 'value') ? { value: boundedIndexedValue(source.value) } : {}),
+  };
+}
+
 function indexedTaskProjection(value: unknown): Record<string, unknown> | null {
   const source = record(value);
   const taskId = id(source?.id);
   if (!source || !taskId) return null;
+
+  const status = normalizedIndexedStatus(source.status);
+  const priority = normalizedIndexedPriority(source.priority);
+  const assignees = boundedArray(source.assignees, 50)
+    .map(normalizedIndexedUser)
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  const tags = boundedArray(source.tags, 50)
+    .map(normalizedIndexedTag)
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
+  const list = normalizedIndexedRelation(source.list);
+  const folder = normalizedIndexedRelation(source.folder);
+  const space = normalizedIndexedRelation(source.space);
+  const customFields = boundedArray(source.custom_fields, 50)
+    .map(normalizedIndexedCustomField)
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry));
 
   const projection: Record<string, unknown> = {
     id: taskId,
@@ -86,25 +177,25 @@ function indexedTaskProjection(value: unknown): Record<string, unknown> | null {
     ...(text(source.markdown_description) ? { markdown_description: text(source.markdown_description) } : {}),
     ...(text(source.text_content) ? { text_content: text(source.text_content) } : {}),
     ...(text(source.description) ? { description: text(source.description) } : {}),
-    ...(source.status !== undefined ? { status: source.status } : {}),
+    ...(status !== undefined ? { status } : {}),
     archived: source.archived === true,
     ...(id(source.parent) ? { parent: id(source.parent) } : {}),
-    ...(source.date_created !== undefined ? { date_created: source.date_created } : {}),
-    ...(source.date_updated !== undefined ? { date_updated: source.date_updated } : {}),
-    ...(source.date_closed !== undefined ? { date_closed: source.date_closed } : {}),
-    ...(source.date_done !== undefined ? { date_done: source.date_done } : {}),
-    ...(source.due_date !== undefined ? { due_date: source.due_date } : {}),
-    ...(source.start_date !== undefined ? { start_date: source.start_date } : {}),
-    ...(typeof source.time_estimate === 'number' ? { time_estimate: source.time_estimate } : {}),
-    ...(typeof source.points === 'number' ? { points: source.points } : {}),
-    ...(source.priority !== undefined ? { priority: source.priority } : {}),
-    assignees: boundedArray(source.assignees, 50),
-    tags: boundedArray(source.tags, 50),
-    ...(source.list !== undefined ? { list: source.list } : {}),
-    ...(source.folder !== undefined ? { folder: source.folder } : {}),
-    ...(source.space !== undefined ? { space: source.space } : {}),
+    ...(millis(source.date_created) > 0 ? { date_created: millis(source.date_created) } : {}),
+    ...(millis(source.date_updated) > 0 ? { date_updated: millis(source.date_updated) } : {}),
+    ...(millis(source.date_closed) > 0 ? { date_closed: millis(source.date_closed) } : {}),
+    ...(millis(source.date_done) > 0 ? { date_done: millis(source.date_done) } : {}),
+    ...(millis(source.due_date) > 0 ? { due_date: millis(source.due_date) } : {}),
+    ...(millis(source.start_date) > 0 ? { start_date: millis(source.start_date) } : {}),
+    ...(typeof source.time_estimate === 'number' && Number.isFinite(source.time_estimate) ? { time_estimate: source.time_estimate } : {}),
+    ...(typeof source.points === 'number' && Number.isFinite(source.points) ? { points: source.points } : {}),
+    ...(priority ? { priority } : {}),
+    ...(assignees.length ? { assignees } : { assignees: [] }),
+    ...(tags.length ? { tags } : { tags: [] }),
+    ...(list ? { list } : {}),
+    ...(folder ? { folder } : {}),
+    ...(space ? { space } : {}),
     ...(text(source.url, 2_048) ? { url: text(source.url, 2_048) } : {}),
-    custom_fields: boundedArray(source.custom_fields, 50),
+    ...(customFields.length ? { custom_fields: customFields } : { custom_fields: [] }),
   };
 
   let serialized = JSON.stringify(projection);
@@ -116,8 +207,33 @@ function indexedTaskProjection(value: unknown): Record<string, unknown> | null {
     delete projection.markdown_description;
     delete projection.text_content;
     delete projection.description;
+    serialized = JSON.stringify(projection);
   }
-  return projection;
+  if (serialized.length > MAX_INDEXED_TASK_JSON_CHARS) {
+    delete projection.assignees;
+    delete projection.tags;
+    serialized = JSON.stringify(projection);
+  }
+  if (serialized.length <= MAX_INDEXED_TASK_JSON_CHARS) return projection;
+
+  // Last-resort projection is deliberately tiny but preserves the stable
+  // identity/location needed for search refreshes, webhook deletion and live
+  // follow-up reads. Never persist provider-controlled JSON above the cap.
+  const minimal: Record<string, unknown> = {
+    id: taskId,
+    ...(text(source.name, 1_000) ? { name: text(source.name, 1_000) } : {}),
+    ...(status !== undefined ? { status } : {}),
+    archived: source.archived === true,
+    ...(id(source.parent) ? { parent: id(source.parent) } : {}),
+    ...(millis(source.date_updated) > 0 ? { date_updated: millis(source.date_updated) } : {}),
+    ...(list ? { list } : {}),
+    ...(folder ? { folder } : {}),
+    ...(space ? { space } : {}),
+  };
+  const minimalSerialized = JSON.stringify(minimal);
+  return minimalSerialized.length <= MAX_INDEXED_TASK_JSON_CHARS
+    ? minimal
+    : { id: taskId, archived: source.archived === true };
 }
 
 function searchableText(task: Record<string, unknown>): string {

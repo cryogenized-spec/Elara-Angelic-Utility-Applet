@@ -280,7 +280,10 @@ export class ClickUpOAuthVault extends DurableObject {
       if (url.pathname === '/clickup/oauth/exchange') return this.exchange(request, body);
       if (url.pathname === '/clickup/oauth/disconnect') return this.disconnect(body);
       return json({ code: 'not_found', message: 'Not found.' }, 404);
-    } catch {
+    } catch (error) {
+      if (error instanceof ClickUpProviderError) {
+        return json({ code: error.code, message: error.message }, error.status);
+      }
       return json({ code: 'oauth', message: 'ClickUp OAuth vault could not complete the request.' }, 502);
     }
   }

@@ -38,6 +38,7 @@ describe('ClickUp canonical model/MCP tool schemas', () => {
 
   it('rejects arbitrary HTTP authority at the semantic tool boundary', () => {
     expect(() => validateClickUpToolArguments('clickup.getTask', {
+      workspaceId: '999',
       taskId: '86abc',
       url: 'https://api.clickup.com/api/v2/task/86abc',
       method: 'DELETE',
@@ -49,36 +50,52 @@ describe('ClickUp canonical model/MCP tool schemas', () => {
     expect(CLICKUP_TOOL_NAMES.some((name) => /deleteTask$/i.test(name))).toBe(false);
     expect(CLICKUP_TOOL_NAMES).toContain('clickup.updateTask');
     expect(validateClickUpToolArguments('clickup.updateTask', {
+      workspaceId: '999',
       taskId: '86abc',
       archived: true,
-    })).toEqual({ taskId: '86abc', archived: true });
+    })).toEqual({ workspaceId: '999', taskId: '86abc', archived: true });
   });
 
   it('requires an actual mutation for updateTask', () => {
     expect(() => validateClickUpToolArguments('clickup.updateTask', {
+      workspaceId: '999',
       taskId: '86abc',
     })).toThrow();
   });
 
   it('models Custom Field set and clear without exposing a raw provider payload', () => {
     expect(validateClickUpToolArguments('clickup.setCustomField', {
+      workspaceId: '999',
+      workspaceId: '999',
+      workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
       value: { add: ['123'], rem: ['456'] },
     })).toEqual({
+      workspaceId: '999',
+      workspaceId: '999',
+      workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
       value: { add: ['123'], rem: ['456'] },
     });
     expect(() => validateClickUpToolArguments('clickup.setCustomField', {
+      workspaceId: '999',
+      workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
     })).toThrow();
     expect(validateClickUpToolArguments('clickup.setCustomField', {
+      workspaceId: '999',
+      workspaceId: '999',
+      workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
       mode: 'clear',
     })).toEqual({
+      workspaceId: '999',
+      workspaceId: '999',
+      workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
       mode: 'clear',
@@ -98,15 +115,21 @@ describe('ClickUp canonical model/MCP tool schemas', () => {
 
   it('keeps artifact bytes and provider URLs out of attachArtifact arguments', () => {
     expect(validateClickUpToolArguments('clickup.attachArtifact', {
+      workspaceId: '999',
+      workspaceId: '999',
       taskId: '86abc',
       artifactId: 'artifact:repair-report',
       filename: 'repair-report.pdf',
     })).toEqual({
+      workspaceId: '999',
+      workspaceId: '999',
       taskId: '86abc',
       artifactId: 'artifact:repair-report',
       filename: 'repair-report.pdf',
     });
     expect(() => validateClickUpToolArguments('clickup.attachArtifact', {
+      workspaceId: '999',
+      workspaceId: '999',
       taskId: '86abc',
       artifactId: 'artifact:repair-report',
       data: 'base64...',

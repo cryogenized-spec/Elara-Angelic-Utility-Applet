@@ -2,6 +2,9 @@ import { artifactRepository } from '../artifacts/repository';
 import { ARTIFACT_LIMITS } from '../artifacts/limits';
 import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../autonomy/cloud/pairing';
 import { validateClickUpToolArguments, type ClickUpToolArguments } from './tool-schema';
+import { clickUpPairingAuthorityBinding } from './oauth/authority';
+import { CLICKUP_GRANT_REVISION_HEADER } from './mcp-protocol';
+import type { ClickUpAdmittedGrant } from './mcp-client';
 
 const CLICKUP_ATTACHMENT_PATH = '/clickup/attachment';
 const UPLOAD_TIMEOUT_MS = 60_000;
@@ -79,9 +82,13 @@ async function responseError(response: Response): Promise<ClickUpAttachmentUploa
 export async function uploadClickUpArtifact(
   rawArguments: unknown,
   signal?: AbortSignal,
+  admittedGrant?: ClickUpAdmittedGrant,
 ): Promise<unknown> {
   const args = validateClickUpToolArguments('clickup.attachArtifact', rawArguments) as ClickUpToolArguments<'clickup.attachArtifact'>;
   const pairing = activePairing();
+  if (admittedGrant && clickUpPairingAuthorityBinding(pairing) !== admittedGrant.authorityBinding) {
+    throw new ClickUpAttachmentUploadError('grant_changed', 'The paired Worker changed after ClickUp authorization was admitted.', 409);
+  }
   const token = await installationToken(pairing);
   const artifact = await artifactBlob(args.artifactId);
 
@@ -102,6 +109,9 @@ export async function uploadClickUpArtifact(
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: 'application/json',
+        ...(admittedGrant ? {
+          [CLICKUP_GRANT_REVISION_HEADER]: String(admittedGrant.revision),
+        } : {}),
       },
       body: form,
       signal: controller.signal,

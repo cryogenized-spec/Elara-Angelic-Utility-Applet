@@ -320,6 +320,60 @@ describe('Gemini tool-loop gross-input governor', () => {
     expect(collected.at(-1)).toMatchObject({ type: 'completed', status: 'completed' });
   });
 
+  it('reports a completed mutation when the budget wall prevents its continuation', async () => {
+    const createTask = vi.fn(async () => ({ id: 'task-done', title: 'Already created', status: 'needsAction' }));
+    const confirm = vi.fn(async () => true);
+    const writeTools = ['tasks.createTask'] as const;
+
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'write-budget-1', model: 'gemini-3.8-flash' },
+      { type: 'interaction-usage', interactionId: 'write-budget-1', status: 'requires_action', source: 'provider', usage: { inputTokens: 80_000 } },
+      {
+        type: 'tool-call',
+        interactionId: 'write-budget-1',
+        index: 0,
+        callId: 'write-budget-call',
+        name: 'tasks.createTask',
+        arguments: { taskListId: 'primary', title: 'Already created' },
+      },
+    ));
+
+    const collected: Array<{ type?: string; text?: string; status?: string }> = [];
+    for await (const event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Create the task.', tools: writeTools },
+      {
+        tools: writeTools,
+        readOnly: false,
+        executor: {
+          oauth,
+          confirm,
+          handlers: { 'tasks.createTask': createTask },
+        },
+        budgetPolicy: {
+          hardGrossInputTokens: 90_000,
+          compactGrossInputTokens: 90_000,
+          compactAfterInteractions: 99,
+          maxModelInteractions: 10,
+          maxCompactions: 0,
+        },
+      },
+    )) collected.push(event as { type?: string; text?: string; status?: string });
+
+    expect(createTask).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledOnce();
+    expect(streamToolResult).not.toHaveBeenCalled();
+    const fallbackText = collected
+      .filter((event) => event.type === 'text-delta')
+      .map((event) => event.text ?? '')
+      .join('');
+    expect(fallbackText).toContain('Completed actions before the budget stop');
+    expect(fallbackText).toContain('tasks.createTask: completed');
+    expect(fallbackText).toContain('task-done');
+    expect(fallbackText).toContain('do not repeat any completed actions');
+    expect(fallbackText).not.toContain('I preserved the investigation state');
+    expect(collected.at(-1)).toMatchObject({ type: 'completed', status: 'budget_exhausted' });
+  });
+
   it('returns a local synthesis fallback instead of dispatching another model call past the hard budget', async () => {
     const listEvents = vi.fn(async () => ({ events: [] }));
     const readTools = ['calendar.listEvents'] as const;

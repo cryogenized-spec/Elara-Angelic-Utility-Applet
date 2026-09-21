@@ -31,6 +31,16 @@ function read(path) {
   return readFileSync(absolute, 'utf8');
 }
 
+function countOccurrences(source, needle) {
+  if (!needle) return 0;
+  return source.split(needle).length - 1;
+}
+
+function requireOccurrenceCount(source, needle, expected, label) {
+  const actual = countOccurrences(source, needle);
+  if (actual !== expected) fail(`${label}: expected ${expected} occurrence(s), found ${actual}`);
+}
+
 const runtimeFiles = [...walk('src'), ...walk('worker/src')]
   .filter((file) => /\.(?:ts|tsx|mts|cts|js|mjs)$/.test(file))
   .filter((file) => !/\.d\.ts$/.test(file))
@@ -212,6 +222,7 @@ const clickUpAttachmentAuthority = read('src/clickup/attachment-authority.ts');
 const clickUpOAuthVault = read('worker/src/clickup/oauth-vault.ts');
 const clickUpProvider = read('worker/src/clickup/provider.ts');
 const clickUpMcpRoute = read('worker/src/clickup/mcp-route.ts');
+const clickUpToolService = read('worker/src/clickup/tool-service.ts');
 const clickUpAttachmentRoute = read('worker/src/clickup/attachment-route.ts');
 const clickUpWebhookRoute = read('worker/src/clickup/webhook-route.ts');
 const clickUpTaskIndex = read('worker/src/clickup/task-index.ts');
@@ -427,13 +438,38 @@ for (const marker of [
 ]) {
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth/REST credential boundary is missing: ${marker}`);
 }
-for (const marker of [
-  'verifyTaskScope(args.workspaceId, args.taskId, args.includeSubtasks ?? false, expectedRevision)',
-  'verifyListScope(args.workspaceId, args.listId, expectedRevision)',
-  'validateWorkspaceUsers(args.workspaceId, args.assigneeIds)',
-  'validateWorkspaceUsers(args.workspaceId, args.mentionUserIds)',
+for (const [marker, expected] of [
+  ['verifyTaskScope(args.workspaceId, args.taskId, args.includeSubtasks ?? false, expectedRevision)', 1],
+  ['verifyTaskScope(command.workspaceId, command.taskId, false, expectedRevision)', 2],
+  ['verifyTaskScope(args.workspaceId, args.taskId, false, expectedRevision)', 3],
+  ['verifySpaceScope(command.workspaceId, command.spaceId, expectedRevision)', 2],
+  ['verifyFolderScope(command.workspaceId, command.folderId', 2],
+  ['verifyListScope(command.workspaceId, command.listId, expectedRevision)', 2],
+  ['verifyListScope(args.workspaceId, args.listId, expectedRevision)', 1],
+  ['verifyCommentBelongsToTask(args.workspaceId, args.taskId, args.commentId, expectedRevision)', 1],
+  ['validateWorkspaceUsers(args.workspaceId, args.assigneeIds)', 1],
+  ['validateWorkspaceUsers(args.workspaceId, args.assignees?.add)', 1],
+  ['validateWorkspaceUsers(args.workspaceId, args.mentionUserIds)', 2],
 ]) {
-  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp resource-scope enforcement call disappeared: ${marker}`);
+  requireOccurrenceCount(
+    clickUpOAuthVault,
+    marker,
+    expected,
+    `ClickUp resource-scope enforcement call count changed: ${marker}`,
+  );
+}
+for (const marker of [
+  "form.set('workspaceId', args.workspaceId)",
+  'assertClickUpArtifactSnapshotCurrent',
+]) {
+  if (!clickUpAttachmentUpload.includes(marker)) fail(`ClickUp attachment scope/approval boundary disappeared: ${marker}`);
+}
+for (const marker of [
+  "operation: 'clearCustomField'",
+  "operation: 'setCustomField'",
+  '}, expectedRevision)',
+]) {
+  if (!clickUpToolService.includes(marker)) fail(`ClickUp Custom Field grant propagation boundary disappeared: ${marker}`);
 }
 for (const marker of [
   "const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'",

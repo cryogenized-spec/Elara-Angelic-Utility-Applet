@@ -249,6 +249,7 @@ const namedPrReviewSkill = read('skills/PR_Review.md');
 if (namedPrReviewSkill !== canonicalPrReviewSkill) fail('skills/PR_Review.md must remain an exact mirror of the canonical skills/SKILL.md');
 
 const workflow = read('.github/workflows/ci.yml');
+const visualEvidenceWorkflow = read('.github/workflows/visual-evidence.yml');
 for (const marker of ['continue-on-error', 'if: always()', '|| true', 'set +e']) if (workflow.includes(marker)) fail(`CI workflow contains forbidden bypass marker: ${marker}`);
 if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci rather than npm install');
 if (/contents:\s*write/.test(workflow)) fail('certification workflow may not retain repository write authority');
@@ -265,14 +266,18 @@ for (const command of orderedCommands) {
 for (const marker of ['ref: ${{ github.event.pull_request.head.sha || github.sha }}', 'persist-credentials: false', 'cancel-in-progress: true', 'needs: runtime', 'pages: write', 'id-token: write']) {
   if (!workflow.includes(marker)) fail(`CI workflow lost Phase 4 control: ${marker}`);
 }
+if (workflow.includes('  visual-evidence:')) fail('ordinary CI must not automatically own visual evidence');
 for (const marker of [
-  'name: Visual evidence',
-  "if: github.event_name == 'pull_request'",
-  'git worktree add --detach "$RUNNER_TEMP/elara-visual-base" "${{ github.event.pull_request.base.sha }}"',
+  'name: Visual Evidence',
+  'workflow_dispatch:',
+  'issue_comment:',
+  "github.event.comment.body == '/visual-evidence'",
+  'ref: ${{ steps.pr.outputs.head_sha }}',
+  'git worktree add --detach "$RUNNER_TEMP/elara-visual-base" "$BASE_SHA"',
   'node scripts/capture-visual-evidence.mjs',
-  'name: visual-evidence-pr-${{ github.event.pull_request.number }}',
+  'name: visual-evidence-pr-${{ steps.pr.outputs.pr_number }}-${{ steps.pr.outputs.head_sha }}',
 ]) {
-  if (!workflow.includes(marker)) fail(`CI workflow lost before/after visual-evidence control: ${marker}`);
+  if (!visualEvidenceWorkflow.includes(marker)) fail(`remote visual-evidence workflow lost required control: ${marker}`);
 }
 
 const eslintDisableComment = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?\b/;

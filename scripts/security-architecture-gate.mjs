@@ -212,6 +212,7 @@ const clickUpOAuthVault = read('worker/src/clickup/oauth-vault.ts');
 const clickUpProvider = read('worker/src/clickup/provider.ts');
 const clickUpMcpRoute = read('worker/src/clickup/mcp-route.ts');
 const clickUpAttachmentRoute = read('worker/src/clickup/attachment-route.ts');
+const clickUpWebhookRoute = read('worker/src/clickup/webhook-route.ts');
 const clickUpTaskIndex = read('worker/src/clickup/task-index.ts');
 if (!pairing.includes("type StoredAutonomyPairing = Omit<AutonomyPairing, 'token'>")) fail('autonomy pairing must exclude token from its durable metadata type');
 if (!pairing.includes('saveAutonomyInstallationToken')) fail('autonomy pairing must route the installation credential through its protected store');
@@ -343,11 +344,32 @@ for (const marker of [
   "ATTACHMENT_PATH = '/clickup/attachment'",
   'verifyBearerToken',
   'ARTIFACT_LIMITS.maxAttachmentBytes',
-  "'/internal/clickup/attachment'",
+  "INTERNAL_ATTACHMENT_PATH = '/internal/clickup/attachment'",
   'internalWakeMarker',
 ]) {
   if (!clickUpAttachmentRoute.includes(marker)) fail(`ClickUp Worker attachment boundary is missing: ${marker}`);
 }
+for (const marker of [
+  "CLICKUP_WEBHOOK_PATH = '/clickup/webhook'",
+  'MAX_WEBHOOK_BODY_BYTES',
+  "request.headers.get('X-Signature')",
+  "'/internal/clickup/webhook'",
+  'internalWakeMarker',
+]) {
+  if (!clickUpWebhookRoute.includes(marker)) fail(`ClickUp webhook ingress boundary is missing: ${marker}`);
+}
+for (const marker of [
+  'clickup_webhooks',
+  'clickup_webhook_deliveries',
+  'hmacHex',
+  'constantTimeEqual',
+  'WEBHOOK_DELIVERY_RETENTION_MS',
+  'markClickUpWorkspaceTaskIndexStale',
+  'removeClickUpTaskFromIndex',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp webhook vault boundary is missing: ${marker}`);
+}
+
 for (const marker of [
   'clickup_task_index',
   'clickup_task_index_state',

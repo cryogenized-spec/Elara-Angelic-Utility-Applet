@@ -808,7 +808,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
   it('elevates ClickUp mutation confirmation after an untrusted ClickUp read', async () => {
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-clickup-taint-1', model: 'gemini-3.8-flash' },
-      { type: 'tool-call', interactionId: 'interaction-clickup-taint-1', index: 0, callId: 'call-clickup-read', name: 'clickup.getTask', arguments: { taskId: '86task' } },
+      { type: 'tool-call', interactionId: 'interaction-clickup-taint-1', index: 0, callId: 'call-clickup-read', name: 'clickup.getTask', arguments: { workspaceId: '999', taskId: '86task' } },
     ));
     streamToolResult
       .mockReturnValueOnce(events(

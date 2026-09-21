@@ -374,7 +374,7 @@ export async function saveTaskLocalMetadata(
     const latestRaw = await db.boards.get(board.account);
     if (!latestRaw) throw new Error('Sync before editing task metadata.');
     const latest = normalizeBoard(latestRaw);
-    let labels = [...(latest.labels ?? [])];
+    const labels = [...(latest.labels ?? [])];
     for (const incoming of patch.upsertLabels ?? []) {
       const name = incoming.name.trim();
       if (!incoming.id || incoming.id.length > 500 || !name || name.length > 48 || !incoming.color || incoming.color.length > 32) throw new Error('Invalid task label.');
@@ -387,7 +387,7 @@ export async function saveTaskLocalMetadata(
     }
     if (labels.length > 100) throw new Error('Maximum 100 Kanban labels.');
 
-    let tasks = [...latest.tasks];
+    const tasks = [...latest.tasks];
     let index = tasks.findIndex((task) => task.listId === listId && task.id === taskId);
     if (index < 0) {
       if (!patch.providerTask || patch.providerTask.id !== taskId) throw new Error('Task is no longer present. Sync and reopen it.');

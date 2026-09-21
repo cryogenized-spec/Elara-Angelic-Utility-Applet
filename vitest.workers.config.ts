@@ -23,7 +23,7 @@ export default defineConfig({
         durableObjects: {
           AUTONOMY: { className: 'TestAutonomyEngine', useSQLite: true },
           GOOGLE_OAUTH: { className: 'TestGoogleOAuthVault', useSQLite: true },
-          CLICKUP_OAUTH: { className: 'ClickUpOAuthVault', useSQLite: true },
+          CLICKUP_OAUTH: { className: 'TestClickUpOAuthVault', useSQLite: true },
         },
         workflows: {
           ROUTINE_RUN: { name: 'elara-routine-run', className: 'RoutineRunWorkflow' },

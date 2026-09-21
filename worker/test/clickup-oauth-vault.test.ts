@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SELF, env, reset, runInDurableObject } from 'cloudflare:test';
+import { SELF, env, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker, newNonce, signWrite } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, bearerRead, signedWrite } from './helpers';
@@ -133,46 +133,44 @@ async function internalCommand(command: unknown, revision?: number): Promise<Res
   }));
 }
 
-async function credentialSnapshot() {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    const row = state.storage.sql.exec<{
-      access_cipher: string;
-      access_iv: string;
-      user_id: string;
-      username: string | null;
-      email: string | null;
-      workspaces_json: string;
-      updated_at: number;
-    }>(
-      'SELECT access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
-    ).toArray()[0];
-    return row ? {
-      accessCipher: row.access_cipher,
-      accessIv: row.access_iv,
-      userId: row.user_id,
-      username: row.username,
-      email: row.email,
-      workspacesJson: row.workspaces_json,
-      updatedAt: row.updated_at,
-    } : null;
-  });
+async function harnessFetch(path: string): Promise<Response> {
+  return doFetch(new Request(`https://clickup-oauth-vault${path}`));
 }
 
-async function rateLimitSnapshot() {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    const row = state.storage.sql.exec<{
-      limit_count: number | null;
-      remaining: number | null;
-      reset_at: number | null;
-    }>(
-      'SELECT limit_count, remaining, reset_at FROM clickup_rate_limit WHERE slot = 1',
-    ).toArray()[0];
-    return row ? {
-      limit: row.limit_count,
-      remaining: row.remaining,
-      resetAt: row.reset_at,
-    } : null;
-  });
+async function credentialSnapshot(): Promise<{
+  accessCipher: string;
+  accessIv: string;
+  userId: string;
+  username: string | null;
+  email: string | null;
+  workspacesJson: string;
+  updatedAt: number;
+} | null> {
+  const response = await harnessFetch('/__test/clickup/credential');
+  expect(response.status).toBe(200);
+  return await response.json() as {
+    accessCipher: string;
+    accessIv: string;
+    userId: string;
+    username: string | null;
+    email: string | null;
+    workspacesJson: string;
+    updatedAt: number;
+  } | null;
+}
+
+async function rateLimitSnapshot(): Promise<{
+  limit: number | null;
+  remaining: number | null;
+  resetAt: number | null;
+} | null> {
+  const response = await harnessFetch('/__test/clickup/rate-limit');
+  expect(response.status).toBe(200);
+  return await response.json() as {
+    limit: number | null;
+    remaining: number | null;
+    resetAt: number | null;
+  } | null;
 }
 
 describe('ClickUp OAuth public boundary', () => {

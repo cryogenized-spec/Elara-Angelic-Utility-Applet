@@ -7,6 +7,13 @@ import { composeSystemInstructionWithStatus } from './memory-context';
 import { artifactRepository } from '../artifacts/repository';
 import { ArtifactError } from '../artifacts/errors';
 import { isAttachment } from '../domain/artifact';
+import {
+  estimateSerializedInputTokens,
+  finalizeGeminiQuotaReservation,
+  releaseGeminiQuotaReservation,
+  reserveGeminiQuota,
+  type GeminiQuotaReservation,
+} from './quota-ledger';
 
 function asRecord(value: unknown): Record<string, unknown> { return typeof value === 'object' && value !== null ? value as Record<string, unknown> : {}; }
 function readString(record: Record<string, unknown>, key: string): string | undefined { const value = record[key]; return typeof value === 'string' && value.length > 0 ? value : undefined; }
@@ -21,7 +28,7 @@ function readUsage(raw: unknown): GeminiUsage | undefined {
   const usage = asRecord(raw);
   const inputTokens = readNumber(usage, 'input_tokens') ?? readNumber(usage, 'prompt_tokens') ?? readNumber(usage, 'prompt_token_count') ?? readNumber(usage, 'total_input_tokens');
   const outputTokens = readNumber(usage, 'output_tokens') ?? readNumber(usage, 'completion_tokens') ?? readNumber(usage, 'candidates_token_count') ?? readNumber(usage, 'total_output_tokens');
-  const cachedTokens = readNumber(usage, 'cached_tokens') ?? readNumber(usage, 'cached_content_token_count');
+  const cachedTokens = readNumber(usage, 'cached_tokens') ?? readNumber(usage, 'cached_content_token_count') ?? readNumber(usage, 'total_cached_tokens');
   const thoughtsTokens = readNumber(usage, 'thoughts_tokens') ?? readNumber(usage, 'total_thought_tokens');
   const totalTokens = readNumber(usage, 'total_tokens') ?? readNumber(usage, 'total_token_count');
   if ([inputTokens, outputTokens, cachedTokens, thoughtsTokens, totalTokens].every((value) => value === undefined)) return undefined;
@@ -149,6 +156,47 @@ function buildInteractionPayload(request: InteractionRequest) {
   return payload;
 }
 
+function toolContinuationInput(request: GeminiToolContinuationRequest): unknown[] {
+  const results = request.results ?? (request.result ? [request.result] : []);
+  return results.map((result) => ({
+    type: 'function_result',
+    name: result.name,
+    call_id: result.callId,
+    result: [{ type: 'text', text: JSON.stringify(result.result) }],
+  }));
+}
+
+/**
+ * Estimate the serialized provider request before dispatch. This mirrors the
+ * exact declaration expansion used by the browser provider; fresh checkpoint
+ * calls use it to prove they still fit inside the turn-level hard budget.
+ */
+export function estimateGeminiTurnRequestInputTokens(request: GeminiTurnRequest): number {
+  return estimateSerializedInputTokens(buildInteractionPayload({
+    model: request.model || DEFAULT_GEMINI_MODEL,
+    input: request.input,
+    previousInteractionId: request.previousInteractionId,
+    generationConfig: request.generationConfig,
+    systemInstruction: request.systemInstruction,
+    tools: request.tools,
+  }));
+}
+
+/**
+ * Continuations inherit server-side history, so callers combine this serialized
+ * delta estimate with the previous interaction's measured gross input.
+ */
+export function estimateGeminiToolContinuationInputTokens(request: GeminiToolContinuationRequest): number {
+  return estimateSerializedInputTokens(buildInteractionPayload({
+    model: request.model || DEFAULT_GEMINI_MODEL,
+    input: toolContinuationInput(request),
+    previousInteractionId: request.previousInteractionId,
+    generationConfig: request.generationConfig,
+    systemInstruction: request.systemInstruction,
+    tools: request.tools,
+  }));
+}
+
 async function nextStreamItem(iterator: AsyncIterator<unknown>, signal?: AbortSignal): Promise<IteratorResult<unknown> | 'aborted'> {
   if (!signal || signal.aborted) return signal?.aborted ? 'aborted' : iterator.next();
   let onAbort: (() => void) | undefined;
@@ -168,6 +216,34 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
   let sawRequiresAction = false;
   const pendingFunctions = new Map<number, PendingFunctionCall>();
   const thoughtSummaryParts = new Map<number, string>();
+  let quotaReservation: Extract<GeminiQuotaReservation, { granted: true }> | undefined;
+  let usageReported = false;
+  const estimatedUsageEvent = (status: string, providerUsage?: GeminiUsage): GeminiStreamEvent | undefined => {
+    if (usageReported || !quotaReservation) return undefined;
+    usageReported = true;
+    return {
+      type: 'interaction-usage',
+      interactionId: interactionId ?? requestId,
+      status,
+      source: 'estimate',
+      usage: { ...providerUsage, inputTokens: quotaReservation.reservedInputTokens },
+    };
+  };
+  const usageEvent = async (status: string, providerUsage?: GeminiUsage): Promise<GeminiStreamEvent | undefined> => {
+    const grossInput = providerUsage?.inputTokens;
+    if (typeof grossInput === 'number' && Number.isInteger(grossInput) && grossInput >= 0) {
+      usageReported = true;
+      if (quotaReservation) await finalizeGeminiQuotaReservation(quotaReservation, grossInput);
+      return {
+        type: 'interaction-usage',
+        interactionId: interactionId ?? requestId,
+        status,
+        source: 'provider',
+        usage: { ...providerUsage, inputTokens: grossInput },
+      };
+    }
+    return estimatedUsageEvent(status, providerUsage);
+  };
   if (signal?.aborted) { yield { type: 'cancelled' }; return; }
   try {
     const lockboxStatus = await getGeminiLockboxStatus();
@@ -204,13 +280,45 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
 
     if (signal?.aborted) { yield { type: 'cancelled' }; return; }
     const providerInput = await resolveGeminiInput({ ...request, signal }, client);
-    const stream = await client.interactions.create(buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction }) as never);
+    const payload = buildInteractionPayload({ ...request, input: providerInput, systemInstruction: contextualInstruction });
+    const reservation = await reserveGeminiQuota(estimateSerializedInputTokens(payload));
+    if (!reservation.granted) {
+      const failure = new Error('Elara paused this Gemini request before the local rolling input budget could be exceeded.') as Error & { code?: string };
+      failure.code = 'LOCAL_RATE_LIMIT';
+      const normalized = normalizeGeminiError(failure, { requestId, category: 'rate_limit' });
+      yield {
+        type: 'failed',
+        error: {
+          ...normalized,
+          code: 'GEMINI_LOCAL_RATE_LIMIT',
+          providerCode: 'LOCAL_RATE_LIMIT',
+          debug: {
+            ...normalized.debug,
+            localQuotaReason: reservation.reason,
+            rollingInputTokens: reservation.rollingInputTokens,
+            projectedInputTokens: reservation.projectedInputTokens,
+            allowance: reservation.allowance,
+            retryAfterMs: reservation.retryAfterMs,
+          },
+        },
+      };
+      return;
+    }
+    quotaReservation = reservation;
+    if (signal?.aborted || request.isGenerationActive?.() === false) {
+      await releaseGeminiQuotaReservation(reservation);
+      yield { type: 'cancelled', interactionId };
+      return;
+    }
+    const stream = await client.interactions.create(payload as never);
     const iterator = (stream as unknown as AsyncIterable<unknown>)[Symbol.asyncIterator]();
     try {
       for (;;) {
         const next = await nextStreamItem(iterator, signal);
         if (next === 'aborted' || signal?.aborted) {
           void iterator.return?.()?.catch(() => undefined);
+          const estimated = estimatedUsageEvent('cancelled');
+          if (estimated) yield estimated;
           yield { type: 'cancelled', interactionId };
           return;
         }
@@ -220,7 +328,23 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
         const eventInteractionId = interactionIdFrom(raw);
         if (eventInteractionId) interactionId = eventInteractionId;
         if (eventType === 'interaction.created') { const interaction = asRecord(raw.interaction); const id = readString(interaction, 'id') ?? interactionId ?? 'unknown'; interactionId = id; const model = readString(interaction, 'model') ?? (request.model || DEFAULT_GEMINI_MODEL); yield { type: 'interaction-created', interactionId: id, model }; continue; }
-        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') { const status = readString(raw, 'status') ?? readString(asRecord(raw.interaction), 'status') ?? eventType.replace('interaction.', ''); if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
+        if (eventType === 'interaction.in_progress' || eventType === 'interaction.status_update' || eventType === 'interaction.status' || eventType === 'interaction.updated' || eventType === 'interaction.requires_action') {
+          const interaction = asRecord(raw.interaction);
+          const status = readString(raw, 'status') ?? readString(interaction, 'status') ?? eventType.replace('interaction.', '');
+          if (eventType === 'interaction.requires_action' || status === 'requires_action') sawRequiresAction = true;
+          if (eventType === 'interaction.requires_action') {
+            const providerUsage = readUsage(interaction.usage)
+              ?? readUsage(interaction.usage_metadata)
+              ?? readUsage(interaction.usageMetadata)
+              ?? readUsage(raw.usage)
+              ?? readUsage(raw.usage_metadata)
+              ?? readUsage(raw.usageMetadata);
+            const accounting = await usageEvent(status, providerUsage);
+            if (accounting) yield accounting;
+          }
+          if (interactionId) yield { type: 'interaction-status', interactionId, status };
+          continue;
+        }
         if (eventType === 'step.start') {
           const index = stepIndex(raw);
           const step = asRecord(raw.step);
@@ -246,13 +370,32 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           else if ((deltaType === 'arguments' || deltaType === 'arguments_delta') && pendingFunctions.has(index)) { const partialArguments = readString(delta, 'partial_arguments') ?? readString(delta, 'arguments'); if (partialArguments) pendingFunctions.get(index)!.arguments += partialArguments; }
           continue;
         }
-        if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
+        if (eventType === 'step.stop') { const index = stepIndex(raw); const pending = pendingFunctions.get(index); if (pending && interactionId) { try { const args = resolveFunctionArguments(pending); yield { type: 'tool-call', interactionId, index, callId: pending.callId, name: pending.name, arguments: args }; sawRequiresAction = true; } catch { const estimated = estimatedUsageEvent('failed'); if (estimated) yield estimated; yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini produced invalid function-call arguments.'), { requestId, interactionId }) }; return; } pendingFunctions.delete(index); } yield { type: 'step-stop', index }; continue; }
         if (eventType === 'interaction.completed') {
-          const interaction = asRecord(raw.interaction); interactionId = readString(interaction, 'id') ?? interactionId; const status = readString(interaction, 'status') ?? 'completed';
-          if (status === 'requires_action') { sawRequiresAction = true; if (interactionId) yield { type: 'interaction-status', interactionId, status }; continue; }
+          const interaction = asRecord(raw.interaction);
+          interactionId = readString(interaction, 'id') ?? interactionId;
+          const status = readString(interaction, 'status') ?? 'completed';
+          const usage = readUsage(interaction.usage)
+            ?? readUsage(interaction.usage_metadata)
+            ?? readUsage(interaction.usageMetadata)
+            ?? readUsage(raw.usage)
+            ?? readUsage(raw.usage_metadata)
+            ?? readUsage(raw.usageMetadata);
+          const accounting = await usageEvent(status, usage);
+          if (accounting) yield accounting;
+          const effectiveUsage = accounting?.type === 'interaction-usage' ? accounting.usage : usage;
+          if (status === 'requires_action') {
+            sawRequiresAction = true;
+            if (interactionId) yield { type: 'interaction-status', interactionId, status };
+            continue;
+          }
           sawTerminalEvent = true;
-          const usage = readUsage(interaction.usage) ?? readUsage(raw.usage); const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts); const completedUsage = usage ?? (thoughtSummary ? { thoughtSummary } : undefined); if (completedUsage && thoughtSummary) completedUsage.thoughtSummary = thoughtSummary;
-          yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage }; return;
+          const thoughtSummary = thoughtSummaryFrom(thoughtSummaryParts);
+          const completedUsage = effectiveUsage
+            ? { ...effectiveUsage, ...(thoughtSummary ? { thoughtSummary } : {}) }
+            : (thoughtSummary ? { thoughtSummary } : undefined);
+          yield { type: 'completed', interactionId: interactionId ?? 'unknown', status, durationMs: Math.max(1, Math.round(performance.now() - startedAt)), usage: completedUsage };
+          return;
         }
         if (eventType === 'error') {
           const providerError = asRecord(raw.error);
@@ -264,11 +407,20 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
           const providerCode = readString(providerError, 'code') ?? readString(providerError, 'type') ?? readString(nestedError, 'code');
           if (providerCode !== undefined) failure.code = providerCode;
           sawTerminalEvent = true;
+          const estimated = estimatedUsageEvent('failed');
+          if (estimated) yield estimated;
           yield { type: 'failed', error: normalizeGeminiError(failure, { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
           return;
         }
       }
-      if (sawRequiresAction || sawTerminalEvent) return;
+      if (sawRequiresAction) {
+        const estimated = estimatedUsageEvent('requires_action');
+        if (estimated) yield estimated;
+        return;
+      }
+      if (sawTerminalEvent) return;
+      const estimated = estimatedUsageEvent('failed');
+      if (estimated) yield estimated;
       yield { type: 'failed', error: normalizeGeminiError(new Error('Gemini stream ended without an explicit interaction.completed event.'), { requestId, interactionId, durationMs: Math.max(1, Math.round(performance.now() - startedAt)) }) };
     } finally {
       void iterator.return?.()?.catch(() => undefined);
@@ -278,7 +430,14 @@ async function* streamDirectRequest(request: InteractionRequest, signal?: AbortS
     const error = cause instanceof ArtifactError
       ? { ...normalized, code: cause.code, message: cause.userMessage, retryable: false, debug: { ...normalized.debug, artifactError: cause.code } }
       : normalized;
-    if (error.cancelled || signal?.aborted || request.isGenerationActive?.() === false) { yield { type: 'cancelled', interactionId }; return; }
+    if (error.cancelled || signal?.aborted || request.isGenerationActive?.() === false) {
+      const estimated = estimatedUsageEvent('cancelled');
+      if (estimated) yield estimated;
+      yield { type: 'cancelled', interactionId };
+      return;
+    }
+    const estimated = estimatedUsageEvent('failed');
+    if (estimated) yield estimated;
     yield { type: 'failed', error };
   }
 }
@@ -288,8 +447,6 @@ export const geminiTurnPort: GeminiTurnPort = {
     return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: request.input, attachments: request.attachments, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: request.memoryContext, conversationId: request.conversationId, generationId: request.generationId, isGenerationActive: request.isGenerationActive }, signal);
   },
   streamToolResult(request: GeminiToolContinuationRequest, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
-    const results = request.results ?? (request.result ? [request.result] : []);
-    const input = results.map((result) => ({ type: 'function_result', name: result.name, call_id: result.callId, result: [{ type: 'text', text: JSON.stringify(result.result) }] }));
-    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input, previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: 'none' }, signal);
+    return streamDirectRequest({ model: request.model || DEFAULT_GEMINI_MODEL, input: toolContinuationInput(request), previousInteractionId: request.previousInteractionId, generationConfig: request.generationConfig, systemInstruction: request.systemInstruction, tools: request.tools, memoryContext: 'none' }, signal);
   },
 };

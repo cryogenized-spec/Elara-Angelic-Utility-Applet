@@ -28,6 +28,17 @@ export interface StoredGooglePickerAdmissions {
   updatedAt: number;
 }
 
+export interface StoredGeminiQuotaLedger {
+  id: 'gemini-quota-ledger-v1';
+  entries: Array<{
+    id: string;
+    startedAt: number;
+    reservedInputTokens: number;
+    actualInputTokens?: number;
+  }>;
+  updatedAt: number;
+}
+
 export interface StoredConversationFolder {
   id: string;
   name: string;
@@ -62,7 +73,7 @@ function stripLegacyEmbedUrls(value: unknown): { value: unknown; changed: boolea
 export class ElaraDatabase extends Dexie {
   messages!: Table<ChatMessage, string>;
   threads!: Table<StoredThread, string>;
-  settings!: Table<StoredGeminiSettings | StoredGooglePickerAdmissions, string>;
+  settings!: Table<StoredGeminiSettings | StoredGooglePickerAdmissions | StoredGeminiQuotaLedger, string>;
   workspaceShortcuts!: Table<StoredWorkspaceShortcut, string>;
   folders!: Table<StoredConversationFolder, string>;
   folderAssignments!: Table<StoredFolderAssignment, string>;

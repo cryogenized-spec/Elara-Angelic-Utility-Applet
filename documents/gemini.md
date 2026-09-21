@@ -23,10 +23,12 @@ interactive App / tool loop
 -> Lockbox credential
 -> compose thread memory unless memoryContext=none
 -> resolve attachments
+-> local rolling-input admission reservation
 -> interactions.create(stream=true, store=true)
--> normalized GeminiStreamEvent
+-> normalized GeminiStreamEvent + per-interaction usage
 -> optional tool execution
 -> grouped tool-result continuation
+-> bounded chain compaction / terminal synthesis when gross-input budget requires it
 
 bounded internal classifier
 -> GeminiTurnPort
@@ -38,6 +40,8 @@ bounded internal classifier
 ```
 
 The SDK client uses API version `v1` with SDK automatic retry attempts fixed to `1`; application retry/lifecycle policy remains outside the SDK.
+
+Browser Gemini admission also uses a device-local rolling 60-second gross-input ledger stored as a typed row in the existing conversation/settings IndexedDB authority. Each provider request reserves conservatively before dispatch; provider-reported gross input replaces the estimate when available, while requests that fail after dispatch remain conservatively charged. When measured provider usage is unavailable, ordinary textual input is charged from a UTF-8 byte upper bound rather than the usual English-oriented ~4-characters/token heuristic, so arbitrary Unicode or high-entropy text cannot silently undercount the safety budget. Every still-live reservation/observation remains in the rolling window until timestamp expiry; the ledger never evicts active usage merely to satisfy an entry-count cap. Inline image and document base64 are treated as transport encoding rather than prompt text. Images receive a fixed media reserve; text-like documents are charged from bounded decoded-content size, PDFs from a bounded document reserve, and URI-backed documents retain an explicit reserve even though their bytes are no longer inline. IndexedDB serialization is authoritative across same-origin tabs; snapshot reads do not mutate the ledger and BroadcastChannel is notification-only. The default local allowance is intentionally below the observed free-tier TPM ceiling and is a safety policy, not a claim about provider billing or cached-token quota discounts.
 
 ## 3. Source map
 
@@ -58,7 +62,7 @@ The SDK client uses API version `v1` with SDK automatic retry attempts fixed to 
 
 Default model is `gemini-3.8-flash`. `model-registry.ts` is authoritative for exposed stable text models and supported thinking/settings controls; preview/experimental and non-text model families are deliberately excluded from the normal selector.
 
-`GeminiStreamEvent` normalizes interaction/status, step boundaries, function calls, text deltas, thought-summary deltas/signatures, artifact creation, structured media resolution, completion, cancellation and failure. Tool continuations accept one result or a grouped `results` array.
+`GeminiStreamEvent` normalizes interaction/status, step boundaries, function calls, text deltas, thought-summary deltas/signatures, artifact creation, structured media resolution, per-interaction usage, completion, cancellation and failure. Usage is surfaced for `requires_action` interactions before tool execution; when Google omits usage on an already-dispatched request, the provider emits an explicitly estimated conservative input floor rather than treating the request as free. Tool continuations accept one result or a grouped `results` array.
 
 Generation settings are capability-driven. The adapter maps supported values to `thinking_level`, `thinking_summaries`, `max_output_tokens`, `seed` and up to five stop sequences. Unsupported controls must not be invented or sent.
 
@@ -84,6 +88,8 @@ Empty or locked Lockbox state yields explicit configuration failures. Provider e
 The organic-memory classifier is treated as an untrusted selector, not an authority. Provider failure, cancellation, timeout, oversized output or invalid JSON fails the classifier closed and does not fail an already-saved chat response. Exact evidence validation, sensitive-category downgrade protection, remembering-style thresholds, category permission and persistence authority live in `SYS-MEM`.
 
 The app may expose provider-produced thought summaries, but it does not treat hidden reasoning/signatures as a user-editable second transcript.
+
+The interactive tool loop has two independent governors: a call-count ceiling and a gross-input/model-interaction ceiling. Gross accounting never subtracts cached tokens for safety. Before a continuation is dispatched, the governor carries forward the latest measured prompt plus the model response/thought footprint that becomes inherited history through `previous_interaction_id`, then adds the serialized pending tool-result payload; large model responses and large Gmail/Docs/tool results therefore cannot hide behind an input-only history heuristic. As a chain grows, the application keeps a bounded deterministic checkpoint of semantic tool observations—including bounded message/document evidence, mutation-critical ETags and pagination cursors—preserves external-data taint and existing mutation/confirmation authority, severs `previous_interaction_id`, and resumes from a fresh interaction. Collection projection retains a bounded prefix plus an explicit omitted-item/truncation marker. Because compaction is intentionally lossy, duplicate-read suppression is reset for the fresh chain so it may repeat an exact read to recover omitted current-page evidence; normal same-chain duplicate suppression resumes after that reread succeeds. Compaction and terminal synthesis are admitted from the actual constructed fresh-request estimate, including system instruction and mounted tool declarations, rather than a fixed reserve alone. An exact successful read is otherwise skipped only while no newer successful tool evidence has appeared; a different successful read or mutation advances the evidence epoch and permits an evidence-driven recheck. If another exploratory call would exceed the hard local budget, the loop uses a fresh no-tools synthesis only when that exact request still fits, otherwise a deterministic local fallback without contacting Gemini. That fallback explicitly reports any already-completed mutation outcomes from the turn using bounded non-secret identifiers/status, and never implies that the in-memory checkpoint is durably resumable across turns. The same mutation-safety notice is emitted when a post-mutation local rolling-quota refusal blocks the next continuation. That path terminates as a durable non-retryable completion rather than a failed turn, so retry UI cannot replay an external write that already completed.
 
 ## 7. Verification and tests
 

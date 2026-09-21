@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { createInteraction, getGeminiApiKey, getGeminiLockboxStatus, GoogleGenAI, oauthFetch, oauthStatus } = vi.hoisted(() => ({
@@ -22,6 +23,7 @@ vi.mock('../google/oauth/authority', () => ({
 }));
 
 import { streamGoogleToolLoop } from './google-tool-loop';
+import { resetGeminiQuotaLedgerForTests } from './quota-ledger';
 
 async function* events(...items: unknown[]) {
   for (const item of items) yield item;
@@ -34,7 +36,8 @@ const oauth = {
 };
 
 describe('Gemini provider and Google tool-loop integration', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    await resetGeminiQuotaLedgerForTests();
     createInteraction.mockReset();
     getGeminiApiKey.mockReset();
     getGeminiLockboxStatus.mockReset();

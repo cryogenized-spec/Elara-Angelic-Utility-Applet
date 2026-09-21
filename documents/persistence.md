@@ -15,7 +15,7 @@ keywords: [dexie, indexeddb, persistence, migration, repository, localstorage]
 
 ## 2. Runtime architecture
 
-The main Dexie database is `elara-angelic-utility-applet`. Its current schema version is 8 and contains conversations plus several central domains. Other bounded systems use dedicated stores where isolation is intentional, including Lockbox, media cache, autonomy and roleplay-world persistence. Google OAuth access tokens remain memory-only; small authorization metadata may use localStorage.
+The main Dexie database is `elara-angelic-utility-applet`. Its current schema version is 9 and contains conversations plus several central domains. Other bounded systems use dedicated stores where isolation is intentional, including Lockbox, media cache, autonomy and roleplay-world persistence. Google OAuth access tokens remain memory-only; small authorization metadata may use localStorage.
 
 ```text
 domain operation
@@ -39,9 +39,9 @@ domain operation
 
 ## 4. Data and contracts
 
-Central `ElaraDatabase` tables are: `messages`, `threads`, `settings`, `workspaceShortcuts`, `folders`, `folderAssignments`, `memories`, `artifactMetadata`, `artifactBlobs`. Schema migrations evolved these tables from v1 through v8; v8 adds the indexed `autonomyContext` memory consent field. A legacy folder localStorage cache is migrated into tables and removed only after successful parsing/write.
+Central `ElaraDatabase` tables are: `messages`, `threads`, `settings`, `workspaceShortcuts`, `folders`, `folderAssignments`, `memories`, `artifactMetadata`, `artifactBlobs`. Schema migrations evolved these tables from v1 through v9; v8 adds the indexed `autonomyContext` memory consent field and v9 removes the retired derived media `embedUrl` from persisted conversation messages without changing the table layout. A legacy folder localStorage cache is migrated into tables and removed only after successful parsing/write.
 
-Related correctness-sensitive writes use Dexie transactions, for example message/thread updates and artifact association/storage. Persisted Gemini settings are per-model and normalized through the model settings engine.
+Related correctness-sensitive writes use Dexie transactions, for example message/thread updates and artifact association/storage. Persisted Gemini settings are per-model and normalized through the model settings engine. The same keyed `settings` table also carries the short-lived `gemini-quota-ledger-v1` row owned by `SYS-GEM`: it stores only rolling 60-second input-token reservations/observations for same-origin admission control, is transactionally updated across tabs, contains no prompts or credentials, and requires no schema bump.
 
 Chat Appearance preferences remain authoritative for Generation Activity glyph selection. The selected twelve Unicode graphemes live in the existing `elara-preferences` / `chat-appearance` record and are normalized on every load/save, so no schema bump is required for older rows. Noto Emoji WOFF2 bytes live separately in CacheStorage as disposable derived data keyed by the final glyph subset. Preview never writes that cache; only the Settings-exit commit may replace the committed subset. A missing/corrupt cache is recoverable from preferences and must not change the selected glyph values.
 

@@ -1,3 +1,4 @@
+import 'fake-indexeddb/auto';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { createInteraction, getGeminiApiKey, getGeminiLockboxStatus, GoogleGenAI, searchMedia } = vi.hoisted(() => ({
@@ -13,6 +14,7 @@ vi.mock('../persistence/gemini-api-key', () => ({ getGeminiApiKey, getGeminiLock
 vi.mock('../media/search', () => ({ searchMedia, resetMediaProvider: () => undefined }));
 
 import { streamGoogleToolLoop } from './google-tool-loop';
+import { resetGeminiQuotaLedgerForTests } from './quota-ledger';
 import type { GeminiStreamEvent } from './contracts';
 import type { MediaItem } from '../domain/media';
 
@@ -61,7 +63,8 @@ async function run(_queries: unknown): Promise<GeminiStreamEvent[]> {
   return collected;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  await resetGeminiQuotaLedgerForTests();
   createInteraction.mockReset();
   searchMedia.mockReset();
   GoogleGenAI.mockReset();

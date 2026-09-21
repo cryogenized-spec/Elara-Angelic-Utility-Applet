@@ -1,13 +1,16 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { env, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
+import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, signedWrite } from './helpers';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
 const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
+let grantRevision = 0;
 
 beforeEach(async () => {
   vi.restoreAllMocks();
+  grantRevision = 0;
   await reset();
 });
 
@@ -28,6 +31,9 @@ async function connect() {
   const exchangeBody = JSON.stringify({ code: 'one-time-code', state, redirectUri: REDIRECT_URI });
   const exchanged = await doFetch(await signedWrite('/clickup/oauth/exchange', exchangeBody));
   expect(exchanged.status).toBe(200);
+  const status = await exchanged.json() as { updatedAt?: number };
+  grantRevision = status.updatedAt ?? 0;
+  expect(grantRevision).toBeGreaterThan(0);
 }
 
 async function search(argumentsValue: Record<string, unknown>) {
@@ -36,6 +42,7 @@ async function search(argumentsValue: Record<string, unknown>) {
     headers: {
       'content-type': 'application/json',
       'X-Elara-Internal': await internalWakeMarker(TOKEN),
+      [CLICKUP_GRANT_REVISION_HEADER]: String(grantRevision),
     },
     body: JSON.stringify({ operation: 'searchTaskIndex', arguments: argumentsValue }),
   }));
@@ -62,6 +69,9 @@ async function indexSnapshot() {
       lastProviderUpdatedAt: number;
       indexedTasks: number;
       oldestIndexedAt?: number;
+      incrementalSince?: number;
+      incrementalNextPage?: number;
+      incrementalMaxUpdatedAt?: number;
     }>;
   }).taskIndexSnapshot('999');
 }

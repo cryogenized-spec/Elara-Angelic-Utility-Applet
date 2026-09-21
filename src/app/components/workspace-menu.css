@@ -34,8 +34,39 @@
 }
 .workspace-trigger:focus-visible { border-color: rgba(110,168,255,.5); box-shadow: 0 0 0 3px rgba(110,168,255,.14); outline: none; }
 .workspace-trigger__label { overflow: hidden; text-overflow: ellipsis; }
+.workspace-trigger__meta { display: inline-flex; align-items: center; gap: 8px; flex: none; }
+.workspace-trigger__google-state {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: 50%;
+  background: #ff6676;
+  box-shadow: 0 0 0 3px rgba(255,102,118,.12);
+}
+.workspace-trigger__google-state[data-state='online'] {
+  background: #67d98a;
+  box-shadow: 0 0 0 3px rgba(103,217,138,.12);
+}
+.workspace-trigger__google-state[data-state='checking'] {
+  background: rgba(255,255,255,.32);
+  box-shadow: 0 0 0 3px rgba(255,255,255,.06);
+}
+.workspace-trigger__google-state[data-state='refreshing'] {
+  width: 12px;
+  height: 12px;
+  border: 2px solid rgba(103,217,138,.22);
+  border-top-color: #67d98a;
+  background: transparent;
+  box-shadow: none;
+  animation: workspace-google-refresh .72s linear infinite;
+}
 .workspace-trigger svg { flex: none; color: rgba(255,255,255,.55); }
 .workspace-trigger.is-active svg { color: var(--blue); }
+
+@keyframes workspace-google-refresh {
+  to { transform: rotate(360deg); }
+}
 
 .workspace-menu {
   position: absolute;
@@ -98,4 +129,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .workspace-trigger, .workspace-service__row > svg:last-child { transition: none; }
+  .workspace-trigger__google-state[data-state='refreshing'] { animation: none; }
 }

@@ -15,15 +15,16 @@
      ├── .control-stack            absolute overlay, top-left
      │     ├── .control-stack__top hamburger + Kanban
      │     └── .tool-rail          Workspace launcher below
-     ├── .elara-banner             frameless character artwork region
-     ├── .conversation             flex: 1 1 auto
+     ├── .elara-banner             portrait overlay; landscape remains in flow
+     ├── .conversation             flex: 1 1 auto; reaches shell top in portrait mode
      │     └── .conversation__stream
      ├── .error
      └── form.composer
 
-   Nothing indents itself to clear the control cluster: it is an overlay, so
-   the conversation gets the full content width and its left and right gutters
-   are the shell's — identical by construction.
+   Nothing indents itself to clear the foreground chrome. In portrait mode the
+   control stack and character artwork overlay the conversation, so the scroll
+   viewport reaches the shell top while controls/artwork remain visually above
+   the text. The composer remains in normal flow and keeps the bottom boundary.
    ========================================================================== */
 
 :root {
@@ -141,6 +142,8 @@ html, body, #root { min-height: 100%; margin: 0; overflow: hidden; }
 .kanban-launcher:hover { transform: translateY(-1px); border-color: rgba(110,168,255,.36); background: rgba(29,31,43,.86); }
 
 /* Conversation --------------------------------------------------------------
+   In portrait mode this is the topmost in-flow shell region: the control stack
+   and portrait are foreground overlays rather than height reservations.
    Horizontal padding is zero because the shell already provides the gutter.
    Adding padding here is what previously produced the asymmetric 54px left
    indent. */

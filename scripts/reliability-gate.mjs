@@ -77,6 +77,8 @@ if (!compilerWorkerSource.includes('shellEscape: false')) throw new Error('Relia
 const workerProviderSource = readFileSync(join(root, 'worker', 'src', 'index.ts'), 'utf8');
 if (!workerProviderSource.includes('verifyBearerToken') || !workerProviderSource.includes('requireProviderAdmission') || !workerProviderSource.includes("request.headers.get('Authorization')")) throw new Error('Reliability gate: Worker Gemini/transcription provider routes must require installation bearer admission.');
 if (!workerProviderSource.includes("maxOutputTokens: z.number().int().min(1).max(65_536)")) throw new Error('Reliability gate: Worker Gemini output budget must remain locally bounded.');
+if (!workerProviderSource.includes('GEMINI_MAX_REQUEST_BYTES = 2 * 1024 * 1024') || !workerProviderSource.includes('readBoundedJson(request, GEMINI_MAX_REQUEST_BYTES)')) throw new Error('Reliability gate: Worker Gemini request bodies must be byte-bounded before JSON parsing.');
+if (!workerProviderSource.includes('GEMINI_MAX_RELAY_BYTES = 4 * 1024 * 1024') || !workerProviderSource.includes('GEMINI_STREAM_LIMITS.maxEvents') || !workerProviderSource.includes('streamedTextChars') || !workerProviderSource.includes('streamedThoughtChars')) throw new Error('Reliability gate: Worker Gemini relay must retain finite event/text/thought/byte budgets.');
 const providerSource = readFileSync(join(root, 'src/gemini/provider.ts'), 'utf8');
 if (!providerSource.includes("from '@google/genai'")) throw new Error('Reliability gate: Gemini must execute directly from the application provider.');
 if (providerSource.includes('GEMINI_WORKER_URL') || providerSource.includes('elara-gemini.cryogenized.workers.dev')) throw new Error('Reliability gate: Gemini provider must not use the Cloudflare Worker.');
@@ -85,6 +87,11 @@ if (!providerSource.includes("httpOptions: { apiVersion: 'v1', retryOptions: { a
 if (providerSource.includes("apiKey, apiVersion: 'v1'")) throw new Error('Reliability gate: Gemini API version must not be configured through the obsolete top-level SDK option.');
 if (!providerSource.includes("if (systemInstruction) payload.system_instruction = systemInstruction;")) throw new Error('Reliability gate: empty Character Master must omit system_instruction entirely.');
 if (!providerSource.includes('request.results')) throw new Error('Reliability gate: Gemini tool-result continuation must support grouped results.');
+const streamLimitSource = readFileSync(join(root, 'src/gemini/stream-limits.ts'), 'utf8');
+if (!streamLimitSource.includes('maxEvents: 50_000') || !streamLimitSource.includes('maxTextChars: 1_000_000') || !streamLimitSource.includes('maxThoughtChars: 64_000') || !streamLimitSource.includes('maxFunctionArgumentChars: 100_000')) throw new Error('Reliability gate: canonical Gemini live-stream ceilings changed without review.');
+if (!providerSource.includes('GEMINI_STREAM_LIMITS.maxEvents') || !providerSource.includes('GEMINI_STREAM_LIMITS.maxTextChars') || !providerSource.includes('GEMINI_STREAM_LIMITS.maxThoughtChars') || !providerSource.includes('GEMINI_STREAM_LIMITS.maxFunctionArgumentChars')) throw new Error('Reliability gate: browser Gemini provider must enforce every canonical live-stream ceiling.');
+const generationStateSafetySource = readFileSync(join(root, 'src/chat/generation-state.ts'), 'utf8');
+if (!generationStateSafetySource.includes('GEMINI_STREAM_LIMITS.maxTextChars') || !generationStateSafetySource.includes('GEMINI_STREAM_LIMITS.maxThoughtChars')) throw new Error('Reliability gate: chat reducer must independently bound live transcript and thought-summary state.');
 
 const markdownSource = readFileSync(join(root, 'src/app/components/MarkdownText.tsx'), 'utf8');
 if (!markdownSource.includes('skipHtml')) throw new Error('Reliability gate: restricted Markdown renderer must explicitly skip raw HTML.');
@@ -128,9 +135,22 @@ if (!googleBrokerSource.includes('aria-label')) throw new Error('Reliability gat
 if (!googleBrokerSource.includes("warning.dataset.untrustedContext = 'true';") || !googleBrokerSource.includes('refreshApproveState')) throw new Error('Reliability gate: tainted confirmations must expose warning state and require explicit selection.');
 const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
 if (!toolLoopSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google tool loop must route mutation batches through the shared confirmation broker.');
-if (!toolLoopSource.includes('containsUntrustedExternal') || !toolLoopSource.includes('isUntrustedExternalReadTool') || !toolLoopSource.includes('UNTRUSTED_EXTERNAL_READ_PREFIXES') || !toolLoopSource.includes('batchStartedTainted') || !toolLoopSource.includes('untrustedContext: true as const')) throw new Error('Reliability gate: external provider reads must intrinsically taint later mutation confirmations.');
+if (!toolLoopSource.includes('containsUntrustedExternal') || !toolLoopSource.includes('isExternalEvidenceReadTool') || !toolLoopSource.includes('EXTERNAL_EVIDENCE_READ_PREFIXES') || !toolLoopSource.includes('batchStartedTainted') || !toolLoopSource.includes('untrustedContext: true as const')) throw new Error('Reliability gate: external provider reads must intrinsically taint later mutation confirmations.');
+if (!toolLoopSource.includes('UNTRUSTED_CONTEXT_REQUIRES_FRESH_USER_TURN') || !toolLoopSource.includes('batchStartedExternalTainted') || !toolLoopSource.includes('PRIVATE_EXTERNAL_READ_PREFIXES') || !toolLoopSource.includes('taintedReadContinuationAllowed') || !toolLoopSource.includes('driveSearchCandidateIds') || !toolLoopSource.includes('Boolean(request.attachments?.length)') || !toolLoopSource.includes("composed.memoryStatus === 'used'")) throw new Error('Reliability gate: attachments/provider content/memory must retain application-enforced information-flow taint with provenance-bound Drive transfer continuation.');
 if (!toolLoopSource.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) throw new Error('Reliability gate: a mutation without a valid confirmation request must fail closed before execution.');
 if (!toolLoopSource.includes('results:')) throw new Error('Reliability gate: Google tool loop must return grouped tool results to Gemini.');
+const oauthAuthoritySafetySource = readFileSync(join(root, 'src/google/oauth/authority.ts'), 'utf8');
+if (!oauthAuthoritySafetySource.includes("window.addEventListener('storage'") || !oauthAuthoritySafetySource.includes('authorizationStorageRevision()') || !oauthAuthoritySafetySource.includes('Google account changed or could not be verified') || !oauthAuthoritySafetySource.includes('clearGooglePickerAdmissions') || !oauthAuthoritySafetySource.includes('GoogleAuthorizationStateChangedError')) throw new Error('Reliability gate: Google OAuth must retain cross-tab invalidation, pre-egress revision checking and account-continuity cleanup.');
+const pairingSafetySource = readFileSync(join(root, 'src/autonomy/cloud/pairing.ts'), 'utf8');
+if (!pairingSafetySource.includes("event.key === PAIRING_KEY") || !pairingSafetySource.includes('const current = loadPairing();') || !pairingSafetySource.includes('const stillCurrent = loadPairing();')) throw new Error('Reliability gate: Autonomy installation tokens must fail closed across stale pairing/unpair races.');
+const organicMemorySource = readFileSync(join(root, 'src/memory/organic-observer.ts'), 'utf8');
+const memorySafetySource = readFileSync(join(root, 'src/memory/safety.ts'), 'utf8');
+if (!organicMemorySource.includes('containsCredentialMaterial') || !memorySafetySource.includes('containsLuhnValidCardNumber') || !memorySafetySource.includes('AKIA|ASIA') || !memorySafetySource.includes('eyJ[A-Za-z0-9_-]')) throw new Error('Reliability gate: automatic memory must retain the shared deterministic bare-secret and card-number rejection boundary.');
+const artifactValidationSafetySource = readFileSync(join(root, 'src/artifacts/validation.ts'), 'utf8');
+const imagePreprocessSafetySource = readFileSync(join(root, 'src/artifacts/image-preprocessing.ts'), 'utf8');
+if (!artifactValidationSafetySource.includes('ARTIFACT_LIMITS.maxImagePixels') || !artifactValidationSafetySource.includes('validateImagePixelBudget') || !imagePreprocessSafetySource.includes('ARTIFACT_LIMITS.maxImagePixels')) throw new Error('Reliability gate: image pixel budget must be enforced both at intake and transform boundaries.');
+const pwaSafetySource = readFileSync(join(root, 'src/pwa.ts'), 'utf8');
+if (!pwaSafetySource.includes("navigator.serviceWorker.addEventListener('controllerchange'") || !pwaSafetySource.includes('let hadController = Boolean(navigator.serviceWorker.controller)') || !pwaSafetySource.includes('window.location.reload()')) throw new Error('Reliability gate: already-controlled PWA clients must reload after a service-worker takeover to prevent version skew.');
 const executorSource = readFileSync(join(root, 'src/google/tools/executor.ts'), 'utf8');
 if (!executorSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: direct Google tool execution must retain the shared confirmation broker.');
 if (!executorSource.includes('confirmationRequestForCall')) throw new Error('Reliability gate: Google executor must expose safe confirmation request derivation for batched mutations.');
@@ -161,10 +181,13 @@ if (!lockboxSource.includes('const PBKDF2_ITERATIONS = 600_000;')) throw new Err
 if (!lockboxSource.includes('GEMINI_LOCKBOX_NEW_PIN_MIN_LENGTH = 10')) throw new Error('Reliability gate: fresh Lockbox PINs must retain the stronger minimum length.');
 if (!lockboxSource.includes("name: 'AES-GCM'")) throw new Error('Reliability gate: Gemini API credential must be encrypted with AES-GCM.');
 if (!lockboxSource.includes('crypto.getRandomValues')) throw new Error('Reliability gate: Lockbox encryption must use random salt and IV material.');
-if (lockboxSource.includes('localStorage.setItem')) throw new Error('Reliability gate: Gemini API credential must never be written to localStorage.');
+const approvedLockboxStorageWrite = 'window.localStorage.setItem(LOCKBOX_SESSION_REVOCATION_KEY, revision);';
+const lockboxStorageWrites = lockboxSource.match(/\blocalStorage\.setItem\b/g) ?? [];
+if (lockboxStorageWrites.length !== 1 || !lockboxSource.includes(approvedLockboxStorageWrite)) throw new Error('Reliability gate: Lockbox localStorage writes are limited to the opaque cross-tab revocation nonce.');
 if (!lockboxSource.includes('removeLegacyPlaintextKey')) throw new Error('Reliability gate: legacy plaintext Gemini API storage must be explicitly removed.');
 if (!lockboxSource.includes('const unlockedSecrets = new Map<LockboxSecretId, string>();')) throw new Error('Reliability gate: decrypted credentials must remain session-memory-only.');
-if (lockboxSource.split('unlockedSecrets.clear();').length - 1 < 2) throw new Error('Reliability gate: locking and clearing the Lockbox must both clear decrypted credentials from session memory.');
+if (!lockboxSource.includes("event.key === LOCKBOX_SESSION_REVOCATION_KEY") || !lockboxSource.includes('handleSiblingLockboxRevocation')) throw new Error('Reliability gate: protected Lockbox sessions must revoke across sibling tabs.');
+if (!lockboxSource.includes('function clearPlaintextSession()') || !lockboxSource.includes('const wasUnlocked = clearPlaintextSession();') || !lockboxSource.includes('clearPlaintextSession();\n  securityMode = null;')) throw new Error('Reliability gate: locking and clearing the Lockbox must converge on the shared plaintext-session revocation boundary.');
 
 const lockboxTestSource = readFileSync(join(root, 'src/persistence/gemini-api-key.test.ts'), 'utf8');
 if (!lockboxTestSource.includes('Invalid Lockbox password.')) throw new Error('Reliability gate: Lockbox tests must cover wrong-password rejection.');

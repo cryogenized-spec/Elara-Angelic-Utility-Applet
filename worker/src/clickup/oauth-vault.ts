@@ -31,11 +31,13 @@ import {
   replyToClickUpComment,
   setClickUpTaskCustomField,
   updateClickUpTask,
+  uploadClickUpTaskAttachment,
   type ClickUpOAuthServerEnv,
   type ClickUpProviderResult,
   type ClickUpRateLimitSnapshot,
 } from './provider';
 import { validateClickUpToolArguments } from '../../../src/clickup/tool-schema';
+import { ARTIFACT_LIMITS } from '../../../src/artifacts/limits';
 import {
   clearClickUpTaskIndex,
   initializeClickUpTaskIndex,
@@ -275,6 +277,11 @@ export class ClickUpOAuthVault extends DurableObject {
         const body = await request.text();
         if (body.length > 64_000) return json({ code: 'validation', message: 'ClickUp internal command is too large.' }, 413);
         return this.executeProviderCommand(body);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/internal/clickup/attachment') {
+        if (!(await this.verifyInternal(request))) return json({ code: 'auth', message: 'Binding-internal ClickUp authority is required.' }, 401);
+        return this.executeAttachmentUpload(request);
       }
 
       if (request.method === 'GET' && url.pathname === '/clickup/oauth/status') {
@@ -618,6 +625,68 @@ export class ClickUpOAuthVault extends DurableObject {
       }
       throw error;
     }
+  }
+
+  private async executeAttachmentUpload(request: Request): Promise<Response> {
+    const contentType = request.headers.get('Content-Type') ?? '';
+    if (!contentType.toLocaleLowerCase().startsWith('multipart/form-data;')) {
+      return json({ code: 'validation', message: 'ClickUp attachment transport requires multipart/form-data.' }, 415);
+    }
+
+    const form = await request.formData();
+    const taskId = typeof form.get('taskId') === 'string' ? String(form.get('taskId')) : '';
+    const artifactId = typeof form.get('artifactId') === 'string' ? String(form.get('artifactId')) : '';
+    const filename = typeof form.get('filename') === 'string' ? String(form.get('filename')) : undefined;
+    const file = form.get('file');
+
+    let args;
+    try {
+      args = validateClickUpToolArguments('clickup.attachArtifact', {
+        taskId,
+        artifactId,
+        ...(filename ? { filename } : {}),
+      });
+    } catch {
+      return json({ code: 'validation', message: 'ClickUp attachment metadata was invalid.' }, 400);
+    }
+
+    if (!(file instanceof File)) {
+      return json({ code: 'validation', message: 'ClickUp attachment payload is missing.' }, 400);
+    }
+    if (file.size > ARTIFACT_LIMITS.maxAttachmentBytes) {
+      return json({ code: 'artifact-too-large', message: 'The attachment exceeds Elara\'s upload limit.' }, 413);
+    }
+
+    const result = await this.providerData((token) => uploadClickUpTaskAttachment(
+      token,
+      args.taskId,
+      file,
+      args.filename ?? file.name,
+    ));
+    if (!result.ok) return result.response;
+
+    const raw = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+    const attachmentId = typeof raw.id === 'string'
+      ? raw.id.trim()
+      : typeof raw.id === 'number' && Number.isSafeInteger(raw.id)
+        ? String(raw.id)
+        : undefined;
+    const providerTitle = typeof raw.title === 'string' && raw.title.trim()
+      ? raw.title.trim().slice(0, 500)
+      : undefined;
+
+    return json({
+      ok: true,
+      result: {
+        provider: 'clickup',
+        taskId: args.taskId,
+        artifactId: args.artifactId,
+        filename: args.filename ?? file.name,
+        size: file.size,
+        ...(attachmentId ? { attachmentId } : {}),
+        ...(providerTitle ? { providerTitle } : {}),
+      },
+    });
   }
 
   private async verifyRead(request: Request): Promise<boolean> {

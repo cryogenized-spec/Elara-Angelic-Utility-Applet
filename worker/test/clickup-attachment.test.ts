@@ -167,6 +167,9 @@ describe('ClickUp artifact attachment boundary', () => {
       if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
       if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
       if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/webhook' && request.method === 'POST') {
+        return new Response(JSON.stringify({ webhook: { id: 'webhook-1', secret: 'webhook-secret' } }), { status: 200 });
+      }
       providerCalls += 1;
       throw new Error('Provider should not receive malformed attachment metadata.');
     });

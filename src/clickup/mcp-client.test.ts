@@ -141,14 +141,14 @@ describe('ClickUp MCP browser client', () => {
   it('rejects invalid semantic arguments before any Worker request', async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await expect(callClickUpMcpTool('clickup.getTask', { taskId: '' }, undefined, ADMITTED)).rejects.toThrow();
+    await expect(callClickUpMcpTool('clickup.getTask', { workspaceId: '999', taskId: '' }, undefined, ADMITTED)).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('requires an admitted provider grant before tool execution', async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await expect(callClickUpMcpTool('clickup.getTask', { taskId: '86task' })).rejects.toMatchObject({
+    await expect(callClickUpMcpTool('clickup.getTask', { workspaceId: '999', taskId: '86task' })).rejects.toMatchObject({
       code: 'grant_required',
       status: 409,
     });
@@ -187,7 +187,7 @@ describe('ClickUp MCP browser client', () => {
 
     await expect(callClickUpMcpTool(
       'clickup.getTask',
-      { taskId: '86task' },
+      { workspaceId: '999', taskId: '86task' },
       undefined,
       ADMITTED,
     )).resolves.toEqual({
@@ -229,7 +229,7 @@ describe('ClickUp MCP browser client', () => {
 
     await expect(callClickUpMcpTool(
       'clickup.getTask',
-      { taskId: '86task' },
+      { workspaceId: '999', taskId: '86task' },
       undefined,
       ADMITTED,
     )).rejects.toThrow(/description drifted/i);
@@ -243,7 +243,7 @@ describe('ClickUp MCP browser client', () => {
 
     await expect(callClickUpMcpTool(
       'clickup.getTask',
-      { taskId: '86task' },
+      { workspaceId: '999', taskId: '86task' },
       undefined,
       ADMITTED,
     )).rejects.toMatchObject({ code: 'grant_changed', status: 409 });
@@ -268,7 +268,7 @@ describe('ClickUp MCP browser client', () => {
 
     await expect(callClickUpMcpTool(
       'clickup.getTask',
-      { taskId: '86task' },
+      { workspaceId: '999', taskId: '86task' },
       undefined,
       ADMITTED,
     )).rejects.toMatchObject({

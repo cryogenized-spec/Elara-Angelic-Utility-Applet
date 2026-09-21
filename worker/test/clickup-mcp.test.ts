@@ -127,7 +127,8 @@ describe('ClickUp MCP Worker boundary', () => {
     expect(response.status).toBe(200);
     const body = await jsonRecord(response);
     const result = record(body.result);
-    const tools = Array.isArray(result.tools) ? result.tools.map(record) : [];
+    const rawTools: unknown[] = Array.isArray(result.tools) ? result.tools as unknown[] : [];
+    const tools = rawTools.map(record);
     const names = tools.map((tool) => tool.name);
     expect(names).toEqual([...CLICKUP_TOOL_NAMES]);
     for (const tool of tools) {

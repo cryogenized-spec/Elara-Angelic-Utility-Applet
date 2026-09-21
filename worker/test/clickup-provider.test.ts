@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ClickUpProviderError,
   buildClickUpCommentBody,
   buildClickUpCreateTaskBody,
   buildClickUpUpdateTaskBody,
+  fetchAuthorizedClickUpUser,
 } from '../src/clickup/provider';
 
 describe('ClickUp provider wire mapping', () => {
@@ -66,5 +68,29 @@ describe('ClickUp provider wire mapping', () => {
       ],
       notify_all: true,
     });
+  });
+
+  it('cancels chunked provider JSON as soon as it crosses the hard byte ceiling', async () => {
+    let cancelled = false;
+    const chunk = new Uint8Array(700_000);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(chunk);
+        controller.enqueue(chunk);
+        controller.close();
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const fetcher = vi.fn(async () => new Response(stream, {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+
+    const request = fetchAuthorizedClickUpUser('provider-token', fetcher);
+    await expect(request).rejects.toBeInstanceOf(ClickUpProviderError);
+    await expect(request).rejects.toMatchObject({ code: 'response-too-large' });
+    expect(cancelled).toBe(true);
   });
 });

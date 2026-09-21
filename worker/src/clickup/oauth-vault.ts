@@ -40,6 +40,7 @@ import {
   type ClickUpRateLimitSnapshot,
 } from './provider';
 import { validateClickUpToolArguments } from '../../../src/clickup/tool-schema';
+import { CLICKUP_GRANT_REVISION_HEADER } from '../../../src/clickup/mcp-protocol';
 import { ARTIFACT_LIMITS } from '../../../src/artifacts/limits';
 import {
   clearClickUpTaskIndex,
@@ -391,14 +392,18 @@ export class ClickUpOAuthVault extends DurableObject {
     try {
       if (request.method === 'POST' && url.pathname === '/internal/clickup/command') {
         if (!(await this.verifyInternal(request))) return json({ code: 'auth', message: 'Binding-internal ClickUp authority is required.' }, 401);
+        const expectedRevision = this.expectedGrantRevision(request);
+        if (expectedRevision === null) return json({ code: 'grant_required', message: 'Binding-internal ClickUp execution requires the admitted grant revision.' }, 409);
         const body = await request.text();
         if (body.length > 64_000) return json({ code: 'validation', message: 'ClickUp internal command is too large.' }, 413);
-        return this.executeProviderCommand(body);
+        return this.executeProviderCommand(body, expectedRevision);
       }
 
       if (request.method === 'POST' && url.pathname === '/internal/clickup/attachment') {
         if (!(await this.verifyInternal(request))) return json({ code: 'auth', message: 'Binding-internal ClickUp authority is required.' }, 401);
-        return this.executeAttachmentUpload(request);
+        const expectedRevision = this.expectedGrantRevision(request);
+        if (expectedRevision === null) return json({ code: 'grant_required', message: 'Binding-internal ClickUp attachment requires the admitted grant revision.' }, 409);
+        return this.executeAttachmentUpload(request, expectedRevision);
       }
 
       if (request.method === 'POST' && url.pathname === '/internal/clickup/webhook') {
@@ -455,6 +460,13 @@ export class ClickUpOAuthVault extends DurableObject {
     const presented = request.headers.get(ELARA_INTERNAL_HEADER) ?? '';
     const expected = await internalWakeMarker(this.installationToken());
     return Boolean(presented) && constantTimeEqual(presented, expected);
+  }
+
+  private expectedGrantRevision(request: Request): number | null {
+    const raw = request.headers.get(CLICKUP_GRANT_REVISION_HEADER)?.trim() ?? '';
+    if (!/^\d+$/.test(raw)) return null;
+    const parsed = Number(raw);
+    return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
   }
 
   private rateLimitRow(): RateLimitRow | null {
@@ -766,9 +778,14 @@ export class ClickUpOAuthVault extends DurableObject {
     });
   }
 
-  private async executeProviderCommand(body: string): Promise<Response> {
+  private async executeProviderCommand(body: string, expectedRevision: number): Promise<Response> {
     const parsed = providerCommandSchema.safeParse(parseJson(body));
     if (!parsed.success) return json({ code: 'validation', message: 'ClickUp internal provider command was invalid.' }, 400);
+    const grant = this.credentialRow();
+    if (!grant) return json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401);
+    if (grant.updated_at !== expectedRevision) {
+      return json({ code: 'grant_changed', message: 'ClickUp authorization changed after this operation was admitted.' }, 409);
+    }
     const command = parsed.data;
     try {
       switch (command.operation) {
@@ -782,17 +799,17 @@ export class ClickUpOAuthVault extends DurableObject {
         if (!this.workspaceAuthorized(command.workspaceId)) {
           return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
         }
-        return this.runProvider((token) => listClickUpSpaces(token, command.workspaceId, command.archived ?? false));
+        return this.runProvider((token) => listClickUpSpaces(token, command.workspaceId, command.archived ?? false), expectedRevision);
       case 'listFolders':
-        return this.runProvider((token) => listClickUpFolders(token, command.spaceId, command.archived ?? false));
+        return this.runProvider((token) => listClickUpFolders(token, command.spaceId, command.archived ?? false), expectedRevision);
       case 'getFolder':
-        return this.runProvider((token) => getClickUpFolder(token, command.folderId, command.includeSubfolders ?? true));
+        return this.runProvider((token) => getClickUpFolder(token, command.folderId, command.includeSubfolders ?? true), expectedRevision);
       case 'listFolderLists':
-        return this.runProvider((token) => listClickUpFolderLists(token, command.folderId, command.archived ?? false));
+        return this.runProvider((token) => listClickUpFolderLists(token, command.folderId, command.archived ?? false), expectedRevision);
       case 'listFolderlessLists':
-        return this.runProvider((token) => listClickUpFolderlessLists(token, command.spaceId, command.archived ?? false));
+        return this.runProvider((token) => listClickUpFolderlessLists(token, command.spaceId, command.archived ?? false), expectedRevision);
       case 'getList':
-        return this.runProvider((token) => getClickUpList(token, command.listId));
+        return this.runProvider((token) => getClickUpList(token, command.listId), expectedRevision);
       case 'listWorkspaceTasks':
         if (!this.workspaceAuthorized(command.workspaceId)) {
           return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
@@ -807,31 +824,31 @@ export class ClickUpOAuthVault extends DurableObject {
           assigneeIds: command.assigneeIds,
           statuses: command.statuses,
           dateUpdatedGt: command.dateUpdatedGt,
-        }));
+        }), expectedRevision);
       case 'searchTaskIndex':
-        return this.searchTaskIndex(command.arguments);
+        return this.searchTaskIndex(command.arguments, expectedRevision);
       case 'getTask': {
         const args = validateClickUpToolArguments('clickup.getTask', command.arguments);
-        return this.runProvider((token) => getClickUpTask(token, args.taskId, args.includeSubtasks ?? false));
+        return this.runProvider((token) => getClickUpTask(token, args.taskId, args.includeSubtasks ?? false), expectedRevision);
       }
       case 'getTaskComments':
         return this.runProvider((token) => getClickUpTaskComments(
           token,
           command.taskId,
           command.start !== undefined && command.startId ? { start: command.start, startId: command.startId } : undefined,
-        ));
+        ), expectedRevision);
       case 'getListCustomFields':
-        return this.runProvider((token) => getClickUpListCustomFields(token, command.listId));
+        return this.runProvider((token) => getClickUpListCustomFields(token, command.listId), expectedRevision);
       case 'createTask': {
         const args = validateClickUpToolArguments('clickup.createTask', command.arguments);
-        const result = await this.providerData((token) => createClickUpTask(token, args));
+        const result = await this.providerData((token) => createClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
         markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         return json({ ok: true, result: result.data });
       }
       case 'updateTask': {
         const args = validateClickUpToolArguments('clickup.updateTask', command.arguments);
-        const result = await this.providerData((token) => updateClickUpTask(token, args));
+        const result = await this.providerData((token) => updateClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
         removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, args.taskId);
         markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
@@ -839,16 +856,16 @@ export class ClickUpOAuthVault extends DurableObject {
       }
       case 'createTaskComment': {
         const args = validateClickUpToolArguments('clickup.createTaskComment', command.arguments);
-        return this.runProvider((token) => createClickUpTaskComment(token, args));
+        return this.runProvider((token) => createClickUpTaskComment(token, args), expectedRevision);
       }
       case 'replyToComment': {
         const args = validateClickUpToolArguments('clickup.replyToComment', command.arguments);
-        return this.runProvider((token) => replyToClickUpComment(token, args));
+        return this.runProvider((token) => replyToClickUpComment(token, args), expectedRevision);
       }
       case 'setCustomField':
-        return this.runProvider((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value));
+        return this.runProvider((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value), expectedRevision);
       case 'clearCustomField':
-        return this.runProvider((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId));
+        return this.runProvider((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId), expectedRevision);
       }
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -858,7 +875,7 @@ export class ClickUpOAuthVault extends DurableObject {
     }
   }
 
-  private async executeAttachmentUpload(request: Request): Promise<Response> {
+  private async executeAttachmentUpload(request: Request, expectedRevision: number): Promise<Response> {
     const contentType = request.headers.get('Content-Type') ?? '';
     if (!contentType.toLocaleLowerCase().startsWith('multipart/form-data;')) {
       return json({ code: 'validation', message: 'ClickUp attachment transport requires multipart/form-data.' }, 415);
@@ -893,7 +910,7 @@ export class ClickUpOAuthVault extends DurableObject {
       args.taskId,
       file,
       args.filename ?? file.name,
-    ));
+    ), expectedRevision);
     if (!result.ok) return result.response;
 
     const raw = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};

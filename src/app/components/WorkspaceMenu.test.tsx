@@ -62,8 +62,8 @@ function service(name: string): HTMLButtonElement {
 function shortcutButtons(): HTMLButtonElement[] { return Array.from(container.querySelectorAll('.workspace-menu__item')); }
 
 beforeEach(() => {
-  vi.mocked(googleOAuthAuthority.getStatus).mockReset();
-  vi.mocked(googleOAuthAuthority.getStatus).mockResolvedValue(disconnectedGoogleStatus);
+  vi.mocked(googleOAuthAuthority).getStatus.mockReset();
+  vi.mocked(googleOAuthAuthority).getStatus.mockResolvedValue(disconnectedGoogleStatus);
   vi.mocked(authorizeGoogleWorkspace).mockReset();
   container = document.createElement('div');
   document.body.appendChild(container);
@@ -98,7 +98,7 @@ describe('default state', () => {
 
 describe('Google session indicator', () => {
   it('refreshes a stale session from the Workspace trigger before opening shortcuts', async () => {
-    vi.mocked(googleOAuthAuthority.getStatus).mockResolvedValue(staleGoogleStatus);
+    vi.mocked(googleOAuthAuthority).getStatus.mockResolvedValue(staleGoogleStatus);
     let completeRefresh!: (status: GoogleOAuthStatus) => void;
     vi.mocked(authorizeGoogleWorkspace).mockImplementation(() => new Promise((resolve) => {
       completeRefresh = resolve;

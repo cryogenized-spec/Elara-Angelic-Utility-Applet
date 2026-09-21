@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const googleToolNameSchema = z.enum([
   'calendar.listCalendars', 'calendar.listEvents', 'calendar.getEvent', 'calendar.getSettings', 'calendar.queryFreeBusy', 'calendar.createEvent', 'calendar.updateEvent', 'calendar.deleteEvent',
   'tasks.listTaskLists', 'tasks.getTaskList', 'tasks.listTasks', 'tasks.getTask', 'tasks.createTaskList', 'tasks.updateTaskList', 'tasks.deleteTaskList', 'tasks.createTask', 'tasks.updateTask', 'tasks.moveTask', 'tasks.deleteTask', 'tasks.clearCompleted',
+  'kanban.inspect', 'kanban.refresh', 'kanban.locate', 'kanban.focus',
   'docs.getDocument', 'docs.inspectDocument', 'docs.exportDocument', 'docs.createDocument', 'docs.insertText', 'docs.appendParagraph', 'docs.replaceText', 'docs.batchUpdate',
   'document.create_pdf',
   'chat.listMessages', 'chat.getMessage', 'chat.createMessage', 'chat.updateMessage', 'chat.deleteMessage',
@@ -49,6 +50,7 @@ export interface GoogleToolDescriptor {
 const WORKSPACE_SERVICE_LABELS: Readonly<Record<string, string>> = {
   calendar: 'Calendar',
   tasks: 'Tasks',
+  kanban: 'Kanban',
   docs: 'Docs',
   chat: 'Chat',
   gmail: 'Gmail',

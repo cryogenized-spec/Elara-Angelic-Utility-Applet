@@ -22,6 +22,8 @@ export class ClickUpProviderError extends Error {
     readonly code: string,
     message: string,
     readonly rateLimit: ClickUpRateLimitSnapshot,
+    /** Raw provider code is internal evidence only and must never be projected to MCP/Gemini. */
+    readonly providerCode?: string,
   ) {
     super(message);
   }
@@ -198,7 +200,14 @@ async function clickupRequest<T>(
   const payload = await readJsonResponse(response);
   const rateLimit = rateLimitFromHeaders(response.headers);
   if (!response.ok) {
-    throw new ClickUpProviderError(response.status, providerCode(payload, response.status), providerMessage(payload, response.status), rateLimit);
+    const rawProviderCode = providerCode(payload, response.status);
+    throw new ClickUpProviderError(
+      response.status,
+      `http-${response.status}`,
+      providerMessage(payload, response.status),
+      rateLimit,
+      rawProviderCode,
+    );
   }
   return { data: payload as T, rateLimit };
 }
@@ -221,9 +230,10 @@ export async function exchangeClickUpAuthorizationCode(
   if (!response.ok) {
     throw new ClickUpProviderError(
       response.status,
-      providerCode(payload, response.status),
+      `http-${response.status}`,
       providerMessage(payload, response.status),
       rateLimitFromHeaders(response.headers),
+      providerCode(payload, response.status),
     );
   }
   const accessToken = payload && typeof payload === 'object' && typeof (payload as Record<string, unknown>).access_token === 'string'

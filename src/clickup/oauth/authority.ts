@@ -3,6 +3,7 @@ import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../../au
 import {
   clickUpOAuthStartSchema,
   clickUpOAuthStatusSchema,
+  type ClickUpExecutionGrant,
   type ClickUpOAuthAuthority,
   type ClickUpOAuthStart,
   type ClickUpOAuthStatus,
@@ -24,7 +25,7 @@ function activePairing(): AutonomyPairing {
   return pairing;
 }
 
-function normalizeWorkerBaseUrl(value: string): string {
+export function normalizeWorkerBaseUrl(value: string): string {
   let url: URL;
   try {
     url = new URL(value.trim());
@@ -34,6 +35,10 @@ function normalizeWorkerBaseUrl(value: string): string {
   if (url.protocol !== 'https:') throw new ClickUpOAuthError('worker-url', 'The paired Worker must use HTTPS.', 0);
   if (url.username || url.password || url.search || url.hash) throw new ClickUpOAuthError('worker-url', 'The paired Worker URL contains unsupported components.', 0);
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
+}
+
+export function clickUpPairingAuthorityBinding(pairing: AutonomyPairing): string {
+  return `${normalizeWorkerBaseUrl(pairing.workerUrl)}#${pairing.installationId}`;
 }
 
 async function workerToken(pairing: AutonomyPairing): Promise<string> {
@@ -126,6 +131,16 @@ async function signedPost<T>(
 export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
   async getStatus(): Promise<ClickUpOAuthStatus> {
     return bearerStatus(activePairing());
+  },
+
+  async getExecutionGrant(): Promise<ClickUpExecutionGrant> {
+    const pairing = activePairing();
+    const status = await bearerStatus(pairing);
+    return {
+      status,
+      authorityBinding: clickUpPairingAuthorityBinding(pairing),
+      revision: status.updatedAt ?? 0,
+    };
   },
 
   async beginConnect(redirectUri: string): Promise<ClickUpOAuthStart> {

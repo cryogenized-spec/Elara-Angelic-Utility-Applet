@@ -369,7 +369,7 @@ describe('Gemini tool-loop gross-input governor', () => {
     expect(fallbackText).toContain('Completed actions before processing stopped');
     expect(fallbackText).toContain('tasks.createTask: completed');
     expect(fallbackText).toContain('task-done');
-    expect(fallbackText).toContain('do not repeat any completed actions');
+    expect(fallbackText).toContain('Do not repeat any completed actions');
     expect(fallbackText).not.toContain('I preserved the investigation state');
     expect(collected.at(-1)).toMatchObject({ type: 'completed', status: 'budget_exhausted' });
   });

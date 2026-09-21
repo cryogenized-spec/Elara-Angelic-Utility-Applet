@@ -10,8 +10,10 @@ import {
   callClickUpMcpTool,
   listClickUpMcpTools,
   resetClickUpMcpClientForTests,
+  type ClickUpAdmittedGrant,
 } from './mcp-client';
 import {
+  CLICKUP_GRANT_REVISION_HEADER,
   CLICKUP_MCP_PROTOCOL_VERSION,
   MCP_META_CLIENT_CAPABILITIES,
   MCP_META_CLIENT_INFO,
@@ -37,6 +39,11 @@ const PAIRING = {
   lastPulledEventsId: '',
 };
 
+const ADMITTED: ClickUpAdmittedGrant = {
+  revision: 123,
+  authorityBinding: 'https://worker.example#test-installation',
+};
+
 function rpc(id: string, result: Record<string, unknown>): Response {
   return new Response(JSON.stringify({ jsonrpc: '2.0', id, result }), {
     status: 200,
@@ -44,15 +51,20 @@ function rpc(id: string, result: Record<string, unknown>): Response {
   });
 }
 
-function resultId(body: BodyInit | null | undefined): string {
-  return (JSON.parse(String(body)) as { id: string }).id;
-}
-
 function discover(id: string) {
   return rpc(id, {
     resultType: 'complete',
     supportedVersions: [CLICKUP_MCP_PROTOCOL_VERSION],
     capabilities: { tools: {} },
+    ttlMs: 60_000,
+    cacheScope: 'private',
+  });
+}
+
+function toolsList(id: string, tools = clickUpMcpToolDefinitions) {
+  return rpc(id, {
+    resultType: 'complete',
+    tools,
     ttlMs: 60_000,
     cacheScope: 'private',
   });
@@ -89,12 +101,7 @@ describe('ClickUp MCP browser client', () => {
       expect(body.method).toBe('tools/list');
       expect(headers.get('Mcp-Method')).toBe('tools/list');
       expect(headers.get('Mcp-Name')).toBeNull();
-      return rpc(body.id, {
-        resultType: 'complete',
-        tools: clickUpMcpToolDefinitions,
-        ttlMs: 60_000,
-        cacheScope: 'private',
-      });
+      return toolsList(body.id);
     }) as unknown as typeof fetch;
 
     const first = await listClickUpMcpTools();
@@ -107,22 +114,34 @@ describe('ClickUp MCP browser client', () => {
   it('rejects invalid semantic arguments before any Worker request', async () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await expect(callClickUpMcpTool('clickup.getTask', { taskId: '' })).rejects.toThrow();
+    await expect(callClickUpMcpTool('clickup.getTask', { taskId: '' }, undefined, ADMITTED)).rejects.toThrow();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it('supports Streamable HTTP SSE tool results and mirrors Mcp-Name', async () => {
-    let discovered = false;
+  it('requires an admitted provider grant before tool execution', async () => {
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await expect(callClickUpMcpTool('clickup.getTask', { taskId: '86task' })).rejects.toMatchObject({
+      code: 'grant_required',
+      status: 409,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('supports Streamable HTTP SSE tool results after validating tools/list on the same Worker', async () => {
+    const methods: string[] = [];
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, any>;
       const headers = new Headers(init?.headers);
-      if (!discovered) {
-        discovered = true;
-        return discover(body.id);
-      }
+      methods.push(body.method);
+
+      if (body.method === 'server/discover') return discover(body.id);
+      if (body.method === 'tools/list') return toolsList(body.id);
+
       expect(body.method).toBe('tools/call');
       expect(headers.get('Mcp-Method')).toBe('tools/call');
       expect(headers.get('Mcp-Name')).toBe('clickup.getTask');
+      expect(headers.get(CLICKUP_GRANT_REVISION_HEADER)).toBe('123');
       const frame = JSON.stringify({
         jsonrpc: '2.0',
         id: body.id,
@@ -139,12 +158,18 @@ describe('ClickUp MCP browser client', () => {
       });
     }) as unknown as typeof fetch;
 
-    await expect(callClickUpMcpTool('clickup.getTask', { taskId: '86task' })).resolves.toEqual({
+    await expect(callClickUpMcpTool(
+      'clickup.getTask',
+      { taskId: '86task' },
+      undefined,
+      ADMITTED,
+    )).resolves.toEqual({
       trust: 'untrusted-external',
       provider: 'clickup',
       id: '86task',
       name: 'Repair S56',
     });
+    expect(methods).toEqual(['server/discover', 'tools/list', 'tools/call']);
   });
 
   it('rejects tools/list schema drift from a stale or compromised Worker', async () => {
@@ -154,21 +179,55 @@ describe('ClickUp MCP browser client', () => {
       const drifted = clickUpMcpToolDefinitions.map((tool, index) => index === 0
         ? { ...tool, inputSchema: { ...tool.inputSchema, additionalProperties: true } }
         : tool);
-      return rpc(body.id, {
-        resultType: 'complete',
-        tools: drifted,
-        ttlMs: 60_000,
-        cacheScope: 'private',
-      });
+      return toolsList(body.id, drifted);
     }) as unknown as typeof fetch;
 
     await expect(listClickUpMcpTools()).rejects.toThrow(/schema drifted/i);
+  });
+
+  it('blocks tools/call when the Worker catalog drifts after protocol discovery', async () => {
+    const methods: string[] = [];
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, any>;
+      methods.push(body.method);
+      if (body.method === 'server/discover') return discover(body.id);
+      if (body.method === 'tools/list') {
+        const drifted = clickUpMcpToolDefinitions.map((tool, index) => index === 0
+          ? { ...tool, description: `${tool.description} stale` }
+          : tool);
+        return toolsList(body.id, drifted);
+      }
+      throw new Error('tools/call must not execute against a drifted Worker catalog.');
+    }) as unknown as typeof fetch;
+
+    await expect(callClickUpMcpTool(
+      'clickup.getTask',
+      { taskId: '86task' },
+      undefined,
+      ADMITTED,
+    )).rejects.toThrow(/description drifted/i);
+    expect(methods).toEqual(['server/discover', 'tools/list']);
+  });
+
+  it('fails closed if the paired Worker changes after grant admission', async () => {
+    pairingMock.mockReturnValue({ ...PAIRING, workerUrl: 'https://replacement.example' });
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(callClickUpMcpTool(
+      'clickup.getTask',
+      { taskId: '86task' },
+      undefined,
+      ADMITTED,
+    )).rejects.toMatchObject({ code: 'grant_changed', status: 409 });
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it('surfaces complete MCP tool errors without losing provider error identity', async () => {
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as Record<string, any>;
       if (body.method === 'server/discover') return discover(body.id);
+      if (body.method === 'tools/list') return toolsList(body.id);
       return rpc(body.id, {
         resultType: 'complete',
         isError: true,
@@ -180,7 +239,12 @@ describe('ClickUp MCP browser client', () => {
       });
     }) as unknown as typeof fetch;
 
-    await expect(callClickUpMcpTool('clickup.getTask', { taskId: '86task' })).rejects.toMatchObject({
+    await expect(callClickUpMcpTool(
+      'clickup.getTask',
+      { taskId: '86task' },
+      undefined,
+      ADMITTED,
+    )).rejects.toMatchObject({
       code: 'rate_limited',
       status: 429,
     });

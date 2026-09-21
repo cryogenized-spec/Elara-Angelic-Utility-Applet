@@ -219,6 +219,42 @@ describe('generation sync: one-assistant-message invariant', () => {
     expect(persistence).toHaveLength(0);
   });
 
+  it('persists a post-mutation quota stop and does not create retry state', async () => {
+    const box: { attempt: FailedTurnAttempt | null } = { attempt: null };
+    const harness = createHarness({
+      input: 'Create the task.',
+      onFailedAttempt: (attempt) => { box.attempt = attempt; },
+    });
+    runTurn(
+      harness.context,
+      [
+        { type: 'interaction-created', interactionId: 'write-1', model: 'gemini-3.8-flash' },
+        { type: 'text-delta', index: 0, text: 'Completed actions before processing stopped:\n- tasks.createTask: completed (id=task-1)' },
+        {
+          type: 'completed',
+          interactionId: 'write-1',
+          status: 'completed_after_local_quota',
+          durationMs: 0,
+          usage: { inputTokens: 12_000, outputTokens: 300 },
+        },
+      ],
+      'gen-write-quota',
+    );
+    await Promise.resolve();
+
+    const { conversation, saved, status, persistence } = harness.read();
+    expect(box.attempt).toBeNull();
+    expect(status).toBe('saving');
+    expect(saved).toHaveLength(1);
+    expect(persistence).toHaveLength(1);
+    const persisted = conversation.messages.find((message) => message.role === 'assistant');
+    expect(persisted?.text).toContain('tasks.createTask: completed');
+    expect(persisted?.providerTurn).toMatchObject({
+      generationId: 'gen-write-quota',
+      interactionId: 'write-1',
+    });
+  });
+
   it('captures the failed attempt so a retry can replace it', () => {
     const box: { attempt: FailedTurnAttempt | null } = { attempt: null };
     const assistantMessage: ChatMessage = { ...makeMessage('assistant', ''), responseGroupId: 'group-1', responseVariant: 2 };

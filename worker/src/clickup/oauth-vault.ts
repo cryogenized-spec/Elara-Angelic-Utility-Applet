@@ -72,6 +72,7 @@ const exchangeSchema = z.object({
 const emptySchema = z.object({}).strict();
 
 const providerCommandSchema = z.discriminatedUnion('operation', [
+  z.object({ operation: z.literal('getAuthorizationContext') }).strict(),
   z.object({ operation: z.literal('listSpaces'), workspaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
   z.object({ operation: z.literal('listFolders'), spaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
   z.object({ operation: z.literal('getFolder'), folderId: z.string().trim().min(1).max(100), includeSubfolders: z.boolean().optional() }).strict(),
@@ -190,6 +191,17 @@ function validRedirectUri(value: string, requestOrigin: string): boolean {
 
 function randomState(): string {
   return bytesToBase64Url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+function mergeRateLimits(...snapshots: readonly ClickUpRateLimitSnapshot[]): ClickUpRateLimitSnapshot {
+  const limits = snapshots.flatMap((snapshot) => snapshot.limit === null ? [] : [snapshot.limit]);
+  const remaining = snapshots.flatMap((snapshot) => snapshot.remaining === null ? [] : [snapshot.remaining]);
+  const resets = snapshots.flatMap((snapshot) => snapshot.resetAt === null ? [] : [snapshot.resetAt]);
+  return {
+    limit: limits.length ? Math.min(...limits) : null,
+    remaining: remaining.length ? Math.min(...remaining) : null,
+    resetAt: resets.length ? Math.max(...resets) : null,
+  };
 }
 
 export class ClickUpOAuthVault extends DurableObject {
@@ -379,7 +391,16 @@ export class ClickUpOAuthVault extends DurableObject {
     const command = parsed.data;
     try {
       switch (command.operation) {
+      case 'getAuthorizationContext': {
+        const context = this.authorizationContext();
+        return context
+          ? json({ ok: true, result: context })
+          : json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401);
+      }
       case 'listSpaces':
+        if (!this.workspaceAuthorized(command.workspaceId)) {
+          return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
+        }
         return this.runProvider((token) => listClickUpSpaces(token, command.workspaceId, command.archived ?? false));
       case 'listFolders':
         return this.runProvider((token) => listClickUpFolders(token, command.spaceId, command.archived ?? false));
@@ -392,6 +413,9 @@ export class ClickUpOAuthVault extends DurableObject {
       case 'getList':
         return this.runProvider((token) => getClickUpList(token, command.listId));
       case 'listWorkspaceTasks':
+        if (!this.workspaceAuthorized(command.workspaceId)) {
+          return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
+        }
         return this.runProvider((token) => listClickUpWorkspaceTasks(token, command.workspaceId, {
           page: command.page,
           includeClosed: command.includeClosed,
@@ -472,18 +496,19 @@ export class ClickUpOAuthVault extends DurableObject {
     return accepted ? { ok: true } : { ok: false, code: 'replayed-nonce' };
   }
 
-  private status() {
+  private authorizationContext() {
     const row = this.credentialRow();
-    if (!row) return { connected: false, workspaces: [] as unknown[] };
-    let workspaces: unknown[] = [];
+    if (!row) return null;
+    let workspaces: Array<Record<string, unknown>> = [];
     try {
       const parsed = JSON.parse(row.workspaces_json) as unknown;
-      if (Array.isArray(parsed)) workspaces = parsed.slice(0, 100);
+      if (Array.isArray(parsed)) {
+        workspaces = parsed.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object').slice(0, 100);
+      }
     } catch {
       workspaces = [];
     }
     return {
-      connected: true,
       account: {
         id: row.user_id,
         ...(row.username ? { username: row.username } : {}),
@@ -492,6 +517,27 @@ export class ClickUpOAuthVault extends DurableObject {
       workspaces,
       updatedAt: row.updated_at,
     };
+  }
+
+  private status() {
+    const context = this.authorizationContext();
+    if (!context) return { connected: false, workspaces: [] as unknown[] };
+    const workspaces = context.workspaces.flatMap((workspace) => {
+      const id = typeof workspace.id === 'string' ? workspace.id.trim() : '';
+      const name = typeof workspace.name === 'string' ? workspace.name.trim() : '';
+      return id && name ? [{ id, name }] : [];
+    });
+    return {
+      connected: true,
+      account: context.account,
+      workspaces,
+      updatedAt: context.updatedAt,
+    };
+  }
+
+  private workspaceAuthorized(workspaceId: string): boolean {
+    const context = this.authorizationContext();
+    return Boolean(context?.workspaces.some((workspace) => String(workspace.id ?? '') === workspaceId));
   }
 
   private async start(request: Request, body: string): Promise<Response> {
@@ -561,6 +607,7 @@ export class ClickUpOAuthVault extends DurableObject {
         updated_at = excluded.updated_at
     `, encrypted.cipher, encrypted.iv, account.data.id, account.data.username ?? null, account.data.email ?? null, JSON.stringify(workspaces.data), revision);
     this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+    this.recordRateLimit(mergeRateLimits(account.rateLimit, workspaces.rateLimit));
 
     return json(this.status());
   }

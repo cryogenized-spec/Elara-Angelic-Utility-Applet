@@ -1124,6 +1124,44 @@ export class ClickUpOAuthVault extends DurableObject {
     return Boolean(context?.workspaces.some((workspace) => String(workspace.id ?? '') === workspaceId));
   }
 
+  private revokeWorkspaceIfRevision(workspaceId: string, revision: number): boolean {
+    return this.ctx.storage.transactionSync(() => {
+      const row = this.credentialRow();
+      if (!row || row.updated_at !== revision) return false;
+
+      let workspaces: Array<Record<string, unknown>> = [];
+      try {
+        const parsed = JSON.parse(row.workspaces_json) as unknown;
+        if (Array.isArray(parsed)) {
+          workspaces = parsed.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object');
+        }
+      } catch {
+        workspaces = [];
+      }
+
+      const filtered = workspaces.filter((workspace) => String(workspace.id ?? '') !== workspaceId);
+      clearClickUpWorkspaceTaskIndex(this.ctx.storage.sql, workspaceId);
+      this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks WHERE workspace_id = ?', workspaceId);
+
+      if (filtered.length === workspaces.length) return false;
+      if (!filtered.length) {
+        this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
+        this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+        this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');
+        return true;
+      }
+
+      const nextRevision = Math.max(Date.now(), row.updated_at + 1);
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_oauth_credential SET workspaces_json = ?, updated_at = ? WHERE slot = 1 AND updated_at = ?',
+        JSON.stringify(filtered),
+        nextRevision,
+        revision,
+      );
+      return true;
+    });
+  }
+
   private async start(request: Request, body: string): Promise<Response> {
     const parsed = startSchema.safeParse(parseJson(body));
     if (!parsed.success) return json({ code: 'validation', message: 'ClickUp OAuth start payload was invalid.' }, 400);

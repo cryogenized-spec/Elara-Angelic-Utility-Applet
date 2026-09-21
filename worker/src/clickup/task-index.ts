@@ -9,6 +9,7 @@ export interface ClickUpTaskIndexState {
   readonly lastRefreshAt: number;
   readonly lastProviderUpdatedAt: number;
   readonly indexedTasks: number;
+  readonly oldestIndexedAt: number;
 }
 
 type StateRow = {
@@ -223,12 +224,20 @@ export function markClickUpWorkspaceTaskIndexStale(sql: TaskIndexSql, workspaceI
   );
 }
 
+export function markAllClickUpTaskIndexesStale(sql: TaskIndexSql): void {
+  sql.exec('UPDATE clickup_task_index_state SET last_refresh_at = 0');
+}
+
 export function removeClickUpTaskFromIndex(sql: TaskIndexSql, workspaceId: string, taskId: string): void {
   sql.exec(
     'DELETE FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
     workspaceId,
     taskId,
   );
+}
+
+export function removeClickUpTaskFromAllIndexes(sql: TaskIndexSql, taskId: string): void {
+  sql.exec('DELETE FROM clickup_task_index WHERE task_id = ?', taskId);
 }
 
 export function upsertClickUpTaskIndexPage(
@@ -297,10 +306,10 @@ export function taskIndexState(sql: TaskIndexSql, workspaceId: string): ClickUpT
     'SELECT workspace_id, full_sync_complete, next_page, last_refresh_at, last_provider_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
     workspaceId,
   ).toArray()[0];
-  const count = sql.exec<{ count: number }>(
-    'SELECT COUNT(*) AS count FROM clickup_task_index WHERE workspace_id = ?',
+  const aggregate = sql.exec<{ count: number; oldest_indexed_at: number | null }>(
+    'SELECT COUNT(*) AS count, MIN(indexed_at) AS oldest_indexed_at FROM clickup_task_index WHERE workspace_id = ?',
     workspaceId,
-  ).toArray()[0]?.count ?? 0;
+  ).toArray()[0];
 
   return {
     workspaceId,
@@ -308,7 +317,8 @@ export function taskIndexState(sql: TaskIndexSql, workspaceId: string): ClickUpT
     nextPage: row?.next_page ?? 0,
     lastRefreshAt: row?.last_refresh_at ?? 0,
     lastProviderUpdatedAt: row?.last_provider_updated_at ?? 0,
-    indexedTasks: count,
+    indexedTasks: aggregate?.count ?? 0,
+    oldestIndexedAt: aggregate?.oldest_indexed_at ?? 0,
   };
 }
 

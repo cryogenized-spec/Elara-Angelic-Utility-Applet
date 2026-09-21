@@ -319,9 +319,10 @@ for (const [path, endpoint] of [
 // loop/roleplay adapter. UI/domain code cannot quietly bypass those seams.
 // ---------------------------------------------------------------------------
 const reviewedGoogleServiceImporters = new Set([
-  // Human-operated board only: live-session/effective-scope/account admission,
-  // explicit Save actions and typed destructive confirmation in KanbanScreen.
-  // Model mutations continue through the existing tool executor/broker.
+  // Human board mutations remain live-session/effective-scope/account admitted,
+  // with explicit Save actions and typed destructive confirmation in KanbanScreen.
+  // Model-visible Kanban tools are read/presentation projections only; provider
+  // mutations continue through the existing tasks.* tool executor/broker.
   'src/kanban/google-port.ts',
   'src/google/tools/read-handlers.ts',
   'src/google/tools/service-handlers.ts',
@@ -369,6 +370,21 @@ if (!oauthAuthority.includes('const latest = loadStored();') || !oauthAuthority.
 if (!kanbanStore.includes('pruneCachedAccounts') || !kanbanStore.includes('status.state === "disconnected"') || !kanbanStore.includes('status.state === "revoked"') || !kanbanStore.includes('status.state === "reauthorization-required" && identityAccount === null')) fail('Kanban account switching/disconnect must retain explicit cache-pruning semantics');
 if (!kanbanStore.includes('else if (!board && state.board?.account === account) update.board = null;')) fail('Kanban cross-tab cache deletion must clear the matching in-memory board projection');
 const kanbanScreen = read('src/app/components/KanbanScreen.tsx');
+const kanbanAgentTools = read('src/kanban/agent-tools.ts');
+const kanbanRegistry = read('src/google/tools/registry.ts');
+for (const name of ['kanban.inspect', 'kanban.refresh', 'kanban.locate', 'kanban.focus']) {
+  const descriptorPattern = new RegExp(`name: ['"]${name.replace('.', '\\.') }['"][^\\n]*risk: ['"]read['"][^\\n]*capability: ['"]tasks\\.read['"][^\\n]*exposure: ['"]gemini['"][^\\n]*executionPlane: ['"]browser['"]`);
+  if (!descriptorPattern.test(kanbanRegistry)) fail(`${name} must remain a read-only browser projection over tasks.read`);
+}
+for (const forbidden of ['kanban.createTask', 'kanban.updateTask', 'kanban.deleteTask', 'kanban.createTaskList', 'kanban.deleteTaskList']) {
+  if (kanbanRegistry.includes(forbidden)) fail(`Kanban must not create a parallel provider mutation authority: ${forbidden}`);
+}
+if (!kanbanAgentTools.includes("providerMutation: false") || !kanbanAgentTools.includes("syncBoard(reason)")) fail('Kanban agent tools must retain presentation-only focus and existing reconciliation reuse');
+if (!kanbanAgentTools.includes("await deps.currentAccount() !== account")) fail('Kanban model reads must recheck account identity after loading the account-keyed projection');
+if (!kanbanAgentTools.includes("signal?.aborted") || !kanbanAgentTools.includes("isGenerationActive?.() === false")) fail('Kanban presentation requests must fail closed after generation cancellation');
+if (!kanbanAgentTools.includes("awaitWhileGenerationActive(deps.sync('manual')")) fail('Kanban model refresh must release cancelled turns without taking ownership of shared reconciliation');
+if (!toolLoop.includes("EXISTING_GRANT_ONLY_TOOLS") || !toolLoop.includes("'kanban.refresh'") || !toolLoop.includes("!EXISTING_GRANT_ONLY_TOOLS.has(call.tool)")) fail('Kanban model tools must not initiate interactive OAuth consent');
+
 if (!kanbanPort.includes('taskServiceForAccount(expectedAccount: string)') || !kanbanPort.includes('admittedAccount(capability, expectedAccount)') || !kanbanScreen.includes('taskServiceForAccount(expectedAccount)')) fail('Kanban human mutations must remain bound to the displayed Google account through the reviewed service boundary');
 if (!kanbanScreen.includes('removal?.kind === "list" ||')) fail('Kanban task-list deletion must always disclose possible Docs/Chat assignment fallout');
 

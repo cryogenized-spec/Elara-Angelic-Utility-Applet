@@ -306,7 +306,14 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
             'The next Gemini continuation was paused by Elara\'s local rolling input budget. The completed actions above already happened.',
           ),
         };
-        yield event;
+        yield {
+          type: 'completed',
+          interactionId: latestInteractionId || interactionId || 'local-quota-after-mutation',
+          status: 'completed_after_local_quota',
+          durationMs: 0,
+          usage: aggregateTurnUsage,
+        };
+        return;
       } else {
         yield event;
       }

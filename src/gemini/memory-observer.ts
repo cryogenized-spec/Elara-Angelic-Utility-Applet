@@ -31,8 +31,17 @@ Category guide:
 Salience guide:
 - high: strongly enduring/core, explicitly lasting, an important commitment/relationship/event, or clearly useful across many future conversations
 - medium: stable and likely useful later, but not core
-- low: softer contextual detail or reflection that may improve companion continuity
+- low: a small useful detail, or softer contextual detail or reflection, that may improve companion continuity
 Do not inflate salience merely to cause retention.
+
+Small useful details: notice these even when their immediate importance is low, and normally record them at low salience:
+- a person's preferred name, nickname, or a correction to a name or spelling ("my name is actually Danielle, not Daniela")
+- a person's relationship or role in the user's life or work ("Jordan is my team lead")
+- a small project, tool, or UI preference or convention ("in this project I use Noto outline emoji, not Iconoir")
+- a brief reason a project or UI decision was made ("the icon looked cramped next to the title")
+- recurring terminology the user relies on
+- a small practical habit or recurring workflow detail
+Small details remain low-authority evidence: they may stay unimportant and dormant; they are never inferred or upgraded by you.
 
 Rules:
 - Return at most 3 candidates. Return {"candidates":[]} when nothing plausibly useful beyond this immediate exchange is present.

@@ -229,6 +229,175 @@ async function captureGenerationActivity(page) {
   await writeFile(join(outputDir, 'evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
 }
 
+async function captureSettingsMemory(page) {
+  // Deterministic Memory settings scenario: one canonical memory (present on
+  // both revisions) plus one grounded semantic summary file (only when the
+  // semanticMemories store exists). The fixture is synthetic and fully
+  // pinned; on the base revision the semantic stage fails closed and is
+  // recorded as such, keeping before/after comparable.
+  await page.goto(appUrl, { waitUntil: 'load' });
+  await page.getByRole('dialog', { name: 'Welcome.' }).waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined);
+  if (await page.getByRole('dialog', { name: 'Welcome.' }).isVisible()) {
+    throw new Error('Visual evidence fixture could not establish the completed-onboarding state.');
+  }
+
+  // First pass lets the app open its database, then the fixture is seeded
+  // through one short-lived connection and the view is reloaded fresh.
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Memory' }).click();
+  await page.getByText('Memory Bank', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+
+  const fixture = await page.evaluate(async () => {
+    const request = globalThis.indexedDB.open('elara-angelic-utility-applet');
+    let database;
+    try {
+      database = await new Promise((resolveOpen, rejectOpen) => {
+        request.onsuccess = () => resolveOpen(request.result);
+        request.onerror = () => rejectOpen(request.error);
+      });
+    } catch {
+      return { canonicalSeeded: false, semanticSeeded: false };
+    }
+    const hasSemanticStore = [...database.objectStoreNames].includes('semanticMemories');
+    const now = 1_758_000_000_000; // pinned epoch: deterministic dates and staleness
+    try {
+      await new Promise((resolveWrite, rejectWrite) => {
+        const transaction = database.transaction(['memories'], 'readwrite');
+        transaction.objectStore('memories').put({
+          id: 'memory_visual_fixture',
+          kind: 'CONTEXTUAL',
+          title: 'Owner note',
+          body: 'Zuhayr is the owner of the project.',
+          createdAt: now,
+          updatedAt: now,
+          observedAt: now,
+          confidence: 0.8,
+          importance: 0.6,
+          lifecycle: 'active',
+          source: { source: 'user', createdAt: now },
+          tags: [],
+          relatedMemoryIds: [],
+          supportingMemoryIds: [],
+          conflictingMemoryIds: [],
+          supersedes: [],
+          supersededBy: [],
+          reinforcementCount: 0,
+          folderId: null,
+          expiresAt: null,
+          lastRecalledAt: null,
+          recallCount: 0,
+          pinned: false,
+          autonomyContext: false,
+        });
+        transaction.oncomplete = () => resolveWrite();
+        transaction.onerror = () => rejectWrite(transaction.error);
+        transaction.onabort = () => rejectWrite(transaction.error);
+      });
+    } catch {
+      database.close();
+      return { canonicalSeeded: false, semanticSeeded: false };
+    }
+    let semanticSeeded = false;
+    if (hasSemanticStore) {
+      try {
+        await new Promise((resolveWrite, rejectWrite) => {
+          const transaction = database.transaction(['semanticMemories'], 'readwrite');
+          transaction.objectStore('semanticMemories').put({
+            id: 'semantic_visual_fixture',
+            kind: 'person',
+            title: 'Zuhayr',
+            aliases: ['Z'],
+            summary: 'The owner of the project.',
+            recentObservations: ['Zuhayr is the owner of the project.'],
+            openConflicts: [],
+            sourceMemoryIds: ['memory_visual_fixture'],
+            updatedAt: now,
+            generatedAt: now,
+            version: 1,
+          });
+          transaction.oncomplete = () => resolveWrite();
+          transaction.onerror = () => rejectWrite(transaction.error);
+          transaction.onabort = () => rejectWrite(transaction.error);
+        });
+        semanticSeeded = true;
+      } catch {
+        semanticSeeded = false;
+      }
+    }
+    database.close();
+    return { canonicalSeeded: true, semanticSeeded };
+  });
+
+  // Fresh mount so the UI reads the seeded fixture exactly once.
+  await page.goto(appUrl, { waitUntil: 'load' });
+  await page.getByRole('dialog', { name: 'Welcome.' }).waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined);
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Memory' }).click();
+  await page.getByText('Memory Bank', { exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+
+  const semanticSection = page.locator('.semantic-files').first();
+  const hasSemanticSection = await semanticSection.isVisible().catch(() => false);
+  const metrics = await page.evaluate(() => {
+    const boxOf = (element) => {
+      const box = element.getBoundingClientRect();
+      return { top: Number(box.top.toFixed(2)), width: Number(box.width.toFixed(2)), height: Number(box.height.toFixed(2)) };
+    };
+    const fontOf = (element) => {
+      const style = globalThis.getComputedStyle(element);
+      return { family: style.fontFamily, size: style.fontSize, weight: style.fontWeight };
+    };
+    const semantic = globalThis.document.querySelector('.semantic-files');
+    const bank = globalThis.document.querySelector('.memory-settings');
+    const firstCard = semantic?.querySelector('.semantic-files__card');
+    const firstBankCard = bank?.querySelector('.memory-card');
+    return {
+      semanticTopics: semantic
+        ? {
+          present: true,
+          ...boxOf(semantic),
+          cards: semantic.querySelectorAll('.semantic-files__card').length,
+          firstCard: firstCard
+            ? { ...boxOf(firstCard), font: fontOf(firstCard.querySelector('strong') || firstCard) }
+            : null,
+        }
+        : { present: false },
+      memoryBank: bank
+        ? {
+          present: true,
+          ...boxOf(bank),
+          cards: bank.querySelectorAll('.memory-card').length,
+          firstCard: firstBankCard ? boxOf(firstBankCard) : null,
+        }
+        : { present: false },
+    };
+  });
+
+  const pagePath = join(outputDir, 'settings-memory-page.png');
+  const panelPath = join(outputDir, 'settings-memory-panel.png');
+  await page.screenshot({ path: pagePath, fullPage: false });
+  const panel = hasSemanticSection ? semanticSection : page.locator('.memory-settings').first();
+  await panel.screenshot({ path: panelPath });
+
+  const evidence = {
+    schemaVersion: 1,
+    label,
+    scenario: 'settings-memory',
+    sourceSha,
+    baseSha,
+    headSha,
+    viewport: VIEWPORT,
+    fixture,
+    metrics,
+    files: {
+      page: `${label}/settings-memory-page.png`,
+      panel: `${label}/settings-memory-panel.png`,
+    },
+  };
+  await writeFile(join(outputDir, 'settings-memory.evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+}
+
 async function main() {
   await mkdir(outputDir, { recursive: true });
   server = spawn(
@@ -269,6 +438,12 @@ async function main() {
 
   try {
     await captureGenerationActivity(page);
+    const memoryPage = await context.newPage();
+    try {
+      await captureSettingsMemory(memoryPage);
+    } finally {
+      await memoryPage.close();
+    }
     process.stdout.write(`[${label}] visual evidence captured in ${outputDir}\n`);
   } finally {
     await context.close();

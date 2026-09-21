@@ -49,6 +49,7 @@ const allowedWritableIndexedDb = new Map([
   ['e2e/media-handoff.spec.ts', 1],
   ['e2e/media-playback-adversarial.phase8.spec.ts', 1],
   ['e2e/memory-bank.spec.ts', 1],
+  ['e2e/memory-files.spec.ts', 1],
 ]);
 const allowedLocalStorageWrites = new Map([
   ['e2e/global-setup.ts', 1],

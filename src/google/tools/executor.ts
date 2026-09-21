@@ -58,6 +58,8 @@ export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandle
 export interface GoogleToolExecutorOptions {
   readonly oauth: GoogleOAuthAuthority;
   readonly clickupOAuth?: ClickUpOAuthAuthority;
+  /** Exact ClickUp grant captured before an external/grouped confirmation UI. */
+  readonly expectedClickUpGrant?: ClickUpExecutionGrant;
   readonly handlers: GoogleToolHandlers;
   readonly confirm?: (request: WriteConfirmationRequest) => Promise<boolean>;
   readonly now?: () => Date;
@@ -340,10 +342,14 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   if (isClickUpTool) {
     if (!options.clickupOAuth) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
     try {
-      clickupGrant = await options.clickupOAuth.getExecutionGrant();
-      if (!clickupGrant.status.connected || clickupGrant.revision <= 0) {
+      const currentGrant = await options.clickupOAuth.getExecutionGrant();
+      if (!currentGrant.status.connected || currentGrant.revision <= 0) {
         return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
       }
+      if (options.expectedClickUpGrant && !sameClickUpExecutionGrant(options.expectedClickUpGrant, currentGrant)) {
+        return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+      }
+      clickupGrant = options.expectedClickUpGrant ?? currentGrant;
     } catch {
       return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) };
     }

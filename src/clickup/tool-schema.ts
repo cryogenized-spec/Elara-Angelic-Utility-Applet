@@ -289,8 +289,8 @@ export interface ClickUpGeminiFunctionDeclaration {
 }
 
 /**
- * Protocol-neutral MCP tool metadata. Pass 3 will hand these definitions to the
- * official MCP server SDK without introducing a second schema registry.
+ * Protocol-neutral MCP tool metadata consumed by Elara's spec-pinned
+ * stateless MCP 2026-07-28 server. No second schema registry exists.
  */
 export const clickUpMcpToolDefinitions: readonly ClickUpMcpToolDefinition[] = CLICKUP_TOOL_NAMES.map((name) => ({
   name,
@@ -300,8 +300,8 @@ export const clickUpMcpToolDefinitions: readonly ClickUpMcpToolDefinition[] = CL
 
 /**
  * Gemini declarations generated from the exact same ClickUp catalog and Zod
- * authority as MCP tools/list. Registration with Elara's existing executable
- * tool registry is intentionally deferred until the Worker executor exists.
+ * authority as MCP tools/list. Elara's existing executable registry consumes
+ * the same catalog; this export remains useful for direct parity certification.
  */
 export const clickUpGeminiFunctionDeclarations: readonly ClickUpGeminiFunctionDeclaration[] = CLICKUP_TOOL_NAMES.map((name) => ({
   type: 'function',

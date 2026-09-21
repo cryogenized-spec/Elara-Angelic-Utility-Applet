@@ -15,6 +15,10 @@ ALLOWED_ORIGINS = "https://cryogenized-spec.github.io"
 # GOOGLE_OAUTH_CLIENT_ID must match the browser VITE_GOOGLE_CLIENT_ID from that
 # same Google Web OAuth client. The vault key must be high-entropy and at least
 # 32 characters. Refresh tokens are AES-GCM encrypted before DO persistence.
+#
+# ClickUp OAuth is likewise deployment-owned. Provision CLICKUP_OAUTH_CLIENT_ID,
+# CLICKUP_OAUTH_CLIENT_SECRET and CLICKUP_OAUTH_VAULT_KEY with wrangler secret put.
+# Register the exact Elara redirect URI in the matching ClickUp OAuth app.
 
 # Phase B autonomy scheduler: one hourly cron heartbeat (the repair clock —
 # the Durable Object's single alarm is the exact per-routine appointment
@@ -27,6 +31,7 @@ crons = ["0 * * * *"]
 bindings = [
   { name = "AUTONOMY", class_name = "AutonomyEngine" },
   { name = "GOOGLE_OAUTH", class_name = "GoogleOAuthVault" },
+  { name = "CLICKUP_OAUTH", class_name = "ClickUpOAuthVault" },
 ]
 
 [[migrations]]
@@ -36,6 +41,10 @@ new_sqlite_classes = ["AutonomyEngine"]
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["GoogleOAuthVault"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["ClickUpOAuthVault"]
 
 # Phase C0: Workflow is the execution plane. Instance id is a hash of runKey;
 # the scheduler (DO) remains the only due-time authority.

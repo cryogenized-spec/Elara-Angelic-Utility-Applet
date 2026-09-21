@@ -263,11 +263,13 @@ const CLICKUP_MUTATION_INTENT: Readonly<Partial<Record<ClickUpToolName, RegExp>>
   'clickup.attachArtifact': /\b(?:attach|upload)\b|\b(?:add|include)\b[\s\S]{0,24}\b(?:file|artifact|document|attachment)\b/i,
 };
 
-function freshUserExplicitlyRequestedClickUpMutation(request: GeminiTurnRequest, tool: GoogleToolName): boolean {
+function freshUserExplicitlyRequestedClickUpMutation(request: GeminiTurnRequest, tool: string): boolean {
   const parsed = clickupToolNameSchema.safeParse(tool);
-  if (!parsed.success || isRegistryReadTool(tool)) return true;
+  if (!parsed.success) return false;
   const pattern = CLICKUP_MUTATION_INTENT[parsed.data];
-  if (!pattern) return false;
+  // ClickUp read tools have no mutation-intent pattern and remain governed by
+  // the existing private/external read taint authority.
+  if (!pattern) return true;
   let raw: string;
   if (typeof request.input === 'string') raw = request.input;
   else {

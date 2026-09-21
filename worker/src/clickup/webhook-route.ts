@@ -10,6 +10,7 @@ export interface ClickUpWebhookRouteEnv {
 }
 
 const CLICKUP_WEBHOOK_PATH = '/clickup/webhook';
+const INTERNAL_WEBHOOK_PATH = '/internal/clickup/webhook';
 const MAX_WEBHOOK_BODY_BYTES = 256 * 1024;
 
 function json(body: unknown, status: number): Response {
@@ -89,7 +90,7 @@ export async function handleClickUpWebhookRoute(
   }
 
   const response = await (await vaultStub(env)).fetch(new Request(
-    'https://clickup-oauth-vault/internal/clickup/webhook',
+    `https://clickup-oauth-vault${INTERNAL_WEBHOOK_PATH}`,
     {
       method: 'POST',
       headers: {

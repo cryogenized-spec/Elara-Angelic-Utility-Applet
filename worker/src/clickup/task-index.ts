@@ -10,6 +10,9 @@ export interface ClickUpTaskIndexState {
   readonly lastProviderUpdatedAt: number;
   readonly indexedTasks: number;
   readonly oldestIndexedAt: number;
+  readonly incrementalSince: number;
+  readonly incrementalNextPage: number;
+  readonly incrementalMaxUpdatedAt: number;
 }
 
 type StateRow = {
@@ -18,6 +21,9 @@ type StateRow = {
   next_page: number;
   last_refresh_at: number;
   last_provider_updated_at: number;
+  incremental_since: number;
+  incremental_next_page: number;
+  incremental_max_updated_at: number;
 };
 
 type SearchRow = {
@@ -202,9 +208,19 @@ export function initializeClickUpTaskIndex(sql: TaskIndexSql): void {
       full_sync_complete INTEGER NOT NULL,
       next_page INTEGER NOT NULL,
       last_refresh_at INTEGER NOT NULL,
-      last_provider_updated_at INTEGER NOT NULL
+      last_provider_updated_at INTEGER NOT NULL,
+      incremental_since INTEGER NOT NULL DEFAULT 0,
+      incremental_next_page INTEGER NOT NULL DEFAULT 0,
+      incremental_max_updated_at INTEGER NOT NULL DEFAULT 0
     )
   `);
+  for (const statement of [
+    'ALTER TABLE clickup_task_index_state ADD COLUMN incremental_since INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE clickup_task_index_state ADD COLUMN incremental_next_page INTEGER NOT NULL DEFAULT 0',
+    'ALTER TABLE clickup_task_index_state ADD COLUMN incremental_max_updated_at INTEGER NOT NULL DEFAULT 0',
+  ]) {
+    try { sql.exec(statement); } catch { /* Already present on current schema. */ }
+  }
 }
 
 export function clearClickUpTaskIndex(sql: TaskIndexSql): void {
@@ -303,7 +319,7 @@ export function upsertClickUpTaskIndexPage(
 
 export function taskIndexState(sql: TaskIndexSql, workspaceId: string): ClickUpTaskIndexState {
   const row = sql.exec<StateRow>(
-    'SELECT workspace_id, full_sync_complete, next_page, last_refresh_at, last_provider_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
+    'SELECT workspace_id, full_sync_complete, next_page, last_refresh_at, last_provider_updated_at, incremental_since, incremental_next_page, incremental_max_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
     workspaceId,
   ).toArray()[0];
   const aggregate = sql.exec<{ count: number; oldest_indexed_at: number | null }>(
@@ -319,6 +335,9 @@ export function taskIndexState(sql: TaskIndexSql, workspaceId: string): ClickUpT
     lastProviderUpdatedAt: row?.last_provider_updated_at ?? 0,
     indexedTasks: aggregate?.count ?? 0,
     oldestIndexedAt: aggregate?.oldest_indexed_at ?? 0,
+    incrementalSince: row?.incremental_since ?? 0,
+    incrementalNextPage: row?.incremental_next_page ?? 0,
+    incrementalMaxUpdatedAt: row?.incremental_max_updated_at ?? 0,
   };
 }
 
@@ -328,19 +347,26 @@ export function setTaskIndexState(
 ): void {
   sql.exec(`
     INSERT INTO clickup_task_index_state (
-      workspace_id, full_sync_complete, next_page, last_refresh_at, last_provider_updated_at
-    ) VALUES (?, ?, ?, ?, ?)
+      workspace_id, full_sync_complete, next_page, last_refresh_at, last_provider_updated_at,
+      incremental_since, incremental_next_page, incremental_max_updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(workspace_id) DO UPDATE SET
       full_sync_complete = excluded.full_sync_complete,
       next_page = excluded.next_page,
       last_refresh_at = excluded.last_refresh_at,
-      last_provider_updated_at = excluded.last_provider_updated_at
+      last_provider_updated_at = excluded.last_provider_updated_at,
+      incremental_since = excluded.incremental_since,
+      incremental_next_page = excluded.incremental_next_page,
+      incremental_max_updated_at = excluded.incremental_max_updated_at
   `,
   state.workspaceId,
   state.fullSyncComplete ? 1 : 0,
   state.nextPage,
   state.lastRefreshAt,
-  state.lastProviderUpdatedAt);
+  state.lastProviderUpdatedAt,
+  state.incrementalSince,
+  state.incrementalNextPage,
+  state.incrementalMaxUpdatedAt);
 }
 
 export function searchClickUpTaskIndex(

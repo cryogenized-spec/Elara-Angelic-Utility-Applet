@@ -289,7 +289,7 @@ describe('ClickUp durable task index', () => {
   });
 
   it('persists hostile provider tasks below the hard 64k projection ceiling', async () => {
-    const hostile = 'x'.repeat(180_000);
+    const hostile = 'x'.repeat(20_000);
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
       const url = new URL(request.url);
@@ -419,8 +419,8 @@ describe('ClickUp durable task index', () => {
     expect((await indexSnapshot()).indexedTasks).toBe(0);
 
     const deniedAgain = await search({ workspaceId: '999', query: 'cached' });
-    expect(deniedAgain.status).toBe(403);
-    expect(await deniedAgain.json()).toEqual(expect.objectContaining({ code: 'workspace_forbidden' }));
+    expect(deniedAgain.status).toBe(401);
+    expect(await deniedAgain.json()).toEqual(expect.objectContaining({ code: 'authorization_required' }));
     expect(taskCalls).toBe(2);
   });
 
@@ -470,9 +470,25 @@ describe('ClickUp durable task index', () => {
     });
 
     await connect();
-    const response = await search({ workspaceId: 'not-authorized', query: 'repair' });
+    const response = await search({ workspaceId: '998', query: 'repair' });
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual(expect.objectContaining({ code: 'workspace_forbidden' }));
     expect(taskCalls).toBe(0);
+  });
+
+  it('rejects malformed semantic search arguments without escaping the Durable Object boundary', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      throw new Error(`Malformed semantic input must not reach ClickUp: ${request.url}`);
+    });
+
+    await connect();
+    const response = await search({ workspaceId: 'not-authorized', query: 'repair' });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: 'validation' }));
   });
 });

@@ -216,6 +216,29 @@ describe('read-only tool loop — call-time enforcement', () => {
     expect(streamToolResult).not.toHaveBeenCalled();
   });
 
+  it('never opens interactive consent for Kanban awareness tools', async () => {
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'interaction-kanban', model: 'gemini-3.8-flash' },
+      { type: 'tool-call', interactionId: 'interaction-kanban', index: 0, callId: 'call-kanban', name: 'kanban.refresh', arguments: {} },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      { type: 'completed', interactionId: 'interaction-kanban-2', status: 'completed', durationMs: 9 },
+    ));
+    executeGoogleTool.mockResolvedValueOnce({ ok: false, code: 'AUTHORIZATION_REQUIRED', requiredCapability: 'tasks.read' });
+
+    for await (const _event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Refresh my board.', systemInstruction: 'Chat instruction.', tools: ['kanban.refresh'] },
+      { tools: ['kanban.refresh'], executor: { oauth, handlers: { 'kanban.refresh': async () => ({ refreshed: true }) } as never } },
+    )) {
+      // consume
+    }
+
+    expect(requestGoogleCapabilityGrant).not.toHaveBeenCalled();
+    expect(streamToolResult).toHaveBeenCalledWith(expect.objectContaining({
+      results: [expect.objectContaining({ callId: 'call-kanban', result: { ok: false, error: 'AUTHORIZATION_REQUIRED' } })],
+    }), undefined);
+  });
+
   it('the grant broker remains available to interactive (non-headless) callers', async () => {
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-1', model: 'gemini-3.8-flash' },

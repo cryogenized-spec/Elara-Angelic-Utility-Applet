@@ -297,6 +297,23 @@ describe('direct Google OAuth authority', () => {
     expect(status.grantedCapabilities).toEqual(expect.arrayContaining(['drive.files.app.read', 'docs.read', 'sheets.read', 'calendar.events.read']));
   });
 
+  it('keeps an equivalent sibling-tab grant from discarding a valid browser token', async () => {
+    installUserinfoFetch('same-account@example.com');
+    tokenMock.mockResolvedValueOnce(token('access-same-account', CALENDAR_READ_SCOPE));
+    await googleOAuthAuthority.authorize('calendar.events.read');
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(true);
+
+    const key = 'elara.google.authorization.v2';
+    const priorRaw = localStorage.getItem(key) ?? '';
+    const shared = JSON.parse(priorRaw) as { updatedAt?: string };
+    shared.updatedAt = new Date(Date.now() + 1_000).toISOString();
+    const nextRaw = JSON.stringify(shared);
+    localStorage.setItem(key, nextRaw);
+    window.dispatchEvent(new StorageEvent('storage', { key, oldValue: priorRaw, newValue: nextRaw }));
+
+    expect((await googleOAuthAuthority.getStatus()).sessionReady).toBe(true);
+  });
+
   it('invalidates a browser token when another tab changes the shared Google account', async () => {
     installUserinfoFetch('account-a@example.com');
     tokenMock.mockResolvedValueOnce(token('access-account-a', CALENDAR_READ_SCOPE));

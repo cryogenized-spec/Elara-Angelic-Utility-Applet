@@ -196,6 +196,17 @@ describe('ClickUpOAuthVault', () => {
     expect(response.status).toBe(401);
   });
 
+  it('fails malformed semantic commands as validation errors before provider egress', async () => {
+    const provider = mockProvider();
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+
+    const response = await internalCommand({ operation: 'getTask', arguments: { taskId: '' } });
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: 'validation' }));
+    expect(provider.task).toBe(0);
+  });
+
   it('learns the provider rate window and blocks the next call locally when remaining reaches zero', async () => {
     const provider = mockProvider({ taskRemaining: 0 });
     const begun = await start();

@@ -8,6 +8,33 @@ const ORIGIN = 'https://cryogenized-spec.github.io';
 const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
 let grantRevision = 0;
 
+type TaskSearchPayload = {
+  readonly result: {
+    readonly tasks: readonly Record<string, unknown>[];
+    readonly index: Record<string, unknown>;
+  };
+};
+
+async function taskSearchPayload(response: Response): Promise<TaskSearchPayload> {
+  const value = await response.json() as unknown;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected ClickUp search response object.');
+  const result = (value as Record<string, unknown>).result;
+  if (!result || typeof result !== 'object' || Array.isArray(result)) throw new Error('Expected ClickUp search result object.');
+  const resultRecord = result as Record<string, unknown>;
+  if (!Array.isArray(resultRecord.tasks) || !resultRecord.index || typeof resultRecord.index !== 'object' || Array.isArray(resultRecord.index)) {
+    throw new Error('Expected ClickUp search tasks and index.');
+  }
+  return {
+    result: {
+      tasks: resultRecord.tasks.map((task) => {
+        if (!task || typeof task !== 'object' || Array.isArray(task)) throw new Error('Expected indexed task object.');
+        return task as Record<string, unknown>;
+      }),
+      index: resultRecord.index as Record<string, unknown>,
+    },
+  };
+}
+
 beforeEach(async () => {
   vi.restoreAllMocks();
   grantRevision = 0;
@@ -205,7 +232,7 @@ describe('ClickUp durable task index', () => {
 
     const first = await search({ workspaceId: '999', query: 'repair' });
     expect(first.status).toBe(200);
-    const firstBody = await first.json() as Record<string, any>;
+    const firstBody = await taskSearchPayload(first);
     expect(firstBody.result.index).toEqual(expect.objectContaining({
       mode: 'persistent-sqlite',
       indexedTasks: 3,
@@ -221,22 +248,22 @@ describe('ClickUp durable task index', () => {
     expect(workspaceTaskCalls).toBe(1);
 
     const withSubtasks = await search({ workspaceId: '999', query: 'repair', includeSubtasks: true });
-    expect((await withSubtasks.json() as Record<string, any>).result.tasks.map((task: Record<string, unknown>) => task.id)).toEqual([
+    expect((await taskSearchPayload(withSubtasks)).result.tasks.map((task: Record<string, unknown>) => task.id)).toEqual([
       'task-repair',
       'task-subtask',
     ]);
 
     const withoutSubtasks = await search({ workspaceId: '999', query: 'repair', includeSubtasks: false });
-    expect((await withoutSubtasks.json() as Record<string, any>).result.tasks.map((task: Record<string, unknown>) => task.id)).toEqual([
+    expect((await taskSearchPayload(withoutSubtasks)).result.tasks.map((task: Record<string, unknown>) => task.id)).toEqual([
       'task-repair',
     ]);
 
     const withClosed = await search({ workspaceId: '999', query: 'repair', includeClosed: true });
-    expect((await withClosed.json() as Record<string, any>).result.tasks.map((task: Record<string, unknown>) => task.id)).toContain('task-closed');
+    expect((await taskSearchPayload(withClosed)).result.tasks.map((task: Record<string, unknown>) => task.id)).toContain('task-closed');
 
     await forceRefreshAt(0);
     const refreshed = await search({ workspaceId: '999', query: 'trigger' });
-    const refreshedBody = await refreshed.json() as Record<string, any>;
+    const refreshedBody = await taskSearchPayload(refreshed);
     expect(workspaceTaskCalls).toBe(2);
     expect(providerRequests[1]?.searchParams.get('date_updated_gt')).toBeTruthy();
     expect(refreshedBody.result.tasks[0]).toEqual(expect.objectContaining({
@@ -341,7 +368,7 @@ describe('ClickUp durable task index', () => {
     expect(firstPass.status).toBe(200);
     expect(incremental).toBe(true);
     expect(seenPages).toEqual([0, 1, 2]);
-    expect((await firstPass.json() as Record<string, any>).result.tasks).toEqual([]);
+    expect((await taskSearchPayload(firstPass)).result.tasks).toEqual([]);
     expect(await indexSnapshot()).toEqual(expect.objectContaining({
       lastProviderUpdatedAt: initialUpdatedAt,
       incrementalNextPage: 3,
@@ -351,7 +378,7 @@ describe('ClickUp durable task index', () => {
     const secondPass = await search({ workspaceId: '999', query: 'needle' });
     expect(secondPass.status).toBe(200);
     expect(seenPages).toEqual([0, 1, 2, 3]);
-    expect((await secondPass.json() as Record<string, any>).result.tasks).toEqual([
+    expect((await taskSearchPayload(secondPass)).result.tasks).toEqual([
       expect.objectContaining({ id: 'late-target' }),
     ]);
     expect(await indexSnapshot()).toEqual(expect.objectContaining({
@@ -425,7 +452,7 @@ describe('ClickUp durable task index', () => {
     await forceRefreshAt(0);
     const after = await search({ workspaceId: '999', query: 'removed' });
     expect(after.status).toBe(200);
-    expect((await after.json() as Record<string, any>).result.tasks).toEqual([]);
+    expect((await taskSearchPayload(after)).result.tasks).toEqual([]);
     expect((await indexSnapshot()).indexedTasks).toBe(1);
   });
 

@@ -41,7 +41,7 @@ export interface Board {
   tasks: BoardTask[];
   routines: Subroutine[];
   /** Elara-owned structured labels. Provider task state remains authoritative in Google. */
-  labels: TaskLabel[];
+  labels?: TaskLabel[];
   syncedAt: number;
 }
 export interface BoardState {
@@ -372,7 +372,7 @@ export async function saveTaskLocalMetadata(
     const latestRaw = await db.boards.get(board.account);
     if (!latestRaw) throw new Error('Sync before editing task metadata.');
     const latest = normalizeBoard(latestRaw);
-    let labels = [...latest.labels];
+    let labels = [...(latest.labels ?? [])];
     for (const incoming of patch.upsertLabels ?? []) {
       const name = incoming.name.trim();
       if (!incoming.id || incoming.id.length > 500 || !name || name.length > 48 || !incoming.color || incoming.color.length > 32) throw new Error('Invalid task label.');
@@ -561,7 +561,7 @@ export function startBoardSync(): () => void {
       next: ({ board, schedule }) => {
         if (stopped || retryAccount !== account) return;
         const update: Partial<BoardState> = {};
-        if (board && (!state.board || (state.board.account === account && board.syncedAt >= state.board.syncedAt))) update.board = board;
+        if (board && (!state.board || (state.board.account === account && board.syncedAt >= state.board.syncedAt))) update.board = normalizeBoard(board);
         else if (!board && state.board?.account === account) update.board = null;
         // Active reads/waiters recheck shared metadata themselves under the lease.
         if (schedule && !inFlight && navigator.onLine) {

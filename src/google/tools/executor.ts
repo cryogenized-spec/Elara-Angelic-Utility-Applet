@@ -15,7 +15,7 @@ import { validateMemoryToolArguments, memoryToolArgumentSchemas, type MemoryTool
 import { describeMemoryReconcileTarget } from '../../memory/tool-handler';
 import { kanbanToolArgumentSchemas, validateKanbanToolArguments, type KanbanToolName } from '../../kanban/tool-schema';
 import { loadRoleplayPreferences } from '../../persistence/preferences';
-import { clickupToolNameSchema, validateClickUpToolArguments, type ClickUpToolName } from '../../clickup/tool-schema';
+import { clickupToolNameSchema, validateClickUpToolArguments } from '../../clickup/tool-schema';
 import type { ClickUpExecutionGrant, ClickUpOAuthAuthority } from '../../clickup/oauth/contracts';
 import {
   captureClickUpArtifactApprovalSnapshot,

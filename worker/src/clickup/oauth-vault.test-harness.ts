@@ -1,109 +1,163 @@
 import { ClickUpOAuthVault } from './oauth-vault';
 
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: {
+      'content-type': 'application/json; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+function requiredSearchParam(url: URL, name: string): string {
+  const value = url.searchParams.get(name)?.trim() ?? '';
+  if (!value) throw new Error(`Missing test parameter: ${name}`);
+  return value;
+}
+
+async function bodyRecord(request: Request): Promise<Record<string, unknown>> {
+  const value = await request.json() as unknown;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Invalid test request body.');
+  return value as Record<string, unknown>;
+}
+
+/**
+ * Test-only ClickUp vault subclass.
+ *
+ * State inspection/mutation deliberately uses ordinary Durable Object fetch
+ * requests instead of RPC methods. This keeps every cross-isolate resource on
+ * the same Response lifecycle that the production boundary uses, avoiding
+ * dangling RPC promise callbacks during workerd teardown.
+ */
 export class TestClickUpOAuthVault extends ClickUpOAuthVault {
-  async credentialSnapshot(): Promise<{
-    accessCipher: string;
-    accessIv: string;
-    userId: string;
-    username: string | null;
-    email: string | null;
-    workspacesJson: string;
-    updatedAt: number;
-  } | null> {
-    const row = this.credentialRow();
-    if (!row) return null;
-    return {
-      accessCipher: row.access_cipher,
-      accessIv: row.access_iv,
-      userId: row.user_id,
-      username: row.username,
-      email: row.email,
-      workspacesJson: row.workspaces_json,
-      updatedAt: row.updated_at,
-    };
-  }
+  override async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+    if (!url.pathname.startsWith('/__test/clickup/')) return super.fetch(request);
 
-  async forceCredentialUpdatedAt(updatedAt: number): Promise<void> {
-    this.ctx.storage.sql.exec('UPDATE clickup_oauth_credential SET updated_at = ? WHERE slot = 1', updatedAt);
-  }
+    try {
+      if (request.method === 'GET' && url.pathname === '/__test/clickup/credential') {
+        const row = this.ctx.storage.sql.exec<{
+          access_cipher: string;
+          access_iv: string;
+          user_id: string;
+          username: string | null;
+          email: string | null;
+          workspaces_json: string;
+          updated_at: number;
+        }>(
+          'SELECT access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
+        ).toArray()[0];
+        return json(row ? {
+          accessCipher: row.access_cipher,
+          accessIv: row.access_iv,
+          userId: row.user_id,
+          username: row.username,
+          email: row.email,
+          workspacesJson: row.workspaces_json,
+          updatedAt: row.updated_at,
+        } : null);
+      }
 
-  async rateLimitSnapshot(): Promise<{ limit: number | null; remaining: number | null; resetAt: number | null } | null> {
-    const row = this.ctx.storage.sql.exec<{ limit_count: number | null; remaining: number | null; reset_at: number | null }>(
-      'SELECT limit_count, remaining, reset_at FROM clickup_rate_limit WHERE slot = 1',
-    ).toArray()[0];
-    return row ? { limit: row.limit_count, remaining: row.remaining, resetAt: row.reset_at } : null;
-  }
+      if (request.method === 'GET' && url.pathname === '/__test/clickup/rate-limit') {
+        const row = this.ctx.storage.sql.exec<{
+          limit_count: number | null;
+          remaining: number | null;
+          reset_at: number | null;
+        }>(
+          'SELECT limit_count, remaining, reset_at FROM clickup_rate_limit WHERE slot = 1',
+        ).toArray()[0];
+        return json(row ? {
+          limit: row.limit_count,
+          remaining: row.remaining,
+          resetAt: row.reset_at,
+        } : null);
+      }
 
-  async taskIndexSnapshot(workspaceId: string): Promise<{
-    fullSyncComplete: boolean;
-    nextPage: number;
-    lastRefreshAt: number;
-    lastProviderUpdatedAt: number;
-    indexedTasks: number;
-    incrementalSince: number;
-    incrementalNextPage: number;
-    incrementalMaxUpdatedAt: number;
-  }> {
-    const row = this.ctx.storage.sql.exec<{
-      full_sync_complete: number;
-      next_page: number;
-      last_refresh_at: number;
-      last_provider_updated_at: number;
-      incremental_since: number;
-      incremental_next_page: number;
-      incremental_max_updated_at: number;
-    }>(
-      'SELECT full_sync_complete, next_page, last_refresh_at, last_provider_updated_at, incremental_since, incremental_next_page, incremental_max_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
-      workspaceId,
-    ).toArray()[0];
-    const count = this.ctx.storage.sql.exec<{ count: number }>(
-      'SELECT COUNT(*) AS count FROM clickup_task_index WHERE workspace_id = ?',
-      workspaceId,
-    ).toArray()[0]?.count ?? 0;
-    return {
-      fullSyncComplete: row?.full_sync_complete === 1,
-      nextPage: row?.next_page ?? 0,
-      lastRefreshAt: row?.last_refresh_at ?? 0,
-      lastProviderUpdatedAt: row?.last_provider_updated_at ?? 0,
-      indexedTasks: count,
-      incrementalSince: row?.incremental_since ?? 0,
-      incrementalNextPage: row?.incremental_next_page ?? 0,
-      incrementalMaxUpdatedAt: row?.incremental_max_updated_at ?? 0,
-    };
-  }
+      if (request.method === 'GET' && url.pathname === '/__test/clickup/task-index') {
+        const workspaceId = requiredSearchParam(url, 'workspaceId');
+        const row = this.ctx.storage.sql.exec<{
+          full_sync_complete: number;
+          next_page: number;
+          last_refresh_at: number;
+          last_provider_updated_at: number;
+          incremental_since: number;
+          incremental_next_page: number;
+          incremental_max_updated_at: number;
+        }>(
+          'SELECT full_sync_complete, next_page, last_refresh_at, last_provider_updated_at, incremental_since, incremental_next_page, incremental_max_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
+          workspaceId,
+        ).toArray()[0];
+        const indexedTasks = this.ctx.storage.sql.exec<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM clickup_task_index WHERE workspace_id = ?',
+          workspaceId,
+        ).toArray()[0]?.count ?? 0;
+        return json({
+          fullSyncComplete: row?.full_sync_complete === 1,
+          nextPage: row?.next_page ?? 0,
+          lastRefreshAt: row?.last_refresh_at ?? 0,
+          lastProviderUpdatedAt: row?.last_provider_updated_at ?? 0,
+          indexedTasks,
+          incrementalSince: row?.incremental_since ?? 0,
+          incrementalNextPage: row?.incremental_next_page ?? 0,
+          incrementalMaxUpdatedAt: row?.incremental_max_updated_at ?? 0,
+        });
+      }
 
-  async webhookSnapshot(): Promise<Array<{ webhookId: string; workspaceId: string; updatedAt: number }>> {
-    return this.ctx.storage.sql.exec<{ webhook_id: string; workspace_id: string; updated_at: number }>(
-      'SELECT webhook_id, workspace_id, updated_at FROM clickup_webhooks ORDER BY workspace_id ASC',
-    ).toArray().map((row) => ({
-      webhookId: row.webhook_id,
-      workspaceId: row.workspace_id,
-      updatedAt: row.updated_at,
-    }));
-  }
+      if (request.method === 'GET' && url.pathname === '/__test/clickup/webhooks') {
+        return json(this.ctx.storage.sql.exec<{
+          webhook_id: string;
+          workspace_id: string;
+          updated_at: number;
+        }>(
+          'SELECT webhook_id, workspace_id, updated_at FROM clickup_webhooks ORDER BY workspace_id ASC',
+        ).toArray().map((row) => ({
+          webhookId: row.webhook_id,
+          workspaceId: row.workspace_id,
+          updatedAt: row.updated_at,
+        })));
+      }
 
-  async taskJsonLength(workspaceId: string, taskId: string): Promise<number | null> {
-    const row = this.ctx.storage.sql.exec<{ task_json: string }>(
-      'SELECT task_json FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
-      workspaceId,
-      taskId,
-    ).toArray()[0];
-    return row ? row.task_json.length : null;
-  }
+      if (request.method === 'GET' && url.pathname === '/__test/clickup/task-json-length') {
+        const workspaceId = requiredSearchParam(url, 'workspaceId');
+        const taskId = requiredSearchParam(url, 'taskId');
+        const row = this.ctx.storage.sql.exec<{ task_json: string }>(
+          'SELECT task_json FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
+          workspaceId,
+          taskId,
+        ).toArray()[0];
+        return json({ length: row ? row.task_json.length : null });
+      }
 
-  async forceTaskIndexRefreshAt(workspaceId: string, value: number): Promise<void> {
-    this.ctx.storage.sql.exec(
-      'UPDATE clickup_task_index_state SET last_refresh_at = ? WHERE workspace_id = ?',
-      value,
-      workspaceId,
-    );
-  }
+      if (request.method === 'POST' && url.pathname === '/__test/clickup/task-index/refresh-at') {
+        const body = await bodyRecord(request);
+        const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+        const value = typeof body.value === 'number' && Number.isFinite(body.value) ? body.value : NaN;
+        if (!workspaceId || !Number.isFinite(value)) return json({ code: 'validation' }, 400);
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_task_index_state SET last_refresh_at = ? WHERE workspace_id = ?',
+          value,
+          workspaceId,
+        );
+        return json({ ok: true });
+      }
 
-  async forceTaskIndexIndexedAt(workspaceId: string, value: number): Promise<void> {
-    this.ctx.storage.sql.exec(
-      'UPDATE clickup_task_index SET indexed_at = ? WHERE workspace_id = ?',
-      value,
-      workspaceId,
-    );
+      if (request.method === 'POST' && url.pathname === '/__test/clickup/task-index/indexed-at') {
+        const body = await bodyRecord(request);
+        const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+        const value = typeof body.value === 'number' && Number.isFinite(body.value) ? body.value : NaN;
+        if (!workspaceId || !Number.isFinite(value)) return json({ code: 'validation' }, 400);
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_task_index SET indexed_at = ? WHERE workspace_id = ?',
+          value,
+          workspaceId,
+        );
+        return json({ ok: true });
+      }
+
+      return json({ code: 'not_found' }, 404);
+    } catch {
+      return json({ code: 'test_harness' }, 500);
+    }
   }
 }

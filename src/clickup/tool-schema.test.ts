@@ -63,17 +63,19 @@ describe('ClickUp canonical model/MCP tool schemas', () => {
     })).toThrow();
   });
 
+  it('requires explicit Workspace scope for direct resource operations', () => {
+    expect(() => validateClickUpToolArguments('clickup.getTask', { taskId: '86abc' })).toThrow();
+    expect(() => validateClickUpToolArguments('clickup.getTaskComments', { taskId: '86abc' })).toThrow();
+    expect(() => validateClickUpToolArguments('clickup.createTask', { listId: '123', name: 'Repair' })).toThrow();
+  });
+
   it('models Custom Field set and clear without exposing a raw provider payload', () => {
     expect(validateClickUpToolArguments('clickup.setCustomField', {
-      workspaceId: '999',
-      workspaceId: '999',
       workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
       value: { add: ['123'], rem: ['456'] },
     })).toEqual({
-      workspaceId: '999',
-      workspaceId: '999',
       workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
@@ -81,20 +83,15 @@ describe('ClickUp canonical model/MCP tool schemas', () => {
     });
     expect(() => validateClickUpToolArguments('clickup.setCustomField', {
       workspaceId: '999',
-      workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
     })).toThrow();
     expect(validateClickUpToolArguments('clickup.setCustomField', {
       workspaceId: '999',
-      workspaceId: '999',
-      workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
       mode: 'clear',
     })).toEqual({
-      workspaceId: '999',
-      workspaceId: '999',
       workspaceId: '999',
       taskId: '86abc',
       fieldId: 'field-1',
@@ -116,19 +113,16 @@ describe('ClickUp canonical model/MCP tool schemas', () => {
   it('keeps artifact bytes and provider URLs out of attachArtifact arguments', () => {
     expect(validateClickUpToolArguments('clickup.attachArtifact', {
       workspaceId: '999',
-      workspaceId: '999',
       taskId: '86abc',
       artifactId: 'artifact:repair-report',
       filename: 'repair-report.pdf',
     })).toEqual({
-      workspaceId: '999',
       workspaceId: '999',
       taskId: '86abc',
       artifactId: 'artifact:repair-report',
       filename: 'repair-report.pdf',
     });
     expect(() => validateClickUpToolArguments('clickup.attachArtifact', {
-      workspaceId: '999',
       workspaceId: '999',
       taskId: '86abc',
       artifactId: 'artifact:repair-report',

@@ -320,6 +320,22 @@ export class ClickUpOAuthVault extends DurableObject {
         updated_at INTEGER NOT NULL
       )
     `);
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS clickup_webhooks (
+        webhook_id TEXT PRIMARY KEY,
+        workspace_id TEXT UNIQUE NOT NULL,
+        secret_cipher TEXT NOT NULL,
+        secret_iv TEXT NOT NULL,
+        endpoint TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    this.ctx.storage.sql.exec(`
+      CREATE TABLE IF NOT EXISTS clickup_webhook_deliveries (
+        dedupe_key TEXT PRIMARY KEY,
+        received_at INTEGER NOT NULL
+      )
+    `);
     initializeClickUpTaskIndex(this.ctx.storage.sql);
   }
 
@@ -342,6 +358,12 @@ export class ClickUpOAuthVault extends DurableObject {
       if (request.method === 'POST' && url.pathname === '/internal/clickup/attachment') {
         if (!(await this.verifyInternal(request))) return json({ code: 'auth', message: 'Binding-internal ClickUp authority is required.' }, 401);
         return this.executeAttachmentUpload(request);
+      }
+
+      if (request.method === 'POST' && url.pathname === '/internal/clickup/webhook') {
+        if (!(await this.verifyInternal(request))) return json({ code: 'auth', message: 'Binding-internal ClickUp authority is required.' }, 401);
+        const body = await request.text();
+        return this.executeWebhook(body, request.headers.get('X-Signature'));
       }
 
       if (request.method === 'GET' && url.pathname === '/clickup/oauth/status') {

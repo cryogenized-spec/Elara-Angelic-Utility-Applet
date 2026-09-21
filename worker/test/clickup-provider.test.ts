@@ -73,11 +73,12 @@ describe('ClickUp provider wire mapping', () => {
   it('cancels chunked provider JSON as soon as it crosses the hard byte ceiling', async () => {
     let cancelled = false;
     const chunk = new Uint8Array(700_000);
+    let emitted = 0;
     const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
+      pull(controller) {
+        emitted += 1;
         controller.enqueue(chunk);
-        controller.enqueue(chunk);
-        controller.close();
+        if (emitted >= 3) controller.close();
       },
       cancel() {
         cancelled = true;

@@ -199,6 +199,44 @@ describe("snapshot reconciliation", () => {
     });
   });
 
+  it('does not copy metadata onto a newly ambiguous duplicate task ID', async () => {
+    await syncBoard();
+    await saveTaskLocalMetadata('a', 't', {
+      createdAt: '2026-09-21T10:00:00.000Z',
+      dueTime: '08:30',
+      timeZone: 'Africa/Johannesburg',
+      upsertLabels: [{ id: 'label-repair', name: 'repair', color: 'violet' }],
+      labelIds: ['label-repair'],
+    });
+
+    mocks.lists.mockResolvedValue({
+      items: [
+        { id: 'a', title: 'Work' },
+        { id: 'b', title: 'Unexpected duplicate' },
+      ],
+    });
+    mocks.tasks.mockImplementation(async () => ({ items: [{ ...task, id: 't' }] }));
+
+    await syncBoard();
+    const snapshot = boardStore.getSnapshot().board!;
+    const original = snapshot.tasks.find((item) => item.listId === 'a' && item.id === 't');
+    const duplicate = snapshot.tasks.find((item) => item.listId === 'b' && item.id === 't');
+
+    expect(original?.local).toMatchObject({
+      createdAt: '2026-09-21T10:00:00.000Z',
+      dueTime: '08:30',
+      timeZone: 'Africa/Johannesburg',
+      labelIds: ['label-repair'],
+    });
+    expect(duplicate?.local).toMatchObject({
+      createdAt: undefined,
+      dueTime: undefined,
+      timeZone: undefined,
+      labelIds: [],
+    });
+    expect(duplicate?.local?.firstSeenAt).toBeDefined();
+  });
+
   it('clears app-only time metadata when Google removes the due date', async () => {
     await syncBoard();
     await saveTaskLocalMetadata('a', 't', {

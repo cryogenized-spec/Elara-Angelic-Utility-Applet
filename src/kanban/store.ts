@@ -104,10 +104,12 @@ function mergeRemoteTaskMetadata(remote: BoardTask[], previous: BoardTask[], fir
     // metadata only when the account snapshot proves that ID is unambiguous.
     const prior = previousByTask.get(taskKey(task)) ?? (sameId.length === 1 ? sameId[0] : undefined);
     const hasObservedTimestamp = Boolean(prior?.local?.createdAt || prior?.local?.firstSeenAt);
-    return {
-      ...task,
-      local: normalizeTaskLocal(prior?.local, hasObservedTimestamp ? undefined : firstSeenAt),
-    };
+    const local = normalizeTaskLocal(prior?.local, hasObservedTimestamp ? undefined : firstSeenAt);
+    if (!task.scheduledDate) {
+      local.dueTime = undefined;
+      local.timeZone = undefined;
+    }
+    return { ...task, local };
   });
 }
 let state: BoardState = { board: null, busy: false, error: null, phase: "idle", nextRetryAt: null, failures: 0 };
@@ -393,11 +395,15 @@ export async function saveTaskLocalMetadata(
     if (!latestRaw) throw new Error('Sync before editing task metadata.');
     const latest = normalizeBoard(latestRaw);
     const labels = [...(latest.labels ?? [])];
+    const labelIdRemap = new Map<string, string>();
     for (const incoming of patch.upsertLabels ?? []) {
       const name = incoming.name.trim();
       if (!incoming.id || incoming.id.length > 500 || !name || name.length > 48 || !incoming.color || incoming.color.length > 32) throw new Error('Invalid task label.');
       const duplicateName = labels.find((label) => label.name.toLocaleLowerCase() === name.toLocaleLowerCase());
-      if (duplicateName && duplicateName.id !== incoming.id) throw new Error(`A label named “${name}” already exists.`);
+      if (duplicateName && duplicateName.id !== incoming.id) {
+        labelIdRemap.set(incoming.id, duplicateName.id);
+        continue;
+      }
       const index = labels.findIndex((label) => label.id === incoming.id);
       const next = { ...incoming, name };
       if (index >= 0) labels[index] = next;
@@ -414,7 +420,9 @@ export async function saveTaskLocalMetadata(
     }
     const task = tasks[index]!;
     const local = normalizeTaskLocal(task.local, patch.createdAt ?? (patch.providerTask ? new Date().toISOString() : undefined));
-    const labelIds = patch.labelIds ? [...new Set(patch.labelIds)] : local.labelIds;
+    const labelIds = patch.labelIds
+      ? [...new Set(patch.labelIds.map((id) => labelIdRemap.get(id) ?? id))]
+      : local.labelIds;
     const knownLabels = new Set(labels.map((label) => label.id));
     if (labelIds.some((id) => !knownLabels.has(id))) throw new Error('One or more task labels no longer exist.');
     tasks[index] = {

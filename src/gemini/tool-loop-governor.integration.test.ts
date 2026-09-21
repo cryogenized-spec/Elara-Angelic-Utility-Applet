@@ -366,12 +366,66 @@ describe('Gemini tool-loop gross-input governor', () => {
       .filter((event) => event.type === 'text-delta')
       .map((event) => event.text ?? '')
       .join('');
-    expect(fallbackText).toContain('Completed actions before the budget stop');
+    expect(fallbackText).toContain('Completed actions before processing stopped');
     expect(fallbackText).toContain('tasks.createTask: completed');
     expect(fallbackText).toContain('task-done');
     expect(fallbackText).toContain('do not repeat any completed actions');
     expect(fallbackText).not.toContain('I preserved the investigation state');
     expect(collected.at(-1)).toMatchObject({ type: 'completed', status: 'budget_exhausted' });
+  });
+
+  it('surfaces a completed mutation before a local rolling-quota continuation failure', async () => {
+    const createTask = vi.fn(async () => ({ id: 'task-quota-done', title: 'Quota-safe write', status: 'needsAction' }));
+    const confirm = vi.fn(async () => true);
+    const writeTools = ['tasks.createTask'] as const;
+
+    streamReply.mockReturnValueOnce(events(
+      { type: 'interaction-created', interactionId: 'quota-write-1', model: 'gemini-3.8-flash' },
+      {
+        type: 'tool-call',
+        interactionId: 'quota-write-1',
+        index: 0,
+        callId: 'quota-write-call',
+        name: 'tasks.createTask',
+        arguments: { taskListId: 'primary', title: 'Quota-safe write' },
+      },
+    ));
+    streamToolResult.mockReturnValueOnce(events(
+      {
+        type: 'failed',
+        error: {
+          code: 'GEMINI_LOCAL_RATE_LIMIT',
+          message: 'Elara paused this Gemini request before the local rolling input budget could be exceeded.',
+          category: 'rate_limit',
+          requestId: 'local-quota-test',
+        },
+      },
+    ));
+
+    const collected: Array<{ type?: string; text?: string; error?: { code?: string } }> = [];
+    for await (const event of streamGoogleToolLoop(
+      { model: 'gemini-3.8-flash', input: 'Create the task.', tools: writeTools },
+      {
+        tools: writeTools,
+        readOnly: false,
+        executor: {
+          oauth,
+          confirm,
+          handlers: { 'tasks.createTask': createTask },
+        },
+      },
+    )) collected.push(event as { type?: string; text?: string; error?: { code?: string } });
+
+    expect(createTask).toHaveBeenCalledOnce();
+    expect(confirm).toHaveBeenCalledOnce();
+    const noticeIndex = collected.findIndex((event) => event.type === 'text-delta' && event.text?.includes('task-quota-done'));
+    const failureIndex = collected.findIndex((event) => event.type === 'failed' && event.error?.code === 'GEMINI_LOCAL_RATE_LIMIT');
+    expect(noticeIndex).toBeGreaterThanOrEqual(0);
+    expect(failureIndex).toBeGreaterThan(noticeIndex);
+    const notice = collected[noticeIndex]?.text ?? '';
+    expect(notice).toContain('tasks.createTask: completed');
+    expect(notice).toContain('The completed actions above already happened');
+    expect(notice).toContain('Do not repeat any completed actions');
   });
 
   it('returns a local synthesis fallback instead of dispatching another model call past the hard budget', async () => {

@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SELF, env, reset } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker, newNonce, signWrite } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
-import { TOKEN, bearerRead, signedWrite } from './helpers';
+import { TOKEN, bearerRead, resetClickUpTestState, signedWrite } from './helpers';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
 const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
@@ -12,7 +12,7 @@ const WORKSPACES_ENDPOINT = 'https://api.clickup.com/api/v2/team';
 
 beforeEach(async () => {
   vi.restoreAllMocks();
-  await reset();
+  await resetClickUpTestState();
 });
 
 afterEach(() => {

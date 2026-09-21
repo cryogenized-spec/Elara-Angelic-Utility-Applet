@@ -119,10 +119,16 @@ export async function uploadClickUpArtifact(
     });
     if (!response.ok) throw await responseError(response);
     const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
-    if (!payload || payload.ok !== true || !payload.result || typeof payload.result !== 'object') {
+    if (!payload || payload.ok !== true || !payload.result || typeof payload.result !== 'object' || Array.isArray(payload.result)) {
       throw new ClickUpAttachmentUploadError('protocol', 'The ClickUp attachment endpoint returned an invalid result.', response.status);
     }
-    return payload.result;
+    return {
+      ...(payload.result as Record<string, unknown>),
+      provider: 'clickup',
+      workspaceId: args.workspaceId,
+      taskId: args.taskId,
+      artifactId: args.artifactId,
+    };
   } catch (error) {
     if (error instanceof ClickUpAttachmentUploadError) throw error;
     if (controller.signal.aborted) {

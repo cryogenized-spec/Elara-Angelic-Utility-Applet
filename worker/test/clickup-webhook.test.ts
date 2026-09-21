@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SELF, env, reset, runInDurableObject } from 'cloudflare:test';
+import { SELF, env, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, signedWrite } from './helpers';
@@ -61,50 +61,42 @@ async function internalSearch() {
   }));
 }
 
-async function webhookSnapshot() {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    return state.storage.sql.exec<{ webhook_id: string; workspace_id: string; updated_at: number }>(
-      'SELECT webhook_id, workspace_id, updated_at FROM clickup_webhooks ORDER BY workspace_id ASC',
-    ).toArray().map((row) => ({
-      webhookId: row.webhook_id,
-      workspaceId: row.workspace_id,
-      updatedAt: row.updated_at,
-    }));
-  });
+async function harnessFetch(path: string): Promise<Response> {
+  return doFetch(new Request(`https://clickup-oauth-vault${path}`));
 }
 
-async function credentialSnapshot() {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    const row = state.storage.sql.exec<{ user_id: string; updated_at: number }>(
-      'SELECT user_id, updated_at FROM clickup_oauth_credential WHERE slot = 1',
-    ).toArray()[0];
-    return row ? { userId: row.user_id, updatedAt: row.updated_at } : null;
-  });
+async function webhookSnapshot(): Promise<Array<{ webhookId: string; workspaceId: string; updatedAt: number }>> {
+  const response = await harnessFetch('/__test/clickup/webhooks');
+  expect(response.status).toBe(200);
+  return await response.json() as Array<{ webhookId: string; workspaceId: string; updatedAt: number }>;
 }
 
-async function indexSnapshot() {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    const row = state.storage.sql.exec<{
-      full_sync_complete: number;
-      next_page: number;
-      last_refresh_at: number;
-      last_provider_updated_at: number;
-    }>(
-      'SELECT full_sync_complete, next_page, last_refresh_at, last_provider_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
-      '999',
-    ).toArray()[0];
-    const indexedTasks = state.storage.sql.exec<{ count: number }>(
-      'SELECT COUNT(*) AS count FROM clickup_task_index WHERE workspace_id = ?',
-      '999',
-    ).toArray()[0]?.count ?? 0;
-    return {
-      fullSyncComplete: row?.full_sync_complete === 1,
-      nextPage: row?.next_page ?? 0,
-      lastRefreshAt: row?.last_refresh_at ?? 0,
-      lastProviderUpdatedAt: row?.last_provider_updated_at ?? 0,
-      indexedTasks,
-    };
-  });
+async function credentialSnapshot(): Promise<{ userId: string; updatedAt: number } | null> {
+  const response = await harnessFetch('/__test/clickup/credential');
+  expect(response.status).toBe(200);
+  const body = await response.json() as {
+    userId: string;
+    updatedAt: number;
+  } | null;
+  return body ? { userId: body.userId, updatedAt: body.updatedAt } : null;
+}
+
+async function indexSnapshot(): Promise<{
+  fullSyncComplete: boolean;
+  nextPage: number;
+  lastRefreshAt: number;
+  lastProviderUpdatedAt: number;
+  indexedTasks: number;
+}> {
+  const response = await harnessFetch('/__test/clickup/task-index?workspaceId=999');
+  expect(response.status).toBe(200);
+  return await response.json() as {
+    fullSyncComplete: boolean;
+    nextPage: number;
+    lastRefreshAt: number;
+    lastProviderUpdatedAt: number;
+    indexedTasks: number;
+  };
 }
 
 async function signWebhook(body: string, secret = WEBHOOK_SECRET): Promise<string> {

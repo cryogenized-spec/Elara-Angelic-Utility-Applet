@@ -626,6 +626,47 @@ export class ClickUpOAuthVault extends DurableObject {
     return json({ code: 'resource_workspace_mismatch', message }, 403);
   }
 
+  private normalizeDirectScopeFailure(response: Response): Response {
+    return response.status === 403 || response.status === 404
+      ? this.scopeDenied()
+      : response;
+  }
+
+  private workspaceMemberIds(workspaceId: string): Set<string> | null {
+    const context = this.authorizationContext();
+    const workspace = context?.workspaces.find((entry) => String(entry.id ?? '') === workspaceId);
+    if (!workspace) return null;
+    const members = Array.isArray(workspace.members) ? workspace.members : null;
+    if (!members) return new Set();
+    const ids = new Set<string>();
+    for (const member of members) {
+      const record = member && typeof member === 'object' && !Array.isArray(member)
+        ? member as Record<string, unknown>
+        : undefined;
+      const directId = safeProviderId(record?.id);
+      const nestedUser = record?.user && typeof record.user === 'object' && !Array.isArray(record.user)
+        ? record.user as Record<string, unknown>
+        : undefined;
+      const nestedId = safeProviderId(nestedUser?.id);
+      if (directId) ids.add(directId);
+      if (nestedId) ids.add(nestedId);
+    }
+    return ids;
+  }
+
+  private validateWorkspaceUsers(workspaceId: string, userIds: readonly string[] | undefined): Response | null {
+    const requested = [...new Set((userIds ?? []).filter(Boolean))];
+    if (!requested.length) return null;
+    const members = this.workspaceMemberIds(workspaceId);
+    if (!members) {
+      return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
+    }
+    if (requested.some((userId) => !members.has(userId))) {
+      return this.scopeDenied('One or more requested ClickUp users are outside the admitted Workspace.');
+    }
+    return null;
+  }
+
   private async verifySpaceScope(
     workspaceId: string,
     spaceId: string,
@@ -670,7 +711,7 @@ export class ClickUpOAuthVault extends DurableObject {
       (token) => getClickUpTask(token, taskId, includeSubtasks),
       expectedRevision,
     );
-    if (!result.ok) return { ok: false, response: result.response };
+    if (!result.ok) return { ok: false, response: this.normalizeDirectScopeFailure(result.response) };
     const task = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
     const teamId = safeProviderId(task.team_id ?? task.teamId);
     if (teamId) {
@@ -700,7 +741,7 @@ export class ClickUpOAuthVault extends DurableObject {
       (token) => getClickUpFolder(token, folderId, includeSubfolders),
       expectedRevision,
     );
-    if (!result.ok) return { ok: false, response: result.response };
+    if (!result.ok) return { ok: false, response: this.normalizeDirectScopeFailure(result.response) };
     const folder = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
     const space = folder.space && typeof folder.space === 'object' && !Array.isArray(folder.space)
       ? folder.space as Record<string, unknown>
@@ -720,7 +761,7 @@ export class ClickUpOAuthVault extends DurableObject {
       return { ok: false, response: json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403) };
     }
     const result = await this.providerData((token) => getClickUpList(token, listId), expectedRevision);
-    if (!result.ok) return { ok: false, response: result.response };
+    if (!result.ok) return { ok: false, response: this.normalizeDirectScopeFailure(result.response) };
     const list = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
     const space = list.space && typeof list.space === 'object' && !Array.isArray(list.space)
       ? list.space as Record<string, unknown>
@@ -1036,6 +1077,8 @@ export class ClickUpOAuthVault extends DurableObject {
           const parentScope = await this.verifyTaskScope(args.workspaceId, args.parentTaskId, false, expectedRevision);
           if (!parentScope.ok) return parentScope.response;
         }
+        const invalidAssignees = this.validateWorkspaceUsers(args.workspaceId, args.assigneeIds);
+        if (invalidAssignees) return invalidAssignees;
         const result = await this.providerData((token) => createClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
         markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
@@ -1049,6 +1092,8 @@ export class ClickUpOAuthVault extends DurableObject {
           const parentScope = await this.verifyTaskScope(args.workspaceId, args.parentTaskId, false, expectedRevision);
           if (!parentScope.ok) return parentScope.response;
         }
+        const invalidAssignees = this.validateWorkspaceUsers(args.workspaceId, args.assignees?.add);
+        if (invalidAssignees) return invalidAssignees;
         const result = await this.providerData((token) => updateClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
         removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, args.taskId);
@@ -1059,12 +1104,16 @@ export class ClickUpOAuthVault extends DurableObject {
         const args = validateClickUpToolArguments('clickup.createTaskComment', command.arguments);
         const taskScope = await this.verifyTaskScope(args.workspaceId, args.taskId, false, expectedRevision);
         if (!taskScope.ok) return taskScope.response;
+        const invalidMentions = this.validateWorkspaceUsers(args.workspaceId, args.mentionUserIds);
+        if (invalidMentions) return invalidMentions;
         return this.runProvider((token) => createClickUpTaskComment(token, args), expectedRevision);
       }
       case 'replyToComment': {
         const args = validateClickUpToolArguments('clickup.replyToComment', command.arguments);
         const commentScope = await this.verifyCommentBelongsToTask(args.workspaceId, args.taskId, args.commentId, expectedRevision);
         if (!commentScope.ok) return commentScope.response;
+        const invalidMentions = this.validateWorkspaceUsers(args.workspaceId, args.mentionUserIds);
+        if (invalidMentions) return invalidMentions;
         return this.runProvider((token) => replyToClickUpComment(token, args), expectedRevision);
       }
       case 'setCustomField':

@@ -145,14 +145,14 @@ describe('pairing store', () => {
       newValue: window.localStorage.getItem('elara.autonomy.pairing.v1'),
     }));
 
-    const originalGetItem = Storage.prototype.getItem;
+    const originalGetItem = window.localStorage.getItem.bind(window.localStorage);
     let pairingReads = 0;
     const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
       if (this === window.localStorage && key === 'elara.autonomy.pairing.v1') {
         pairingReads += 1;
         if (pairingReads >= 3) return null;
       }
-      return originalGetItem.call(this, key);
+      return originalGetItem(key);
     });
 
     try {

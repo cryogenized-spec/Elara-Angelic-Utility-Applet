@@ -47,5 +47,10 @@ export default defineConfig({
   ],
   test: {
     include: ['worker/test/**/*.test.ts'],
+    // Worker suites call cloudflare:test reset() and several replace the shared
+    // provider fetch boundary. Run files sequentially so one suite cannot
+    // delete Durable Objects or restore fetch while another workerd request is
+    // still live.
+    fileParallelism: false,
   },
 });

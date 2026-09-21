@@ -44,6 +44,32 @@ const ADMITTED: ClickUpAdmittedGrant = {
   authorityBinding: 'https://worker.example#test-installation',
 };
 
+type RpcRequestBody = {
+  readonly id: string;
+  readonly method: string;
+  readonly params: {
+    readonly _meta: Record<string, unknown>;
+    readonly [key: string]: unknown;
+  };
+};
+
+function requestBody(init?: RequestInit): RpcRequestBody {
+  const parsed = JSON.parse(String(init?.body)) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Invalid test JSON-RPC request.');
+  const record = parsed as Record<string, unknown>;
+  const params = record.params;
+  if (typeof record.id !== 'string' || typeof record.method !== 'string' || !params || typeof params !== 'object' || Array.isArray(params)) {
+    throw new Error('Invalid test JSON-RPC request shape.');
+  }
+  const meta = (params as Record<string, unknown>)._meta;
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) throw new Error('Missing test JSON-RPC metadata.');
+  return {
+    id: record.id,
+    method: record.method,
+    params: { ...(params as Record<string, unknown>), _meta: meta as Record<string, unknown> },
+  };
+}
+
 function rpc(id: string, result: Record<string, unknown>): Response {
   return new Response(JSON.stringify({ jsonrpc: '2.0', id, result }), {
     status: 200,
@@ -84,14 +110,15 @@ describe('ClickUp MCP browser client', () => {
       const url = input instanceof Request ? input.url : String(input);
       calls.push({ url, init: init ?? {} });
       const headers = new Headers(init?.headers);
-      const body = JSON.parse(String(init?.body)) as Record<string, any>;
+      const body = requestBody(init);
       expect(url).toBe('https://worker.example/mcp/clickup');
       expect(headers.get('Authorization')).toBe('Bearer installation-token');
       expect(headers.get('Accept')).toBe('application/json, text/event-stream');
       expect(headers.get('MCP-Protocol-Version')).toBe(CLICKUP_MCP_PROTOCOL_VERSION);
-      expect(body.params._meta[MCP_META_PROTOCOL_VERSION]).toBe(CLICKUP_MCP_PROTOCOL_VERSION);
-      expect(body.params._meta[MCP_META_CLIENT_CAPABILITIES]).toEqual({});
-      expect(body.params._meta[MCP_META_CLIENT_INFO]).toEqual({ name: 'elara-angelic', version: '0.1.0' });
+      const meta = body.params._meta;
+      expect(meta[MCP_META_PROTOCOL_VERSION]).toBe(CLICKUP_MCP_PROTOCOL_VERSION);
+      expect(meta[MCP_META_CLIENT_CAPABILITIES]).toEqual({});
+      expect(meta[MCP_META_CLIENT_INFO]).toEqual({ name: 'elara-angelic', version: '0.1.0' });
 
       if (body.method === 'server/discover') {
         expect(headers.get('Mcp-Method')).toBe('server/discover');
@@ -131,7 +158,7 @@ describe('ClickUp MCP browser client', () => {
   it('supports Streamable HTTP SSE tool results after validating tools/list on the same Worker', async () => {
     const methods: string[] = [];
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, any>;
+      const body = requestBody(init);
       const headers = new Headers(init?.headers);
       methods.push(body.method);
 
@@ -174,7 +201,7 @@ describe('ClickUp MCP browser client', () => {
 
   it('rejects tools/list schema drift from a stale or compromised Worker', async () => {
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, any>;
+      const body = requestBody(init);
       if (body.method === 'server/discover') return discover(body.id);
       const drifted = clickUpMcpToolDefinitions.map((tool, index) => index === 0
         ? { ...tool, inputSchema: { ...tool.inputSchema, additionalProperties: true } }
@@ -188,7 +215,7 @@ describe('ClickUp MCP browser client', () => {
   it('blocks tools/call when the Worker catalog drifts after protocol discovery', async () => {
     const methods: string[] = [];
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, any>;
+      const body = requestBody(init);
       methods.push(body.method);
       if (body.method === 'server/discover') return discover(body.id);
       if (body.method === 'tools/list') {
@@ -225,7 +252,7 @@ describe('ClickUp MCP browser client', () => {
 
   it('surfaces complete MCP tool errors without losing provider error identity', async () => {
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-      const body = JSON.parse(String(init?.body)) as Record<string, any>;
+      const body = requestBody(init);
       if (body.method === 'server/discover') return discover(body.id);
       if (body.method === 'tools/list') return toolsList(body.id);
       return rpc(body.id, {

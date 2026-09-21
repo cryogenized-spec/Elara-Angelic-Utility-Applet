@@ -70,7 +70,7 @@ function taskKey(task: Pick<BoardTask, 'listId' | 'id'>): string {
   return `${task.listId}/${task.id}`;
 }
 
-function normalizeTaskLocal(local: TaskLocalMetadata | undefined, fallbackIso: string): TaskLocalMetadata {
+function normalizeTaskLocal(local: TaskLocalMetadata | undefined, fallbackIso?: string): TaskLocalMetadata {
   return {
     createdAt: local?.createdAt,
     firstSeenAt: local?.firstSeenAt ?? fallbackIso,
@@ -83,20 +83,22 @@ function normalizeTaskLocal(local: TaskLocalMetadata | undefined, fallbackIso: s
 }
 
 function normalizeBoard(board: Board): Board {
-  const fallbackIso = new Date(Number.isFinite(board.syncedAt) ? board.syncedAt : Date.now()).toISOString();
   return {
     ...board,
     labels: Array.isArray(board.labels) ? board.labels : [],
-    tasks: board.tasks.map((task) => ({ ...task, local: normalizeTaskLocal(task.local, fallbackIso) })),
+    tasks: board.tasks.map((task) => ({ ...task, local: normalizeTaskLocal(task.local) })),
   };
 }
 
 function mergeRemoteTaskMetadata(remote: BoardTask[], previous: BoardTask[], firstSeenAt: string): BoardTask[] {
-  const localByTask = new Map(previous.map((task) => [taskKey(task), task.local]));
-  return remote.map((task) => ({
-    ...task,
-    local: normalizeTaskLocal(localByTask.get(taskKey(task)), firstSeenAt),
-  }));
+  const previousByTask = new Map(previous.map((task) => [taskKey(task), task]));
+  return remote.map((task) => {
+    const prior = previousByTask.get(taskKey(task));
+    return {
+      ...task,
+      local: normalizeTaskLocal(prior?.local, prior ? undefined : firstSeenAt),
+    };
+  });
 }
 let state: BoardState = { board: null, busy: false, error: null, phase: "idle", nextRetryAt: null, failures: 0 };
 const listeners = new Set<() => void>();
@@ -393,8 +395,7 @@ export async function saveTaskLocalMetadata(
       index = tasks.length - 1;
     }
     const task = tasks[index]!;
-    const fallbackIso = new Date(latest.syncedAt).toISOString();
-    const local = normalizeTaskLocal(task.local, fallbackIso);
+    const local = normalizeTaskLocal(task.local, patch.createdAt ?? (patch.providerTask ? new Date().toISOString() : undefined));
     const labelIds = patch.labelIds ? [...new Set(patch.labelIds)] : local.labelIds;
     const knownLabels = new Set(labels.map((label) => label.id));
     if (labelIds.some((id) => !knownLabels.has(id))) throw new Error('One or more task labels no longer exist.');

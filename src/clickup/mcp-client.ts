@@ -16,6 +16,7 @@ import {
   clickupToolNameSchema,
   validateClickUpToolArguments,
   type ClickUpMcpToolDefinition,
+  type ClickUpToolJsonSchema,
   type ClickUpToolName,
 } from './tool-schema';
 
@@ -264,6 +265,26 @@ async function ensureDiscovery(session: McpSession, signal?: AbortSignal): Promi
   discoveryKey = session.cacheKey;
 }
 
+function remoteToolSchema(value: unknown): ClickUpToolJsonSchema {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new ClickUpMcpError('protocol', 'ClickUp MCP tools/list returned an invalid input schema.');
+  }
+  const schema = value as Record<string, unknown>;
+  const properties = schema.properties;
+  const required = schema.required;
+  if (
+    schema.type !== 'object'
+    || !properties
+    || typeof properties !== 'object'
+    || Array.isArray(properties)
+    || typeof schema.additionalProperties !== 'boolean'
+    || (required !== undefined && (!Array.isArray(required) || !required.every((entry) => typeof entry === 'string')))
+  ) {
+    throw new ClickUpMcpError('protocol', 'ClickUp MCP tools/list returned a non-portable tool schema.');
+  }
+  return schema as ClickUpToolJsonSchema;
+}
+
 function parseToolDefinitions(value: unknown): readonly ClickUpMcpToolDefinition[] {
   if (!Array.isArray(value)) throw new ClickUpMcpError('protocol', 'ClickUp MCP tools/list returned an invalid tool collection.');
   const tools: ClickUpMcpToolDefinition[] = [];
@@ -273,13 +294,13 @@ function parseToolDefinitions(value: unknown): readonly ClickUpMcpToolDefinition
     }
     const record = candidate as Record<string, unknown>;
     const name = clickupToolNameSchema.safeParse(record.name);
-    if (!name.success || typeof record.description !== 'string' || !record.inputSchema || typeof record.inputSchema !== 'object') {
+    if (!name.success || typeof record.description !== 'string') {
       throw new ClickUpMcpError('protocol', 'ClickUp MCP tools/list returned an unexpected tool definition.');
     }
     tools.push({
       name: name.data,
       description: record.description,
-      inputSchema: record.inputSchema as Readonly<Record<string, unknown>>,
+      inputSchema: remoteToolSchema(record.inputSchema),
     });
   }
   const returnedNames = new Set(tools.map((tool) => tool.name));

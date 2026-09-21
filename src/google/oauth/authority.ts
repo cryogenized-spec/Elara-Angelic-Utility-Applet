@@ -6,6 +6,7 @@ import { getGoogleScope } from './scope-registry';
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
 import { requestGoogleAuthorizationCode } from './code-flow';
 import { createGoogleDrivePickerAuthority } from '../picker/service';
+import { clearGooglePickerAdmissions } from '../../persistence/google-picker-admissions';
 import {
   authorizationStateFor,
   computeEffectiveCapabilities,
@@ -172,6 +173,24 @@ function clearStored(): void {
   stored = emptyStored();
   legacyGrantedCapabilities = [];
   if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+}
+
+function authorizationStorageRevision(): string {
+  if (typeof localStorage === 'undefined') return stored.updatedAt;
+  try {
+    return localStorage.getItem(STORAGE_KEY) ?? '';
+  } catch {
+    return stored.updatedAt;
+  }
+}
+
+function installGoogleAuthorizationCrossTabInvalidation(): void {
+  if (typeof window === 'undefined') return;
+  window.addEventListener('storage', (event) => {
+    if (event.key !== STORAGE_KEY) return;
+    session = null;
+    loadStored();
+  });
 }
 
 function ensureClientId(): string {
@@ -369,6 +388,9 @@ async function acquireBrowserTokenForCapabilities(
     const returnedScopes = parseProviderScopes(response.scope);
     const requestedProviderScopes = requestedCapabilities.map((capability) => getGoogleScope(capability).scope).filter(Boolean);
     const fetched = await fetchGoogleAccount(response.access_token);
+    if (prompt === '' && !fetched) {
+      throw new Error('Google account identity could not be verified. Please retry authorization.');
+    }
     let commitState = current;
     if (prompt === 'none') {
       if (!current.account?.email) {
@@ -383,12 +405,20 @@ async function acquireBrowserTokenForCapabilities(
       }
       commitState = latest;
     }
+    const explicitIdentityReset = prompt === ''
+      && Boolean(commitState.account?.email)
+      && Boolean(fetched)
+      && normalizedAccountEmail(fetched?.email) !== normalizedAccountEmail(commitState.account?.email);
     const grantedProviderScopes = returnedScopes.length
       ? returnedScopes
-      : [...new Set([...commitState.grantedProviderScopes, ...requestedProviderScopes])];
+      : explicitIdentityReset
+        ? [...new Set(requestedProviderScopes)]
+        : [...new Set([...commitState.grantedProviderScopes, ...requestedProviderScopes])];
     const enabledCapabilities = prompt === 'none'
       ? [...commitState.enabledCapabilities]
-      : uniqueCapabilities([...commitState.enabledCapabilities, ...requestedCapabilities]);
+      : explicitIdentityReset
+        ? [...requestedCapabilities]
+        : uniqueCapabilities([...commitState.enabledCapabilities, ...requestedCapabilities]);
     let nextAccount = commitState.account;
     if (fetched) nextAccount = fetched;
     else if (prompt === '') nextAccount = undefined;
@@ -404,6 +434,7 @@ async function acquireBrowserTokenForCapabilities(
     if (nextAccount) stored.account = nextAccount;
     else delete (stored as { account?: unknown }).account;
     saveStored();
+    if (explicitIdentityReset) await clearGooglePickerAdmissions().catch(() => undefined);
   } catch (error) {
     const raw = error instanceof Error ? error.message : undefined;
     if (prompt === 'none') {
@@ -441,6 +472,11 @@ async function acquireDurableTokenForCapabilities(
   }, true);
   const providerScopes = parseProviderScopes(response.scopes.join(' '));
   const codeScopes = parseProviderScopes(code.scope);
+  const accountSwitched = Boolean(
+    current.account?.email
+    && response.account?.email
+    && normalizedAccountEmail(current.account.email) !== normalizedAccountEmail(response.account.email)
+  );
   session = {
     accessToken: response.accessToken,
     expiresAt: Date.now() + Math.max(60, response.expiresIn) * 1000,
@@ -448,12 +484,15 @@ async function acquireDurableTokenForCapabilities(
     vaultUpdatedAt: durableRevision(response.updatedAt),
   };
   legacyGrantedCapabilities = [];
-  stored.enabledCapabilities = uniqueCapabilities([...current.enabledCapabilities, ...requestedCapabilities]);
+  stored.enabledCapabilities = accountSwitched
+    ? [...requestedCapabilities]
+    : uniqueCapabilities([...current.enabledCapabilities, ...requestedCapabilities]);
   stored.grantedProviderScopes = providerScopes.length ? providerScopes : codeScopes;
   stored.needsReauthorization = false;
   if (response.account?.email) stored.account = response.account;
   else delete (stored as { account?: unknown }).account;
   saveStored();
+  if (accountSwitched) await clearGooglePickerAdmissions().catch(() => undefined);
 }
 
 async function acquireDurableToken(capability: GoogleCapabilityKey, pairing: AutonomyPairing): Promise<void> {
@@ -527,6 +566,7 @@ async function authorizedFetch(
 ): Promise<Response> {
   const target = assertGoogleApiTarget(input);
   const token = await ensureToken(capability, false);
+  const admittedRevision = authorizationStorageRevision();
   const request = new Request(target, init);
   const body = request.method === 'GET' || request.method === 'HEAD' ? undefined : await request.arrayBuffer();
   const requestOptions = (accessToken: string): RequestInit => {
@@ -535,8 +575,15 @@ async function authorizedFetch(
     headers.set('Accept', headers.get('Accept') ?? 'application/json');
     return { method: request.method, headers, body, signal: request.signal };
   };
+  const assertAdmissionStillCurrent = (accessToken: string, revision: string) => {
+    if (!session || session.accessToken !== accessToken || authorizationStorageRevision() !== revision) {
+      session = null;
+      throw new GoogleAuthorizationStateChangedError('Google authorization changed before the provider request. Retry after the current account state is refreshed.');
+    }
+  };
 
   await beforeProviderFetch?.();
+  assertAdmissionStillCurrent(token, admittedRevision);
   let response = await fetch(new Request(target, requestOptions(token)));
   if (response.status !== 401) return response;
 
@@ -549,8 +596,10 @@ async function authorizedFetch(
   }
 
   const refreshedToken = currentAccessToken();
+  const refreshedRevision = authorizationStorageRevision();
   if (!refreshedToken) throw new Error('Google authorization did not return a refreshed access token.');
   await beforeProviderFetch?.();
+  assertAdmissionStillCurrent(refreshedToken, refreshedRevision);
   response = await fetch(new Request(target, requestOptions(refreshedToken)));
   if (response.status === 401) {
     markReauthorizationRequired();
@@ -651,6 +700,8 @@ export const googleOAuthAuthority: GoogleOAuthAuthority = {
     clearStored();
   },
 };
+
+installGoogleAuthorizationCrossTabInvalidation();
 
 export function normalizeGoogleOAuthError(input: { error?: string; errorDescription?: string; status?: number }): Error {
   const result = classifyGoogleOAuthFailure(input);

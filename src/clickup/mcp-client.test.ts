@@ -14,12 +14,13 @@ import {
 } from './mcp-client';
 import {
   CLICKUP_GRANT_REVISION_HEADER,
+  CLICKUP_TOOL_CATALOG_HEADER,
   CLICKUP_MCP_PROTOCOL_VERSION,
   MCP_META_CLIENT_CAPABILITIES,
   MCP_META_CLIENT_INFO,
   MCP_META_PROTOCOL_VERSION,
 } from './mcp-protocol';
-import { clickUpMcpToolDefinitions } from './tool-schema';
+import { clickUpMcpToolDefinitions, clickUpToolCatalogFingerprint } from './tool-schema';
 
 const pairingMock = vi.mocked(loadPairing);
 const tokenMock = vi.mocked(resolvePairingToken);
@@ -169,6 +170,7 @@ describe('ClickUp MCP browser client', () => {
       expect(headers.get('Mcp-Method')).toBe('tools/call');
       expect(headers.get('Mcp-Name')).toBe('clickup.getTask');
       expect(headers.get(CLICKUP_GRANT_REVISION_HEADER)).toBe('123');
+      expect(headers.get(CLICKUP_TOOL_CATALOG_HEADER)).toBe(await clickUpToolCatalogFingerprint());
       const frame = JSON.stringify({
         jsonrpc: '2.0',
         id: body.id,

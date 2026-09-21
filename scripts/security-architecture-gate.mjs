@@ -191,6 +191,7 @@ const reviewedPairingTokenConsumers = new Set([
   'src/google/oauth/authority.ts',
   'src/clickup/oauth/authority.ts',
   'src/clickup/mcp-client.ts',
+  'src/clickup/attachment-upload.ts',
 ]);
 const actualPairingTokenConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -206,9 +207,12 @@ const autonomyClient = read('src/autonomy/cloud/client.ts');
 const oauthAuthority = read('src/google/oauth/authority.ts');
 const clickUpOAuthAuthority = read('src/clickup/oauth/authority.ts');
 const clickUpMcpClient = read('src/clickup/mcp-client.ts');
+const clickUpAttachmentUpload = read('src/clickup/attachment-upload.ts');
 const clickUpOAuthVault = read('worker/src/clickup/oauth-vault.ts');
 const clickUpProvider = read('worker/src/clickup/provider.ts');
 const clickUpMcpRoute = read('worker/src/clickup/mcp-route.ts');
+const clickUpAttachmentRoute = read('worker/src/clickup/attachment-route.ts');
+const clickUpTaskIndex = read('worker/src/clickup/task-index.ts');
 if (!pairing.includes("type StoredAutonomyPairing = Omit<AutonomyPairing, 'token'>")) fail('autonomy pairing must exclude token from its durable metadata type');
 if (!pairing.includes('saveAutonomyInstallationToken')) fail('autonomy pairing must route the installation credential through its protected store');
 if (/writeJson\(PAIRING_KEY\s*,\s*\{\s*\.\.\.pairing\s*\}/.test(pairing)) fail('autonomy pairing serializes the complete pairing object, including its credential');
@@ -222,6 +226,7 @@ for (const [path, source] of [
   ['src/google/oauth/authority.ts', oauthAuthority],
   ['src/clickup/oauth/authority.ts', clickUpOAuthAuthority],
   ['src/clickup/mcp-client.ts', clickUpMcpClient],
+  ['src/clickup/attachment-upload.ts', clickUpAttachmentUpload],
 ]) {
   if (/\bconsole\.(?:log|info|warn|error|debug)\s*\(/.test(source)) fail(`${path} must not log from the installation-credential-bearing boundary`);
 }
@@ -248,6 +253,7 @@ const reviewedRawFetchAuthorities = new Set([
   'src/google/oauth/authority.ts',
   'src/clickup/oauth/authority.ts',
   'src/clickup/mcp-client.ts',
+  'src/clickup/attachment-upload.ts',
   'src/ui/noto-emoji.ts',
 ]);
 const reviewedGlobalFetchReferences = new Set([
@@ -324,6 +330,35 @@ for (const marker of [
   if (!clickUpMcpClient.includes(marker)) fail(`ClickUp browser MCP boundary is missing: ${marker}`);
 }
 for (const marker of [
+  "CLICKUP_ATTACHMENT_PATH = '/clickup/attachment'",
+  'artifactRepository.get',
+  'ARTIFACT_LIMITS.maxAttachmentBytes',
+  'resolvePairingToken',
+  "Authorization: `Bearer ${token}`",
+  'FormData',
+]) {
+  if (!clickUpAttachmentUpload.includes(marker)) fail(`ClickUp browser attachment boundary is missing: ${marker}`);
+}
+for (const marker of [
+  "ATTACHMENT_PATH = '/clickup/attachment'",
+  'verifyBearerToken',
+  'ARTIFACT_LIMITS.maxAttachmentBytes',
+  "'/internal/clickup/attachment'",
+  'internalWakeMarker',
+]) {
+  if (!clickUpAttachmentRoute.includes(marker)) fail(`ClickUp Worker attachment boundary is missing: ${marker}`);
+}
+for (const marker of [
+  'clickup_task_index',
+  'clickup_task_index_state',
+  'searchClickUpTaskIndex',
+  'upsertClickUpTaskIndexPage',
+  'MAX_SEARCH_CANDIDATES',
+]) {
+  if (!clickUpTaskIndex.includes(marker)) fail(`ClickUp task-index boundary is missing: ${marker}`);
+}
+
+for (const marker of [
   "method === 'server/discover'",
   "method === 'tools/list'",
   "method === 'tools/call'",
@@ -343,6 +378,9 @@ for (const marker of [
   'clickup_oauth_states',
   'clickup_oauth_nonces',
   "'/internal/clickup/command'",
+  "'/internal/clickup/attachment'",
+  'uploadClickUpTaskAttachment',
+  'initializeClickUpTaskIndex',
   'internalWakeMarker',
   'validateClickUpToolArguments',
 ]) {

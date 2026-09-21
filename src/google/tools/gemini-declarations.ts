@@ -4,7 +4,7 @@ import { MAX_MEDIA_QUERIES_PER_CALL } from '../../domain/media';
 import { DRIVE_LIMITS } from '../drive/limits';
 import { clickUpToolJsonSchema, clickupToolNameSchema } from '../../clickup/tool-schema';
 
-export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly name: string; readonly description: string; readonly parameters: Readonly<Record<string, unknown>>; }
+export interface GeminiFunctionDeclaration { readonly type: 'function'; readonly name: string; readonly description: string; readonly parameters: { readonly type: 'object'; readonly properties: Readonly<Record<string, unknown>>; readonly additionalProperties: boolean; readonly required?: readonly string[]; }; }
 
 const stringProperty = (description: string) => ({ type: 'string', description });
 const objectProperty = (description: string) => ({ type: 'object', description });

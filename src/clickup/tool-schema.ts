@@ -81,11 +81,13 @@ const searchTasksSchema = z.object({
 }).strict();
 
 const getTaskSchema = z.object({
+  workspaceId: decimalIdSchema,
   taskId: taskIdSchema,
   includeSubtasks: z.boolean().optional(),
 }).strict();
 
 const getTaskContextSchema = z.object({
+  workspaceId: decimalIdSchema,
   taskId: taskIdSchema,
   includeSubtasks: z.boolean().optional(),
   includeAttachments: z.boolean().optional(),
@@ -94,6 +96,7 @@ const getTaskContextSchema = z.object({
 }).strict();
 
 const getTaskCommentsSchema = z.object({
+  workspaceId: decimalIdSchema,
   taskId: taskIdSchema,
   cursor: z.string().trim().min(1).max(2048).optional(),
   limit: z.number().int().min(1).max(50).optional(),
@@ -117,6 +120,7 @@ const listHierarchySchema = z.object({
 });
 
 const createTaskSchema = z.object({
+  workspaceId: decimalIdSchema,
   listId: decimalIdSchema,
   name: z.string().trim().min(1).max(1000),
   markdownContent: markdownSchema.optional(),
@@ -133,6 +137,7 @@ const createTaskSchema = z.object({
 }).strict();
 
 const updateTaskSchema = z.object({
+  workspaceId: decimalIdSchema,
   taskId: taskIdSchema,
   name: z.string().trim().min(1).max(1000).optional(),
   markdownContent: markdownSchema.optional(),
@@ -151,6 +156,7 @@ const updateTaskSchema = z.object({
 });
 
 const taskCommentSchema = z.object({
+  workspaceId: decimalIdSchema,
   taskId: taskIdSchema,
   text: z.string().trim().min(1).max(20_000),
   mentionUserIds: z.array(userIdSchema).max(20).optional(),
@@ -158,6 +164,8 @@ const taskCommentSchema = z.object({
 }).strict();
 
 const replyCommentSchema = z.object({
+  workspaceId: decimalIdSchema,
+  taskId: taskIdSchema,
   commentId: commentIdSchema,
   text: z.string().trim().min(1).max(20_000),
   mentionUserIds: z.array(userIdSchema).max(20).optional(),
@@ -165,6 +173,7 @@ const replyCommentSchema = z.object({
 }).strict();
 
 const setCustomFieldSchema = z.object({
+  workspaceId: decimalIdSchema,
   taskId: taskIdSchema,
   fieldId: fieldIdSchema,
   mode: z.enum(['set', 'clear']).optional(),
@@ -181,6 +190,7 @@ const setCustomFieldSchema = z.object({
 });
 
 const attachArtifactSchema = z.object({
+  workspaceId: decimalIdSchema,
   taskId: taskIdSchema,
   artifactId: artifactIdSchema,
   filename: z.string().trim().min(1).max(255).optional(),
@@ -194,17 +204,17 @@ export const clickupToolCatalog = {
   },
   'clickup.getTask': {
     risk: 'read',
-    description: 'Read one ClickUp task by provider task id and return a bounded normalized task projection.',
+    description: 'Read one ClickUp task by provider task id inside one authorized Workspace and return a bounded normalized task projection.'
     inputSchema: getTaskSchema,
   },
   'clickup.getTaskContext': {
     risk: 'read',
-    description: 'Read one ClickUp task together with bounded comments and relevant metadata so Elara can inspect a task efficiently.',
+    description: 'Read one ClickUp task inside one authorized Workspace together with bounded comments and relevant metadata so Elara can inspect a task efficiently.'
     inputSchema: getTaskContextSchema,
   },
   'clickup.getTaskComments': {
     risk: 'read',
-    description: 'Read a bounded page of ClickUp task comments using an opaque Elara cursor.',
+    description: 'Read a bounded page of comments from a task proven to belong to one authorized ClickUp Workspace, using an opaque Elara cursor.'
     inputSchema: getTaskCommentsSchema,
   },
   'clickup.resolveAssignees': {
@@ -219,32 +229,32 @@ export const clickupToolCatalog = {
   },
   'clickup.createTask': {
     risk: 'write',
-    description: 'Create a ClickUp task in a specific List using a bounded high-level task payload.',
+    description: 'Create a ClickUp task in a List proven to belong to one authorized Workspace using a bounded high-level task payload.'
     inputSchema: createTaskSchema,
   },
   'clickup.updateTask': {
     risk: 'write',
-    description: 'Update selected fields on a ClickUp task, including reversible archive or unarchive. Permanent deletion is not exposed.',
+    description: 'Update selected fields on a task proven to belong to one authorized ClickUp Workspace, including reversible archive or unarchive. Permanent deletion is not exposed.'
     inputSchema: updateTaskSchema,
   },
   'clickup.createTaskComment': {
     risk: 'write',
-    description: 'Post a ClickUp task comment. Optional resolved user ids become genuine ClickUp @mentions through structured comment segments.',
+    description: 'Post a comment to a task proven to belong to one authorized ClickUp Workspace. Optional resolved user ids become genuine ClickUp @mentions through structured comment segments.'
     inputSchema: taskCommentSchema,
   },
   'clickup.replyToComment': {
     risk: 'write',
-    description: 'Reply to a ClickUp task comment thread, with optional genuine ClickUp @mentions.',
+    description: 'Reply to a comment thread after proving both the parent task Workspace and comment-to-task association, with optional genuine ClickUp @mentions.'
     inputSchema: replyCommentSchema,
   },
   'clickup.setCustomField': {
     risk: 'write',
-    description: 'Set or clear one ClickUp task Custom Field through the field-specific REST authority.',
+    description: 'Set or clear one Custom Field on a task proven to belong to one authorized ClickUp Workspace through the field-specific REST authority.'
     inputSchema: setCustomFieldSchema,
   },
   'clickup.attachArtifact': {
     risk: 'write',
-    description: 'Attach one Elara artifact to a ClickUp task. The browser supplies only an artifact reference; provider credentials remain server-side.',
+    description: 'Attach one Elara artifact to a task proven to belong to one authorized ClickUp Workspace. The browser supplies only an artifact reference; provider credentials remain server-side.'
     inputSchema: attachArtifactSchema,
   },
 } as const satisfies Record<ClickUpToolName, {

@@ -113,11 +113,11 @@ const webhookPayloadSchema = z.object({
 const providerCommandSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('getAuthorizationContext') }).strict(),
   z.object({ operation: z.literal('listSpaces'), workspaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
-  z.object({ operation: z.literal('listFolders'), spaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
-  z.object({ operation: z.literal('getFolder'), folderId: z.string().trim().min(1).max(100), includeSubfolders: z.boolean().optional() }).strict(),
-  z.object({ operation: z.literal('listFolderLists'), folderId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
-  z.object({ operation: z.literal('listFolderlessLists'), spaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
-  z.object({ operation: z.literal('getList'), listId: z.string().trim().min(1).max(100) }).strict(),
+  z.object({ operation: z.literal('listFolders'), workspaceId: z.string().trim().min(1).max(100), spaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
+  z.object({ operation: z.literal('getFolder'), workspaceId: z.string().trim().min(1).max(100), folderId: z.string().trim().min(1).max(100), includeSubfolders: z.boolean().optional() }).strict(),
+  z.object({ operation: z.literal('listFolderLists'), workspaceId: z.string().trim().min(1).max(100), folderId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
+  z.object({ operation: z.literal('listFolderlessLists'), workspaceId: z.string().trim().min(1).max(100), spaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
+  z.object({ operation: z.literal('getList'), workspaceId: z.string().trim().min(1).max(100), listId: z.string().trim().min(1).max(100) }).strict(),
   z.object({
     operation: z.literal('listWorkspaceTasks'),
     workspaceId: z.string().trim().min(1).max(100),
@@ -135,6 +135,7 @@ const providerCommandSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('getTask'), arguments: z.unknown() }).strict(),
   z.object({
     operation: z.literal('getTaskComments'),
+    workspaceId: z.string().trim().min(1).max(100),
     taskId: z.string().trim().min(1).max(500),
     start: z.number().int().min(0).optional(),
     startId: z.string().trim().min(1).max(100).optional(),
@@ -143,19 +144,21 @@ const providerCommandSchema = z.discriminatedUnion('operation', [
       context.addIssue({ code: 'custom', message: 'Comment pagination requires start and startId together.' });
     }
   }),
-  z.object({ operation: z.literal('getListCustomFields'), listId: z.string().trim().min(1).max(100) }).strict(),
+  z.object({ operation: z.literal('getListCustomFields'), workspaceId: z.string().trim().min(1).max(100), listId: z.string().trim().min(1).max(100) }).strict(),
   z.object({ operation: z.literal('createTask'), arguments: z.unknown() }).strict(),
   z.object({ operation: z.literal('updateTask'), arguments: z.unknown() }).strict(),
   z.object({ operation: z.literal('createTaskComment'), arguments: z.unknown() }).strict(),
   z.object({ operation: z.literal('replyToComment'), arguments: z.unknown() }).strict(),
   z.object({
     operation: z.literal('setCustomField'),
+    workspaceId: z.string().trim().min(1).max(100),
     taskId: z.string().trim().min(1).max(500),
     fieldId: z.string().trim().min(1).max(500),
     value: z.unknown(),
   }).strict(),
   z.object({
     operation: z.literal('clearCustomField'),
+    workspaceId: z.string().trim().min(1).max(100),
     taskId: z.string().trim().min(1).max(500),
     fieldId: z.string().trim().min(1).max(500),
   }).strict(),
@@ -616,6 +619,154 @@ export class ClickUpOAuthVault extends DurableObject {
   ): Promise<Response> {
     const result = await this.providerData(run, expectedRevision);
     return result.ok ? json({ ok: true, result: result.data }) : result.response;
+  }
+
+  private scopeDenied(message = 'The requested ClickUp resource is outside the admitted Workspace.'): Response {
+    return json({ code: 'resource_workspace_mismatch', message }, 403);
+  }
+
+  private async verifySpaceScope(
+    workspaceId: string,
+    spaceId: string,
+    expectedRevision: number,
+  ): Promise<{ ok: true } | { ok: false; response: Response }> {
+    if (!this.workspaceAuthorized(workspaceId)) {
+      return { ok: false, response: json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403) };
+    }
+
+    for (const archived of [false, true] as const) {
+      const result = await this.providerData(
+        (token) => listClickUpSpaces(token, workspaceId, archived),
+        expectedRevision,
+      );
+      if (!result.ok) {
+        if (result.response.status === 403) this.revokeWorkspaceIfRevision(workspaceId, result.grantRevision);
+        return { ok: false, response: result.response };
+      }
+      const root = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+      const spaces = Array.isArray(root.spaces) ? root.spaces : [];
+      if (spaces.some((entry) => safeProviderId(
+        entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : undefined,
+      ) === spaceId)) {
+        return { ok: true };
+      }
+    }
+    return { ok: false, response: this.scopeDenied() };
+  }
+
+  private async verifyTaskScope(
+    workspaceId: string,
+    taskId: string,
+    includeSubtasks: boolean,
+    expectedRevision: number,
+  ): Promise<{ ok: true; task: Record<string, unknown> } | { ok: false; response: Response }> {
+    if (!this.workspaceAuthorized(workspaceId)) {
+      return { ok: false, response: json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403) };
+    }
+    const result = await this.providerData(
+      (token) => getClickUpTask(token, taskId, includeSubtasks),
+      expectedRevision,
+    );
+    if (!result.ok) return { ok: false, response: result.response };
+    const task = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+    const teamId = safeProviderId(task.team_id ?? task.teamId);
+    if (teamId) {
+      return teamId === workspaceId
+        ? { ok: true, task }
+        : { ok: false, response: this.scopeDenied() };
+    }
+    const space = task.space && typeof task.space === 'object' && !Array.isArray(task.space)
+      ? task.space as Record<string, unknown>
+      : undefined;
+    const spaceId = safeProviderId(space?.id);
+    if (!spaceId) return { ok: false, response: json({ code: 'resource_scope_unverifiable', message: 'ClickUp did not return enough ancestry to verify this task Workspace.' }, 502) };
+    const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
+    return scoped.ok ? { ok: true, task } : scoped;
+  }
+
+  private async verifyFolderScope(
+    workspaceId: string,
+    folderId: string,
+    includeSubfolders: boolean,
+    expectedRevision: number,
+  ): Promise<{ ok: true; folder: Record<string, unknown> } | { ok: false; response: Response }> {
+    if (!this.workspaceAuthorized(workspaceId)) {
+      return { ok: false, response: json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403) };
+    }
+    const result = await this.providerData(
+      (token) => getClickUpFolder(token, folderId, includeSubfolders),
+      expectedRevision,
+    );
+    if (!result.ok) return { ok: false, response: result.response };
+    const folder = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+    const space = folder.space && typeof folder.space === 'object' && !Array.isArray(folder.space)
+      ? folder.space as Record<string, unknown>
+      : undefined;
+    const spaceId = safeProviderId(space?.id);
+    if (!spaceId) return { ok: false, response: json({ code: 'resource_scope_unverifiable', message: 'ClickUp did not return enough ancestry to verify this Folder Workspace.' }, 502) };
+    const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
+    return scoped.ok ? { ok: true, folder } : scoped;
+  }
+
+  private async verifyListScope(
+    workspaceId: string,
+    listId: string,
+    expectedRevision: number,
+  ): Promise<{ ok: true; list: Record<string, unknown> } | { ok: false; response: Response }> {
+    if (!this.workspaceAuthorized(workspaceId)) {
+      return { ok: false, response: json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403) };
+    }
+    const result = await this.providerData((token) => getClickUpList(token, listId), expectedRevision);
+    if (!result.ok) return { ok: false, response: result.response };
+    const list = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+    const space = list.space && typeof list.space === 'object' && !Array.isArray(list.space)
+      ? list.space as Record<string, unknown>
+      : undefined;
+    const spaceId = safeProviderId(space?.id);
+    if (!spaceId) return { ok: false, response: json({ code: 'resource_scope_unverifiable', message: 'ClickUp did not return enough ancestry to verify this List Workspace.' }, 502) };
+    const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
+    return scoped.ok ? { ok: true, list } : scoped;
+  }
+
+  private async verifyCommentBelongsToTask(
+    workspaceId: string,
+    taskId: string,
+    commentId: string,
+    expectedRevision: number,
+  ): Promise<{ ok: true } | { ok: false; response: Response }> {
+    const taskScope = await this.verifyTaskScope(workspaceId, taskId, false, expectedRevision);
+    if (!taskScope.ok) return taskScope;
+
+    let cursor: { start: number; startId: string } | undefined;
+    for (let page = 0; page < 8; page += 1) {
+      const result = await this.providerData(
+        (token) => getClickUpTaskComments(token, taskId, cursor),
+        expectedRevision,
+      );
+      if (!result.ok) return { ok: false, response: result.response };
+      const root = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+      const comments = Array.isArray(root.comments) ? root.comments : [];
+      if (comments.some((entry) => safeProviderId(
+        entry && typeof entry === 'object' && !Array.isArray(entry)
+          ? (entry as Record<string, unknown>).id
+          : undefined,
+      ) === commentId)) return { ok: true };
+      if (comments.length < 25) break;
+      const last = comments.at(-1);
+      const lastRecord = last && typeof last === 'object' && !Array.isArray(last) ? last as Record<string, unknown> : undefined;
+      const startId = safeProviderId(lastRecord?.id);
+      const startRaw = lastRecord?.date;
+      const start = typeof startRaw === 'number' && Number.isSafeInteger(startRaw)
+        ? startRaw
+        : typeof startRaw === 'string' && /^\d+$/.test(startRaw)
+          ? Number(startRaw)
+          : NaN;
+      if (!startId || !Number.isSafeInteger(start)) break;
+      cursor = { start, startId };
+    }
+    return { ok: false, response: this.scopeDenied('The requested ClickUp comment was not found on the admitted task.') };
   }
 
   private async searchTaskIndex(argumentsValue: unknown, expectedRevision?: number): Promise<Response> {

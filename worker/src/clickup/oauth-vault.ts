@@ -1105,6 +1105,7 @@ export class ClickUpOAuthVault extends DurableObject {
     }
 
     const form = await request.formData();
+    const workspaceId = typeof form.get('workspaceId') === 'string' ? String(form.get('workspaceId')) : '';
     const taskId = typeof form.get('taskId') === 'string' ? String(form.get('taskId')) : '';
     const artifactId = typeof form.get('artifactId') === 'string' ? String(form.get('artifactId')) : '';
     const filename = typeof form.get('filename') === 'string' ? String(form.get('filename')) : undefined;
@@ -1113,6 +1114,7 @@ export class ClickUpOAuthVault extends DurableObject {
     let args;
     try {
       args = validateClickUpToolArguments('clickup.attachArtifact', {
+        workspaceId,
         taskId,
         artifactId,
         ...(filename ? { filename } : {}),
@@ -1127,6 +1129,9 @@ export class ClickUpOAuthVault extends DurableObject {
     if (file.size > ARTIFACT_LIMITS.maxAttachmentBytes) {
       return json({ code: 'artifact-too-large', message: 'The attachment exceeds Elara\'s upload limit.' }, 413);
     }
+
+    const taskScope = await this.verifyTaskScope(args.workspaceId, args.taskId, false, expectedRevision);
+    if (!taskScope.ok) return taskScope.response;
 
     const result = await this.providerData((token) => uploadClickUpTaskAttachment(
       token,

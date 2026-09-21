@@ -2,7 +2,7 @@
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { canonicalHexColour, HexColourField } from './HexColourField';
+import { canonicalHexColour, HexColourField, sanitizeHexColourInput } from './HexColourField';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -15,6 +15,18 @@ function changeInput(input: HTMLInputElement, value: string): void {
     if (!descriptor?.set) throw new Error('HTMLInputElement value setter unavailable');
     descriptor.set.call(input, value);
     input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+function pasteInput(input: HTMLInputElement, value: string): void {
+  act(() => {
+    input.focus();
+    input.setSelectionRange(0, input.value.length);
+    const event = new Event('paste', { bubbles: true, cancelable: true });
+    Object.defineProperty(event, 'clipboardData', {
+      value: { getData: (type: string) => type === 'text/plain' ? value : '' },
+    });
+    input.dispatchEvent(event);
   });
 }
 
@@ -63,10 +75,22 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('canonicalHexColour', () => {
+describe('hex colour sanitation', () => {
+  it('strips whitespace and invisible formatting from plain text', () => {
+    expect(sanitizeHexColourInput('  #FF 00\u00a0AA\u200b  ')).toBe('#FF00AA');
+    expect(sanitizeHexColourInput('#12\u200E34\u200F56')).toBe('#123456');
+    expect(sanitizeHexColourInput('#AB\u061CCD\u2060EF')).toBe('#ABCDEF');
+  });
+
+  it('extracts one complete colour from common pasted rich-text debris', () => {
+    expect(sanitizeHexColourInput('•  Colour:  #34 D3 99  ')).toBe('#34D399');
+    expect(sanitizeHexColourInput('“#7c3aed”')).toBe('#7C3AED');
+  });
+
   it('normalizes six-digit values with or without a hash', () => {
     expect(canonicalHexColour('#7c3aed')).toBe('#7C3AED');
-    expect(canonicalHexColour('  34d399  ')).toBe('#34D399');
+    expect(canonicalHexColour('  34 d3 99  ')).toBe('#34D399');
+    expect(canonicalHexColour('• #ff 00 aa')).toBe('#FF00AA');
   });
 
   it('rejects partial, shorthand, oversized, and non-hex values', () => {
@@ -91,9 +115,9 @@ describe('HexColourField transactional editing', () => {
     expect(picker.getAttribute('aria-label')).toBe('Generation activity accent colour');
   });
 
-  it('allows incomplete typing without mutating the committed colour', () => {
+  it('allows incomplete typing while stripping internal whitespace without mutating the committed colour', () => {
     const { onCommit, text, picker } = renderField();
-    changeInput(text, '#A85');
+    changeInput(text, '#A 8 5');
 
     expect(text.value).toBe('#A85');
     expect(picker.value.toUpperCase()).toBe('#A855F7');
@@ -113,18 +137,29 @@ describe('HexColourField transactional editing', () => {
     expect(container.textContent).toContain('Enter a 6-digit hex colour');
   });
 
-  it('accepts pasted-style values without a hash and commits canonical uppercase on blur', () => {
+  it('commits a complete valid text value immediately without waiting for blur', () => {
     const { onCommit, text } = renderField();
-    changeInput(text, ' 34d399 ');
-    expect(onCommit).not.toHaveBeenCalled();
-    blur(text);
+    changeInput(text, ' 34 d3 99 ');
 
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith('#34D399');
     expect(text.value).toBe('#34D399');
+
+    blur(text);
+    expect(onCommit).toHaveBeenCalledTimes(1);
   });
 
-  it('commits a valid value with Enter and rejects no intermediate drafts', () => {
+  it('accepts a bullet/spacing-rich paste as plain text and applies it immediately', () => {
+    const { onCommit, text } = renderField();
+    pasteInput(text, '•\u00a0 #FF 00 AA\u200b ');
+
+    expect(onCommit).toHaveBeenCalledTimes(1);
+    expect(onCommit).toHaveBeenCalledWith('#FF00AA');
+    expect(text.value).toBe('#FF00AA');
+    expect(container.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('does not duplicate an already-immediate commit when Enter follows', () => {
     const { onCommit, text } = renderField();
     changeInput(text, '#112233');
     key(text, 'Enter');
@@ -135,7 +170,7 @@ describe('HexColourField transactional editing', () => {
     expect(container.querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('abandons edits with Escape without flashing an error or committing', () => {
+  it('abandons incomplete edits with Escape without flashing an error or committing', () => {
     const { onCommit, text } = renderField();
     changeInput(text, '#BAD');
     key(text, 'Escape');

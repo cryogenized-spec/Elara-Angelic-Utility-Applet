@@ -27,6 +27,7 @@ const mocks = {
   tasks: vi.fn<GoogleTasksService['listTasks']>(),
   status: vi.fn<typeof googleOAuthAuthority.getStatus>(),
 };
+type ListTasksOptions = { signal?: AbortSignal };
 const initial: Board = {
   account: "one@example.com",
   lists: [{ id: "a", title: "Work" }],
@@ -234,7 +235,7 @@ describe("snapshot reconciliation", () => {
     await syncBoard();
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     let reading = false;
-    mocks.tasks.mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+    mocks.tasks.mockImplementationOnce((_id: string, options?: ListTasksOptions) => new Promise((_resolve, reject) => {
       reading = true;
       options?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
     }));
@@ -510,7 +511,7 @@ describe("snapshot reconciliation", () => {
   });
   it('releases an in-flight read lease on pagehide and reads again on pageshow', async () => {
     let signal: AbortSignal | undefined;
-    mocks.tasks.mockImplementationOnce((_id, options) => new Promise((_resolve, reject) => {
+    mocks.tasks.mockImplementationOnce((_id: string, options?: ListTasksOptions) => new Promise((_resolve, reject) => {
       signal = options?.signal;
       signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
     }));

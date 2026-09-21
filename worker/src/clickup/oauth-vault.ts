@@ -250,6 +250,12 @@ function mergeRateLimits(...snapshots: readonly ClickUpRateLimitSnapshot[]): Cli
   };
 }
 
+function minNullable(left: number | null, right: number | null): number | null {
+  if (left === null) return right;
+  if (right === null) return left;
+  return Math.min(left, right);
+}
+
 function safeProviderId(value: unknown): string | null {
   if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 500);
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
@@ -449,15 +455,42 @@ export class ClickUpOAuthVault extends DurableObject {
 
   private recordRateLimit(rateLimit: ClickUpRateLimitSnapshot): void {
     if (rateLimit.limit === null && rateLimit.remaining === null && rateLimit.resetAt === null) return;
-    this.ctx.storage.sql.exec(`
-      INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at)
-      VALUES (1, ?, ?, ?, ?)
-      ON CONFLICT(slot) DO UPDATE SET
-        limit_count = excluded.limit_count,
-        remaining = excluded.remaining,
-        reset_at = excluded.reset_at,
-        updated_at = excluded.updated_at
-    `, rateLimit.limit, rateLimit.remaining, rateLimit.resetAt, Date.now());
+    const now = Date.now();
+    this.ctx.storage.transactionSync(() => {
+      const current = this.rateLimitRow();
+      if (!current) {
+        this.ctx.storage.sql.exec(
+          'INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at) VALUES (1, ?, ?, ?, ?)',
+          rateLimit.limit,
+          rateLimit.remaining,
+          rateLimit.resetAt,
+          now,
+        );
+        return;
+      }
+
+      const currentReset = current.reset_at;
+      const incomingReset = rateLimit.resetAt;
+
+      // A delayed response from an older provider window must never overwrite
+      // state learned from a newer window.
+      if (currentReset !== null && incomingReset !== null && incomingReset < currentReset) return;
+
+      const newerWindow = currentReset !== null && incomingReset !== null && incomingReset > currentReset;
+      const mergedLimit = newerWindow ? rateLimit.limit : minNullable(current.limit_count, rateLimit.limit);
+      const mergedRemaining = newerWindow ? rateLimit.remaining : minNullable(current.remaining, rateLimit.remaining);
+      const mergedReset = newerWindow
+        ? incomingReset
+        : currentReset ?? incomingReset;
+
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
+        mergedLimit,
+        mergedRemaining,
+        mergedReset,
+        now,
+      );
+    });
   }
 
   private providerCredentialRevoked(error: ClickUpProviderError): boolean {

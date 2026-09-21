@@ -344,8 +344,9 @@ export function searchClickUpTaskIndex(
     clauses.push("search_text LIKE ? ESCAPE '\\'");
     bindings.push(`%${escapeLike(term)}%`);
   }
+  clauses.push('archived = 0');
   if (!args.includeClosed) clauses.push('closed = 0');
-  if (args.includeSubtasks === false) clauses.push('parent_id IS NULL');
+  if (!args.includeSubtasks) clauses.push('parent_id IS NULL');
   if (args.listIds?.length) {
     clauses.push(`list_id IN (${placeholders(args.listIds)})`);
     bindings.push(...args.listIds);

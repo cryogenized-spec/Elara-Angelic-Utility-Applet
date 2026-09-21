@@ -466,8 +466,9 @@ for (const marker of [
 }
 for (const marker of [
   "operation: 'clearCustomField'",
+  "fieldId: value.fieldId,\n          }, expectedRevision)",
   "operation: 'setCustomField'",
-  '}, expectedRevision)',
+  "value: value.value,\n          }, expectedRevision)",
 ]) {
   if (!clickUpToolService.includes(marker)) fail(`ClickUp Custom Field grant propagation boundary disappeared: ${marker}`);
 }

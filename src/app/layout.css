@@ -69,6 +69,8 @@ html, body, #root { min-height: 100%; margin: 0; overflow: hidden; }
   margin: 0 auto;
   padding: max(12px, env(safe-area-inset-top)) var(--gutter) max(8px, env(safe-area-inset-bottom));
   overflow: hidden;
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* Left control cluster ------------------------------------------------------

@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { SELF, reset } from 'cloudflare:test';
 import {
+  CLICKUP_GRANT_REVISION_HEADER,
   CLICKUP_MCP_PATH,
   CLICKUP_MCP_PROTOCOL_VERSION,
   MCP_META_CLIENT_CAPABILITIES,
@@ -31,6 +32,7 @@ function request(method: string, params: Record<string, unknown>, name?: string,
       'MCP-Protocol-Version': CLICKUP_MCP_PROTOCOL_VERSION,
       'Mcp-Method': method,
       ...(name ? { 'Mcp-Name': name } : {}),
+      ...(method === 'tools/call' ? { [CLICKUP_GRANT_REVISION_HEADER]: '1' } : {}),
       ...Object.fromEntries(new Headers(overrides)),
     },
     body: JSON.stringify({
@@ -59,6 +61,7 @@ describe('ClickUp MCP Worker boundary', () => {
     expect(allowed).toContain('MCP-Protocol-Version');
     expect(allowed).toContain('Mcp-Method');
     expect(allowed).toContain('Mcp-Name');
+    expect(allowed).toContain(CLICKUP_GRANT_REVISION_HEADER);
   });
 
   it('rejects an untrusted browser origin before parsing JSON-RPC', async () => {
@@ -135,6 +138,17 @@ describe('ClickUp MCP Worker boundary', () => {
       error: expect.objectContaining({ code: -32022 }),
     }));
   });
+  it('rejects tools/call without the admitted provider grant revision', async () => {
+    const response = await request('tools/call', {
+      name: 'clickup.getTask',
+      arguments: { taskId: '86task' },
+    }, 'clickup.getTask', { [CLICKUP_GRANT_REVISION_HEADER]: '' });
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual(expect.objectContaining({
+      error: expect.objectContaining({ code: -32023 }),
+    }));
+  });
+
 
   it('returns provider authorization failure as a complete tool error rather than JSON-RPC transport failure', async () => {
     const response = await request('tools/call', {

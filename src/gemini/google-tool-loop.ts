@@ -12,6 +12,7 @@ import { googleReadToolHandlers } from '../google/tools/read-handlers';
 import { roleplayWorldToolHandlers } from '../google/tools/roleplay-world-handlers';
 import { mediaToolHandlers } from '../media/tool-handler';
 import { memoryToolHandlers } from '../memory/tool-handler';
+import { kanbanToolHandlers } from '../kanban/agent-tools';
 import { isMediaItem, isMediaProviderId } from '../domain/media';
 import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
 import { isConfirmationFresh } from '../google/confirmation/policy';
@@ -65,6 +66,7 @@ export interface GoogleToolLoopOptions {
 }
 
 const DEFAULT_MAX_TOOL_CALLS = 8;
+const EXISTING_GRANT_ONLY_TOOLS = new Set<GoogleToolName>(['kanban.inspect', 'kanban.refresh', 'kanban.locate', 'kanban.focus']);
 /**
  * Heartbeat while a mutation approval is parked on the user. The turn runner
  * treats every yielded event as stream activity, so this keeps a healthy
@@ -108,7 +110,7 @@ function normalizeTools(tools: readonly GoogleToolName[] | undefined, allowEmpty
 function executorOptions(options: GoogleToolLoopOptions, request: GeminiTurnRequest, signal?: AbortSignal): GoogleToolExecutorOptions {
   return {
     oauth: options.executor?.oauth ?? googleOAuthAuthority,
-    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...documentToolHandlers, ...mediaToolHandlers, ...memoryToolHandlers, ...options.executor?.handlers },
+    handlers: { ...googleServiceToolHandlers, ...roleplayWorldToolHandlers, ...documentToolHandlers, ...mediaToolHandlers, ...memoryToolHandlers, ...kanbanToolHandlers, ...options.executor?.handlers },
     confirm: options.executor?.confirm,
     now: options.executor?.now,
     signal,
@@ -161,7 +163,7 @@ function containsUntrustedExternal(value: unknown, depth = 0): boolean {
   return Object.values(record).some((item) => containsUntrustedExternal(item, depth + 1));
 }
 
-const UNTRUSTED_EXTERNAL_READ_PREFIXES = ['calendar.', 'tasks.', 'gmail.', 'drive.', 'docs.', 'sheets.', 'youtube.'] as const;
+const UNTRUSTED_EXTERNAL_READ_PREFIXES = ['calendar.', 'tasks.', 'gmail.', 'drive.', 'docs.', 'sheets.', 'youtube.', 'kanban.'] as const;
 
 function isUntrustedExternalReadTool(tool: string): boolean {
   return isRegistryReadTool(tool) && UNTRUSTED_EXTERNAL_READ_PREFIXES.some((prefix) => tool.startsWith(prefix));
@@ -402,7 +404,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           return;
         }
         if (call.name === 'document.create_pdf') yield { type: 'interaction-status', interactionId, status: 'finalizing_artifact' };
-        if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless) {
+        if (!result.ok && result.code === 'AUTHORIZATION_REQUIRED' && result.requiredCapability && !executeOptions.confirm && !options.headless && !EXISTING_GRANT_ONLY_TOOLS.has(call.tool)) {
           yield { type: 'interaction-status', interactionId, status: 'awaiting_authorization' };
           const pendingGrant = requestGoogleCapabilityGrant(result.requiredCapability as GoogleCapabilityKey, signal);
           // Assigned on the only loop exit (break) before any read.

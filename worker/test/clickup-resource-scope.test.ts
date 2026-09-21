@@ -10,7 +10,8 @@ let grantRevision = 0;
 
 type ProviderCounters = {
   resourceReads: number;
-  taskComments: number;
+  taskCommentsA: number;
+  taskCommentsB: number;
   createTask: number;
   updateTask: number;
   createComment: number;
@@ -91,7 +92,8 @@ async function internalAttachment(workspaceId: string, taskId: string): Promise<
 function providerFixture(): ProviderCounters {
   const counters: ProviderCounters = {
     resourceReads: 0,
-    taskComments: 0,
+    taskCommentsA: 0,
+    taskCommentsB: 0,
     createTask: 0,
     updateTask: 0,
     createComment: 0,
@@ -219,14 +221,14 @@ function providerFixture(): ProviderCounters {
     }
 
     if (url.pathname === '/api/v2/task/task-b/comment' && request.method === 'GET') {
-      counters.taskComments += 1;
+      counters.taskCommentsB += 1;
       return new Response(JSON.stringify({ comments: [{ id: 991, comment_text: 'SECRET_B_COMMENT' }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
     }
     if (url.pathname === '/api/v2/task/task-a/comment' && request.method === 'GET') {
-      counters.taskComments += 1;
+      counters.taskCommentsA += 1;
       return new Response(JSON.stringify({ comments: [{ id: 100, comment_text: 'A comment', date: 1_790_000_000_000 }] }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -365,7 +367,8 @@ describe('ClickUp Workspace-scoped resource authority', () => {
       expect(response.status).toBe(403);
       expect(await responseBody(response)).toEqual(expect.objectContaining({ code: 'resource_workspace_mismatch' }));
     }
-    expect(counters.taskComments).toBe(0);
+    expect(counters.taskCommentsB).toBe(0);
+    expect(counters.taskCommentsA).toBe(1);
     expect(counters.updateTask).toBe(0);
     expect(counters.createTask).toBe(0);
     expect(counters.setField).toBe(0);

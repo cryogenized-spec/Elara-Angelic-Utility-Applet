@@ -419,9 +419,14 @@ describe('Gemini tool-loop gross-input governor', () => {
     expect(createTask).toHaveBeenCalledOnce();
     expect(confirm).toHaveBeenCalledOnce();
     const noticeIndex = collected.findIndex((event) => event.type === 'text-delta' && event.text?.includes('task-quota-done'));
-    const failureIndex = collected.findIndex((event) => event.type === 'failed' && event.error?.code === 'GEMINI_LOCAL_RATE_LIMIT');
+    const completionIndex = collected.findIndex((event) => event.type === 'completed');
     expect(noticeIndex).toBeGreaterThanOrEqual(0);
-    expect(failureIndex).toBeGreaterThan(noticeIndex);
+    expect(completionIndex).toBeGreaterThan(noticeIndex);
+    expect(collected.some((event) => event.type === 'failed')).toBe(false);
+    expect(collected[completionIndex]).toMatchObject({
+      type: 'completed',
+      status: 'completed_after_local_quota',
+    });
     const notice = collected[noticeIndex]?.text ?? '';
     expect(notice).toContain('tasks.createTask: completed');
     expect(notice).toContain('The completed actions above already happened');

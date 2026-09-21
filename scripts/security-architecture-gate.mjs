@@ -485,6 +485,9 @@ for (const marker of [
 ]) {
   if (!clickUpMcpRoute.includes(marker)) fail(`ClickUp Worker MCP boundary is missing: ${marker}`);
 }
+if (!clickUpMcpRoute.includes('if (!presentedCatalog || presentedCatalog !== liveCatalog)')) {
+  fail('ClickUp live catalog admission disappeared from Worker tools/call');
+}
 
 for (const marker of [
   "VAULT_KEY_CONTEXT = 'elara-clickup-oauth-vault-v1'",

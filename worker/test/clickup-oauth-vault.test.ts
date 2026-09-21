@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { SELF, env, reset } from 'cloudflare:test';
+import { SELF, env, reset, runInDurableObject } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker, newNonce, signWrite } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, bearerRead, signedWrite } from './helpers';
@@ -25,7 +25,13 @@ async function stub() {
 }
 
 async function doFetch(request: Request): Promise<Response> {
-  return (await stub()).fetch(request);
+  const remote = await (await stub()).fetch(request);
+  const body = await remote.arrayBuffer();
+  return new Response(body, {
+    status: remote.status,
+    statusText: remote.statusText,
+    headers: remote.headers,
+  });
 }
 
 type Counters = { token: number; user: number; teams: number; task: number };
@@ -128,23 +134,45 @@ async function internalCommand(command: unknown, revision?: number): Promise<Res
 }
 
 async function credentialSnapshot() {
-  return (await stub() as DurableObjectStub & {
-    credentialSnapshot(): Promise<{
-      accessCipher: string;
-      accessIv: string;
-      userId: string;
+  return runInDurableObject(await stub(), async (_instance, state) => {
+    const row = state.storage.sql.exec<{
+      access_cipher: string;
+      access_iv: string;
+      user_id: string;
       username: string | null;
       email: string | null;
-      workspacesJson: string;
-      updatedAt: number;
-    } | null>;
-  }).credentialSnapshot();
+      workspaces_json: string;
+      updated_at: number;
+    }>(
+      'SELECT access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
+    ).toArray()[0];
+    return row ? {
+      accessCipher: row.access_cipher,
+      accessIv: row.access_iv,
+      userId: row.user_id,
+      username: row.username,
+      email: row.email,
+      workspacesJson: row.workspaces_json,
+      updatedAt: row.updated_at,
+    } : null;
+  });
 }
 
 async function rateLimitSnapshot() {
-  return (await stub() as DurableObjectStub & {
-    rateLimitSnapshot(): Promise<{ limit: number | null; remaining: number | null; resetAt: number | null } | null>;
-  }).rateLimitSnapshot();
+  return runInDurableObject(await stub(), async (_instance, state) => {
+    const row = state.storage.sql.exec<{
+      limit_count: number | null;
+      remaining: number | null;
+      reset_at: number | null;
+    }>(
+      'SELECT limit_count, remaining, reset_at FROM clickup_rate_limit WHERE slot = 1',
+    ).toArray()[0];
+    return row ? {
+      limit: row.limit_count,
+      remaining: row.remaining,
+      resetAt: row.reset_at,
+    } : null;
+  });
 }
 
 describe('ClickUp OAuth public boundary', () => {

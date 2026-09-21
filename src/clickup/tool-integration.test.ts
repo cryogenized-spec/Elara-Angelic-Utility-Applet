@@ -55,17 +55,17 @@ const clickupDisconnected = {
 
 const sampleArguments: Record<string, Record<string, unknown>> = {
   'clickup.searchTasks': { workspaceId: '999', query: 'repair' },
-  'clickup.getTask': { taskId: '86task' },
-  'clickup.getTaskContext': { taskId: '86task' },
-  'clickup.getTaskComments': { taskId: '86task' },
+  'clickup.getTask': { workspaceId: '999', taskId: '86task' },
+  'clickup.getTaskContext': { workspaceId: '999', taskId: '86task' },
+  'clickup.getTaskComments': { workspaceId: '999', taskId: '86task' },
   'clickup.resolveAssignees': { workspaceId: '999', names: ['Gareth'] },
   'clickup.listHierarchy': { workspaceId: '999' },
-  'clickup.createTask': { listId: '123', name: 'Repair S56' },
-  'clickup.updateTask': { taskId: '86task', status: 'complete' },
-  'clickup.createTaskComment': { taskId: '86task', text: 'Inspection complete.' },
-  'clickup.replyToComment': { commentId: '456', text: 'Confirmed.' },
-  'clickup.setCustomField': { taskId: '86task', fieldId: 'field_1', mode: 'set', value: 'Ready' },
-  'clickup.attachArtifact': { taskId: '86task', artifactId: 'artifact-1' },
+  'clickup.createTask': { workspaceId: '999', listId: '123', name: 'Repair S56' },
+  'clickup.updateTask': { workspaceId: '999', taskId: '86task', status: 'complete' },
+  'clickup.createTaskComment': { workspaceId: '999', taskId: '86task', text: 'Inspection complete.' },
+  'clickup.replyToComment': { workspaceId: '999', taskId: '86task', commentId: '456', text: 'Confirmed.' },
+  'clickup.setCustomField': { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'set', value: 'Ready' },
+  'clickup.attachArtifact': { workspaceId: '999', taskId: '86task', artifactId: 'artifact-1' },
 };
 
 describe('ClickUp integration with Elara model-tool authority', () => {
@@ -116,7 +116,7 @@ describe('ClickUp integration with Elara model-tool authority', () => {
     const handler = vi.fn(async () => ({ id: '86task' }));
     const result = await executeGoogleTool({
       tool: 'clickup.getTask',
-      arguments: { taskId: '86task' },
+      arguments: { workspaceId: '999', taskId: '86task' },
     }, {
       oauth: googleOauth,
       clickupOAuth: clickupDisconnected,
@@ -131,7 +131,7 @@ describe('ClickUp integration with Elara model-tool authority', () => {
     const handler = vi.fn(async () => ({ trust: 'untrusted-external', provider: 'clickup', id: '86task' }));
     const result = await executeGoogleTool({
       tool: 'clickup.getTask',
-      arguments: { taskId: '86task' },
+      arguments: { workspaceId: '999', taskId: '86task' },
     }, {
       oauth: googleOauth,
       clickupOAuth: clickupConnected,
@@ -149,7 +149,7 @@ describe('ClickUp integration with Elara model-tool authority', () => {
     const handler = vi.fn(async () => ({ id: 'new-task' }));
     const declined = await executeGoogleTool({
       tool: 'clickup.createTask',
-      arguments: { listId: '123', name: 'Repair S56' },
+      arguments: { workspaceId: '999', listId: '123', name: 'Repair S56' },
     }, {
       oauth: googleOauth,
       clickupOAuth: clickupConnected,
@@ -161,7 +161,7 @@ describe('ClickUp integration with Elara model-tool authority', () => {
 
     const approved = await executeGoogleTool({
       tool: 'clickup.createTask',
-      arguments: { listId: '123', name: 'Repair S56' },
+      arguments: { workspaceId: '999', listId: '123', name: 'Repair S56' },
     }, {
       oauth: googleOauth,
       clickupOAuth: clickupConnected,
@@ -198,11 +198,48 @@ describe('ClickUp integration with Elara model-tool authority', () => {
 
     const result = await executeGoogleTool({
       tool: 'clickup.createTask',
-      arguments: { listId: '123', name: 'Repair S56' },
+      arguments: { workspaceId: '999', listId: '123', name: 'Repair S56' },
     }, {
       oauth: googleOauth,
       clickupOAuth: switchingAuthority,
       handlers: { 'clickup.createTask': handler },
+      confirm: async () => true,
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: false, code: 'AUTHORIZATION_REQUIRED' }));
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['set', { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'set' as const, value: 'Ready' }],
+    ['clear', { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'clear' as const }],
+  ])('does not execute Custom Field %s if the ClickUp grant changes during confirmation', async (_mode, argumentsValue) => {
+    const handler = vi.fn(async () => ({ ok: true }));
+    let reads = 0;
+    const switchingAuthority = {
+      ...clickupConnected,
+      getExecutionGrant: async () => {
+        reads += 1;
+        const revision = reads === 1 ? 21 : 22;
+        return {
+          status: {
+            ...connectedStatus,
+            account: { id: reads === 1 ? '183' : '456' },
+            updatedAt: revision,
+          },
+          authorityBinding: 'https://worker.example#test-installation',
+          revision,
+        };
+      },
+    };
+
+    const result = await executeGoogleTool({
+      tool: 'clickup.setCustomField',
+      arguments: argumentsValue,
+    }, {
+      oauth: googleOauth,
+      clickupOAuth: switchingAuthority,
+      handlers: { 'clickup.setCustomField': handler },
       confirm: async () => true,
     });
 

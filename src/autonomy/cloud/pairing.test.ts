@@ -121,6 +121,19 @@ describe('pairing store', () => {
     await expect(resolvePairingToken(PAIRING)).resolves.toBe('');
   });
 
+  it('recovers the protected installation credential after the in-memory session is invalidated', async () => {
+    savePairing(PAIRING);
+    // Simulate a sibling-tab storage event: module memory is cleared while the
+    // shared pairing metadata and encrypted IndexedDB credential remain valid.
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'elara.autonomy.pairing.v1',
+      oldValue: null,
+      newValue: window.localStorage.getItem('elara.autonomy.pairing.v1'),
+    }));
+
+    await expect(resolvePairingToken({ ...PAIRING, token: '' })).resolves.toBe(PAIRING.token);
+  });
+
   it('rechecks shared pairing identity after awaiting the protected credential queue', async () => {
     savePairing(PAIRING);
     // Clear only the module-memory token while preserving pairing metadata and

@@ -957,30 +957,54 @@ export class ClickUpOAuthVault extends DurableObject {
     ).toArray();
   }
 
-  private async clearStoredWebhooks(accessToken?: string | null): Promise<void> {
+  private detachStoredWebhooks(): WebhookRow[] {
     const rows = this.webhookRows();
-    if (accessToken) {
-      for (const row of rows) {
-        try {
-          const result = await deleteClickUpWebhook(accessToken, row.webhook_id);
-          this.recordRateLimit(result.rateLimit);
-        } catch (error) {
-          if (error instanceof ClickUpProviderError) this.recordRateLimit(error.rateLimit);
-          // Local secret removal is authoritative even if provider cleanup is unavailable.
-        }
+    this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');
+      this.ctx.storage.sql.exec('DELETE FROM clickup_webhook_deliveries');
+    });
+    return rows;
+  }
+
+  private async deleteProviderWebhooks(accessToken: string, rows: readonly WebhookRow[]): Promise<void> {
+    for (const row of rows) {
+      try {
+        await deleteClickUpWebhook(accessToken, row.webhook_id);
+      } catch {
+        // Local secret removal is authoritative even if provider cleanup is unavailable.
       }
     }
-    this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');
-    this.ctx.storage.sql.exec('DELETE FROM clickup_webhook_deliveries');
+  }
+
+  private async clearStoredWebhooks(accessToken?: string | null): Promise<void> {
+    const rows = this.detachStoredWebhooks();
+    if (accessToken && rows.length) await this.deleteProviderWebhooks(accessToken, rows);
+  }
+
+  private grantLifecycleCurrent(epoch: number, revision: number): boolean {
+    return this.connectionEpoch() === epoch && this.credentialRow()?.updated_at === revision;
+  }
+
+  private async cleanupCreatedWebhook(accessToken: string, webhookId: string | null): Promise<void> {
+    if (!webhookId) return;
+    try {
+      await deleteClickUpWebhook(accessToken, webhookId);
+    } catch {
+      // Best-effort provider cleanup; without a local secret/row, callbacks are ignored.
+    }
   }
 
   private async registerTaskIndexWebhooks(
     accessToken: string,
     workspaces: readonly { id: string }[],
     endpoint: string | null,
+    expectedEpoch: number,
+    expectedRevision: number,
   ): Promise<void> {
     if (!endpoint) return;
     for (const workspace of workspaces) {
+      if (!this.grantLifecycleCurrent(expectedEpoch, expectedRevision)) return;
+
       try {
         const result = await createClickUpWebhook(
           accessToken,
@@ -988,30 +1012,58 @@ export class ClickUpOAuthVault extends DurableObject {
           endpoint,
           CLICKUP_TASK_INDEX_WEBHOOK_EVENTS,
         );
-        this.recordRateLimit(result.rateLimit);
         const root = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
         const webhook = root.webhook && typeof root.webhook === 'object'
           ? root.webhook as Record<string, unknown>
           : root;
         const webhookId = safeProviderId(webhook.id);
         const secret = typeof webhook.secret === 'string' ? webhook.secret.trim() : '';
-        if (!webhookId || !secret || secret.length > 16_384) continue;
+
+        if (!this.grantLifecycleCurrent(expectedEpoch, expectedRevision)) {
+          await this.cleanupCreatedWebhook(accessToken, webhookId);
+          return;
+        }
+
+        this.recordRateLimit(result.rateLimit);
+
+        if (!webhookId || !secret || secret.length > 16_384) {
+          await this.cleanupCreatedWebhook(accessToken, webhookId);
+          continue;
+        }
+
         const encrypted = await encryptToken(this.vaultSecret(), secret);
-        this.ctx.storage.sql.exec(`
-          INSERT INTO clickup_webhooks (
-            webhook_id, workspace_id, secret_cipher, secret_iv, endpoint, updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(workspace_id) DO UPDATE SET
-            webhook_id = excluded.webhook_id,
-            secret_cipher = excluded.secret_cipher,
-            secret_iv = excluded.secret_iv,
-            endpoint = excluded.endpoint,
-            updated_at = excluded.updated_at
-        `, webhookId, workspace.id, encrypted.cipher, encrypted.iv, endpoint, Date.now());
+        if (!this.grantLifecycleCurrent(expectedEpoch, expectedRevision)) {
+          await this.cleanupCreatedWebhook(accessToken, webhookId);
+          return;
+        }
+
+        const stored = this.ctx.storage.transactionSync(() => {
+          if (!this.grantLifecycleCurrent(expectedEpoch, expectedRevision)) return false;
+          this.ctx.storage.sql.exec(`
+            INSERT INTO clickup_webhooks (
+              webhook_id, workspace_id, secret_cipher, secret_iv, endpoint, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(workspace_id) DO UPDATE SET
+              webhook_id = excluded.webhook_id,
+              secret_cipher = excluded.secret_cipher,
+              secret_iv = excluded.secret_iv,
+              endpoint = excluded.endpoint,
+              updated_at = excluded.updated_at
+          `, webhookId, workspace.id, encrypted.cipher, encrypted.iv, endpoint, Date.now());
+          return true;
+        });
+
+        if (!stored) {
+          await this.cleanupCreatedWebhook(accessToken, webhookId);
+          return;
+        }
+
         if (result.rateLimit.remaining !== null && result.rateLimit.remaining <= 1) break;
       } catch (error) {
         if (error instanceof ClickUpProviderError) {
-          this.recordRateLimit(error.rateLimit);
+          if (this.grantLifecycleCurrent(expectedEpoch, expectedRevision)) {
+            this.recordRateLimit(error.rateLimit);
+          }
           if (this.providerCredentialRevoked(error)) break;
         }
         // Webhooks optimize freshness only. OAuth remains usable without them.
@@ -1237,8 +1289,10 @@ export class ClickUpOAuthVault extends DurableObject {
 
     const exchangeEpoch = this.advanceConnectionEpoch();
     const previousAccessToken = await this.accessToken().catch(() => null);
-    await this.clearStoredWebhooks(previousAccessToken);
 
+    // Do not tear down the currently-valid grant's webhook state until the
+    // replacement authorization is fully validated. A failed reconnect must
+    // leave the old credential + auxiliary webhook state intact.
     const accessToken = await exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code);
     const [account, workspaces] = await Promise.all([
       fetchAuthorizedClickUpUser(accessToken),
@@ -1269,14 +1323,33 @@ export class ClickUpOAuthVault extends DurableObject {
         workspaces_json = excluded.workspaces_json,
         updated_at = excluded.updated_at
     `, encrypted.cipher, encrypted.iv, account.data.id, account.data.username ?? null, account.data.email ?? null, JSON.stringify(workspaces.data), revision);
+
+    // The replacement grant is now authoritative. Remove old local webhook
+    // secrets synchronously before any provider cleanup await so stale
+    // callbacks are ignored immediately, then clean their provider rows
+    // best-effort using the previous token.
+    const previousWebhookRows = this.detachStoredWebhooks();
     this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
     clearClickUpTaskIndex(this.ctx.storage.sql);
     this.recordRateLimit(mergeRateLimits(account.rateLimit, workspaces.rateLimit));
+
+    if (previousAccessToken && previousWebhookRows.length) {
+      await this.deleteProviderWebhooks(previousAccessToken, previousWebhookRows);
+    }
+    if (!this.grantLifecycleCurrent(exchangeEpoch, revision)) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    }
+
     await this.registerTaskIndexWebhooks(
       accessToken,
       workspaces.data,
       validWebhookEndpoint(request.headers.get(CLICKUP_WEBHOOK_ENDPOINT_HEADER)),
+      exchangeEpoch,
+      revision,
     );
+    if (!this.grantLifecycleCurrent(exchangeEpoch, revision)) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    }
 
     return json(this.status());
   }

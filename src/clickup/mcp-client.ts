@@ -22,6 +22,12 @@ const MCP_REQUEST_TIMEOUT_MS = 30_000;
 
 type JsonRpcId = string | number;
 
+type McpSession = {
+  readonly baseUrl: string;
+  readonly token: string;
+  readonly cacheKey: string;
+};
+
 type JsonRpcResponse = {
   readonly jsonrpc: '2.0';
   readonly id: JsonRpcId;
@@ -68,6 +74,17 @@ async function pairingToken(pairing: AutonomyPairing): Promise<string> {
   const token = (await resolvePairingToken(pairing)).trim();
   if (!token) throw new ClickUpMcpError('credential', 'The paired Worker installation credential is unavailable.');
   return token;
+}
+
+async function currentSession(): Promise<McpSession> {
+  const pairing = activePairing();
+  const baseUrl = workerBaseUrl(pairing);
+  const token = await pairingToken(pairing);
+  return {
+    baseUrl,
+    token,
+    cacheKey: `${baseUrl}#${pairing.installationId}`,
+  };
 }
 
 function requestMeta() {
@@ -166,13 +183,12 @@ async function decodeResponse(response: Response, expectedId: JsonRpcId): Promis
 }
 
 async function mcpPost(
+  session: McpSession,
   method: 'server/discover' | 'tools/list' | 'tools/call',
   params: Record<string, unknown>,
   name?: ClickUpToolName,
   signal?: AbortSignal,
 ): Promise<Record<string, unknown>> {
-  const pairing = activePairing();
-  const token = await pairingToken(pairing);
   const id = crypto.randomUUID();
   const body = JSON.stringify({
     jsonrpc: '2.0',
@@ -186,11 +202,11 @@ async function mcpPost(
   const abort = () => controller.abort();
   signal?.addEventListener('abort', abort, { once: true });
   try {
-    const response = await fetch(`${workerBaseUrl(pairing)}${CLICKUP_MCP_PATH}`, {
+    const response = await fetch(`${session.baseUrl}${CLICKUP_MCP_PATH}`, {
       method: 'POST',
       headers: {
         Accept: 'application/json, text/event-stream',
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${session.token}`,
         'Content-Type': 'application/json',
         'MCP-Protocol-Version': CLICKUP_MCP_PROTOCOL_VERSION,
         'Mcp-Method': method,
@@ -219,17 +235,17 @@ function completeResult(result: Record<string, unknown>, operation: string): Rec
   return result;
 }
 
-let discoveryReady = false;
-let toolCache: { expiresAt: number; tools: readonly ClickUpMcpToolDefinition[] } | null = null;
+let discoveryKey: string | null = null;
+let toolCache: { cacheKey: string; expiresAt: number; tools: readonly ClickUpMcpToolDefinition[] } | null = null;
 
-async function ensureDiscovery(signal?: AbortSignal): Promise<void> {
-  if (discoveryReady) return;
-  const result = completeResult(await mcpPost('server/discover', {}, undefined, signal), 'server/discover');
+async function ensureDiscovery(session: McpSession, signal?: AbortSignal): Promise<void> {
+  if (discoveryKey === session.cacheKey) return;
+  const result = completeResult(await mcpPost(session, 'server/discover', {}, undefined, signal), 'server/discover');
   const supported = Array.isArray(result.supportedVersions) ? result.supportedVersions : [];
   if (!supported.includes(CLICKUP_MCP_PROTOCOL_VERSION)) {
     throw new ClickUpMcpError('protocol-version', 'The paired Worker does not support Elara\'s ClickUp MCP protocol version.');
   }
-  discoveryReady = true;
+  discoveryKey = session.cacheKey;
 }
 
 function parseToolDefinitions(value: unknown): readonly ClickUpMcpToolDefinition[] {
@@ -267,16 +283,26 @@ function parseToolDefinitions(value: unknown): readonly ClickUpMcpToolDefinition
   return tools;
 }
 
-export async function listClickUpMcpTools(signal?: AbortSignal, force = false): Promise<readonly ClickUpMcpToolDefinition[]> {
-  await ensureDiscovery(signal);
-  if (!force && toolCache && toolCache.expiresAt > Date.now()) return toolCache.tools;
-  const result = completeResult(await mcpPost('tools/list', {}, undefined, signal), 'tools/list');
+async function listToolsForSession(
+  session: McpSession,
+  signal?: AbortSignal,
+  force = false,
+): Promise<readonly ClickUpMcpToolDefinition[]> {
+  await ensureDiscovery(session, signal);
+  if (!force && toolCache && toolCache.cacheKey === session.cacheKey && toolCache.expiresAt > Date.now()) {
+    return toolCache.tools;
+  }
+  const result = completeResult(await mcpPost(session, 'tools/list', {}, undefined, signal), 'tools/list');
   const tools = parseToolDefinitions(result.tools);
   const ttlMs = typeof result.ttlMs === 'number' && Number.isFinite(result.ttlMs)
     ? Math.max(0, Math.min(result.ttlMs, 5 * 60_000))
     : 0;
-  toolCache = { expiresAt: Date.now() + ttlMs, tools };
+  toolCache = { cacheKey: session.cacheKey, expiresAt: Date.now() + ttlMs, tools };
   return tools;
+}
+
+export async function listClickUpMcpTools(signal?: AbortSignal, force = false): Promise<readonly ClickUpMcpToolDefinition[]> {
+  return listToolsForSession(await currentSession(), signal, force);
 }
 
 export async function callClickUpMcpTool<T extends ClickUpToolName>(
@@ -285,8 +311,9 @@ export async function callClickUpMcpTool<T extends ClickUpToolName>(
   signal?: AbortSignal,
 ): Promise<unknown> {
   const argumentsValue = validateClickUpToolArguments(tool, rawArguments);
-  await ensureDiscovery(signal);
-  const result = completeResult(await mcpPost('tools/call', {
+  const session = await currentSession();
+  await listToolsForSession(session, signal);
+  const result = completeResult(await mcpPost(session, 'tools/call', {
     name: tool,
     arguments: argumentsValue,
   }, tool, signal), 'tools/call');
@@ -312,6 +339,6 @@ export async function callClickUpMcpTool<T extends ClickUpToolName>(
 }
 
 export function resetClickUpMcpClientForTests(): void {
-  discoveryReady = false;
+  discoveryKey = null;
   toolCache = null;
 }

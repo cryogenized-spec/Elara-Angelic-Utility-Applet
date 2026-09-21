@@ -15,7 +15,7 @@ import { memoryToolHandlers } from '../memory/tool-handler';
 import { kanbanToolHandlers } from '../kanban/agent-tools';
 import { clickUpToolHandlers } from '../clickup/tool-handlers';
 import { clickUpOAuthAuthority } from '../clickup/oauth/authority';
-import { clickupToolNameSchema } from '../clickup/tool-schema';
+import { clickupToolNameSchema, type ClickUpToolName } from '../clickup/tool-schema';
 import type { ClickUpExecutionGrant } from '../clickup/oauth/contracts';
 import {
   captureClickUpArtifactApprovalSnapshot,
@@ -254,6 +254,28 @@ function readFingerprint(call: PendingToolCall): string {
   return `${call.name}:${JSON.stringify(stableToolArgumentValue(call.arguments))}`;
 }
 
+const CLICKUP_MUTATION_INTENT: Readonly<Partial<Record<ClickUpToolName, RegExp>>> = {
+  'clickup.createTask': /\b(?:create|add|make|log|record|open)\b[\s\S]{0,48}\btask\b|\btask\b[\s\S]{0,48}\b(?:create|add|make|log|record|open)\b/i,
+  'clickup.updateTask': /\b(?:update|change|edit|modify|mark|complete|close|reopen|archive|unarchive|assign|rename|move|fix)\b/i,
+  'clickup.createTaskComment': /\b(?:comment|post|note|message|mention|tell|ask)\b/i,
+  'clickup.replyToComment': /\b(?:reply|respond|answer)\b/i,
+  'clickup.setCustomField': /\b(?:custom\s+field|field)\b[\s\S]{0,32}\b(?:set|clear|change|update|edit)\b|\b(?:set|clear|change|update|edit)\b[\s\S]{0,32}\b(?:custom\s+field|field)\b/i,
+  'clickup.attachArtifact': /\b(?:attach|upload)\b|\b(?:add|include)\b[\s\S]{0,24}\b(?:file|artifact|document|attachment)\b/i,
+};
+
+function freshUserExplicitlyRequestedClickUpMutation(request: GeminiTurnRequest, tool: GoogleToolName): boolean {
+  const parsed = clickupToolNameSchema.safeParse(tool);
+  if (!parsed.success || isRegistryReadTool(tool)) return true;
+  const pattern = CLICKUP_MUTATION_INTENT[parsed.data];
+  if (!pattern) return false;
+  let raw = '';
+  if (typeof request.input === 'string') raw = request.input;
+  else {
+    try { raw = JSON.stringify(request.input); } catch { raw = ''; }
+  }
+  return pattern.test(raw.normalize('NFKC').slice(0, 8_000));
+}
+
 export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options: GoogleToolLoopOptions = {}, signal?: AbortSignal): AsyncGenerator<GeminiStreamEvent> {
   const readOnly = options.readOnly ?? true;
   const tools = normalizeTools(request.tools as readonly GoogleToolName[] | undefined ?? options.tools, options.allowEmptyTools === true);
@@ -432,6 +454,18 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push(errorToolResult(call, 'HANDLER_UNAVAILABLE'));
         continue;
       }
+      if (
+        batchStartedExternalTainted
+        && clickupToolNameSchema.safeParse(call.name).success
+        && !freshUserExplicitlyRequestedClickUpMutation(request, call.name)
+      ) {
+        // External provider content may supply evidence for a mutation the user
+        // already asked for, but it cannot manufacture a new mutation class and
+        // bootstrap authority by merely reaching the confirmation UI.
+        results.push(errorToolResult(call, UNTRUSTED_CONTEXT_READ_BLOCK));
+        continue;
+      }
+
       if (isRegistryReadTool(call.name)) {
         const fingerprint = readFingerprint(call);
         if (

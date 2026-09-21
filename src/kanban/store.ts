@@ -86,7 +86,9 @@ function normalizeBoard(board: Board): Board {
   return {
     ...board,
     labels: Array.isArray(board.labels) ? board.labels : [],
-    tasks: board.tasks.map((task) => ({ ...task, local: normalizeTaskLocal(task.local) })),
+    tasks: board.tasks.map((task) =>
+      task.local ? { ...task, local: normalizeTaskLocal(task.local) } : task
+    ),
   };
 }
 

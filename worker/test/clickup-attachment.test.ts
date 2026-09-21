@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SELF, reset } from 'cloudflare:test';
+import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, signedWrite } from './helpers';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
@@ -10,7 +11,7 @@ beforeEach(async () => {
   await reset();
 });
 
-async function connect() {
+async function connect(): Promise<number> {
   const startBody = JSON.stringify({ redirectUri: REDIRECT_URI });
   const started = await SELF.fetch(await signedWrite('/clickup/oauth/start', startBody));
   expect(started.status).toBe(200);
@@ -18,6 +19,9 @@ async function connect() {
   const exchangeBody = JSON.stringify({ code: 'one-time-code', state, redirectUri: REDIRECT_URI });
   const exchanged = await SELF.fetch(await signedWrite('/clickup/oauth/exchange', exchangeBody));
   expect(exchanged.status).toBe(200);
+  const status = await exchanged.json() as { updatedAt?: number };
+  expect(status.updatedAt).toBeGreaterThan(0);
+  return status.updatedAt ?? 0;
 }
 
 describe('ClickUp artifact attachment boundary', () => {
@@ -79,7 +83,7 @@ describe('ClickUp artifact attachment boundary', () => {
       throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
     });
 
-    await connect();
+    const grantRevision = await connect();
 
     const form = new FormData();
     form.set('taskId', '86task');
@@ -92,6 +96,7 @@ describe('ClickUp artifact attachment boundary', () => {
       headers: {
         Origin: ORIGIN,
         Authorization: `Bearer ${TOKEN}`,
+        [CLICKUP_GRANT_REVISION_HEADER]: String(grantRevision),
         Accept: 'application/json',
       },
       body: form,
@@ -123,7 +128,7 @@ describe('ClickUp artifact attachment boundary', () => {
 
     const response = await SELF.fetch('https://worker.example/clickup/attachment', {
       method: 'POST',
-      headers: { Origin: 'https://evil.example', Authorization: `Bearer ${TOKEN}` },
+      headers: { Origin: 'https://evil.example', Authorization: `Bearer ${TOKEN}`, [CLICKUP_GRANT_REVISION_HEADER]: '1' },
       body: form,
     });
     expect(response.status).toBe(403);
@@ -155,7 +160,7 @@ describe('ClickUp artifact attachment boundary', () => {
       providerCalls += 1;
       throw new Error('Provider should not receive malformed attachment metadata.');
     });
-    await connect();
+    const grantRevision = await connect();
 
     const form = new FormData();
     form.set('taskId', '');
@@ -164,7 +169,7 @@ describe('ClickUp artifact attachment boundary', () => {
 
     const response = await SELF.fetch('https://worker.example/clickup/attachment', {
       method: 'POST',
-      headers: { Origin: ORIGIN, Authorization: `Bearer ${TOKEN}` },
+      headers: { Origin: ORIGIN, Authorization: `Bearer ${TOKEN}`, [CLICKUP_GRANT_REVISION_HEADER]: String(grantRevision) },
       body: form,
     });
     expect(response.status).toBe(400);

@@ -1,6 +1,7 @@
 export const CLICKUP_MCP_PROTOCOL_VERSION = '2026-07-28';
 export const CLICKUP_MCP_PATH = '/mcp/clickup';
 export const CLICKUP_GRANT_REVISION_HEADER = 'X-Elara-ClickUp-Grant-Revision';
+export const CLICKUP_TOOL_CATALOG_HEADER = 'X-Elara-ClickUp-Tool-Catalog';
 export const CLICKUP_MCP_CLIENT_INFO = Object.freeze({
   name: 'elara-angelic',
   version: '0.1.0',

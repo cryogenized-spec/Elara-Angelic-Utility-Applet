@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
@@ -40,6 +40,10 @@ beforeEach(async () => {
   vi.restoreAllMocks();
   grantRevision = 0;
   await reset();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 async function stub() {

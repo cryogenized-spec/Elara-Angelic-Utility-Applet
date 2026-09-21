@@ -268,7 +268,7 @@ function freshUserExplicitlyRequestedClickUpMutation(request: GeminiTurnRequest,
   if (!parsed.success || isRegistryReadTool(tool)) return true;
   const pattern = CLICKUP_MUTATION_INTENT[parsed.data];
   if (!pattern) return false;
-  let raw = '';
+  let raw: string;
   if (typeof request.input === 'string') raw = request.input;
   else {
     try { raw = JSON.stringify(request.input); } catch { raw = ''; }

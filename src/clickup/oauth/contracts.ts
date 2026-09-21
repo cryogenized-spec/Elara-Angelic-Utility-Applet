@@ -3,12 +3,6 @@ import { z } from 'zod';
 export const clickUpWorkspaceSchema = z.object({
   id: z.string().trim().min(1).max(100),
   name: z.string().trim().min(1).max(500),
-  members: z.array(z.object({
-    id: z.string().trim().min(1).max(100),
-    username: z.string().trim().max(500).optional(),
-    email: z.string().trim().max(320).optional(),
-    profilePicture: z.string().url().max(2048).optional(),
-  }).strict()).max(10_000),
 }).strict();
 
 export const clickUpOAuthStatusSchema = z.object({

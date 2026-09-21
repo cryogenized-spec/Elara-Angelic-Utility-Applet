@@ -10,6 +10,7 @@ import {
 describe('ClickUp provider wire mapping', () => {
   it('maps semantic create-task fields to documented ClickUp JSON names', () => {
     expect(buildClickUpCreateTaskBody({
+      workspaceId: '999',
       listId: '123',
       name: 'Repair S56',
       markdownContent: '**Inspect trigger link**',
@@ -43,6 +44,7 @@ describe('ClickUp provider wire mapping', () => {
 
   it('maps semantic assignee removal to ClickUp rem without exposing that spelling upstream', () => {
     expect(buildClickUpUpdateTaskBody({
+      workspaceId: '999',
       taskId: '86task',
       assignees: { add: ['183'], remove: ['456'] },
       archived: true,

@@ -120,6 +120,7 @@ export function App() {
   const generationArbiterRef = useRef(createGenerationArbiter());
   const uiSaveQueueRef = useRef(Promise.resolve());
   const chatAppearanceSaveQueueRef = useRef(Promise.resolve());
+  const chatAppearanceSaveVersionRef = useRef(0);
 
   useVisualViewport();
 
@@ -509,11 +510,18 @@ export function App() {
   }
   function queueChatAppearanceSave(next: ChatAppearancePreferences): Promise<ChatAppearancePreferences> {
     const safe = normalizedChatAppearance(next);
+    const saveVersion = ++chatAppearanceSaveVersionRef.current;
+
+    // Appearance is optimistic UI state: render the user's latest choice now,
+    // while IndexedDB durability remains serialized in the background.
     setChatAppearance(safe);
     const task = chatAppearanceSaveQueueRef.current.catch(() => undefined).then(() => saveChatAppearance(safe));
     chatAppearanceSaveQueueRef.current = task.then(() => undefined, () => undefined);
+
     return task.then((saved) => {
-      setChatAppearance(saved);
+      // An older queued write must never repaint stale appearance over a newer
+      // optimistic edit while the queue catches up.
+      if (saveVersion === chatAppearanceSaveVersionRef.current) setChatAppearance(saved);
       return saved;
     });
   }

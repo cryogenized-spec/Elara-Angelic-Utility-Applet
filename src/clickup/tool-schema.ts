@@ -262,7 +262,12 @@ export function validateClickUpToolArguments<T extends ClickUpToolName>(
   return clickupToolCatalog[tool].inputSchema.parse(value) as ClickUpToolArguments<T>;
 }
 
-export type ClickUpToolJsonSchema = Readonly<Record<string, unknown>>;
+export type ClickUpToolJsonSchema = Readonly<Record<string, unknown>> & {
+  readonly type: 'object';
+  readonly properties: Readonly<Record<string, unknown>>;
+  readonly additionalProperties: boolean;
+  readonly required?: readonly string[];
+};
 
 /**
  * The same Zod authority feeds Gemini function parameters and MCP tools/list.
@@ -271,7 +276,19 @@ export type ClickUpToolJsonSchema = Readonly<Record<string, unknown>>;
 export function clickUpToolJsonSchema(tool: ClickUpToolName): ClickUpToolJsonSchema {
   const generated = z.toJSONSchema(clickupToolCatalog[tool].inputSchema) as Record<string, unknown>;
   const { $schema: _schemaDialect, ...portable } = generated;
-  return Object.freeze(portable);
+  const properties = portable.properties;
+  const required = portable.required;
+  if (
+    portable.type !== 'object'
+    || !properties
+    || typeof properties !== 'object'
+    || Array.isArray(properties)
+    || typeof portable.additionalProperties !== 'boolean'
+    || (required !== undefined && (!Array.isArray(required) || !required.every((entry) => typeof entry === 'string')))
+  ) {
+    throw new Error(`Generated ClickUp schema for ${tool} is not a portable object tool schema.`);
+  }
+  return Object.freeze(portable) as ClickUpToolJsonSchema;
 }
 
 

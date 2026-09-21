@@ -22,7 +22,9 @@ function redirectUri(): string {
  * forward only the one-time code/state back to the opener and close.
  */
 export function forwardClickUpOAuthCallbackFromPopup(): boolean {
-  if (typeof window === 'undefined' || !window.opener) return false;
+  if (typeof window === 'undefined') return false;
+  const opener = window.opener as Window | null;
+  if (!opener) return false;
   const params = new URLSearchParams(window.location.search);
   const code = params.get('code')?.trim() ?? '';
   const state = params.get('state')?.trim() ?? '';
@@ -35,7 +37,7 @@ export function forwardClickUpOAuthCallbackFromPopup(): boolean {
     ...(state ? { state } : {}),
     ...(error ? { error } : {}),
   };
-  window.opener.postMessage(message, window.location.origin);
+  opener.postMessage(message, window.location.origin);
   window.close();
   return true;
 }
@@ -84,7 +86,7 @@ export async function connectClickUpWithPopup(): Promise<ClickUpOAuthStatus> {
           redirectUri: targetRedirect,
         }).then(
           (status) => finish(() => resolve(status)),
-          (error: unknown) => finish(() => reject(error)),
+          (error: unknown) => finish(() => reject(error instanceof Error ? error : new Error('ClickUp authorization failed.'))),
         );
       };
 

@@ -3,6 +3,7 @@ import { googleOAuthPreflight, handleGoogleOAuthRoute } from './google/oauth-rou
 import { clickUpOAuthPreflight, handleClickUpOAuthRoute } from './clickup/oauth-routes';
 import { clickUpMcpPreflight, handleClickUpMcpRoute } from './clickup/mcp-route';
 import { clickUpAttachmentPreflight, handleClickUpAttachmentRoute } from './clickup/attachment-route';
+import { handleClickUpWebhookRoute } from './clickup/webhook-route';
 
 export { AutonomyEngine, RoutineRunWorkflow } from './index';
 export { GoogleOAuthVault } from './google/oauth-vault';
@@ -52,6 +53,14 @@ function json(body: unknown, status: number, origin: string | null): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
+    if (pathname === '/clickup/webhook') {
+      try {
+        const response = await handleClickUpWebhookRoute(pathname, request, env);
+        return response ?? json({ code: 'not_found', message: 'Not found.' }, 404, null);
+      } catch {
+        return json({ code: 'internal', message: 'The ClickUp webhook boundary could not complete the request.' }, 500, null);
+      }
+    }
     if (pathname === '/clickup/attachment') {
       const origin = request.headers.get('Origin');
       const corsOrigin = allowedOrigin(request, env);

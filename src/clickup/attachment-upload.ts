@@ -1,10 +1,13 @@
-import { artifactRepository } from '../artifacts/repository';
-import { ARTIFACT_LIMITS } from '../artifacts/limits';
 import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../autonomy/cloud/pairing';
 import { validateClickUpToolArguments, type ClickUpToolArguments } from './tool-schema';
 import { clickUpPairingAuthorityBinding } from './oauth/authority';
 import { CLICKUP_GRANT_REVISION_HEADER } from './mcp-protocol';
 import type { ClickUpAdmittedGrant } from './mcp-client';
+import {
+  assertClickUpArtifactSnapshotCurrent,
+  ClickUpArtifactApprovalError,
+  type ClickUpArtifactApprovalSnapshot,
+} from './attachment-authority';
 
 const CLICKUP_ATTACHMENT_PATH = '/clickup/attachment';
 const UPLOAD_TIMEOUT_MS = 60_000;
@@ -45,31 +48,6 @@ async function installationToken(pairing: AutonomyPairing): Promise<string> {
   return token;
 }
 
-async function artifactBlob(artifactId: string): Promise<{ blob: Blob; name: string; mimeType: string }> {
-  const artifact = await artifactRepository.get(artifactId);
-  if (artifact.status !== 'ready') {
-    throw new ClickUpAttachmentUploadError('artifact-not-ready', 'Only ready Elara artifacts can be attached to ClickUp.');
-  }
-
-  let blob: Blob | undefined;
-  if (artifact.artifactType === 'attachment') blob = artifact.data;
-  else blob = artifact.outputBlob;
-
-  if (!blob && artifact.artifactType !== 'attachment' && artifact.sourceCode?.content !== undefined) {
-    blob = new Blob([artifact.sourceCode.content], { type: artifact.mimeType });
-  }
-  if (!blob) throw new ClickUpAttachmentUploadError('artifact-payload', 'The selected Elara artifact has no attachable payload.');
-  if (blob.size > ARTIFACT_LIMITS.maxAttachmentBytes) {
-    throw new ClickUpAttachmentUploadError('artifact-too-large', `Elara attachments are limited to ${ARTIFACT_LIMITS.maxAttachmentBytes} bytes.`);
-  }
-
-  return {
-    blob,
-    name: artifact.name,
-    mimeType: artifact.mimeType,
-  };
-}
-
 async function responseError(response: Response): Promise<ClickUpAttachmentUploadError> {
   const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
   return new ClickUpAttachmentUploadError(
@@ -83,23 +61,42 @@ export async function uploadClickUpArtifact(
   rawArguments: unknown,
   signal?: AbortSignal,
   admittedGrant?: ClickUpAdmittedGrant,
+  approvedArtifact?: ClickUpArtifactApprovalSnapshot,
 ): Promise<unknown> {
   const args = validateClickUpToolArguments('clickup.attachArtifact', rawArguments) as ClickUpToolArguments<'clickup.attachArtifact'>;
   if (!admittedGrant || !Number.isSafeInteger(admittedGrant.revision) || admittedGrant.revision <= 0) {
     throw new ClickUpAttachmentUploadError('grant_required', 'ClickUp artifact upload requires an admitted provider grant.', 409);
   }
+  if (!approvedArtifact || approvedArtifact.artifactId !== args.artifactId) {
+    throw new ClickUpAttachmentUploadError('artifact-approval-required', 'ClickUp artifact upload requires the exact artifact snapshot approved by the user.', 409);
+  }
+  if ((args.filename ?? approvedArtifact.artifactName) !== approvedArtifact.uploadName) {
+    throw new ClickUpAttachmentUploadError('artifact-changed', 'The approved upload filename no longer matches this attachment request.', 409);
+  }
+
   const pairing = activePairing();
-  if (admittedGrant && clickUpPairingAuthorityBinding(pairing) !== admittedGrant.authorityBinding) {
+  if (clickUpPairingAuthorityBinding(pairing) !== admittedGrant.authorityBinding) {
     throw new ClickUpAttachmentUploadError('grant_changed', 'The paired Worker changed after ClickUp authorization was admitted.', 409);
   }
   const token = await installationToken(pairing);
-  const artifact = await artifactBlob(args.artifactId);
+
+  // Re-read and hash the mutable repository entry immediately before multipart
+  // construction. If it changed, fail closed. The bytes sent below are the
+  // immutable Blob captured before confirmation, not a newly-resolved payload.
+  try {
+    await assertClickUpArtifactSnapshotCurrent(approvedArtifact);
+  } catch (error) {
+    if (error instanceof ClickUpArtifactApprovalError) {
+      throw new ClickUpAttachmentUploadError(error.code, error.message, 409);
+    }
+    throw error;
+  }
 
   const form = new FormData();
   form.set('taskId', args.taskId);
   form.set('artifactId', args.artifactId);
-  form.set('filename', args.filename ?? artifact.name);
-  form.set('file', artifact.blob, args.filename ?? artifact.name);
+  form.set('filename', approvedArtifact.uploadName);
+  form.set('file', approvedArtifact.blob, approvedArtifact.uploadName);
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), UPLOAD_TIMEOUT_MS);

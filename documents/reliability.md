@@ -3,7 +3,7 @@ id: SYS-REL
 status: active
 verified_commit: 0b5fd5623962c1d737ec6f5a793428bc42cc8649
 scope: CI, verification integrity, test quality, adversarial certification, coverage, secret scanning, supply-chain controls and certified deployment
-paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/secret-scan.mjs, scripts/supply-chain-gate.mjs, scripts/supply-chain-baseline.json, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/verify-coverage-gate.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, scripts/capture-visual-evidence.mjs, .github/workflows/ci.yml, .github/dependabot.yml, package.json, package-lock.json, .npmrc, .nvmrc, e2e]
+paths: [scripts/check-docs.mjs, scripts/check-verification-integrity.mjs, scripts/security-architecture-gate.mjs, scripts/secret-scan.mjs, scripts/supply-chain-gate.mjs, scripts/supply-chain-baseline.json, scripts/test-quality-gate.mjs, scripts/check-coverage.mjs, scripts/verify-coverage-gate.mjs, scripts/coverage-baseline.json, scripts/reliability-gate.mjs, scripts/capture-visual-evidence.mjs, .github/workflows/ci.yml, .github/workflows/visual-evidence.yml, .github/dependabot.yml, package.json, package-lock.json, .npmrc, .nvmrc, e2e]
 keywords: [reliability, ci, exact-head, adversarial, mutation, fail-closed, supply-chain, secret-scan, audit, signature, dependency, coverage, deployment]
 ---
 
@@ -37,7 +37,7 @@ exact PR head / main push SHA
 -> production build
 -> Playwright: Chromium + Android portrait + onboarding
 -> final reliability gate
--> PR only, after Runtime verification: exact-base/exact-head visual evidence
+-> UI-changing PRs only, explicit remote trigger: exact-base/exact-head visual evidence (independent of Runtime verification)
 -> main only: package certified dist/
 -> deploy job after Runtime verification succeeds
 ```
@@ -60,7 +60,7 @@ CI pins Node `24.21.0` and npm `11.19.0`. Pull-request checkout explicitly uses 
 | CI and Pages release | `.github/workflows/ci.yml` |
 | Automated dependency proposals | `.github/dependabot.yml` |
 | Browser behavior | `e2e/`, `playwright.config.ts` |
-| Before/after visual evidence | `scripts/capture-visual-evidence.mjs`, `.github/workflows/ci.yml` |
+| Before/after visual evidence | `scripts/capture-visual-evidence.mjs`, `.github/workflows/visual-evidence.yml` |
 | Worker behavior | `worker/test/`, `vitest.workers.config.ts` |
 
 ## 4. Supply-chain contract
@@ -96,13 +96,13 @@ The coverage checker requires all 185 eligible source files to appear in the rep
 
 Persistence/credential changes require failure-path and migration evidence. Worker changes are verified through the isolated Worker/Durable Object suite. Browser-visible geometry and interaction are owned by Playwright rather than source-string assertions.
 
-For pull requests, the read-only `visual-evidence` job runs only after `Runtime verification` succeeds. It checks out the exact PR head with comparison history, materializes the exact PR base SHA into a detached worktree, installs each side from its own lockfile, and drives the same deterministic browser fixture against both revisions. The canonical initial fixture is Generation Activity at the Android reference viewport `412 x 915`; it emits a viewport PNG, a focused panel PNG and JSON geometry/font metadata under `before/` and `after/`. A second deterministic fixture, the Memory settings scenario, seeds one pinned synthetic canonical memory (and one grounded semantic summary file where the semantic store exists) and captures the Memory settings view plus its focused panel, recording fixture provenance and geometry in `settings-memory.evidence.json`. The pair is uploaded as a seven-day Actions artifact and is not committed to the repository.
+Visual evidence is not part of ordinary PR/push CI. It is generated only when a UI-changing pull request explicitly requests it through the dedicated `Visual Evidence` workflow: either a trusted collaborator comments exactly `/visual-evidence` on the PR or a reviewer manually dispatches the workflow with the PR number. The job resolves the exact open PR base/head SHAs at trigger time, checks out the head with comparison history, materializes the exact base SHA into a detached worktree, installs each side from its own lockfile, and drives the same deterministic browser fixture against both revisions. It runs independently of Runtime Verification so visual iteration is available immediately. The canonical initial fixture is Generation Activity at the Android reference viewport `412 x 915`; it emits a viewport PNG, a focused panel PNG and JSON geometry/font metadata under `before/` and `after/`. A second deterministic fixture, the Memory settings scenario, seeds one pinned synthetic canonical memory (and one grounded semantic summary file where the semantic store exists) and captures the Memory settings view plus its focused panel, recording fixture provenance and geometry in `settings-memory.evidence.json`. The pair is uploaded as a seven-day Actions artifact and is not committed to the repository.
 
 Visual evidence is deliberately synthetic: no production secrets, live account data or user conversations are permitted in the fixture. Screenshots are review evidence rather than behavioral assertions; Playwright DOM/runtime checks remain authoritative for interaction correctness. A failed optional presentation asset is recorded in JSON rather than silently treated as proof of the intended rendering.
 
 ## 7. CI authority and release semantics
 
-Workflow-wide `GITHUB_TOKEN` permissions default to none. Runtime certification and PR visual evidence each receive read-only repository contents. The permanent certification workflow rejects repository write authority and persisted checkout credentials. GitHub Actions are pinned to reviewed full commit SHAs; each job has an explicit timeout and superseded runs for the same ref are cancelled.
+Workflow-wide `GITHUB_TOKEN` permissions default to none. Runtime certification receives read-only repository contents. The separately triggered visual-evidence workflow receives read-only repository contents plus read-only pull-request metadata so it can resolve exact comparison SHAs; it has no repository write authority. Both workflows reject persisted checkout credentials. GitHub Actions are pinned to reviewed full commit SHAs; each job has an explicit timeout and superseded runs for the same ref are cancelled.
 
 Pages write and OIDC authority exist only in the downstream deploy job. On a `main` push, the runtime job builds and certifies the commit first, then uploads `dist/`; the deploy job has `needs: runtime` and cannot run when certification fails. The former independent Pages workflow must not return.
 
@@ -120,7 +120,7 @@ The protected mutation classes include executable DOM sinks and syntax evasions,
 
 Runtime adversarial tests complement those static mutations. In particular, mutation tool calls must not execute after the confirmation shown to the user expires, and a delayed OAuth grant must not revive an expired mutation confirmation. Encrypted credential tests intentionally corrupt sealed material and require fail-closed reads/unlock behavior rather than plaintext recovery or silent weakening.
 
-These tests certify application, credential, authority, test, CI and deployment boundaries. Indirect prompt injection now has an application-enforced containment boundary: successful Calendar/Tasks/Gmail/Drive/Docs/Sheets/YouTube reads intrinsically taint the model turn (with explicit `trust: untrusted-external` as a second tripwire). A mutation proposed by a later model continuation after that taint is marked `untrustedContext`; the confirmation broker displays an external-content warning, leaves the action unselected, and disables approval until the human explicitly selects it. Mutations emitted in the same model batch as a read are not retroactively tainted because the model had not yet received that read result. Grouped items likewise start unselected and there is no approve-all control. Broader cross-turn provenance/taint propagation and semantic information-flow analysis remain future security work rather than a solved claim.
+These tests certify application, credential, authority, test, CI and deployment boundaries. Indirect prompt injection now has an application-enforced containment boundary: successful Calendar/Tasks/Gmail/Drive/Docs/Sheets/YouTube/Kanban reads intrinsically taint the model turn (with explicit `trust: untrusted-external` as a second tripwire). A mutation proposed by a later model continuation after that taint is marked `untrustedContext`; the confirmation broker displays an external-content warning, leaves the action unselected, and disables approval until the human explicitly selects it. Mutations emitted in the same model batch as a read are not retroactively tainted because the model had not yet received that read result. Grouped items likewise start unselected and there is no approve-all control. Broader cross-turn provenance/taint propagation and semantic information-flow analysis remain future security work rather than a solved claim.
 
 ## 10. Completion rule
 

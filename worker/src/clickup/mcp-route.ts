@@ -5,6 +5,14 @@ import {
   clickupToolNameSchema,
 } from '../../../src/clickup/tool-schema';
 import {
+  CLICKUP_MCP_PATH,
+  CLICKUP_MCP_PROTOCOL_VERSION,
+  MCP_MCP_META_CLIENT_CAPABILITIES,
+  MCP_MCP_META_CLIENT_INFO,
+  MCP_MCP_META_PROTOCOL_VERSION,
+  MCP_MCP_META_SERVER_INFO,
+} from '../../../src/clickup/mcp-protocol';
+import {
   ClickUpToolServiceError,
   executeClickUpTool,
   type ClickUpToolServiceEnv,
@@ -14,8 +22,6 @@ export interface ClickUpMcpRouteEnv extends ClickUpToolServiceEnv {
   readonly ELARA_INSTALLATION_TOKEN?: string;
 }
 
-export const CLICKUP_MCP_PROTOCOL_VERSION = '2026-07-28';
-const MCP_PATH = '/mcp/clickup';
 const MAX_MCP_REQUEST_BYTES = 128 * 1024;
 const TOOLS_LIST_TTL_MS = 60_000;
 
@@ -24,20 +30,15 @@ const SERVER_INFO = Object.freeze({
   version: '0.1.0',
 });
 
-const META_PROTOCOL_VERSION = 'io.modelcontextprotocol/protocolVersion';
-const META_CLIENT_CAPABILITIES = 'io.modelcontextprotocol/clientCapabilities';
-const META_CLIENT_INFO = 'io.modelcontextprotocol/clientInfo';
-const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo';
-
 const requestIdSchema = z.union([z.string().max(256), z.number().finite()]);
 const clientInfoSchema = z.object({
   name: z.string().trim().min(1).max(200),
   version: z.string().trim().min(1).max(100),
 }).passthrough();
 const requestMetaSchema = z.object({
-  [META_PROTOCOL_VERSION]: z.literal(CLICKUP_MCP_PROTOCOL_VERSION),
-  [META_CLIENT_CAPABILITIES]: z.record(z.string(), z.unknown()),
-  [META_CLIENT_INFO]: clientInfoSchema.optional(),
+  [MCP_META_PROTOCOL_VERSION]: z.literal(CLICKUP_MCP_PROTOCOL_VERSION),
+  [MCP_META_CLIENT_CAPABILITIES]: z.record(z.string(), z.unknown()),
+  [MCP_META_CLIENT_INFO]: clientInfoSchema.optional(),
 }).passthrough();
 
 const baseRequestSchema = z.object({
@@ -76,7 +77,7 @@ function corsHeaders(corsOrigin: string | null): Headers {
 }
 
 function serverMeta(): Record<string, unknown> {
-  return { [META_SERVER_INFO]: SERVER_INFO };
+  return { [MCP_META_SERVER_INFO]: SERVER_INFO };
 }
 
 function rpcResult(id: string | number, result: Record<string, unknown>, corsOrigin: string | null): Response {
@@ -180,7 +181,7 @@ function headerValidation(
 ): { ok: true } | { ok: false; code: number; message: string } {
   const protocolHeader = request.headers.get('MCP-Protocol-Version')?.trim() ?? '';
   const meta = objectValue(params._meta);
-  const metaVersion = typeof meta?.[META_PROTOCOL_VERSION] === 'string' ? meta[META_PROTOCOL_VERSION] as string : '';
+  const metaVersion = typeof meta?.[MCP_META_PROTOCOL_VERSION] === 'string' ? meta[MCP_META_PROTOCOL_VERSION] as string : '';
 
   if (protocolHeader !== CLICKUP_MCP_PROTOCOL_VERSION || metaVersion !== CLICKUP_MCP_PROTOCOL_VERSION) {
     return { ok: false, code: -32022, message: 'Unsupported MCP protocol version.' };
@@ -219,7 +220,7 @@ export async function handleClickUpMcpRoute(
   env: ClickUpMcpRouteEnv,
   corsOrigin: string | null,
 ): Promise<Response | null> {
-  if (pathname !== MCP_PATH) return null;
+  if (pathname !== CLICKUP_MCP_PATH) return null;
   if (request.method !== 'POST') {
     return rpcError(null, -32600, 'MCP endpoint accepts POST requests only.', 405, corsOrigin);
   }

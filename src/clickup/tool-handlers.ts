@@ -6,12 +6,20 @@ import { uploadClickUpArtifact } from './attachment-upload';
 export const clickUpToolHandlers: GoogleToolHandlers = Object.fromEntries(
   CLICKUP_TOOL_NAMES.map((name) => [
     name,
-    async ({ arguments: raw, signal, providerGrantRevision, providerAuthorityBinding }) => {
+    async ({
+      arguments: raw,
+      signal,
+      providerGrantRevision,
+      providerAuthorityBinding,
+      clickupArtifactSnapshot,
+    }) => {
       const args = validateClickUpToolArguments(name, raw);
       const admittedGrant = providerGrantRevision && providerAuthorityBinding
         ? { revision: providerGrantRevision, authorityBinding: providerAuthorityBinding }
         : undefined;
-      if (name === 'clickup.attachArtifact') return uploadClickUpArtifact(args, signal, admittedGrant);
+      if (name === 'clickup.attachArtifact') {
+        return uploadClickUpArtifact(args, signal, admittedGrant, clickupArtifactSnapshot);
+      }
       return callClickUpMcpTool(name, args, signal, admittedGrant);
     },
   ]),

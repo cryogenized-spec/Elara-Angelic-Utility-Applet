@@ -102,15 +102,46 @@ function providerMessage(payload: unknown, status: number): string {
 }
 
 async function readJsonResponse(response: Response): Promise<unknown> {
-  const text = await response.text();
-  if (text.length > MAX_PROVIDER_BODY_CHARS) {
+  const rateLimit = rateLimitFromHeaders(response.headers);
+  const declared = Number(response.headers.get('content-length') ?? '0');
+  if (Number.isFinite(declared) && declared > MAX_PROVIDER_BODY_CHARS) {
     throw new ClickUpProviderError(
       502,
       'response-too-large',
       'ClickUp returned a response larger than Elara allows.',
-      rateLimitFromHeaders(response.headers),
+      rateLimit,
     );
   }
+
+  const reader = response.body?.getReader();
+  let text = '';
+  if (!reader) {
+    const raw = new Uint8Array(await response.arrayBuffer());
+    if (raw.byteLength > MAX_PROVIDER_BODY_CHARS) {
+      throw new ClickUpProviderError(502, 'response-too-large', 'ClickUp returned a response larger than Elara allows.', rateLimit);
+    }
+    text = new TextDecoder().decode(raw);
+  } else {
+    const decoder = new TextDecoder();
+    let total = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+        total += value.byteLength;
+        if (total > MAX_PROVIDER_BODY_CHARS) {
+          throw new ClickUpProviderError(502, 'response-too-large', 'ClickUp returned a response larger than Elara allows.', rateLimit);
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } catch (cause) {
+      await reader.cancel().catch(() => undefined);
+      throw cause;
+    }
+  }
+
   if (!text) return {};
   try {
     return JSON.parse(text) as unknown;
@@ -119,7 +150,7 @@ async function readJsonResponse(response: Response): Promise<unknown> {
       502,
       'invalid-json',
       'ClickUp returned malformed JSON.',
-      rateLimitFromHeaders(response.headers),
+      rateLimit,
     );
   }
 }

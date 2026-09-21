@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { env, evictAllDurableObjects, reset } from 'cloudflare:test';
+import { env, reset, runInDurableObject } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, signedWrite } from './helpers';
@@ -42,10 +42,6 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  // Drain in-flight DO/RPC work while the provider mock is still available,
-  // then clear persisted state. This avoids workerd tearing down a live
-  // callback when the test file or isolated storage is destroyed.
-  await evictAllDurableObjects();
   await reset();
   vi.restoreAllMocks();
 });
@@ -91,37 +87,65 @@ async function search(argumentsValue: Record<string, unknown>) {
 }
 
 async function forceRefreshAt(value: number) {
-  return (await stub() as DurableObjectStub & {
-    forceTaskIndexRefreshAt(workspaceId: string, value: number): Promise<void>;
-  }).forceTaskIndexRefreshAt('999', value);
+  return runInDurableObject(await stub(), async (_instance, state) => {
+    state.storage.sql.exec(
+      'UPDATE clickup_task_index_state SET last_refresh_at = ? WHERE workspace_id = ?',
+      value,
+      '999',
+    );
+  });
 }
 
 async function forceIndexedAt(value: number) {
-  return (await stub() as DurableObjectStub & {
-    forceTaskIndexIndexedAt(workspaceId: string, value: number): Promise<void>;
-  }).forceTaskIndexIndexedAt('999', value);
+  return runInDurableObject(await stub(), async (_instance, state) => {
+    state.storage.sql.exec(
+      'UPDATE clickup_task_index SET indexed_at = ? WHERE workspace_id = ?',
+      value,
+      '999',
+    );
+  });
 }
 
 async function taskJsonLength(taskId: string) {
-  return (await stub() as DurableObjectStub & {
-    taskJsonLength(workspaceId: string, taskId: string): Promise<number | null>;
-  }).taskJsonLength('999', taskId);
+  return runInDurableObject(await stub(), async (_instance, state) => {
+    const row = state.storage.sql.exec<{ task_json: string }>(
+      'SELECT task_json FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
+      '999',
+      taskId,
+    ).toArray()[0];
+    return row ? row.task_json.length : null;
+  });
 }
 
 async function indexSnapshot() {
-  return (await stub() as DurableObjectStub & {
-    taskIndexSnapshot(workspaceId: string): Promise<{
-      fullSyncComplete: boolean;
-      nextPage: number;
-      lastRefreshAt: number;
-      lastProviderUpdatedAt: number;
-      indexedTasks: number;
-      oldestIndexedAt?: number;
-      incrementalSince?: number;
-      incrementalNextPage?: number;
-      incrementalMaxUpdatedAt?: number;
-    }>;
-  }).taskIndexSnapshot('999');
+  return runInDurableObject(await stub(), async (_instance, state) => {
+    const row = state.storage.sql.exec<{
+      full_sync_complete: number;
+      next_page: number;
+      last_refresh_at: number;
+      last_provider_updated_at: number;
+      incremental_since: number;
+      incremental_next_page: number;
+      incremental_max_updated_at: number;
+    }>(
+      'SELECT full_sync_complete, next_page, last_refresh_at, last_provider_updated_at, incremental_since, incremental_next_page, incremental_max_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
+      '999',
+    ).toArray()[0];
+    const indexedTasks = state.storage.sql.exec<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM clickup_task_index WHERE workspace_id = ?',
+      '999',
+    ).toArray()[0]?.count ?? 0;
+    return {
+      fullSyncComplete: row?.full_sync_complete === 1,
+      nextPage: row?.next_page ?? 0,
+      lastRefreshAt: row?.last_refresh_at ?? 0,
+      lastProviderUpdatedAt: row?.last_provider_updated_at ?? 0,
+      indexedTasks,
+      incrementalSince: row?.incremental_since ?? 0,
+      incrementalNextPage: row?.incremental_next_page ?? 0,
+      incrementalMaxUpdatedAt: row?.incremental_max_updated_at ?? 0,
+    };
+  });
 }
 
 describe('ClickUp durable task index', () => {

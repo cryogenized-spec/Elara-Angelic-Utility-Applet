@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { env, reset, runInDurableObject } from 'cloudflare:test';
+import { env, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, signedWrite } from './helpers';
@@ -86,66 +86,59 @@ async function search(argumentsValue: Record<string, unknown>) {
   }));
 }
 
+async function harnessFetch(path: string, init?: RequestInit): Promise<Response> {
+  return doFetch(new Request(`https://clickup-oauth-vault${path}`, init));
+}
+
 async function forceRefreshAt(value: number) {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    state.storage.sql.exec(
-      'UPDATE clickup_task_index_state SET last_refresh_at = ? WHERE workspace_id = ?',
-      value,
-      '999',
-    );
+  const response = await harnessFetch('/__test/clickup/task-index/refresh-at', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId: '999', value }),
   });
+  expect(response.status).toBe(200);
 }
 
 async function forceIndexedAt(value: number) {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    state.storage.sql.exec(
-      'UPDATE clickup_task_index SET indexed_at = ? WHERE workspace_id = ?',
-      value,
-      '999',
-    );
+  const response = await harnessFetch('/__test/clickup/task-index/indexed-at', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId: '999', value }),
   });
+  expect(response.status).toBe(200);
 }
 
-async function taskJsonLength(taskId: string) {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    const row = state.storage.sql.exec<{ task_json: string }>(
-      'SELECT task_json FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
-      '999',
-      taskId,
-    ).toArray()[0];
-    return row ? row.task_json.length : null;
-  });
+async function taskJsonLength(taskId: string): Promise<number | null> {
+  const response = await harnessFetch(
+    `/__test/clickup/task-json-length?workspaceId=999&taskId=${encodeURIComponent(taskId)}`,
+  );
+  expect(response.status).toBe(200);
+  const body = await response.json() as { length: number | null };
+  return body.length;
 }
 
-async function indexSnapshot() {
-  return runInDurableObject(await stub(), async (_instance, state) => {
-    const row = state.storage.sql.exec<{
-      full_sync_complete: number;
-      next_page: number;
-      last_refresh_at: number;
-      last_provider_updated_at: number;
-      incremental_since: number;
-      incremental_next_page: number;
-      incremental_max_updated_at: number;
-    }>(
-      'SELECT full_sync_complete, next_page, last_refresh_at, last_provider_updated_at, incremental_since, incremental_next_page, incremental_max_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
-      '999',
-    ).toArray()[0];
-    const indexedTasks = state.storage.sql.exec<{ count: number }>(
-      'SELECT COUNT(*) AS count FROM clickup_task_index WHERE workspace_id = ?',
-      '999',
-    ).toArray()[0]?.count ?? 0;
-    return {
-      fullSyncComplete: row?.full_sync_complete === 1,
-      nextPage: row?.next_page ?? 0,
-      lastRefreshAt: row?.last_refresh_at ?? 0,
-      lastProviderUpdatedAt: row?.last_provider_updated_at ?? 0,
-      indexedTasks,
-      incrementalSince: row?.incremental_since ?? 0,
-      incrementalNextPage: row?.incremental_next_page ?? 0,
-      incrementalMaxUpdatedAt: row?.incremental_max_updated_at ?? 0,
-    };
-  });
+async function indexSnapshot(): Promise<{
+  fullSyncComplete: boolean;
+  nextPage: number;
+  lastRefreshAt: number;
+  lastProviderUpdatedAt: number;
+  indexedTasks: number;
+  incrementalSince: number;
+  incrementalNextPage: number;
+  incrementalMaxUpdatedAt: number;
+}> {
+  const response = await harnessFetch('/__test/clickup/task-index?workspaceId=999');
+  expect(response.status).toBe(200);
+  return await response.json() as {
+    fullSyncComplete: boolean;
+    nextPage: number;
+    lastRefreshAt: number;
+    lastProviderUpdatedAt: number;
+    indexedTasks: number;
+    incrementalSince: number;
+    incrementalNextPage: number;
+    incrementalMaxUpdatedAt: number;
+  };
 }
 
 describe('ClickUp durable task index', () => {

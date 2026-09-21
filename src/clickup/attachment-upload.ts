@@ -93,6 +93,7 @@ export async function uploadClickUpArtifact(
   }
 
   const form = new FormData();
+  form.set('workspaceId', args.workspaceId);
   form.set('taskId', args.taskId);
   form.set('artifactId', args.artifactId);
   form.set('filename', approvedArtifact.uploadName);

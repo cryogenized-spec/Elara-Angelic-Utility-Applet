@@ -396,20 +396,20 @@ export class ClickUpOAuthVault extends DurableObject {
         if (expectedRevision === null) return json({ code: 'grant_required', message: 'Binding-internal ClickUp execution requires the admitted grant revision.' }, 409);
         const body = await request.text();
         if (body.length > 64_000) return json({ code: 'validation', message: 'ClickUp internal command is too large.' }, 413);
-        return this.executeProviderCommand(body, expectedRevision);
+        return await this.executeProviderCommand(body, expectedRevision);
       }
 
       if (request.method === 'POST' && url.pathname === '/internal/clickup/attachment') {
         if (!(await this.verifyInternal(request))) return json({ code: 'auth', message: 'Binding-internal ClickUp authority is required.' }, 401);
         const expectedRevision = this.expectedGrantRevision(request);
         if (expectedRevision === null) return json({ code: 'grant_required', message: 'Binding-internal ClickUp attachment requires the admitted grant revision.' }, 409);
-        return this.executeAttachmentUpload(request, expectedRevision);
+        return await this.executeAttachmentUpload(request, expectedRevision);
       }
 
       if (request.method === 'POST' && url.pathname === '/internal/clickup/webhook') {
         if (!(await this.verifyInternal(request))) return json({ code: 'auth', message: 'Binding-internal ClickUp authority is required.' }, 401);
         const body = await request.text();
-        return this.executeWebhook(body, request.headers.get('X-Signature'));
+        return await this.executeWebhook(body, request.headers.get('X-Signature'));
       }
 
       if (request.method === 'GET' && url.pathname === '/clickup/oauth/status') {
@@ -426,13 +426,16 @@ export class ClickUpOAuthVault extends DurableObject {
         return json({ code: writeAuth.code, message: `ClickUp OAuth write rejected: ${writeAuth.code}.` }, status);
       }
 
-      if (url.pathname === '/clickup/oauth/start') return this.start(request, body);
-      if (url.pathname === '/clickup/oauth/exchange') return this.exchange(request, body);
-      if (url.pathname === '/clickup/oauth/disconnect') return this.disconnect(body);
+      if (url.pathname === '/clickup/oauth/start') return await this.start(request, body);
+      if (url.pathname === '/clickup/oauth/exchange') return await this.exchange(request, body);
+      if (url.pathname === '/clickup/oauth/disconnect') return await this.disconnect(body);
       return json({ code: 'not_found', message: 'Not found.' }, 404);
     } catch (error) {
       if (error instanceof ClickUpProviderError) {
         return json({ code: error.code, message: error.message }, error.status);
+      }
+      if (error instanceof z.ZodError) {
+        return json({ code: 'validation', message: 'ClickUp request arguments were invalid.' }, 400);
       }
       return json({ code: 'oauth', message: 'ClickUp OAuth vault could not complete the request.' }, 502);
     }
@@ -840,7 +843,7 @@ export class ClickUpOAuthVault extends DurableObject {
           dateUpdatedGt: command.dateUpdatedGt,
         }), expectedRevision);
       case 'searchTaskIndex':
-        return this.searchTaskIndex(command.arguments, expectedRevision);
+        return await this.searchTaskIndex(command.arguments, expectedRevision);
       case 'getTask': {
         const args = validateClickUpToolArguments('clickup.getTask', command.arguments);
         return this.runProvider((token) => getClickUpTask(token, args.taskId, args.includeSubtasks ?? false), expectedRevision);

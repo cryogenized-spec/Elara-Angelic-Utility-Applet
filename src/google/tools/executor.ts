@@ -16,7 +16,7 @@ import { describeMemoryReconcileTarget } from '../../memory/tool-handler';
 import { kanbanToolArgumentSchemas, validateKanbanToolArguments, type KanbanToolName } from '../../kanban/tool-schema';
 import { loadRoleplayPreferences } from '../../persistence/preferences';
 import { clickupToolNameSchema, validateClickUpToolArguments, type ClickUpToolName } from '../../clickup/tool-schema';
-import type { ClickUpOAuthAuthority } from '../../clickup/oauth/contracts';
+import type { ClickUpExecutionGrant, ClickUpOAuthAuthority } from '../../clickup/oauth/contracts';
 
 export type LocalToolCapability = 'documents.local' | 'media.youtube.read' | 'memory.durable.local' | 'clickup.read' | 'clickup.write';
 export type ToolCapability = GoogleCapabilityKey | LocalToolCapability;
@@ -48,6 +48,10 @@ export interface GoogleToolExecutionContext {
   readonly signal?: AbortSignal;
   readonly generationId?: string;
   readonly isGenerationActive?: () => boolean;
+  /** Provider grant checked by the executor; never model-supplied. */
+  readonly providerGrantRevision?: number;
+  /** Paired Worker identity checked by the executor; never model-supplied. */
+  readonly providerAuthorityBinding?: string;
 }
 export type GoogleToolHandler = (context: GoogleToolExecutionContext) => Promise<unknown>;
 export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandler>>;
@@ -97,6 +101,15 @@ function validateArguments(tool: GoogleToolName, value: unknown): Readonly<Recor
 function isGoogleOAuthCapability(capability: ToolCapability): capability is GoogleCapabilityKey {
   return !NON_OAUTH_CAPABILITIES.has(capability);
 }
+function sameClickUpExecutionGrant(left: ClickUpExecutionGrant, right: ClickUpExecutionGrant): boolean {
+  return left.authorityBinding === right.authorityBinding
+    && left.revision > 0
+    && left.revision === right.revision
+    && left.status.connected
+    && right.status.connected
+    && left.status.account?.id === right.status.account?.id;
+}
+
 function authorizationNeeded(status: GoogleOAuthStatus, capability: ToolCapability): boolean {
   if (!isGoogleOAuthCapability(capability)) return false;
   const stateNeedsRecovery = status.state === 'disconnected' || status.state === 'needs-consent' || status.state === 'revoked' || status.state === 'reauthorization-required';
@@ -322,11 +335,15 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
   const capability = safeCapability(descriptor.capability);
   const isRoleplayTool = validCall.tool.startsWith('roleplay_setting.');
   if (isRoleplayTool && !(await loadRoleplayPreferences()).enabled) return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
-  if (clickupToolNameSchema.safeParse(validCall.tool).success) {
+  const isClickUpTool = clickupToolNameSchema.safeParse(validCall.tool).success;
+  let clickupGrant: ClickUpExecutionGrant | undefined;
+  if (isClickUpTool) {
     if (!options.clickupOAuth) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
     try {
-      const status = await options.clickupOAuth.getStatus();
-      if (!status.connected) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+      clickupGrant = await options.clickupOAuth.getExecutionGrant();
+      if (!clickupGrant.status.connected || clickupGrant.revision <= 0) {
+        return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+      }
     } catch {
       return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) };
     }
@@ -353,6 +370,16 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
     try { confirmationInvoked = true; approved = await confirm(confirmation) && isConfirmationFresh(confirmation.requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
     if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: confirmationInvoked ? 'USER_DECLINED' : 'CONFIRMATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
   }
+  if (isClickUpTool && clickupGrant && decision.requiresConfirmation) {
+    try {
+      const currentGrant = await options.clickupOAuth!.getExecutionGrant();
+      if (!sameClickUpExecutionGrant(clickupGrant, currentGrant)) {
+        return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+      }
+    } catch {
+      return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'network' }) };
+    }
+  }
   const handler = options.handlers[descriptor.name];
   if (!handler) return { ok: false, correlationId: id, tool: validCall.tool, code: 'HANDLER_UNAVAILABLE', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
   try {
@@ -368,6 +395,10 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
       signal: options.signal,
       generationId: options.generationId,
       isGenerationActive: options.isGenerationActive,
+      ...(clickupGrant ? {
+        providerGrantRevision: clickupGrant.revision,
+        providerAuthorityBinding: clickupGrant.authorityBinding,
+      } : {}),
     });
     return { ok: true, correlationId: id, tool: descriptor.name, result };
   }

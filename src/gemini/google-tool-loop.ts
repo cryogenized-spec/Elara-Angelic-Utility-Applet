@@ -17,6 +17,10 @@ import { clickUpToolHandlers } from '../clickup/tool-handlers';
 import { clickUpOAuthAuthority } from '../clickup/oauth/authority';
 import { clickupToolNameSchema } from '../clickup/tool-schema';
 import type { ClickUpExecutionGrant } from '../clickup/oauth/contracts';
+import {
+  captureClickUpArtifactApprovalSnapshot,
+  type ClickUpArtifactApprovalSnapshot,
+} from '../clickup/attachment-authority';
 import { isMediaItem, isMediaProviderId } from '../domain/media';
 import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
 import { isConfirmationFresh } from '../google/confirmation/policy';
@@ -506,10 +510,12 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       call: PendingToolCall;
       confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>>;
       clickupGrant?: ClickUpExecutionGrant;
+      clickupArtifactSnapshot?: ClickUpArtifactApprovalSnapshot;
     }> = [];
     const confirmationNow = executeOptions.now?.() ?? new Date();
     for (const call of admittedMutationCalls) {
       let clickupGrant: ClickUpExecutionGrant | undefined;
+      let clickupArtifactSnapshot: ClickUpArtifactApprovalSnapshot | undefined;
       if (clickupToolNameSchema.safeParse(call.name).success) {
         try {
           clickupGrant = await executeOptions.clickupOAuth?.getExecutionGrant();
@@ -520,16 +526,30 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
           continue;
         }
+        if (call.name === 'clickup.attachArtifact') {
+          try {
+            clickupArtifactSnapshot = await captureClickUpArtifactApprovalSnapshot(call.arguments);
+          } catch {
+            results.push(errorToolResult(call, 'EXECUTION_FAILED'));
+            continue;
+          }
+        }
       }
       const baseConfirmation = confirmationRequestForCall(call, confirmationNow, {
         conversationId: executeOptions.conversationId,
         messageId: executeOptions.messageId,
         generationId: executeOptions.generationId,
+        ...(clickupArtifactSnapshot ? { clickupArtifactSnapshot } : {}),
       });
       const confirmation = baseConfirmation && batchStartedTainted
         ? { ...baseConfirmation, untrustedContext: true as const }
         : baseConfirmation;
-      if (confirmation) mutationEntries.push({ call, confirmation, ...(clickupGrant ? { clickupGrant } : {}) });
+      if (confirmation) mutationEntries.push({
+        call,
+        confirmation,
+        ...(clickupGrant ? { clickupGrant } : {}),
+        ...(clickupArtifactSnapshot ? { clickupArtifactSnapshot } : {}),
+      });
       else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));
     }
 
@@ -636,6 +656,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       const result = await executeGoogleTool(entry.call, {
         ...executeOptions,
         ...(entry.clickupGrant ? { expectedClickUpGrant: entry.clickupGrant } : {}),
+        ...(entry.clickupArtifactSnapshot ? { expectedClickUpArtifactSnapshot: entry.clickupArtifactSnapshot } : {}),
         confirm: async () => true,
       });
       if (signal?.aborted || request.isGenerationActive?.() === false) {

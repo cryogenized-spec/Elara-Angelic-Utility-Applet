@@ -450,6 +450,145 @@ describe('ClickUpOAuthVault', () => {
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 88 }));
   });
 
+  it('blocks a provider-readable task from Workspace B when only Workspace A is admitted', async () => {
+    let taskBReads = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'token-a' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace A', members: [] }] }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/task/task-b') {
+        taskBReads += 1;
+        return new Response(JSON.stringify({
+          id: 'task-b',
+          name: 'SECRET B TASK',
+          markdown_description: 'B-only confidential content',
+          team_id: '998',
+          list: { id: 'list-b' },
+          space: { id: 'space-b' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const response = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: 'task-b' },
+    });
+
+    expect(response.status).toBe(403);
+    const body = await response.text();
+    expect(body).toContain('resource_workspace_mismatch');
+    expect(body).not.toContain('SECRET B TASK');
+    expect(body).not.toContain('confidential');
+    expect(taskBReads).toBe(1);
+  });
+
+  it('blocks a provider-readable Folder from Workspace B when hierarchy is scoped to Workspace A', async () => {
+    let folderReads = 0;
+    let spaceLists = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'token-a' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace A', members: [] }] }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/folder/456') {
+        folderReads += 1;
+        return new Response(JSON.stringify({
+          id: '456',
+          name: 'SECRET B FOLDER',
+          space: { id: '222' },
+          lists: [{ id: 'list-b', name: 'B list' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/team/999/space') {
+        spaceLists += 1;
+        return new Response(JSON.stringify({
+          spaces: [{ id: '111', name: 'A Space' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const response = await internalCommand({
+      operation: 'getFolder',
+      workspaceId: '999',
+      folderId: '456',
+      includeSubfolders: true,
+    });
+
+    expect(response.status).toBe(403);
+    const body = await response.text();
+    expect(body).toContain('resource_workspace_mismatch');
+    expect(body).not.toContain('SECRET B FOLDER');
+    expect(body).not.toContain('B list');
+    expect(folderReads).toBe(1);
+    expect(spaceLists).toBeGreaterThan(0);
+  });
+
+  it('cannot reuse a removed Workspace B resource after reconnect authorizes only Workspace A', async () => {
+    let tokenSequence = 0;
+    let taskBReads = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') {
+        tokenSequence += 1;
+        return new Response(JSON.stringify({ access_token: tokenSequence === 1 ? 'token-ab' : 'token-a' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        const both = request.headers.get('Authorization')?.endsWith('token-ab');
+        return new Response(JSON.stringify({
+          teams: both
+            ? [{ id: '999', name: 'Workspace A', members: [] }, { id: '998', name: 'Workspace B', members: [] }]
+            : [{ id: '999', name: 'Workspace A', members: [] }],
+        }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/task/task-b') {
+        taskBReads += 1;
+        return new Response(JSON.stringify({ id: 'task-b', name: 'SECRET B', team_id: '998' }), { status: 200 });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const first = await start();
+    expect((await exchange(first.state, 'grant-ab')).status).toBe(200);
+    expect((await credentialSnapshot())?.workspacesJson).toContain('"998"');
+
+    const second = await start();
+    expect((await exchange(second.state, 'grant-a')).status).toBe(200);
+    expect((await credentialSnapshot())?.workspacesJson).not.toContain('"998"');
+
+    const response = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '998', taskId: 'task-b' },
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: 'workspace_forbidden' }));
+    expect(taskBReads).toBe(0);
+  });
+
   it('does not raise the local rate budget when concurrent provider responses arrive out of order', async () => {
     let taskCalls = 0;
     let firstStarted = false;

@@ -184,6 +184,42 @@ try {
       '&& false',
     ));
   });
+  addMutation('ClickUp task-comments scope check bypassed with helper left intact', 'scripts/security-architecture-gate.mjs', 'ClickUp resource-scope enforcement call count changed', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/oauth-vault.ts', (source) => source.replace(
+      "case 'getTaskComments': {\n        const scoped = await this.verifyTaskScope(command.workspaceId, command.taskId, false, expectedRevision);",
+      "case 'getTaskComments': {\n        const scoped = { ok: true, task: {} as Record<string, unknown> };",
+    ));
+  });
+  addMutation('ClickUp direct-list scope check bypassed with verifier still present', 'scripts/security-architecture-gate.mjs', 'ClickUp resource-scope enforcement call count changed', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/oauth-vault.ts', (source) => source.replace(
+      "case 'getList': {\n        const scoped = await this.verifyListScope(command.workspaceId, command.listId, expectedRevision);",
+      "case 'getList': {\n        const scoped = { ok: true, list: {} as Record<string, unknown> };",
+    ));
+  });
+  addMutation('ClickUp comment-to-task association bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp resource-scope enforcement call count changed', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/oauth-vault.ts', (source) => source.replace(
+      'const commentScope = await this.verifyCommentBelongsToTask(args.workspaceId, args.taskId, args.commentId, expectedRevision);',
+      'const commentScope = { ok: true as const };',
+    ));
+  });
+  addMutation('ClickUp Custom Field clear drops admitted grant revision', 'scripts/security-architecture-gate.mjs', 'ClickUp Custom Field grant propagation boundary disappeared', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/tool-service.ts', (source) => source.replace(
+      "fieldId: value.fieldId,\n          }, expectedRevision)",
+      "fieldId: value.fieldId,\n          })",
+    ));
+  });
+  addMutation('ClickUp Custom Field set drops admitted grant revision', 'scripts/security-architecture-gate.mjs', 'ClickUp Custom Field grant propagation boundary disappeared', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/tool-service.ts', (source) => source.replace(
+      "value: value.value,\n          }, expectedRevision)",
+      "value: value.value,\n          })",
+    ));
+  });
+  addMutation('ClickUp attachment drops Workspace scope from multipart', 'scripts/security-architecture-gate.mjs', 'ClickUp attachment scope/approval boundary disappeared', (cwd) => {
+    mutateRelative(cwd, 'src/clickup/attachment-upload.ts', (source) => source.replace(
+      "  form.set('workspaceId', args.workspaceId);\n",
+      '',
+    ));
+  });
 
   addMutation('synthetic Google API key leak', 'scripts/secret-scan.mjs', 'possible Google API key', (cwd) => {
     const token = 'AIza' + 'A'.repeat(35);

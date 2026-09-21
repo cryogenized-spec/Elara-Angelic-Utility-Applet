@@ -428,6 +428,14 @@ for (const marker of [
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth/REST credential boundary is missing: ${marker}`);
 }
 for (const marker of [
+  'verifyTaskScope(args.workspaceId, args.taskId, args.includeSubtasks ?? false, expectedRevision)',
+  'verifyListScope(args.workspaceId, args.listId, expectedRevision)',
+  'validateWorkspaceUsers(args.workspaceId, args.assigneeIds)',
+  'validateWorkspaceUsers(args.workspaceId, args.mentionUserIds)',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp resource-scope enforcement call disappeared: ${marker}`);
+}
+for (const marker of [
   "const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'",
   "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",
   "headers.set('Authorization'",
@@ -533,6 +541,7 @@ for (const marker of [
 }
 if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
 if (!toolLoop.includes("results.push(errorToolResult(call, UNTRUSTED_CONTEXT_READ_BLOCK));")) fail('Untrusted provider evidence must fail closed before it can manufacture fresh ClickUp mutation authority');
+if (!toolLoop.includes('&& !freshUserExplicitlyRequestedClickUpMutation(request, call.name)')) fail('ClickUp untrusted mutation admission lost fresh-user intent check');
 if (!toolLoop.includes("'clickup.'") || !toolLoop.includes('clickUpToolHandlers') || !toolLoop.includes('clickUpOAuthAuthority')) fail('ClickUp tools must remain inside the existing model-tool and untrusted-provider authority');
 if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isExternalEvidenceReadTool') || !toolLoop.includes('EXTERNAL_EVIDENCE_READ_PREFIXES') || !toolLoop.includes('PRIVATE_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('taintedReadContinuationAllowed') || !toolLoop.includes('driveSearchCandidateIds') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must taint external evidence, block post-taint private reads, and limit Drive transfer continuation to same-turn search provenance');
 if (!toolLoop.includes("call.name === 'memory.lookup' || call.name === 'memory.recall'") || !toolLoop.includes('untrustedExternalSeen = true')) fail('Durable-memory recall must taint later private Workspace reads as well as mutations');

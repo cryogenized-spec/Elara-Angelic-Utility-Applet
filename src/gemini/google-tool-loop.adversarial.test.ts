@@ -702,8 +702,14 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       },
     });
 
+    const clickupStatus = { connected: true as const, workspaces: [{ id: '999', name: 'Workspace' }], account: { id: '183' }, updatedAt: 1 };
     const clickupOAuth = {
-      getStatus: async () => ({ connected: true, workspaces: [{ id: '999', name: 'Workspace' }] }),
+      getStatus: async () => clickupStatus,
+      getExecutionGrant: async () => ({
+        status: clickupStatus,
+        authorityBinding: 'https://worker.example#test-installation',
+        revision: 1,
+      }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
@@ -754,8 +760,14 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       return [false];
     });
 
+    const clickupStatus = { connected: true as const, workspaces: [{ id: '999', name: 'Workspace' }], account: { id: '183' }, updatedAt: 1 };
     const clickupOAuth = {
-      getStatus: async () => ({ connected: true, workspaces: [{ id: '999', name: 'Workspace' }] }),
+      getStatus: async () => clickupStatus,
+      getExecutionGrant: async () => ({
+        status: clickupStatus,
+        authorityBinding: 'https://worker.example#test-installation',
+        revision: 1,
+      }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,

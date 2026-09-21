@@ -13,6 +13,7 @@ import {
 const base: ToolLoopBudgetSnapshot = {
   cumulativeGrossInputTokens: 0,
   lastGrossInputTokens: 0,
+  lastResponseTokens: 0,
   interactions: 1,
   compactions: 0,
 };
@@ -22,6 +23,31 @@ describe('Gemini tool-loop TPM budget', () => {
     const next = addGrossUsage(base, { inputTokens: 42_000, cachedTokens: 39_000 });
     expect(next.cumulativeGrossInputTokens).toBe(42_000);
     expect(next.lastGrossInputTokens).toBe(42_000);
+  });
+
+  it('includes the prior model response in inherited continuation context', () => {
+    const snapshot = addGrossUsage(base, {
+      inputTokens: 70_000,
+      outputTokens: 40_000,
+      totalTokens: 110_000,
+    });
+    expect(snapshot.lastResponseTokens).toBe(40_000);
+    expect(projectedNextGross(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY, 5_000)).toBe(185_000);
+    expect(decideToolLoopBudget(snapshot, DEFAULT_TOOL_LOOP_BUDGET_POLICY, {
+      continuationInputTokens: 5_000,
+      compactInputTokens: 15_000,
+      terminalInputTokens: 8_000,
+    })).toBe('compact');
+  });
+
+  it('uses total-token response remainder when it exceeds explicit output telemetry', () => {
+    const snapshot = addGrossUsage(base, {
+      inputTokens: 30_000,
+      outputTokens: 2_000,
+      thoughtsTokens: 3_000,
+      totalTokens: 42_000,
+    });
+    expect(snapshot.lastResponseTokens).toBe(12_000);
   });
 
   it('projects the next continuation from the recent gross size', () => {

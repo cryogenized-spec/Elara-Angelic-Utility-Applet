@@ -1,5 +1,6 @@
 import { memoryScopeForConversation } from '../memory/retrieval';
 import { formatMemoryContext, retrieveMemories } from '../memory/store';
+import { loadSemanticMemoryContext } from '../memory/semantic-retrieval';
 import { loadFolderState } from '../persistence/folders';
 import { loadMemoryBehaviorPreferences, withMemoryBehaviorReadLease } from '../persistence/preferences';
 
@@ -37,7 +38,16 @@ export async function loadMemoryContext(query: string, conversationId?: string):
     // under an older, potentially broader policy.
     const current = await loadMemoryBehaviorPreferences();
     if (!current.enabled || current.recallStyle !== behavior.recallStyle) return '';
-    return formatMemoryContext(memories);
+
+    // The derived dossier lane is an additional, separately bounded,
+    // relevance-gated projection. It never widens the canonical memory
+    // budget, never mutates recall telemetry, and degrades to empty text on
+    // any failure. Deliberate memory.recall stays canonical-only.
+    const memoryText = formatMemoryContext(memories);
+    const semanticText = await loadSemanticMemoryContext(query, scope, current);
+    if (!memoryText) return semanticText;
+    if (!semanticText) return memoryText;
+    return `${memoryText}\n\n${semanticText}`;
   });
 }
 

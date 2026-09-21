@@ -1,4 +1,5 @@
 import type { DurableMemory, MemoryKind, MemoryLifecycle } from './types';
+import { hasOperationalStateHint } from './volatility';
 import { getMemory, listMemories, updateMemory } from './store';
 
 export const SUPPORT_CONFIDENCE_STEP = 0.08;
@@ -10,8 +11,14 @@ export const MICRO_TO_EPISODIC_REINFORCEMENTS = 1;
 export const EPISODIC_TO_CONTEXTUAL_REINFORCEMENTS = 3;
 
 export const ORGANIC_MICRO_DORMANCY_MS = 90 * 86_400_000;
+/** Transient operational state recedes faster than ordinary organic evidence. */
+export const OPERATIONAL_MICRO_DORMANCY_MS = 30 * 86_400_000;
 export const ORGANIC_EPISODIC_DORMANCY_MS = 180 * 86_400_000;
 export const ORGANIC_CONTEXTUAL_DORMANCY_MS = 365 * 86_400_000;
+
+function carriesOperationalState(memory: DurableMemory): boolean {
+  return hasOperationalStateHint(`${memory.title}\n${memory.body}`);
+}
 
 const KIND_RANK: Readonly<Record<MemoryKind, number>> = {
   MICRO_OBSERVATION: 0,
@@ -107,7 +114,8 @@ function shouldDormantForAge(memory: DurableMemory, now: number): boolean {
   const ageMs = Math.max(0, now - memory.updatedAt);
 
   if (memory.kind === 'MICRO_OBSERVATION') {
-    return memory.reinforcementCount === 0 && ageMs >= ORGANIC_MICRO_DORMANCY_MS;
+    const dormancy = carriesOperationalState(memory) ? OPERATIONAL_MICRO_DORMANCY_MS : ORGANIC_MICRO_DORMANCY_MS;
+    return memory.reinforcementCount === 0 && ageMs >= dormancy;
   }
   if (memory.kind === 'EPISODIC') {
     return memory.reinforcementCount < EPISODIC_TO_CONTEXTUAL_REINFORCEMENTS
@@ -146,6 +154,12 @@ export function previewMemoryLifecycleTransition(memory: DurableMemory, now = Da
   }
 
   if (memory.conflictingMemoryIds.length > 0) return null;
+
+  // Transient operational state ("CI is failing", "PR #79 is unmerged") must
+  // never auto-promote into established belief through repetition: it stays
+  // low-authority and requires revalidation before being presented as
+  // current. Deliberate human promotion in the Memory Bank remains possible.
+  if (memory.tags.includes('organic') && carriesOperationalState(memory)) return null;
 
   if (
     memory.kind === 'MICRO_OBSERVATION'

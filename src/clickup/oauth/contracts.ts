@@ -18,6 +18,12 @@ export const clickUpOAuthStatusSchema = z.object({
 
 export type ClickUpOAuthStatus = z.infer<typeof clickUpOAuthStatusSchema>;
 
+export interface ClickUpExecutionGrant {
+  readonly status: ClickUpOAuthStatus;
+  readonly authorityBinding: string;
+  readonly revision: number;
+}
+
 export const clickUpOAuthStartSchema = z.object({
   authorizationUrl: z.string().url().max(4096),
   state: z.string().trim().min(16).max(512),
@@ -28,6 +34,7 @@ export type ClickUpOAuthStart = z.infer<typeof clickUpOAuthStartSchema>;
 
 export interface ClickUpOAuthAuthority {
   getStatus(): Promise<ClickUpOAuthStatus>;
+  getExecutionGrant(): Promise<ClickUpExecutionGrant>;
   beginConnect(redirectUri: string): Promise<ClickUpOAuthStart>;
   completeConnect(input: { code: string; state: string; redirectUri: string }): Promise<ClickUpOAuthStatus>;
   disconnect(): Promise<void>;

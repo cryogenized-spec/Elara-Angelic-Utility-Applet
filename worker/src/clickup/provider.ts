@@ -570,3 +570,49 @@ export async function uploadClickUpTaskAttachment(
     fetcher,
   );
 }
+
+export const CLICKUP_TASK_INDEX_WEBHOOK_EVENTS = Object.freeze([
+  'taskCreated',
+  'taskUpdated',
+  'taskDeleted',
+  'taskPriorityUpdated',
+  'taskStatusUpdated',
+  'taskAssigneeUpdated',
+  'taskDueDateUpdated',
+  'taskTagUpdated',
+  'taskMoved',
+  'taskTimeEstimateUpdated',
+] as const);
+
+export async function createClickUpWebhook(
+  accessToken: string,
+  workspaceId: string,
+  endpoint: string,
+  events: readonly string[] = CLICKUP_TASK_INDEX_WEBHOOK_EVENTS,
+  fetcher: typeof fetch = fetch,
+) {
+  const url = new URL(endpoint);
+  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash) {
+    throw new Error('ClickUp webhook endpoint must be a clean HTTPS URL.');
+  }
+  return jsonMutation(
+    accessToken,
+    `/team/${boundedId(workspaceId, 'workspace id')}/webhook`,
+    'POST',
+    { endpoint: url.toString(), events: [...events] },
+    fetcher,
+  );
+}
+
+export async function deleteClickUpWebhook(
+  accessToken: string,
+  webhookId: string,
+  fetcher: typeof fetch = fetch,
+) {
+  return clickupRequest<Record<string, unknown>>(
+    accessToken,
+    `/webhook/${boundedId(webhookId, 'webhook id')}`,
+    { method: 'DELETE' },
+    fetcher,
+  );
+}

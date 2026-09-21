@@ -124,7 +124,7 @@ export async function handleClickUpAttachmentRoute(
       body,
     });
     const response = await (await vaultStub(env)).fetch(forwarded);
-    const body = await response.text();
+    const responseBody = await response.text();
     const headers = new Headers({
       'content-type': 'application/json; charset=utf-8',
       'cache-control': 'no-store',
@@ -134,7 +134,7 @@ export async function handleClickUpAttachmentRoute(
       headers.set('Access-Control-Allow-Origin', corsOrigin);
       headers.set('Access-Control-Allow-Credentials', 'true');
     }
-    return new Response(body, { status: response.status, headers });
+    return new Response(responseBody, { status: response.status, headers });
   } catch {
     return json({ code: 'attachment', message: 'The ClickUp attachment upload could not be completed.' }, 502, corsOrigin);
   }

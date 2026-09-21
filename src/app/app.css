@@ -31,18 +31,12 @@ body {
   background: #050507;
   -webkit-tap-highlight-color: transparent;
 }
-.app-shell {
-  -webkit-user-select: none;
-  user-select: none;
-}
 button, textarea, input, select { font: inherit; }
 button, a, select, summary, [role="button"] {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 button { cursor: pointer; color: inherit; }
-.message-body,
-.message-body *,
 input,
 textarea,
 pre,

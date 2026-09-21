@@ -60,6 +60,12 @@ async function forceIndexedAt(value: number) {
   }).forceTaskIndexIndexedAt('999', value);
 }
 
+async function taskJsonLength(taskId: string) {
+  return (await stub() as DurableObjectStub & {
+    taskJsonLength(workspaceId: string, taskId: string): Promise<number | null>;
+  }).taskJsonLength('999', taskId);
+}
+
 async function indexSnapshot() {
   return (await stub() as DurableObjectStub & {
     taskIndexSnapshot(workspaceId: string): Promise<{
@@ -252,6 +258,175 @@ describe('ClickUp durable task index', () => {
     expect(reconciled.status).toBe(200);
     expect(workspaceTaskCalls).toBe(3);
     expect(providerRequests[2]?.searchParams.has('date_updated_gt')).toBe(false);
+  });
+
+  it('persists hostile provider tasks below the hard 64k projection ceiling', async () => {
+    const hostile = 'x'.repeat(180_000);
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/task') {
+        return new Response(JSON.stringify({
+          tasks: [{
+            id: 'hostile-task',
+            name: 'Hostile but valid task',
+            date_updated: '1790000000000',
+            status: { status: hostile, type: hostile },
+            priority: { id: '1', priority: hostile },
+            assignees: [{ id: 183, username: hostile, email: `${'a'.repeat(10_000)}@example.com`, extra: hostile }],
+            tags: [{ name: hostile, extra: hostile }],
+            list: { id: '123', name: hostile, extra: hostile },
+            folder: { id: '456', name: hostile, extra: hostile },
+            space: { id: '789', name: hostile, extra: hostile },
+            custom_fields: [{ id: 'field-1', name: hostile, type: hostile, value: { nested: hostile } }],
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.url}`);
+    });
+
+    await connect();
+    const response = await search({ workspaceId: '999', query: 'hostile' });
+    expect(response.status).toBe(200);
+    expect(await taskJsonLength('hostile-task')).not.toBeNull();
+    expect(await taskJsonLength('hostile-task')).toBeLessThanOrEqual(64_000);
+  });
+
+  it('persists incremental continuation without advancing the durable watermark until every page is consumed', async () => {
+    const initialUpdatedAt = 1_790_000_000_000;
+    const changedUpdatedAt = initialUpdatedAt + 60_000;
+    const seenPages: number[] = [];
+    let incremental = false;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/task') {
+        const page = Number(url.searchParams.get('page') ?? '0');
+        if (!url.searchParams.has('date_updated_gt')) {
+          return new Response(JSON.stringify({
+            tasks: [{ id: 'initial', name: 'Initial', date_updated: String(initialUpdatedAt), status: { status: 'open' } }],
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+
+        incremental = true;
+        seenPages.push(page);
+        if (page < 3) {
+          const tasks = Array.from({ length: 100 }, (_, index) => ({
+            id: `page-${page}-task-${index}`,
+            name: `changed page ${page} item ${index}`,
+            date_updated: String(changedUpdatedAt + page * 1_000 + index),
+            status: { status: 'open' },
+          }));
+          return new Response(JSON.stringify({ tasks }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          tasks: [{ id: 'late-target', name: 'Needle task', date_updated: String(changedUpdatedAt + 99_999), status: { status: 'open' } }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.url}`);
+    });
+
+    await connect();
+    expect((await search({ workspaceId: '999', query: 'initial' })).status).toBe(200);
+    await forceRefreshAt(0);
+
+    const firstPass = await search({ workspaceId: '999', query: 'needle' });
+    expect(firstPass.status).toBe(200);
+    expect(incremental).toBe(true);
+    expect(seenPages).toEqual([0, 1, 2]);
+    expect((await firstPass.json() as Record<string, any>).result.tasks).toEqual([]);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      lastProviderUpdatedAt: initialUpdatedAt,
+      incrementalNextPage: 3,
+    }));
+    expect((await indexSnapshot()).incrementalSince).toBeGreaterThan(0);
+
+    const secondPass = await search({ workspaceId: '999', query: 'needle' });
+    expect(secondPass.status).toBe(200);
+    expect(seenPages).toEqual([0, 1, 2, 3]);
+    expect((await secondPass.json() as Record<string, any>).result.tasks).toEqual([
+      expect.objectContaining({ id: 'late-target' }),
+    ]);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      incrementalSince: 0,
+      incrementalNextPage: 0,
+      lastProviderUpdatedAt: changedUpdatedAt + 99_999,
+    }));
+  });
+
+  it('purges cached Workspace tasks and authorization metadata when refresh is denied', async () => {
+    let deny = false;
+    let taskCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/task') {
+        taskCalls += 1;
+        if (deny) return new Response(JSON.stringify({ ECODE: 'ACCESS_403', err: 'Forbidden' }), { status: 403 });
+        return new Response(JSON.stringify({
+          tasks: [{ id: 'cached-task', name: 'Cached repair', date_updated: '1790000000000', status: { status: 'open' } }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.url}`);
+    });
+
+    await connect();
+    expect((await search({ workspaceId: '999', query: 'cached' })).status).toBe(200);
+    expect((await indexSnapshot()).indexedTasks).toBe(1);
+
+    deny = true;
+    await forceRefreshAt(0);
+    const denied = await search({ workspaceId: '999', query: 'cached' });
+    expect(denied.status).toBe(403);
+    expect((await indexSnapshot()).indexedTasks).toBe(0);
+
+    const deniedAgain = await search({ workspaceId: '999', query: 'cached' });
+    expect(deniedAgain.status).toBe(403);
+    expect(await deniedAgain.json()).toEqual(expect.objectContaining({ code: 'workspace_forbidden' }));
+    expect(taskCalls).toBe(2);
+  });
+
+  it('removes tasks omitted from the periodic full reconciliation snapshot', async () => {
+    let reconciled = false;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/task') {
+        const tasks = reconciled
+          ? [{ id: 'survivor', name: 'Survivor', date_updated: '1790000001000', status: { status: 'open' } }]
+          : [
+              { id: 'survivor', name: 'Survivor', date_updated: '1790000000000', status: { status: 'open' } },
+              { id: 'removed-task', name: 'Removed task', date_updated: '1790000000000', status: { status: 'open' } },
+            ];
+        return new Response(JSON.stringify({ tasks }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.url}`);
+    });
+
+    await connect();
+    expect((await search({ workspaceId: '999', query: 'removed' })).status).toBe(200);
+    expect((await indexSnapshot()).indexedTasks).toBe(2);
+
+    reconciled = true;
+    await forceIndexedAt(Date.now() - (7 * 60 * 60_000));
+    await forceRefreshAt(0);
+    const after = await search({ workspaceId: '999', query: 'removed' });
+    expect(after.status).toBe(200);
+    expect((await after.json() as Record<string, any>).result.tasks).toEqual([]);
+    expect((await indexSnapshot()).indexedTasks).toBe(1);
   });
 
   it('rejects search for a Workspace outside the OAuth grant before provider egress', async () => {

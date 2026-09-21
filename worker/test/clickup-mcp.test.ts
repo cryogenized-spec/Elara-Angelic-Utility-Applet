@@ -56,7 +56,7 @@ function request(method: string, params: Record<string, unknown>, name?: string,
 
 describe('ClickUp MCP Worker boundary', () => {
   beforeEach(async () => {
-    await reset();
+    await resetClickUpTestState();
   });
 
   it('advertises the modern MCP CORS/header surface only to the allowed origin', async () => {

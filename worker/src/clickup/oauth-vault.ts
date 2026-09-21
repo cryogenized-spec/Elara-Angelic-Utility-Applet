@@ -36,6 +36,14 @@ import {
   type ClickUpRateLimitSnapshot,
 } from './provider';
 import { validateClickUpToolArguments } from '../../../src/clickup/tool-schema';
+import {
+  clearClickUpTaskIndex,
+  initializeClickUpTaskIndex,
+  searchClickUpTaskIndex,
+  setTaskIndexState,
+  taskIndexState,
+  upsertClickUpTaskIndexPage,
+} from './task-index';
 
 interface ClickUpOAuthVaultEnv extends ClickUpOAuthServerEnv {
   readonly ELARA_INSTALLATION_TOKEN?: string;
@@ -92,6 +100,7 @@ const providerCommandSchema = z.discriminatedUnion('operation', [
     statuses: z.array(z.string().trim().min(1).max(500)).max(30).optional(),
     dateUpdatedGt: z.number().int().min(0).optional(),
   }).strict(),
+  z.object({ operation: z.literal('searchTaskIndex'), arguments: z.unknown() }).strict(),
   z.object({ operation: z.literal('getTask'), arguments: z.unknown() }).strict(),
   z.object({
     operation: z.literal('getTaskComments'),
@@ -124,6 +133,11 @@ const MAX_BODY_CHARS = 16_384;
 const STATE_TTL_MS = 10 * 60_000;
 const NONCE_RETENTION_MS = 10 * 60_000;
 const VAULT_KEY_CONTEXT = 'elara-clickup-oauth-vault-v1';
+const TASK_INDEX_STALE_MS = 60_000;
+const TASK_INDEX_COLD_PAGES_PER_SEARCH = 5;
+const TASK_INDEX_INCREMENTAL_PAGES = 3;
+const TASK_INDEX_PROVIDER_PAGE_SIZE = 100;
+const TASK_INDEX_REFRESH_OVERLAP_MS = 5_000;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -244,6 +258,7 @@ export class ClickUpOAuthVault extends DurableObject {
         updated_at INTEGER NOT NULL
       )
     `);
+    initializeClickUpTaskIndex(this.ctx.storage.sql);
   }
 
   protected credentialRow(): CredentialRow | null {
@@ -356,36 +371,168 @@ export class ClickUpOAuthVault extends DurableObject {
     return error.status === 401 || new Set(['OAUTH_019', 'OAUTH_021', 'OAUTH_025', 'OAUTH_077']).has(error.code);
   }
 
-  private async runProvider<T>(
+  private async providerData<T>(
     run: (accessToken: string) => Promise<ClickUpProviderResult<T>>,
-  ): Promise<Response> {
+  ): Promise<{ ok: true; data: T } | { ok: false; response: Response }> {
     const token = await this.accessToken();
-    if (!token) return json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401);
+    if (!token) {
+      return { ok: false, response: json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401) };
+    }
     const reservation = this.reserveProviderCall();
     if (reservation.blocked) {
-      return json({
-        code: 'rate_limited',
-        message: 'ClickUp request budget is exhausted for the current provider window.',
-        ...(reservation.retryAt ? { retryAt: reservation.retryAt } : {}),
-      }, 429);
+      return {
+        ok: false,
+        response: json({
+          code: 'rate_limited',
+          message: 'ClickUp request budget is exhausted for the current provider window.',
+          ...(reservation.retryAt ? { retryAt: reservation.retryAt } : {}),
+        }, 429),
+      };
     }
     try {
       const result = await run(token);
       this.recordRateLimit(result.rateLimit);
-      return json({ ok: true, result: result.data });
+      return { ok: true, data: result.data };
     } catch (error) {
       if (!(error instanceof ClickUpProviderError)) throw error;
       this.recordRateLimit(error.rateLimit);
       if (this.providerCredentialRevoked(error)) {
         this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
         this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+        clearClickUpTaskIndex(this.ctx.storage.sql);
       }
-      return json({
-        code: error.code,
-        message: error.message,
-        ...(error.rateLimit.resetAt ? { retryAt: error.rateLimit.resetAt * 1000 } : {}),
-      }, error.status);
+      return {
+        ok: false,
+        response: json({
+          code: error.code,
+          message: error.message,
+          ...(error.rateLimit.resetAt ? { retryAt: error.rateLimit.resetAt * 1000 } : {}),
+        }, error.status),
+      };
     }
+  }
+
+  private async runProvider<T>(
+    run: (accessToken: string) => Promise<ClickUpProviderResult<T>>,
+  ): Promise<Response> {
+    const result = await this.providerData(run);
+    return result.ok ? json({ ok: true, result: result.data }) : result.response;
+  }
+
+  private async searchTaskIndex(argumentsValue: unknown): Promise<Response> {
+    const args = validateClickUpToolArguments('clickup.searchTasks', argumentsValue);
+    if (!this.workspaceAuthorized(args.workspaceId)) {
+      return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
+    }
+
+    let state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
+    const now = Date.now();
+    let refreshIncomplete = false;
+    let refreshError: { code: string; message: string } | undefined;
+
+    const providerPage = async (page: number, dateUpdatedGt?: number) => {
+      return this.providerData((token) => listClickUpWorkspaceTasks(token, args.workspaceId, {
+        page,
+        includeClosed: true,
+        includeSubtasks: true,
+        ...(dateUpdatedGt !== undefined ? { dateUpdatedGt } : {}),
+      }));
+    };
+
+    if (state.indexedTasks === 0 || now - state.lastRefreshAt >= TASK_INDEX_STALE_MS) {
+      if (!state.fullSyncComplete) {
+        let nextPage = state.nextPage;
+        let maxUpdatedAt = state.lastProviderUpdatedAt;
+        let fullSyncComplete = false;
+        let fetchedAnyPage = false;
+
+        for (let offset = 0; offset < TASK_INDEX_COLD_PAGES_PER_SEARCH; offset += 1) {
+          const pageResult = await providerPage(nextPage);
+          if (!pageResult.ok) {
+            if (state.indexedTasks === 0 && !fetchedAnyPage) return pageResult.response;
+            const body = await pageResult.response.json().catch(() => null) as Record<string, unknown> | null;
+            refreshError = {
+              code: typeof body?.code === 'string' ? body.code : `http-${pageResult.response.status}`,
+              message: typeof body?.message === 'string' ? body.message : 'ClickUp task-index refresh was interrupted.',
+            };
+            refreshIncomplete = true;
+            break;
+          }
+
+          fetchedAnyPage = true;
+          const source = pageResult.data && typeof pageResult.data === 'object' ? pageResult.data as Record<string, unknown> : {};
+          const tasks = Array.isArray(source.tasks) ? source.tasks : [];
+          const indexed = upsertClickUpTaskIndexPage(this.ctx.storage.sql, args.workspaceId, tasks, now);
+          maxUpdatedAt = Math.max(maxUpdatedAt, indexed.maxProviderUpdatedAt);
+          nextPage += 1;
+
+          if (tasks.length < TASK_INDEX_PROVIDER_PAGE_SIZE) {
+            fullSyncComplete = true;
+            nextPage = 0;
+            break;
+          }
+        }
+
+        if (!fullSyncComplete && !refreshError) refreshIncomplete = true;
+        setTaskIndexState(this.ctx.storage.sql, {
+          workspaceId: args.workspaceId,
+          fullSyncComplete,
+          nextPage,
+          lastRefreshAt: now,
+          lastProviderUpdatedAt: maxUpdatedAt,
+        });
+      } else {
+        const threshold = Math.max(
+          0,
+          (state.lastProviderUpdatedAt || state.lastRefreshAt || now) - TASK_INDEX_REFRESH_OVERLAP_MS,
+        );
+        let maxUpdatedAt = state.lastProviderUpdatedAt;
+        let pageWasFull = false;
+
+        for (let page = 0; page < TASK_INDEX_INCREMENTAL_PAGES; page += 1) {
+          const pageResult = await providerPage(page, threshold);
+          if (!pageResult.ok) {
+            const body = await pageResult.response.json().catch(() => null) as Record<string, unknown> | null;
+            refreshError = {
+              code: typeof body?.code === 'string' ? body.code : `http-${pageResult.response.status}`,
+              message: typeof body?.message === 'string' ? body.message : 'ClickUp task-index refresh was interrupted.',
+            };
+            break;
+          }
+          const source = pageResult.data && typeof pageResult.data === 'object' ? pageResult.data as Record<string, unknown> : {};
+          const tasks = Array.isArray(source.tasks) ? source.tasks : [];
+          const indexed = upsertClickUpTaskIndexPage(this.ctx.storage.sql, args.workspaceId, tasks, now);
+          maxUpdatedAt = Math.max(maxUpdatedAt, indexed.maxProviderUpdatedAt);
+          pageWasFull = tasks.length >= TASK_INDEX_PROVIDER_PAGE_SIZE;
+          if (!pageWasFull) break;
+        }
+
+        refreshIncomplete = pageWasFull;
+        setTaskIndexState(this.ctx.storage.sql, {
+          workspaceId: args.workspaceId,
+          fullSyncComplete: true,
+          nextPage: 0,
+          lastRefreshAt: now,
+          lastProviderUpdatedAt: maxUpdatedAt,
+        });
+      }
+    }
+
+    state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
+    return json({
+      ok: true,
+      result: {
+        tasks: searchClickUpTaskIndex(this.ctx.storage.sql, args),
+        index: {
+          mode: 'persistent-sqlite',
+          indexedTasks: state.indexedTasks,
+          fullSyncComplete: state.fullSyncComplete,
+          lastRefreshAt: state.lastRefreshAt,
+          refreshIncomplete,
+          ...(refreshError ? { refreshError } : {}),
+        },
+      },
+    });
   }
 
   private async executeProviderCommand(body: string): Promise<Response> {
@@ -430,6 +577,8 @@ export class ClickUpOAuthVault extends DurableObject {
           statuses: command.statuses,
           dateUpdatedGt: command.dateUpdatedGt,
         }));
+      case 'searchTaskIndex':
+        return this.searchTaskIndex(command.arguments);
       case 'getTask': {
         const args = validateClickUpToolArguments('clickup.getTask', command.arguments);
         return this.runProvider((token) => getClickUpTask(token, args.taskId, args.includeSubtasks ?? false));
@@ -610,6 +759,7 @@ export class ClickUpOAuthVault extends DurableObject {
         updated_at = excluded.updated_at
     `, encrypted.cipher, encrypted.iv, account.data.id, account.data.username ?? null, account.data.email ?? null, JSON.stringify(workspaces.data), revision);
     this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+    clearClickUpTaskIndex(this.ctx.storage.sql);
     this.recordRateLimit(mergeRateLimits(account.rateLimit, workspaces.rateLimit));
 
     return json(this.status());

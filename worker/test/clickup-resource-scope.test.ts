@@ -426,6 +426,33 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     expect(counters.replyComment).toBe(0);
   });
 
+  it('rejects stale grant revisions for Custom Field set and clear before scope/provider work', async () => {
+    const counters = providerFixture();
+    await connect();
+    const before = { ...counters };
+    const staleRevision = Math.max(1, grantRevision - 1);
+
+    const set = await internalCommand({
+      operation: 'setCustomField',
+      workspaceId: '111',
+      taskId: 'task-a',
+      fieldId: 'field-a',
+      value: 'Ready',
+    }, staleRevision);
+    const clear = await internalCommand({
+      operation: 'clearCustomField',
+      workspaceId: '111',
+      taskId: 'task-a',
+      fieldId: 'field-a',
+    }, staleRevision);
+
+    for (const response of [set, clear]) {
+      expect(response.status).toBe(409);
+      expect(await responseBody(response)).toEqual(expect.objectContaining({ code: 'grant_changed' }));
+    }
+    expect(counters).toEqual(before);
+  });
+
   it('rejects stale grant revisions and forged internal authority before any provider resource call', async () => {
     const counters = providerFixture();
     await connect();

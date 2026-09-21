@@ -505,9 +505,13 @@ export class ClickUpOAuthVault extends DurableObject {
   private recordRateLimit(rateLimit: ClickUpRateLimitSnapshot): void {
     if (rateLimit.limit === null && rateLimit.remaining === null && rateLimit.resetAt === null) return;
     const now = Date.now();
+    const nowSeconds = Math.floor(now / 1000);
     this.ctx.storage.transactionSync(() => {
       const current = this.rateLimitRow();
       if (!current) {
+        // Do not resurrect an already-expired provider window from a late
+        // response. The next request will establish fresh state.
+        if (rateLimit.resetAt !== null && rateLimit.resetAt <= nowSeconds) return;
         this.ctx.storage.sql.exec(
           'INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at) VALUES (1, ?, ?, ?, ?)',
           rateLimit.limit,
@@ -519,18 +523,22 @@ export class ClickUpOAuthVault extends DurableObject {
       }
 
       const currentReset = current.reset_at;
-      const incomingReset = rateLimit.resetAt;
 
-      // A delayed response from an older provider window must never overwrite
-      // state learned from a newer window.
-      if (currentReset !== null && incomingReset !== null && incomingReset < currentReset) return;
+      // The local window boundary is established by the first accepted
+      // provider snapshot and reset only by reserveProviderCall() after local
+      // time crosses it. A concurrent response may report a slightly later
+      // reset horizon; treating that as a new window can raise remaining.
+      // While the current local window is active, merge only downward and keep
+      // its boundary pinned.
+      if (currentReset !== null && currentReset <= nowSeconds) return;
 
-      const newerWindow = currentReset !== null && incomingReset !== null && incomingReset > currentReset;
-      const mergedLimit = newerWindow ? rateLimit.limit : minNullable(current.limit_count, rateLimit.limit);
-      const mergedRemaining = newerWindow ? rateLimit.remaining : minNullable(current.remaining, rateLimit.remaining);
-      const mergedReset = newerWindow
-        ? incomingReset
-        : currentReset ?? incomingReset;
+      const mergedLimit = minNullable(current.limit_count, rateLimit.limit);
+      const mergedRemaining = minNullable(current.remaining, rateLimit.remaining);
+      const mergedReset = currentReset ?? (
+        rateLimit.resetAt !== null && rateLimit.resetAt > nowSeconds
+          ? rateLimit.resetAt
+          : null
+      );
 
       this.ctx.storage.sql.exec(
         'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',

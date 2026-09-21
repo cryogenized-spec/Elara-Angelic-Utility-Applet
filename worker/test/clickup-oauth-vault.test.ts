@@ -54,7 +54,12 @@ function mockProvider(options: { taskStatus?: number; taskRemaining?: number } =
         user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
       }), {
         status: 200,
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'X-RateLimit-Limit': '100',
+          'X-RateLimit-Remaining': '99',
+          'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+        },
       });
     }
 
@@ -68,7 +73,12 @@ function mockProvider(options: { taskStatus?: number; taskRemaining?: number } =
         }],
       }), {
         status: 200,
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          'X-RateLimit-Limit': '100',
+          'X-RateLimit-Remaining': '98',
+          'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+        },
       });
     }
 
@@ -150,7 +160,9 @@ describe('ClickUpOAuthVault', () => {
     expect(body).toEqual(expect.objectContaining({
       connected: true,
       account: { id: '183', username: 'Gareth', email: 'gareth@example.com' },
+      workspaces: [{ id: '999', name: 'Neon Sales' }],
     }));
+    expect(JSON.stringify(body)).not.toContain('members');
     expect(JSON.stringify(body)).not.toContain('clickup-access-token-never-returned');
     expect(provider.token).toBe(1);
     expect(provider.user).toBe(1);
@@ -161,6 +173,20 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.accessCipher).not.toContain('clickup-access-token-never-returned');
     expect(snapshot?.accessIv).toBeTruthy();
     expect(snapshot?.userId).toBe('183');
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ limit: 100, remaining: 98 }));
+
+    const contextResponse = await internalCommand({ operation: 'getAuthorizationContext' });
+    expect(contextResponse.status).toBe(200);
+    expect(await contextResponse.json()).toEqual(expect.objectContaining({
+      ok: true,
+      result: expect.objectContaining({
+        workspaces: [expect.objectContaining({
+          id: '999',
+          name: 'Neon Sales',
+          members: [expect.objectContaining({ id: '183', username: 'Gareth' })],
+        })],
+      }),
+    }));
 
     const status = await doFetch(await bearerRead('/clickup/oauth/status'));
     expect(await status.json()).toEqual(expect.objectContaining({ connected: true }));
@@ -204,6 +230,17 @@ describe('ClickUpOAuthVault', () => {
     const response = await internalCommand({ operation: 'getTask', arguments: { taskId: '' } });
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual(expect.objectContaining({ code: 'validation' }));
+    expect(provider.task).toBe(0);
+  });
+
+  it('rejects an ungranted Workspace before provider egress', async () => {
+    const provider = mockProvider();
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+
+    const response = await internalCommand({ operation: 'listSpaces', workspaceId: 'not-authorized' });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: 'workspace_forbidden' }));
     expect(provider.task).toBe(0);
   });
 

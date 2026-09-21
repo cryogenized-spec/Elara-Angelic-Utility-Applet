@@ -723,7 +723,7 @@ export class ClickUpOAuthVault extends DurableObject {
       ? task.space as Record<string, unknown>
       : undefined;
     const spaceId = safeProviderId(space?.id);
-    if (!spaceId) return { ok: false, response: json({ code: 'resource_scope_unverifiable', message: 'ClickUp did not return enough ancestry to verify this task Workspace.' }, 502) };
+    if (!spaceId) return { ok: false, response: this.scopeDenied() };
     const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
     return scoped.ok ? { ok: true, task } : scoped;
   }
@@ -747,7 +747,7 @@ export class ClickUpOAuthVault extends DurableObject {
       ? folder.space as Record<string, unknown>
       : undefined;
     const spaceId = safeProviderId(space?.id);
-    if (!spaceId) return { ok: false, response: json({ code: 'resource_scope_unverifiable', message: 'ClickUp did not return enough ancestry to verify this Folder Workspace.' }, 502) };
+    if (!spaceId) return { ok: false, response: this.scopeDenied() };
     const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
     return scoped.ok ? { ok: true, folder } : scoped;
   }
@@ -767,7 +767,7 @@ export class ClickUpOAuthVault extends DurableObject {
       ? list.space as Record<string, unknown>
       : undefined;
     const spaceId = safeProviderId(space?.id);
-    if (!spaceId) return { ok: false, response: json({ code: 'resource_scope_unverifiable', message: 'ClickUp did not return enough ancestry to verify this List Workspace.' }, 502) };
+    if (!spaceId) return { ok: false, response: this.scopeDenied() };
     const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
     return scoped.ok ? { ok: true, list } : scoped;
   }

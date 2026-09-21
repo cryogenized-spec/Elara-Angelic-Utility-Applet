@@ -23,6 +23,7 @@ export default defineConfig({
         durableObjects: {
           AUTONOMY: { className: 'TestAutonomyEngine', useSQLite: true },
           GOOGLE_OAUTH: { className: 'TestGoogleOAuthVault', useSQLite: true },
+          CLICKUP_OAUTH: { className: 'TestClickUpOAuthVault', useSQLite: true },
         },
         workflows: {
           ROUTINE_RUN: { name: 'elara-routine-run', className: 'RoutineRunWorkflow' },
@@ -34,6 +35,9 @@ export default defineConfig({
           GOOGLE_OAUTH_CLIENT_ID: 'test-client-id.apps.googleusercontent.com',
           GOOGLE_OAUTH_CLIENT_SECRET: 'unit-test-google-client-secret-value',
           GOOGLE_OAUTH_VAULT_KEY: 'unit-test-google-oauth-vault-key-material-please-ignore',
+          CLICKUP_OAUTH_CLIENT_ID: 'test-clickup-client-id',
+          CLICKUP_OAUTH_CLIENT_SECRET: 'unit-test-clickup-client-secret-value',
+          CLICKUP_OAUTH_VAULT_KEY: 'unit-test-clickup-oauth-vault-key-material-please-ignore',
           C1_MODEL_STUB: '{"disposition":"noop","reason":"test stub"}',
         },
       },

@@ -384,6 +384,228 @@ async function captureGoogleSettings(page) {
   await writeFile(join(outputDir, 'settings-google.evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
 }
 
+
+async function prepareKanbanWorkspace(page) {
+  const lists = [
+    { id: 'studio', title: 'Studio projects' },
+    { id: 'personal', title: 'Personal' },
+    { id: 'reading', title: 'Reading list' },
+  ];
+  const tasks = [
+    {
+      id: 'review',
+      title: 'Review the launch proposal',
+      notes: 'Read the source email and confirm the next steps.',
+      due: '2026-09-22T00:00:00Z',
+      status: 'needsAction',
+      etag: 'one',
+      position: '0001',
+      updated: '2026-09-21T17:00:00Z',
+      assignmentInfo: { surfaceType: 'DOCUMENT', linkToTask: 'https://tasks.google.com/task/review' },
+    },
+    {
+      id: 'task-0',
+      title: 'Supplier quotation follow-up',
+      notes: 'Check the outstanding quotation.',
+      status: 'needsAction',
+      etag: 'one',
+      position: '0002',
+      updated: '2026-09-21T17:05:00Z',
+    },
+    {
+      id: 'task-1',
+      title: 'Confirm customer collection',
+      status: 'needsAction',
+      etag: 'one',
+      position: '0003',
+      updated: '2026-09-21T17:10:00Z',
+    },
+  ];
+
+  await page.route('https://accounts.google.com/gsi/client', (route) => route.fulfill({
+    contentType: 'text/javascript',
+    body: 'window.google = { accounts: { oauth2: { initTokenClient: (config) => ({ requestAccessToken: () => config.callback({ access_token: "visual-kanban-token", expires_in: 3600, scope: config.scope }) }), revoke: (_token, callback) => callback({}) } } };',
+  }));
+  await page.route('https://www.googleapis.com/oauth2/v2/userinfo*', (route) => route.fulfill({
+    json: { email: 'visual@example.com', name: 'Visual Evidence' },
+  }));
+  await page.route('https://tasks.googleapis.com/**', async (route) => {
+    const request = route.request();
+    const url = new URL(request.url());
+    const path = url.pathname;
+    const method = request.method();
+    const body = request.postData() ? request.postDataJSON() : {};
+    const headers = { 'access-control-allow-origin': '*' };
+
+    if (method === 'OPTIONS') {
+      await route.fulfill({
+        status: 204,
+        headers: {
+          ...headers,
+          'access-control-allow-methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+          'access-control-allow-headers': '*',
+        },
+      });
+      return;
+    }
+
+    let result;
+    if (path.endsWith('/users/@me/lists')) {
+      result = { items: lists };
+    } else if (path.endsWith('/tasks')) {
+      result = { items: path.includes('/studio/') ? tasks : [] };
+    } else if (method === 'PATCH') {
+      const task = tasks.find((candidate) => path.endsWith('/' + candidate.id));
+      if (!task) {
+        await route.fulfill({ status: 404, json: { error: 'missing task' }, headers });
+        return;
+      }
+      Object.assign(task, body, { etag: task.etag === 'one' ? 'two' : 'three', updated: '2026-09-21T18:00:00Z' });
+      result = task;
+    } else if (method === 'GET') {
+      result = tasks.find((candidate) => path.endsWith('/' + candidate.id)) ?? { items: [] };
+    } else {
+      result = {};
+    }
+    await route.fulfill({ json: result, headers });
+  });
+
+  await page.goto(appUrl, { waitUntil: 'load' });
+  await page.getByRole('dialog', { name: 'Welcome.' }).waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined);
+  if (await page.getByRole('dialog', { name: 'Welcome.' }).isVisible()) {
+    throw new Error('Kanban visual fixture could not establish the completed-onboarding state.');
+  }
+
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Google', exact: true }).click();
+  await page.getByRole('button', { name: /Connect Google Workspace|Refresh Google Workspace/ }).click();
+  await page.getByText('Session ready').waitFor({ state: 'visible', timeout: 10_000 });
+  await page.getByRole('button', { name: 'Back to chat' }).click();
+
+  await page.getByRole('button', { name: 'Kanban', exact: true }).click();
+  await page.getByRole('heading', { name: 'Task orchestration' }).waitFor({ state: 'visible', timeout: 15_000 });
+  await page.getByRole('button', { name: 'Review the launch proposal', exact: true }).waitFor({ state: 'visible', timeout: 15_000 });
+}
+
+async function captureKanban(page) {
+  await prepareKanbanWorkspace(page);
+
+  const canvas = page.locator('.kb-canvas');
+  const card = page.locator('[data-kanban-task-id="review"]');
+  await canvas.waitFor({ state: 'visible', timeout: 10_000 });
+  await card.waitFor({ state: 'visible', timeout: 10_000 });
+
+  const initialMetrics = await page.evaluate(() => {
+    const canvasElement = globalThis.document.querySelector('.kb-canvas');
+    const cardElement = globalThis.document.querySelector('[data-kanban-task-id="review"]');
+    const canvasStyle = canvasElement ? globalThis.getComputedStyle(canvasElement) : null;
+    const canvasBefore = canvasElement ? globalThis.getComputedStyle(canvasElement, '::before') : null;
+    const cardStyle = cardElement ? globalThis.getComputedStyle(cardElement) : null;
+    return {
+      canvas: canvasElement && canvasStyle && canvasBefore ? {
+        scrollWidth: canvasElement.scrollWidth,
+        clientWidth: canvasElement.clientWidth,
+        scrollHeight: canvasElement.scrollHeight,
+        clientHeight: canvasElement.clientHeight,
+        backgroundImage: canvasBefore.backgroundImage,
+      } : null,
+      card: cardStyle ? {
+        tapHighlightColor: cardStyle.webkitTapHighlightColor,
+        userSelect: cardStyle.userSelect,
+        cursor: cardStyle.cursor,
+      } : null,
+      controls: {
+        labelFilter: Boolean(globalThis.document.querySelector('[aria-label="Filter by label"]')),
+        sortField: Boolean(globalThis.document.querySelector('[aria-label="Sort tasks by"]')),
+        sortDirection: Boolean(globalThis.document.querySelector('[aria-label="Sort direction"]')),
+      },
+    };
+  });
+
+  await mkdir(outputDir, { recursive: true });
+  const initialPagePath = join(outputDir, 'kanban-page.png');
+  const canvasPath = join(outputDir, 'kanban-canvas.png');
+  await page.screenshot({ path: initialPagePath, fullPage: false });
+  await canvas.screenshot({ path: canvasPath });
+
+  // Invoke the card element itself rather than its title button. This directly
+  // distinguishes whole-card activation from the old title-only interaction.
+  await card.evaluate((element) => element.click());
+  const dialog = page.getByRole('dialog', { name: 'Edit task' });
+  const surfaceOpened = await dialog.isVisible().catch(() => false);
+  if (!surfaceOpened) {
+    await page.getByRole('button', { name: 'Review the launch proposal', exact: true }).click();
+  }
+  await dialog.waitFor({ state: 'visible', timeout: 10_000 });
+
+  const editorMetrics = await page.evaluate(() => {
+    const dialogElement = globalThis.document.querySelector('[role="dialog"]');
+    const title = globalThis.document.querySelector('input[aria-label="Title"]');
+    const dueTime = globalThis.document.querySelector('[aria-label="Due time"]');
+    const newLabel = globalThis.document.querySelector('[aria-label="New label"]');
+    const backdrop = dialogElement?.parentElement;
+    const backdropStyle = backdrop ? globalThis.getComputedStyle(backdrop) : null;
+    return {
+      dueTime: Boolean(dueTime),
+      labels: Boolean(newLabel),
+      titleFocused: globalThis.document.activeElement === title,
+      backdropFilter: backdropStyle?.backdropFilter ?? '',
+      webkitBackdropFilter: backdropStyle?.webkitBackdropFilter ?? '',
+    };
+  });
+
+  const editorPath = join(outputDir, 'kanban-editor.png');
+  await dialog.screenshot({ path: editorPath });
+
+  let metadataApplied = false;
+  if (editorMetrics.dueTime && editorMetrics.labels) {
+    await page.getByLabel('Due time', { exact: true }).fill('08:30');
+    await page.getByLabel('New label', { exact: true }).fill('#supplier');
+    await page.getByRole('button', { name: 'Add label', exact: true }).click();
+    await page.getByRole('button', { name: 'Save to Google', exact: true }).click();
+    await dialog.waitFor({ state: 'detached', timeout: 10_000 });
+    await card.getByText('#supplier', { exact: true }).waitFor({ state: 'visible', timeout: 10_000 });
+    metadataApplied = true;
+  } else {
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+    await dialog.waitFor({ state: 'detached', timeout: 10_000 });
+  }
+
+  const finalPagePath = join(outputDir, 'kanban-metadata-page.png');
+  await page.screenshot({ path: finalPagePath, fullPage: false });
+
+  const finalMetrics = await card.evaluate((element) => ({
+    text: element.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+    hasSupplierLabel: element.textContent?.includes('#supplier') ?? false,
+    hasDueTime: element.textContent?.includes('08:30') ?? false,
+  }));
+
+  const evidence = {
+    schemaVersion: 1,
+    label,
+    scenario: 'kanban-native-interactions',
+    sourceSha,
+    baseSha,
+    headSha,
+    viewport: VIEWPORT,
+    metrics: {
+      initial: initialMetrics,
+      wholeCardSurfaceOpenedEditor: surfaceOpened,
+      editor: editorMetrics,
+      metadataApplied,
+      finalCard: finalMetrics,
+    },
+    files: {
+      page: label + '/kanban-page.png',
+      canvas: label + '/kanban-canvas.png',
+      editor: label + '/kanban-editor.png',
+      metadataPage: label + '/kanban-metadata-page.png',
+    },
+  };
+  await writeFile(join(outputDir, 'kanban.evidence.json'), JSON.stringify(evidence, null, 2) + '\n', 'utf8');
+}
+
 async function captureSettingsMemory(page) {
   // Deterministic Memory settings scenario: one canonical memory (present on
   // both revisions) plus one grounded semantic summary file (only when the
@@ -598,6 +820,12 @@ async function main() {
       await captureGoogleSettings(googlePage);
     } finally {
       await googlePage.close();
+    }
+    const kanbanPage = await context.newPage();
+    try {
+      await captureKanban(kanbanPage);
+    } finally {
+      await kanbanPage.close();
     }
     const memoryPage = await context.newPage();
     try {

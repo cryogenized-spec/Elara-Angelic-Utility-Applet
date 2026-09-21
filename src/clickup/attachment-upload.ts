@@ -85,6 +85,9 @@ export async function uploadClickUpArtifact(
   admittedGrant?: ClickUpAdmittedGrant,
 ): Promise<unknown> {
   const args = validateClickUpToolArguments('clickup.attachArtifact', rawArguments) as ClickUpToolArguments<'clickup.attachArtifact'>;
+  if (!admittedGrant || !Number.isSafeInteger(admittedGrant.revision) || admittedGrant.revision <= 0) {
+    throw new ClickUpAttachmentUploadError('grant_required', 'ClickUp artifact upload requires an admitted provider grant.', 409);
+  }
   const pairing = activePairing();
   if (admittedGrant && clickUpPairingAuthorityBinding(pairing) !== admittedGrant.authorityBinding) {
     throw new ClickUpAttachmentUploadError('grant_changed', 'The paired Worker changed after ClickUp authorization was admitted.', 409);

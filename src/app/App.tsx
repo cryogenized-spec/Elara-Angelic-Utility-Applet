@@ -385,7 +385,7 @@ export function App() {
 
     try {
       const kanbanInstruction = await kanbanContext();
-      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction + kanbanInstruction, untrustedExternalContext: Boolean(kanbanInstruction), tools: options.tools, conversationId, inputMessageId: options.inputMessageId, generationId, isGenerationActive: isActiveGeneration };
+      const request = { model: geminiModel, input, attachments: attachmentsForTurn(base, options.inputMessageId, options.attachments), previousInteractionId, generationConfig: options.generationConfig, systemInstruction: options.systemInstruction + kanbanInstruction, untrustedAmbientContext: Boolean(kanbanInstruction), tools: options.tools, conversationId, inputMessageId: options.inputMessageId, generationId, isGenerationActive: isActiveGeneration };
       const stream = options.tools?.length
         ? streamGoogleToolLoop(request, { tools: options.tools, readOnly: false }, controller.signal)
         : geminiTurnPort.streamReply(request, controller.signal);

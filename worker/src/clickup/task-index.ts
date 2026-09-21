@@ -119,7 +119,8 @@ function searchableText(task: Record<string, unknown>): string {
   const folder = record(task.folder);
   const tags = boundedArray(task.tags, 50).flatMap((entry) => {
     const item = record(entry);
-    return text(item?.name ?? entry, 200) ?? [];
+    const name = text(item?.name ?? entry, 200);
+    return name ? [name] : [];
   });
   const assignees = boundedArray(task.assignees, 50).flatMap((entry) => {
     const item = record(entry);
@@ -329,7 +330,7 @@ export function searchClickUpTaskIndex(
     bindings.push(`%${escapeLike(term)}%`);
   }
   if (!args.includeClosed) clauses.push('closed = 0');
-  if (!args.includeSubtasks) clauses.push('parent_id IS NULL');
+  if (args.includeSubtasks === false) clauses.push('parent_id IS NULL');
   if (args.listIds?.length) {
     clauses.push(`list_id IN (${placeholders(args.listIds)})`);
     bindings.push(...args.listIds);

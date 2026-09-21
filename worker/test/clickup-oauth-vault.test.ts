@@ -38,6 +38,7 @@ type Counters = { token: number; user: number; teams: number; task: number };
 
 function mockProvider(options: { taskStatus?: number; taskRemaining?: number } = {}): Counters {
   const counters: Counters = { token: 0, user: 0, teams: 0, task: 0 };
+  const resetAt = Math.floor(Date.now() / 1000) + 600;
   vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
     const request = input instanceof Request ? input : new Request(input, init);
 
@@ -367,6 +368,7 @@ describe('ClickUpOAuthVault', () => {
 
   it('does not let a delayed old-token failure delete or rate-limit a newer grant', async () => {
     let oldTaskStarted = false;
+    const resetAt = Math.floor(Date.now() / 1000) + 600;
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);

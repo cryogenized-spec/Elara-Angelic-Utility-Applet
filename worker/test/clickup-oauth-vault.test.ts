@@ -99,7 +99,7 @@ function mockProvider(options: { taskStatus?: number; taskRemaining?: number } =
         'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
       });
       return new Response(status === 200
-        ? JSON.stringify({ id: '86task', name: 'Repair S56' })
+        ? JSON.stringify({ id: '86task', name: 'Repair S56', team_id: '999', list: { id: '123' }, space: { id: '789' } })
         : JSON.stringify({ ECODE: 'OAUTH_019', err: 'Token not found' }), { status, headers });
     }
 
@@ -261,7 +261,7 @@ describe('ClickUpOAuthVault', () => {
     const response = await doFetch(new Request('https://clickup-oauth-vault/internal/clickup/command', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ operation: 'getTask', arguments: { taskId: '86task' } }),
+      body: JSON.stringify({ operation: 'getTask', arguments: { workspaceId: '999', taskId: '86task' } }),
     }));
     expect(response.status).toBe(401);
   });
@@ -293,11 +293,11 @@ describe('ClickUpOAuthVault', () => {
     const begun = await start();
     expect((await exchange(begun.state)).status).toBe(200);
 
-    const first = await internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } });
+    const first = await internalCommand({ operation: 'getTask', arguments: { workspaceId: '999', taskId: '86task' } });
     expect(first.status).toBe(200);
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ limit: 100, remaining: 0 }));
 
-    const second = await internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } });
+    const second = await internalCommand({ operation: 'getTask', arguments: { workspaceId: '999', taskId: '86task' } });
     expect(second.status).toBe(429);
     expect(await second.json()).toEqual(expect.objectContaining({ code: 'rate_limited' }));
     expect(provider.task).toBe(1);
@@ -309,7 +309,7 @@ describe('ClickUpOAuthVault', () => {
     expect((await exchange(begun.state)).status).toBe(200);
     expect(await credentialSnapshot()).not.toBeNull();
 
-    const failed = await internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } });
+    const failed = await internalCommand({ operation: 'getTask', arguments: { workspaceId: '999', taskId: '86task' } });
     expect(failed.status).toBe(401);
     expect(await credentialSnapshot()).toBeNull();
 
@@ -422,7 +422,7 @@ describe('ClickUpOAuthVault', () => {
     const firstRevision = (await credentialSnapshot())?.updatedAt ?? 0;
 
     const oldRequest = internalCommand(
-      { operation: 'getTask', arguments: { taskId: '86task' } },
+      { operation: 'getTask', arguments: { workspaceId: '999', taskId: '86task' } },
       firstRevision,
     );
     for (let attempt = 0; attempt < 100 && !oldTaskStarted; attempt += 1) {
@@ -486,7 +486,7 @@ describe('ClickUpOAuthVault', () => {
         // Force response #2 (remaining=8) to settle before response #1
         // (remaining=9), without exporting promise resolvers across contexts.
         await new Promise<void>((resolve) => setTimeout(resolve, sequence === 1 ? 200 : 20));
-        return new Response(JSON.stringify({ id: '86task', name: 'Repair S56' }), {
+        return new Response(JSON.stringify({ id: '86task', name: 'Repair S56', team_id: '999', list: { id: '123' }, space: { id: '789' } }), {
           status: 200,
           headers: {
             'content-type': 'application/json',
@@ -503,13 +503,13 @@ describe('ClickUpOAuthVault', () => {
     expect((await exchange(begun.state)).status).toBe(200);
     const revision = (await credentialSnapshot())?.updatedAt ?? 0;
 
-    const firstRequest = internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } }, revision);
+    const firstRequest = internalCommand({ operation: 'getTask', arguments: { workspaceId: '999', taskId: '86task' } }, revision);
     for (let attempt = 0; attempt < 100 && !firstStarted; attempt += 1) {
       await new Promise<void>((resolve) => setTimeout(resolve, 2));
     }
     expect(firstStarted).toBe(true);
 
-    const secondRequest = internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } }, revision);
+    const secondRequest = internalCommand({ operation: 'getTask', arguments: { workspaceId: '999', taskId: '86task' } }, revision);
     expect((await secondRequest).status).toBe(200);
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 8 }));
 

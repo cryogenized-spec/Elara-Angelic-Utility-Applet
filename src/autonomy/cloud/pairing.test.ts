@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   adoptConfigGeneration,
   bumpConfigGeneration,
@@ -135,6 +135,32 @@ describe('pairing store', () => {
     window.localStorage.removeItem('elara.autonomy.pairing.v1');
 
     await expect(resolving).resolves.toBe('');
+  });
+
+  it('rechecks pairing identity again after the protected credential read completes', async () => {
+    savePairing(PAIRING);
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'elara.autonomy.pairing.v1',
+      oldValue: null,
+      newValue: window.localStorage.getItem('elara.autonomy.pairing.v1'),
+    }));
+
+    const originalGetItem = Storage.prototype.getItem;
+    let pairingReads = 0;
+    const getItem = vi.spyOn(Storage.prototype, 'getItem').mockImplementation(function (this: Storage, key: string) {
+      if (this === window.localStorage && key === 'elara.autonomy.pairing.v1') {
+        pairingReads += 1;
+        if (pairingReads >= 3) return null;
+      }
+      return originalGetItem.call(this, key);
+    });
+
+    try {
+      await expect(resolvePairingToken({ ...PAIRING, token: '' })).resolves.toBe('');
+      expect(pairingReads).toBeGreaterThanOrEqual(3);
+    } finally {
+      getItem.mockRestore();
+    }
   });
 });
 

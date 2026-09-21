@@ -22,6 +22,7 @@ const DB_NAME = 'elara-gemini-lockbox';
 const GEMINI_RECORD_ID = 'gemini-api-key';
 const YOUTUBE_RECORD_ID = 'youtube-api-key';
 const LEGACY_STORAGE_KEY = 'elara.gemini.api-key';
+const LOCKBOX_SESSION_REVOCATION_KEY = 'elara.gemini.lockbox.session-revocation.v1';
 const PBKDF2_ITERATIONS = 600_000;
 const SALT_BYTES = 16;
 const IV_BYTES = 12;
@@ -315,6 +316,40 @@ function notifyChanged(): void {
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('elara-gemini-lockbox-changed'));
 }
 
+/**
+ * Clear plaintext owned by this browser tab. Durable encrypted records remain
+ * untouched; this is only the live unlock session.
+ */
+function clearPlaintextSession(): boolean {
+  const wasUnlocked = sessionUnlocked();
+  clearIdleTimer();
+  unlockedSecrets.clear();
+  mismatchedSecrets.clear();
+  lastActivityAt = null;
+  return wasUnlocked;
+}
+
+/**
+ * Cross-tab revocation carries only an opaque nonce through Web Storage.
+ * Credentials, derived keys and security metadata never enter localStorage.
+ * The storage event is delivered only to sibling documents, so the caller's
+ * newly-established session is not accidentally revoked.
+ */
+function revokeSiblingLockboxSessions(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const revision = `${Date.now()}:${crypto.randomUUID()}`;
+    window.localStorage.setItem(LOCKBOX_SESSION_REVOCATION_KEY, revision);
+  } catch {
+    // Storage may be unavailable; the current tab still clears itself safely.
+  }
+}
+
+function handleSiblingLockboxRevocation(): void {
+  if (!clearPlaintextSession()) return;
+  notifyChanged();
+}
+
 function scheduleIdleLock(): void {
   clearIdleTimer();
   if (securityMode === 'off' || !sessionUnlocked() || typeof window === 'undefined' || lastActivityAt === null) return;
@@ -563,6 +598,7 @@ export async function saveGeminiApiKey(value: string, passphrase: string): Promi
   // Secondaries are sealed with the credential rather than the key material, so
   // skipping this would orphan every one of them against the new passphrase.
   await reencryptSecondarySecrets(passphrase.trim());
+  revokeSiblingLockboxSessions();
 }
 
 export async function configureGeminiApiKeyWithPin(value: string, pin: string): Promise<void> {
@@ -573,6 +609,7 @@ export async function configureGeminiApiKeyWithPin(value: string, pin: string): 
   // A PIN change rotates the Lockbox credential, so every other stored secret
   // must be re-encrypted with the new one or it becomes permanently unreadable.
   await reencryptSecondarySecrets(pin);
+  revokeSiblingLockboxSessions();
 }
 
 /**
@@ -619,6 +656,7 @@ export async function setGeminiLockboxSecurityMode(mode: Exclude<GeminiLockboxSe
   });
   securityMode = mode;
   scheduleIdleLock();
+  revokeSiblingLockboxSessions();
   notifyChanged();
 }
 
@@ -660,6 +698,7 @@ export async function disableGeminiLockboxSecurity(): Promise<void> {
   lastActivityAt = null;
   clearIdleTimer();
   removeLegacyPlaintextKey();
+  revokeSiblingLockboxSessions();
   notifyChanged();
 }
 
@@ -669,6 +708,7 @@ export async function enableGeminiLockboxWithPin(pin: string): Promise<void> {
   if (!apiKey) throw new Error('The Gemini API Lockbox is not configured.');
   await saveSecretWithMode(GEMINI_RECORD_ID, apiKey, pin, 'pin');
   await reencryptSecondarySecrets(pin);
+  revokeSiblingLockboxSessions();
 }
 
 async function unlockWithCredential(credential: string, requirePinMode: boolean): Promise<void> {
@@ -723,12 +763,10 @@ export async function unlockGeminiApiKeyWithPin(pin: string): Promise<void> {
 }
 
 export function lockGeminiApiKey(): void {
-  clearIdleTimer();
-  const wasUnlocked = sessionUnlocked();
-  unlockedSecrets.clear();
-  mismatchedSecrets.clear();
-  lastActivityAt = null;
-  if (wasUnlocked) notifyChanged();
+  const wasUnlocked = clearPlaintextSession();
+  if (!wasUnlocked) return;
+  revokeSiblingLockboxSessions();
+  notifyChanged();
 }
 
 export async function clearGeminiApiKey(): Promise<void> {
@@ -737,12 +775,10 @@ export async function clearGeminiApiKey(): Promise<void> {
   // primary, so with the primary gone it would report 'unlocked' forever while
   // being impossible to decrypt.
   await db.secrets.bulkDelete([GEMINI_RECORD_ID, YOUTUBE_RECORD_ID]);
-  clearIdleTimer();
-  unlockedSecrets.clear();
-  mismatchedSecrets.clear();
-  lastActivityAt = null;
+  clearPlaintextSession();
   securityMode = null;
   removeLegacyPlaintextKey();
+  revokeSiblingLockboxSessions();
   notifyChanged();
 }
 
@@ -799,6 +835,7 @@ export async function saveYouTubeApiKey(value: string, credential: string): Prom
   // Keep the security authority's metadata intact: the secondary record must
   // not reset the primary's attempt counter or configured-at timestamp.
   await db.secrets.update(GEMINI_RECORD_ID, { updatedAt: Date.now() });
+  revokeSiblingLockboxSessions();
   notifyChanged();
 }
 
@@ -815,6 +852,7 @@ export async function clearYouTubeApiKey(): Promise<void> {
   await db.secrets.delete(YOUTUBE_RECORD_ID);
   unlockedSecrets.delete(YOUTUBE_RECORD_ID);
   mismatchedSecrets.delete(YOUTUBE_RECORD_ID);
+  revokeSiblingLockboxSessions();
   notifyChanged();
 }
 
@@ -825,6 +863,9 @@ function installLifecycleController(): void {
     enforceGeminiApiKeyIdleTimeout();
     if (touch && sessionUnlocked()) touchGeminiApiKeyActivity();
   };
+  window.addEventListener('storage', (event) => {
+    if (event.key === LOCKBOX_SESSION_REVOCATION_KEY && event.newValue) handleSiblingLockboxRevocation();
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') enforceAndMaybeTouch(true);
   });

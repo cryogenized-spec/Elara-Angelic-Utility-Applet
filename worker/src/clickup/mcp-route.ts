@@ -2,10 +2,12 @@ import { z } from 'zod';
 import { verifyBearerToken } from '../../../src/autonomy/protocol';
 import {
   clickUpMcpToolDefinitions,
+  clickUpToolCatalogFingerprint,
   clickupToolNameSchema,
 } from '../../../src/clickup/tool-schema';
 import {
   CLICKUP_GRANT_REVISION_HEADER,
+  CLICKUP_TOOL_CATALOG_HEADER,
   CLICKUP_MCP_PATH,
   CLICKUP_MCP_PROTOCOL_VERSION,
   MCP_META_CLIENT_CAPABILITIES,
@@ -307,6 +309,11 @@ export async function handleClickUpMcpRoute(
     if (grantRevision === null) {
       return rpcError(id, -32023, 'ClickUp tools/call requires the admitted provider grant revision.', 409, corsOrigin);
     }
+    const presentedCatalog = request.headers.get(CLICKUP_TOOL_CATALOG_HEADER)?.trim() ?? '';
+    const liveCatalog = await clickUpToolCatalogFingerprint();
+    if (!presentedCatalog || presentedCatalog !== liveCatalog) {
+      return rpcError(id, -32024, 'ClickUp tool catalog changed after browser admission. Refresh the Worker catalog before retrying.', 409, corsOrigin);
+    }
     try {
       const value = await executeClickUpTool(env, valid.data.name, valid.data.arguments, grantRevision);
       return rpcResult(id, {
@@ -345,6 +352,7 @@ export function clickUpMcpPreflight(corsOrigin: string | null): Response {
       'Mcp-Method',
       'Mcp-Name',
       CLICKUP_GRANT_REVISION_HEADER,
+      CLICKUP_TOOL_CATALOG_HEADER,
     ].join(', '),
     Vary: 'Origin',
   });

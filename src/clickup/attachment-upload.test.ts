@@ -16,6 +16,7 @@ vi.mock('../autonomy/cloud/pairing', () => ({
 }));
 
 import { CLICKUP_GRANT_REVISION_HEADER } from './mcp-protocol';
+import { captureClickUpArtifactApprovalSnapshot } from './attachment-authority';
 import { uploadClickUpArtifact } from './attachment-upload';
 
 describe('ClickUp browser artifact upload', () => {
@@ -66,14 +67,17 @@ describe('ClickUp browser artifact upload', () => {
       });
     }) as unknown as typeof fetch;
 
-    await expect(uploadClickUpArtifact({
+    const args = {
       taskId: '86task',
       artifactId: 'artifact-1',
       filename: 'repair-note.txt',
-    }, undefined, {
+    };
+    const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
+
+    await expect(uploadClickUpArtifact(args, undefined, {
       revision: 123,
       authorityBinding: 'https://worker.example#test-installation',
-    })).resolves.toEqual({
+    }, approvedArtifact)).resolves.toEqual({
       provider: 'clickup',
       taskId: '86task',
       artifactId: 'artifact-1',
@@ -106,10 +110,13 @@ describe('ClickUp browser artifact upload', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }) as unknown as typeof fetch;
 
+    const args = { taskId: '86task', artifactId: 'artifact-generated' };
+    const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
     await uploadClickUpArtifact(
-      { taskId: '86task', artifactId: 'artifact-generated' },
+      args,
       undefined,
       { revision: 123, authorityBinding: 'https://worker.example#test-installation' },
+      approvedArtifact,
     );
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
@@ -130,13 +137,92 @@ describe('ClickUp browser artifact upload', () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await expect(uploadClickUpArtifact(
-      { taskId: '86task', artifactId: 'artifact-1' },
-      undefined,
-      { revision: 123, authorityBinding: 'https://worker.example#test-installation' },
-    )).rejects.toMatchObject({
+    await expect(captureClickUpArtifactApprovalSnapshot({
+      taskId: '86task',
+      artifactId: 'artifact-1',
+    })).rejects.toMatchObject({
       code: 'artifact-not-ready',
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('rejects payload substitution under the same artifact id after approval and sends no bytes', async () => {
+    artifactGet
+      .mockResolvedValueOnce({
+        id: 'artifact-1',
+        artifactType: 'attachment',
+        kind: 'text',
+        provenance: 'user_upload',
+        status: 'ready',
+        name: 'repair.txt',
+        mimeType: 'text/plain',
+        size: 8,
+        createdAt: 1,
+        data: new Blob(['approved'], { type: 'text/plain' }),
+      })
+      .mockResolvedValueOnce({
+        id: 'artifact-1',
+        artifactType: 'attachment',
+        kind: 'text',
+        provenance: 'user_upload',
+        status: 'ready',
+        name: 'repair.txt',
+        mimeType: 'text/plain',
+        size: 8,
+        createdAt: 1,
+        data: new Blob(['replaced'], { type: 'text/plain' }),
+      });
+
+    const args = { taskId: '86task', artifactId: 'artifact-1' };
+    const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(uploadClickUpArtifact(
+      args,
+      undefined,
+      { revision: 123, authorityBinding: 'https://worker.example#test-installation' },
+      approvedArtifact,
+    )).rejects.toMatchObject({
+      code: 'artifact-changed',
+      status: 409,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('uploads the immutable approved Blob rather than a second mutable repository read', async () => {
+    const approvedArtifactRecord = {
+      id: 'artifact-1',
+      artifactType: 'attachment' as const,
+      kind: 'text' as const,
+      provenance: 'user_upload' as const,
+      status: 'ready' as const,
+      name: 'repair.txt',
+      mimeType: 'text/plain',
+      size: 8,
+      createdAt: 1,
+      data: new Blob(['approved'], { type: 'text/plain' }),
+    };
+    artifactGet.mockResolvedValue(approvedArtifactRecord);
+
+    const args = { taskId: '86task', artifactId: 'artifact-1' };
+    const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
+
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const form = init?.body as FormData;
+      const file = form.get('file') as File;
+      expect(await file.text()).toBe('approved');
+      return new Response(JSON.stringify({
+        ok: true,
+        result: { provider: 'clickup', taskId: '86task', artifactId: 'artifact-1' },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+
+    await uploadClickUpArtifact(
+      args,
+      undefined,
+      { revision: 123, authorityBinding: 'https://worker.example#test-installation' },
+      approvedArtifact,
+    );
   });
 });

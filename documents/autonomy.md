@@ -77,6 +77,8 @@ Pairing tokens and Worker secrets remain in their owning runtimes. Protocol inpu
 
 Google OAuth has its own route/vault admission, nonce replay protection and durable credential storage. Autonomy cannot bypass that boundary simply because both systems share a self-hosted Worker deployment.
 
+A runtime AutonomyPairing object is not credential authority by itself. Before returning an in-memory or protected installation token, the pairing layer verifies that shared pairing metadata still identifies the same Worker URL and installation id, and repeats that check after the asynchronous credential boundary. Sibling-tab pairing changes clear the local session-token cache. Unpairing in one tab therefore prevents a stale object in another tab from resurrecting the installation credential.
+
 ## 7. Verification and tests
 
 Use `src/autonomy/*.test.ts`, cloud sync/client tests, persistence tests, `worker/test/autonomy-*.test.ts`, `test:workers`, `e2e/autonomy.spec.ts` and `e2e/autonomy-cloud.spec.ts`. Worker verification is additionally covered by dedicated scripts and `SYS-REL / reliability.md`.

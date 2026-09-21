@@ -376,6 +376,31 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     expect(counters.attachment).toBe(0);
   });
 
+  it.each([
+    ['set', { operation: 'setCustomField', workspaceId: '111', taskId: 'task-a', fieldId: 'field-a', value: 'stale' }],
+    ['clear', { operation: 'clearCustomField', workspaceId: '111', taskId: 'task-a', fieldId: 'field-a' }],
+  ] as const)('rejects Custom Field %s under a stale admitted grant after reconnect', async (_mode, command) => {
+    const counters = providerFixture();
+    await connect('grant-a');
+    const staleRevision = grantRevision;
+
+    await connect('grant-b');
+    const currentRevision = grantRevision;
+    expect(currentRevision).toBeGreaterThan(staleRevision);
+
+    const response = await internalCommand(command, staleRevision);
+    expect(response.status).toBe(409);
+    expect(await responseBody(response)).toEqual(expect.objectContaining({ code: 'grant_changed' }));
+    expect(counters.setField).toBe(0);
+    expect(counters.clearField).toBe(0);
+
+    const current = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '111', taskId: 'task-a' },
+    }, currentRevision);
+    expect(current.status).toBe(200);
+  });
+
   it('rejects cross-Workspace assignee and mention ids before writes leave the vault', async () => {
     const counters = providerFixture();
     await connect();

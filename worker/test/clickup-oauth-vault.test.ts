@@ -282,7 +282,7 @@ describe('ClickUpOAuthVault', () => {
     const begun = await start();
     expect((await exchange(begun.state)).status).toBe(200);
 
-    const response = await internalCommand({ operation: 'listSpaces', workspaceId: 'not-authorized' });
+    const response = await internalCommand({ operation: 'listSpaces', workspaceId: '998' });
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual(expect.objectContaining({ code: 'workspace_forbidden' }));
     expect(provider.task).toBe(0);

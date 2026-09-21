@@ -175,8 +175,8 @@ if (/export\s+(?:async\s+)?function\s+(?:get|read|save|set|store)Secret\b/.test(
 
 // The installation credential is a separate device-local secret boundary used
 // only for the user's own self-hosted Worker. Freeze the direct store consumer
-// (pairing) and the two reviewed plaintext handoff consumers: autonomy cloud
-// transport and durable Google OAuth brokerage.
+// (pairing) and the three reviewed plaintext handoff consumers: autonomy cloud
+// transport plus durable Google and ClickUp OAuth brokerage.
 const reviewedAutonomyCredentialConsumers = new Set(['src/autonomy/cloud/pairing.ts']);
 const actualAutonomyCredentialConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -189,6 +189,7 @@ for (const path of reviewedAutonomyCredentialConsumers) if (!actualAutonomyCrede
 const reviewedPairingTokenConsumers = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
+  'src/clickup/oauth/authority.ts',
 ]);
 const actualPairingTokenConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -202,6 +203,9 @@ const pairing = read('src/autonomy/cloud/pairing.ts');
 const autonomyCredential = read('src/autonomy/cloud/credential.ts');
 const autonomyClient = read('src/autonomy/cloud/client.ts');
 const oauthAuthority = read('src/google/oauth/authority.ts');
+const clickUpOAuthAuthority = read('src/clickup/oauth/authority.ts');
+const clickUpOAuthVault = read('worker/src/clickup/oauth-vault.ts');
+const clickUpProvider = read('worker/src/clickup/provider.ts');
 if (!pairing.includes("type StoredAutonomyPairing = Omit<AutonomyPairing, 'token'>")) fail('autonomy pairing must exclude token from its durable metadata type');
 if (!pairing.includes('saveAutonomyInstallationToken')) fail('autonomy pairing must route the installation credential through its protected store');
 if (/writeJson\(PAIRING_KEY\s*,\s*\{\s*\.\.\.pairing\s*\}/.test(pairing)) fail('autonomy pairing serializes the complete pairing object, including its credential');
@@ -213,6 +217,7 @@ for (const [path, source] of [
   ['src/autonomy/cloud/pairing.ts', pairing],
   ['src/autonomy/cloud/client.ts', autonomyClient],
   ['src/google/oauth/authority.ts', oauthAuthority],
+  ['src/clickup/oauth/authority.ts', clickUpOAuthAuthority],
 ]) {
   if (/\bconsole\.(?:log|info|warn|error|debug)\s*\(/.test(source)) fail(`${path} must not log from the installation-credential-bearing boundary`);
 }
@@ -237,6 +242,7 @@ for (const [path, source] of runtime) {
 const reviewedRawFetchAuthorities = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
+  'src/clickup/oauth/authority.ts',
   'src/ui/noto-emoji.ts',
 ]);
 const reviewedGlobalFetchReferences = new Set([
@@ -287,6 +293,36 @@ if (!oauthAuthority.includes("url.protocol !== 'https:'")) fail('Google OAuth eg
 if (!oauthAuthority.includes('assertGoogleApiTarget')) fail('Google authorized fetch must validate its destination');
 for (const marker of ['requestGoogleAuthorizationCode', "'/google/oauth/token'", 'resolvePairingToken', 'signWrite']) {
   if (!oauthAuthority.includes(marker)) fail(`durable Google OAuth browser authority is missing: ${marker}`);
+}
+for (const marker of [
+  "url.protocol !== 'https:'",
+  'url.username || url.password || url.search || url.hash',
+  'resolvePairingToken',
+  'signWrite',
+  "'/clickup/oauth/start'",
+  "'/clickup/oauth/exchange'",
+  "'/clickup/oauth/disconnect'",
+]) {
+  if (!clickUpOAuthAuthority.includes(marker)) fail(`durable ClickUp OAuth browser authority is missing: ${marker}`);
+}
+for (const marker of [
+  "VAULT_KEY_CONTEXT = 'elara-clickup-oauth-vault-v1'",
+  "name: 'AES-GCM'",
+  'clickup_oauth_states',
+  'clickup_oauth_nonces',
+  "'/internal/clickup/command'",
+  'internalWakeMarker',
+  'validateClickUpToolArguments',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth/REST credential boundary is missing: ${marker}`);
+}
+for (const marker of [
+  "const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'",
+  "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",
+  "headers.set('Authorization'",
+  'MAX_PROVIDER_BODY_CHARS',
+]) {
+  if (!clickUpProvider.includes(marker)) fail(`ClickUp provider egress boundary is missing: ${marker}`);
 }
 
 for (const marker of [

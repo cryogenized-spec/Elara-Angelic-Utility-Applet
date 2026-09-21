@@ -156,7 +156,7 @@ describe('ClickUp MCP Worker boundary', () => {
   it('rejects tools/call without the admitted provider grant revision', async () => {
     const response = await request('tools/call', {
       name: 'clickup.getTask',
-      arguments: { taskId: '86task' },
+      arguments: { workspaceId: '999', taskId: '86task' },
     }, 'clickup.getTask', { [CLICKUP_GRANT_REVISION_HEADER]: '' });
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toEqual(expect.objectContaining({
@@ -168,7 +168,7 @@ describe('ClickUp MCP Worker boundary', () => {
   it('returns provider authorization failure as a complete tool error rather than JSON-RPC transport failure', async () => {
     const response = await request('tools/call', {
       name: 'clickup.getTask',
-      arguments: { taskId: '86task' },
+      arguments: { workspaceId: '999', taskId: '86task' },
     }, 'clickup.getTask');
     expect(response.status).toBe(200);
     const body = await jsonRecord(response);

@@ -543,7 +543,8 @@ export class ClickUpOAuthVault extends DurableObject {
   }
 
   private providerCredentialRevoked(error: ClickUpProviderError): boolean {
-    return error.status === 401 || new Set(['OAUTH_019', 'OAUTH_021', 'OAUTH_025', 'OAUTH_077']).has(error.code);
+    return error.status === 401
+      || new Set(['OAUTH_019', 'OAUTH_021', 'OAUTH_025', 'OAUTH_077']).has(error.providerCode ?? '');
   }
 
   private async providerData<T>(

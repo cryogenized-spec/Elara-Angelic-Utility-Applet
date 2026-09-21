@@ -12,6 +12,8 @@ export interface ClickUpOAuthRouteEnv {
   readonly CLICKUP_OAUTH?: DurableObjectNamespace;
 }
 
+export const CLICKUP_WEBHOOK_ENDPOINT_HEADER = 'X-Elara-ClickUp-Webhook-Endpoint';
+
 const CLICKUP_OAUTH_PATHS = new Set([
   '/clickup/oauth/status',
   '/clickup/oauth/start',
@@ -69,6 +71,9 @@ async function forward(env: ClickUpOAuthRouteEnv, request: Request, body: string
   ]) {
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
+  }
+  if (url.pathname === '/clickup/oauth/exchange') {
+    headers.set(CLICKUP_WEBHOOK_ENDPOINT_HEADER, `${url.origin}/clickup/webhook`);
   }
   const response = await (await vaultStub(env)).fetch(new Request(`https://clickup-oauth-vault${url.pathname}`, {
     method: request.method,

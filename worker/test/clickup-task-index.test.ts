@@ -48,7 +48,13 @@ async function stub() {
 }
 
 async function doFetch(request: Request): Promise<Response> {
-  return (await stub()).fetch(request);
+  const remote = await (await stub()).fetch(request);
+  const body = await remote.arrayBuffer();
+  return new Response(body, {
+    status: remote.status,
+    statusText: remote.statusText,
+    headers: remote.headers,
+  });
 }
 
 async function connect() {

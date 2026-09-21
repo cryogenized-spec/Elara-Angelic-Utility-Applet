@@ -32,9 +32,13 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 button, textarea, input, select { font: inherit; }
-button, a, select, summary, [role="button"] {
+button, a, select, summary, label, [role="button"] {
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
+}
+button, select, summary, label, [role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
 }
 button { cursor: pointer; color: inherit; }
 input,

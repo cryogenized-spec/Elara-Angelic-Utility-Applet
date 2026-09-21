@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { env, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker, newNonce, signWrite } from '../../src/autonomy/protocol';
+import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, bearerRead, signedWrite } from './helpers';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
@@ -113,12 +114,14 @@ async function exchange(state: string, code = 'one-time-code'): Promise<Response
   return doFetch(await signedWrite('/clickup/oauth/exchange', body));
 }
 
-async function internalCommand(command: unknown): Promise<Response> {
+async function internalCommand(command: unknown, revision?: number): Promise<Response> {
+  const currentRevision = revision ?? (await credentialSnapshot())?.updatedAt ?? 0;
   return doFetch(new Request('https://clickup-oauth-vault/internal/clickup/command', {
     method: 'POST',
     headers: {
       'content-type': 'application/json',
       'X-Elara-Internal': await internalWakeMarker(TOKEN),
+      [CLICKUP_GRANT_REVISION_HEADER]: String(currentRevision),
     },
     body: JSON.stringify(command),
   }));

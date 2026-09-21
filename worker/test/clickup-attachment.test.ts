@@ -127,6 +127,7 @@ describe('ClickUp artifact attachment boundary', () => {
       ok: true,
       result: {
         provider: 'clickup',
+        workspaceId: '999',
         taskId: '86task',
         artifactId: 'artifact-local-1',
         filename: 'repair-note.txt',

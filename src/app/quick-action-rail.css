@@ -1,5 +1,5 @@
 /* The Workspace launcher is a single disclosure button living inside the
-   shell's left control cluster (layout.css), directly under the hamburger.
+   shell's left control cluster (layout.css), directly under the top control row.
    Its size comes from the shared control tokens so the two controls always
    share one geometry; nothing here invents its own. */
 .tool-rail { position: relative; z-index: 50; isolation: isolate; }

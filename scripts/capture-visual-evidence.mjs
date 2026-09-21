@@ -540,7 +540,7 @@ async function captureKanban(page) {
   await dialog.waitFor({ state: 'visible', timeout: 10_000 });
 
   const editorMetrics = await page.evaluate(() => {
-    const dialogElement = globalThis.document.querySelector('[role="dialog"]');
+    const dialogElement = globalThis.document.querySelector('dialog.kb-dialog');
     const title = globalThis.document.querySelector('input[name="title"]');
     const dueTime = globalThis.document.querySelector('input[name="dueTime"]');
     const newLabel = globalThis.document.querySelector('[aria-label="New label"]');

@@ -43,7 +43,7 @@ main.tsx -> App.tsx
 
 ## 4. Data and contracts
 
-Canonical shell width is capped at `520px`; the 9:16 Android portrait composition is the reference geometry. Touch controls use a `44px` minimum shell control token. The composer is a four-track row: attachment, flexible editor, VTT and send. The editor grows to roughly ten visible lines, then scrolls internally; conversation space shrinks instead of being pushed outside the shell.
+Canonical shell width is capped at `520px`; the 9:16 Android portrait composition is the reference geometry. Touch controls use a `44px` minimum shell control token. The chat header control cluster is a durable two-row contract: hamburger and Kanban share the first row with the shared control gap, while the full-width Workspace launcher sits directly beneath them. Character presentation is frameless in portrait mode: the former gradient/banner backplate and visible identity/presence card are absent, while the 4:5 portrait remains pinned top-right. The character name remains present as a visually hidden level-one heading so screen-reader heading navigation survives the frameless treatment. The composer is a four-track row: attachment, flexible editor, VTT and send. The editor grows to roughly ten visible lines, then scrolls internally; conversation space shrinks instead of being pushed outside the shell.
 
 Built-in fonts are Inter, Manrope and Outfit as local Latin WOFF2 assets with system fallbacks. Custom Google Fonts are opt-in and accepted only from validated HTTPS `fonts.googleapis.com/css2` URLs.
 

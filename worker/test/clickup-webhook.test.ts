@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { SELF, env, reset } from 'cloudflare:test';
+import { SELF, env } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
-import { TOKEN, signedWrite } from './helpers';
+import { TOKEN, resetClickUpTestState, signedWrite } from './helpers';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
 const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
@@ -13,7 +13,7 @@ let grantRevision = 0;
 beforeEach(async () => {
   vi.restoreAllMocks();
   grantRevision = 0;
-  await reset();
+  await resetClickUpTestState();
 });
 
 async function stub() {

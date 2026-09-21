@@ -144,6 +144,11 @@ function completedMutationLine(tool: string, value: unknown): string {
   return `- ${tool}: completed${details.length ? ` (${details.join(', ')})` : ''}`;
 }
 
+function completedMutationNotice(outcomes: readonly string[], reason: string): string {
+  if (!outcomes.length) return reason;
+  return `Completed actions before processing stopped:\n${outcomes.join('\n')}\n\n${reason}\nDo not repeat any completed actions listed above unless you intend to perform them again.`;
+}
+
 function artifactEvent(toolName: string, value: unknown): GeminiStreamEvent | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const result = value as Record<string, unknown>;
@@ -288,6 +293,20 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
           aggregateTurnUsage = aggregateUsage(aggregateTurnUsage, event.usage);
         }
         yield { ...event, usage: aggregateTurnUsage ?? event.usage };
+      } else if (
+        event.type === 'failed'
+        && event.error.code === 'GEMINI_LOCAL_RATE_LIMIT'
+        && completedMutationOutcomes.length
+      ) {
+        yield {
+          type: 'text-delta',
+          index: Number.MAX_SAFE_INTEGER,
+          text: completedMutationNotice(
+            completedMutationOutcomes,
+            'The next Gemini continuation was paused by Elara\'s local rolling input budget. The completed actions above already happened.',
+          ),
+        };
+        yield event;
       } else {
         yield event;
       }
@@ -577,10 +596,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     }
 
     if (budgetDecision === 'local-fallback') {
-      const completedActions = completedMutationOutcomes.length
-        ? `Completed actions before the budget stop:\n${completedMutationOutcomes.join('\n')}\n\n`
-        : '';
-      const fallback = `${completedActions}I reached the local exploration budget for this turn before another model call could be made safely. No further model call was dispatched. If you ask me to continue, I may need to re-read current context; do not repeat any completed actions listed above unless you intend to perform them again.`;
+      const fallback = completedMutationNotice(
+        completedMutationOutcomes,
+        'I reached the local exploration budget for this turn before another model call could be made safely. No further model call was dispatched. If you ask me to continue, I may need to re-read current context.',
+      );
       yield { type: 'text-delta', index: Number.MAX_SAFE_INTEGER, text: fallback };
       yield {
         type: 'completed',

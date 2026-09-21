@@ -47,6 +47,12 @@ async function forceRefreshAt(value: number) {
   }).forceTaskIndexRefreshAt('999', value);
 }
 
+async function forceIndexedAt(value: number) {
+  return (await stub() as DurableObjectStub & {
+    forceTaskIndexIndexedAt(workspaceId: string, value: number): Promise<void>;
+  }).forceTaskIndexIndexedAt('999', value);
+}
+
 async function indexSnapshot() {
   return (await stub() as DurableObjectStub & {
     taskIndexSnapshot(workspaceId: string): Promise<{
@@ -55,6 +61,7 @@ async function indexSnapshot() {
       lastRefreshAt: number;
       lastProviderUpdatedAt: number;
       indexedTasks: number;
+      oldestIndexedAt?: number;
     }>;
   }).taskIndexSnapshot('999');
 }
@@ -190,13 +197,18 @@ describe('ClickUp durable task index', () => {
     }));
     expect(firstBody.result.tasks.map((task: Record<string, unknown>) => task.id)).toEqual([
       'task-repair',
-      'task-subtask',
     ]);
     expect(workspaceTaskCalls).toBe(1);
 
     const second = await search({ workspaceId: '999', query: 'repair' });
     expect(second.status).toBe(200);
     expect(workspaceTaskCalls).toBe(1);
+
+    const withSubtasks = await search({ workspaceId: '999', query: 'repair', includeSubtasks: true });
+    expect((await withSubtasks.json() as Record<string, any>).result.tasks.map((task: Record<string, unknown>) => task.id)).toEqual([
+      'task-repair',
+      'task-subtask',
+    ]);
 
     const withoutSubtasks = await search({ workspaceId: '999', query: 'repair', includeSubtasks: false });
     expect((await withoutSubtasks.json() as Record<string, any>).result.tasks.map((task: Record<string, unknown>) => task.id)).toEqual([
@@ -221,6 +233,15 @@ describe('ClickUp durable task index', () => {
       indexedTasks: 3,
       lastProviderUpdatedAt: secondUpdatedAt,
     }));
+
+    // Even with webhook + incremental refresh, periodically rebuild the full
+    // snapshot so a missed delete/archive cannot remain cached indefinitely.
+    await forceIndexedAt(Date.now() - (7 * 60 * 60_000));
+    await forceRefreshAt(0);
+    const reconciled = await search({ workspaceId: '999', query: 'repair' });
+    expect(reconciled.status).toBe(200);
+    expect(workspaceTaskCalls).toBe(3);
+    expect(providerRequests[2]?.searchParams.has('date_updated_gt')).toBe(false);
   });
 
   it('rejects search for a Workspace outside the OAuth grant before provider egress', async () => {

@@ -32,6 +32,19 @@
   box-shadow: none;
 }
 
+/* Portrait presentation is foreground chrome, not a layout row. Removing it
+   from flex flow lets the conversation scroller occupy the full shell height
+   above the unchanged composer while the portrait remains pinned over it. */
+.elara-banner.artwork-mode-portrait {
+  position: absolute;
+  top: max(12px, env(safe-area-inset-top));
+  left: var(--gutter);
+  right: var(--gutter);
+  z-index: 10;
+  width: auto;
+  pointer-events: none;
+}
+
 .elara-banner__sr-heading {
   position: absolute;
   width: 1px;

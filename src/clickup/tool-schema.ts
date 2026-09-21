@@ -259,7 +259,7 @@ export const clickupToolCatalog = {
   },
 } as const satisfies Record<ClickUpToolName, {
   readonly risk: ClickUpToolRisk;
-  readonly description: string;,
+  readonly description: string;
   readonly inputSchema: z.ZodType;
 }>;
 

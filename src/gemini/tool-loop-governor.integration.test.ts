@@ -19,7 +19,7 @@ async function* events(...items: unknown[]) {
   for (const item of items) yield item as never;
 }
 
-const tools = ['drive.searchFiles', 'drive.searchLibrary', 'gmail.listMessages', 'tasks.createTask'] as const;
+const tools = ['youtube.search', 'tasks.createTask'] as const;
 
 const oauth = {
   authorize: async (capability: string) => ({ capability: capability as never, fetch: async () => new Response('{}', { status: 200 }) }),
@@ -43,11 +43,10 @@ describe('Gemini tool-loop gross-input governor', () => {
   });
 
   it('severs a growing chain at the compaction boundary and preserves external-data taint', async () => {
-    const driveFiles = vi.fn(async () => ({ files: [] }));
-    const driveLibrary = vi.fn(async () => ({ files: [] }));
-    const gmailList = vi.fn(async () => ({
+    const youtubeSearch = vi.fn(async (context: { arguments: Record<string, unknown> }) => ({
       trust: 'untrusted-external',
-      messages: [{ id: 'm1', subject: 'GitHub PR #79', snippet: 'Kanban integration' }],
+      source: 'youtube',
+      items: [{ id: String(context.arguments.queries ?? 'result'), title: 'GitHub PR #79', kind: 'video' }],
     }));
     const createTask = vi.fn(async () => ({ id: 'task-1', title: 'Review PR #79' }));
     const confirm = vi.fn(async () => true);
@@ -56,7 +55,7 @@ describe('Gemini tool-loop gross-input governor', () => {
       .mockReturnValueOnce(events(
         { type: 'interaction-created', interactionId: 'i1', model: 'gemini-3.8-flash' },
         { type: 'interaction-usage', interactionId: 'i1', status: 'requires_action', source: 'provider', usage: { inputTokens: 40_000, cachedTokens: 30_000 } },
-        { type: 'tool-call', interactionId: 'i1', index: 0, callId: 'c1', name: 'drive.searchFiles', arguments: { query: "name contains 'Kanban'" } },
+        { type: 'tool-call', interactionId: 'i1', index: 0, callId: 'c1', name: 'youtube.search', arguments: { queries: ['Kanban overview'] } },
       ))
       .mockReturnValueOnce(events(
         { type: 'interaction-created', interactionId: 'compact-1', model: 'gemini-3.8-flash' },
@@ -68,12 +67,12 @@ describe('Gemini tool-loop gross-input governor', () => {
       .mockReturnValueOnce(events(
         { type: 'interaction-created', interactionId: 'i2', model: 'gemini-3.8-flash' },
         { type: 'interaction-usage', interactionId: 'i2', status: 'requires_action', source: 'provider', usage: { inputTokens: 40_000, cachedTokens: 32_000 } },
-        { type: 'tool-call', interactionId: 'i2', index: 0, callId: 'c2', name: 'drive.searchLibrary', arguments: { query: "fullText contains 'Kanban'" } },
+        { type: 'tool-call', interactionId: 'i2', index: 0, callId: 'c2', name: 'youtube.search', arguments: { queries: ['Kanban follow-up'] } },
       ))
       .mockReturnValueOnce(events(
         { type: 'interaction-created', interactionId: 'i3', model: 'gemini-3.8-flash' },
         { type: 'interaction-usage', interactionId: 'i3', status: 'requires_action', source: 'provider', usage: { inputTokens: 40_000, cachedTokens: 33_000 } },
-        { type: 'tool-call', interactionId: 'i3', index: 0, callId: 'c3', name: 'gmail.listMessages', arguments: { query: 'Kanban' } },
+        { type: 'tool-call', interactionId: 'i3', index: 0, callId: 'c3', name: 'youtube.search', arguments: { queries: ['Kanban PR 79'] } },
       ))
       .mockReturnValueOnce(events(
         { type: 'interaction-created', interactionId: 'i5', model: 'gemini-3.8-flash' },
@@ -92,9 +91,7 @@ describe('Gemini tool-loop gross-input governor', () => {
           oauth,
           confirm,
           handlers: {
-            'drive.searchFiles': driveFiles,
-            'drive.searchLibrary': driveLibrary,
-            'gmail.listMessages': gmailList,
+            'youtube.search': youtubeSearch,
             'tasks.createTask': createTask,
           },
         },
@@ -175,7 +172,7 @@ describe('Gemini tool-loop gross-input governor', () => {
     });
   });
 
-  it('permits an evidence-driven recheck after a different successful read', async () => {
+  it('blocks a new private-source pivot after untrusted provider evidence', async () => {
     const listEvents = vi.fn(async () => ({ events: [{ id: 'e1', summary: 'Review' }] }));
     const listLabels = vi.fn(async () => ({ labels: [{ id: 'l1', name: 'GitHub' }] }));
     const readTools = ['calendar.listEvents', 'gmail.listLabels'] as const;
@@ -190,16 +187,11 @@ describe('Gemini tool-loop gross-input governor', () => {
         { type: 'tool-call', interactionId: 'e2', index: 0, callId: 'read-b', name: 'gmail.listLabels', arguments: {} },
       ))
       .mockReturnValueOnce(events(
-        { type: 'interaction-created', interactionId: 'e3', model: 'gemini-3.8-flash' },
-        { type: 'tool-call', interactionId: 'e3', index: 0, callId: 'read-a2', name: 'calendar.listEvents', arguments: { calendarId: 'primary' } },
-      ))
-      .mockReturnValueOnce(events(
-        { type: 'interaction-created', interactionId: 'e4', model: 'gemini-3.8-flash' },
-        { type: 'completed', interactionId: 'e4', status: 'completed', durationMs: 2 },
+        { type: 'completed', interactionId: 'e3', status: 'completed', durationMs: 2 },
       ));
 
     for await (const _event of streamGoogleToolLoop(
-      { model: 'gemini-3.8-flash', input: 'Recheck the calendar if another source gives a reason.', tools: readTools },
+      { model: 'gemini-3.8-flash', input: 'Check the calendar.', tools: readTools },
       {
         tools: readTools,
         executor: {
@@ -214,8 +206,14 @@ describe('Gemini tool-loop gross-input governor', () => {
       // Consume.
     }
 
-    expect(listEvents).toHaveBeenCalledTimes(2);
-    expect(listLabels).toHaveBeenCalledOnce();
+    expect(listEvents).toHaveBeenCalledOnce();
+    expect(listLabels).not.toHaveBeenCalled();
+    expect(streamToolResult.mock.calls[1]?.[0]).toMatchObject({
+      results: [expect.objectContaining({
+        callId: 'read-b',
+        result: { ok: false, error: 'UNTRUSTED_CONTEXT_REQUIRES_FRESH_USER_TURN' },
+      })],
+    });
   });
 
   it('compacts before dispatch when the pending serialized tool result makes the continuation exceed the hard budget', async () => {
@@ -263,15 +261,18 @@ describe('Gemini tool-loop gross-input governor', () => {
     expect(collected).toContainEqual(expect.objectContaining({ type: 'context-activity', label: 'Context compacted' }));
   });
 
-  it('permits the exact read again after lossy checkpoint compaction', async () => {
-    const listEvents = vi.fn(async () => ({
-      events: Array.from({ length: 8 }, (_, index) => ({
-        id: `event-${index + 1}`,
-        summary: `Event ${index + 1}`,
+  it('permits an exact public-evidence read again after lossy checkpoint compaction', async () => {
+    const youtubeSearch = vi.fn(async () => ({
+      trust: 'untrusted-external',
+      source: 'youtube',
+      items: Array.from({ length: 8 }, (_, index) => ({
+        id: `video-${index + 1}`,
+        title: `Video ${index + 1}`,
+        kind: 'video',
         etag: `"etag-${index + 1}"`,
       })),
     }));
-    const readTools = ['calendar.listEvents'] as const;
+    const readTools = ['youtube.search'] as const;
 
     estimateContinuation
       .mockReturnValueOnce(100_000)
@@ -282,12 +283,12 @@ describe('Gemini tool-loop gross-input governor', () => {
       .mockReturnValueOnce(events(
         { type: 'interaction-created', interactionId: 'lossy-1', model: 'gemini-3.8-flash' },
         { type: 'interaction-usage', interactionId: 'lossy-1', status: 'requires_action', source: 'provider', usage: { inputTokens: 40_000 } },
-        { type: 'tool-call', interactionId: 'lossy-1', index: 0, callId: 'lossy-read-1', name: 'calendar.listEvents', arguments: { calendarId: 'primary' } },
+        { type: 'tool-call', interactionId: 'lossy-1', index: 0, callId: 'lossy-read-1', name: 'youtube.search', arguments: { queries: ['lossy checkpoint'] } },
       ))
       .mockReturnValueOnce(events(
         { type: 'interaction-created', interactionId: 'lossy-compact', model: 'gemini-3.8-flash' },
         { type: 'interaction-usage', interactionId: 'lossy-compact', status: 'requires_action', source: 'provider', usage: { inputTokens: 10_000 } },
-        { type: 'tool-call', interactionId: 'lossy-compact', index: 0, callId: 'lossy-read-2', name: 'calendar.listEvents', arguments: { calendarId: 'primary' } },
+        { type: 'tool-call', interactionId: 'lossy-compact', index: 0, callId: 'lossy-read-2', name: 'youtube.search', arguments: { queries: ['lossy checkpoint'] } },
       ));
 
     streamToolResult.mockReturnValueOnce(events(
@@ -298,10 +299,10 @@ describe('Gemini tool-loop gross-input governor', () => {
 
     const collected: unknown[] = [];
     for await (const event of streamGoogleToolLoop(
-      { model: 'gemini-3.8-flash', input: 'Find the event, even if you need to reread the page after compaction.', tools: readTools },
+      { model: 'gemini-3.8-flash', input: 'Search the public media source again if checkpoint compaction omits evidence.', tools: readTools },
       {
         tools: readTools,
-        executor: { oauth, handlers: { 'calendar.listEvents': listEvents } },
+        executor: { oauth, handlers: { 'youtube.search': youtubeSearch } },
         budgetPolicy: {
           compactGrossInputTokens: 140_000,
           hardGrossInputTokens: 150_000,
@@ -311,7 +312,7 @@ describe('Gemini tool-loop gross-input governor', () => {
       },
     )) collected.push(event);
 
-    expect(listEvents).toHaveBeenCalledTimes(2);
+    expect(youtubeSearch).toHaveBeenCalledTimes(2);
     expect(streamReply).toHaveBeenCalledTimes(2);
     expect(streamToolResult).toHaveBeenCalledOnce();
     const compacted = streamReply.mock.calls[1]?.[0] as { input?: string };

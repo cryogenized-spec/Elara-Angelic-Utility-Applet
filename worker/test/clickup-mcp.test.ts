@@ -193,7 +193,7 @@ describe('ClickUp MCP Worker boundary', () => {
   it('keeps attachArtifact fail-closed until authenticated staging exists', async () => {
     const response = await request('tools/call', {
       name: 'clickup.attachArtifact',
-      arguments: { taskId: '86task', artifactId: 'artifact-1' },
+      arguments: { workspaceId: '999', taskId: '86task', artifactId: 'artifact-1' },
     }, 'clickup.attachArtifact');
     expect(response.status).toBe(200);
     const body = await jsonRecord(response);

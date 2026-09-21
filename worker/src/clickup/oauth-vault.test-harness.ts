@@ -33,4 +33,41 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
     ).toArray()[0];
     return row ? { limit: row.limit_count, remaining: row.remaining, resetAt: row.reset_at } : null;
   }
+
+  taskIndexSnapshot(workspaceId: string): {
+    fullSyncComplete: boolean;
+    nextPage: number;
+    lastRefreshAt: number;
+    lastProviderUpdatedAt: number;
+    indexedTasks: number;
+  } {
+    const row = this.ctx.storage.sql.exec<{
+      full_sync_complete: number;
+      next_page: number;
+      last_refresh_at: number;
+      last_provider_updated_at: number;
+    }>(
+      'SELECT full_sync_complete, next_page, last_refresh_at, last_provider_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
+      workspaceId,
+    ).toArray()[0];
+    const count = this.ctx.storage.sql.exec<{ count: number }>(
+      'SELECT COUNT(*) AS count FROM clickup_task_index WHERE workspace_id = ?',
+      workspaceId,
+    ).toArray()[0]?.count ?? 0;
+    return {
+      fullSyncComplete: row?.full_sync_complete === 1,
+      nextPage: row?.next_page ?? 0,
+      lastRefreshAt: row?.last_refresh_at ?? 0,
+      lastProviderUpdatedAt: row?.last_provider_updated_at ?? 0,
+      indexedTasks: count,
+    };
+  }
+
+  forceTaskIndexRefreshAt(workspaceId: string, value: number): void {
+    this.ctx.storage.sql.exec(
+      'UPDATE clickup_task_index_state SET last_refresh_at = ? WHERE workspace_id = ?',
+      value,
+      workspaceId,
+    );
+  }
 }

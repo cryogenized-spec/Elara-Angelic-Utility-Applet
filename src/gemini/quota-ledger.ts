@@ -7,6 +7,10 @@ const DEFAULT_FIRST_RESERVE = 30_000;
 const MIN_RESERVE = 20_000;
 const RECENT_RESERVE_MULTIPLIER = 1.15;
 const IMAGE_INPUT_TOKEN_RESERVE = 12_000;
+const PDF_INPUT_TOKEN_MIN_RESERVE = 16_000;
+const PDF_INPUT_TOKEN_MAX_RESERVE = 96_000;
+const REMOTE_TEXT_DOCUMENT_TOKEN_RESERVE = 160_000;
+const INLINE_TEXT_DOCUMENT_TOKEN_CAP = 180_000;
 
 export const DEFAULT_GEMINI_ROLLING_INPUT_ALLOWANCE = 200_000;
 
@@ -260,6 +264,46 @@ export async function releaseGeminiQuotaReservation(
   }
 }
 
+function decodedBase64Bytes(value: string): number {
+  const padding = value.endsWith('==') ? 2 : value.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((value.length * 3) / 4) - padding);
+}
+
+function isTextDocumentMime(mimeType: string): boolean {
+  const normalized = mimeType.toLowerCase();
+  return normalized.startsWith('text/')
+    || normalized === 'application/json'
+    || normalized === 'application/javascript'
+    || normalized === 'application/xml';
+}
+
+function documentInputReserve(record: Record<string, unknown>): number {
+  const mimeType = typeof record.mime_type === 'string' ? record.mime_type : '';
+  const data = typeof record.data === 'string' ? record.data : undefined;
+  if (data) {
+    const decodedBytes = decodedBase64Bytes(data);
+    if (isTextDocumentMime(mimeType)) {
+      // Text-like documents are closest to ordinary prompt text. Charge one
+      // token per decoded byte as a conservative bound, but cap the local
+      // admission reserve so transport format alone cannot disable documents.
+      return Math.min(INLINE_TEXT_DOCUMENT_TOKEN_CAP, Math.max(1, decodedBytes));
+    }
+    // PDF bytes are provider document transport, not prompt text. Reserve by
+    // decoded content size with bounded floor/ceiling; measured provider usage
+    // replaces this planning charge after dispatch.
+    return Math.min(
+      PDF_INPUT_TOKEN_MAX_RESERVE,
+      Math.max(PDF_INPUT_TOKEN_MIN_RESERVE, Math.ceil(decodedBytes / 8)),
+    );
+  }
+  if (typeof record.uri === 'string') {
+    return isTextDocumentMime(mimeType)
+      ? REMOTE_TEXT_DOCUMENT_TOKEN_RESERVE
+      : PDF_INPUT_TOKEN_MAX_RESERVE;
+  }
+  return 0;
+}
+
 export function estimateSerializedInputTokens(value: unknown): number {
   try {
     let mediaReserve = 0;
@@ -268,20 +312,29 @@ export function estimateSerializedInputTokens(value: unknown): number {
       : JSON.stringify(value, (_key, current: unknown) => {
           if (!current || typeof current !== 'object' || Array.isArray(current)) return current;
           const record = current as Record<string, unknown>;
-          if (record.type !== 'image') return current;
-          if (typeof record.data !== 'string' && typeof record.uri !== 'string') return current;
-          mediaReserve += IMAGE_INPUT_TOKEN_RESERVE;
-          return typeof record.data === 'string'
-            ? { ...record, data: '[inline-image-bytes]' }
-            : current;
+          const type = record.type;
+          if (type === 'image') {
+            if (typeof record.data !== 'string' && typeof record.uri !== 'string') return current;
+            mediaReserve += IMAGE_INPUT_TOKEN_RESERVE;
+            return typeof record.data === 'string'
+              ? { ...record, data: '[inline-image-bytes]' }
+              : current;
+          }
+          if (type === 'document') {
+            mediaReserve += documentInputReserve(record);
+            return typeof record.data === 'string'
+              ? { ...record, data: '[inline-document-bytes]' }
+              : current;
+          }
+          return current;
         });
     // Safety admission needs an upper bound, not the usual ~4 characters/token
     // English heuristic. Gemini tokenization cannot consume more non-empty text
     // pieces than the UTF-8 bytes supplied, so charging one token per serialized
     // UTF-8 byte is deliberately conservative for arbitrary Unicode/high-entropy
     // text. Provider usage replaces this bound with measured truth when present.
-    // Base64 image transport is still replaced above and charged via the fixed
-    // media reserve instead of pretending encoded bytes are prompt text.
+    // Base64 image/document transport is replaced above and charged via bounded
+    // media/document reserves instead of pretending encoded bytes are prompt text.
     const serializedBytes = new TextEncoder().encode(serialized).byteLength;
     return Math.max(1, serializedBytes + mediaReserve);
   } catch {

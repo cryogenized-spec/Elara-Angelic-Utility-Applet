@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { env, reset } from 'cloudflare:test';
+import { SELF, env, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker, newNonce, signWrite } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, bearerRead, signedWrite } from './helpers';
@@ -146,6 +146,21 @@ async function rateLimitSnapshot() {
     rateLimitSnapshot(): Promise<{ limit: number | null; remaining: number | null; resetAt: number | null } | null>;
   }).rateLimitSnapshot();
 }
+
+describe('ClickUp OAuth public boundary', () => {
+  it('rejects oversized OAuth bodies before signature verification or vault buffering', async () => {
+    const response = await SELF.fetch('https://worker.example/clickup/oauth/start', {
+      method: 'POST',
+      headers: {
+        Origin: ORIGIN,
+        'Content-Type': 'application/json',
+      },
+      body: 'x'.repeat(20 * 1024),
+    });
+    expect(response.status).toBe(413);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: 'request_too_large' }));
+  });
+});
 
 describe('ClickUpOAuthVault', () => {
   it('creates a one-time official authorization URL and stores only encrypted access material after exchange', async () => {

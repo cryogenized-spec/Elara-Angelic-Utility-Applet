@@ -747,7 +747,7 @@ export class ClickUpOAuthVault extends DurableObject {
       );
       if (!result.ok) return { ok: false, response: result.response };
       const root = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
-      const comments = Array.isArray(root.comments) ? root.comments : [];
+      const comments: unknown[] = Array.isArray(root.comments) ? root.comments as unknown[] : [];
       if (comments.some((entry) => safeProviderId(
         entry && typeof entry === 'object' && !Array.isArray(entry)
           ? (entry as Record<string, unknown>).id

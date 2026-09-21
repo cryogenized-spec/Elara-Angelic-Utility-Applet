@@ -15,6 +15,9 @@ import {
   clearClickUpTaskCustomField,
   createClickUpTask,
   createClickUpTaskComment,
+  createClickUpWebhook,
+  deleteClickUpWebhook,
+  CLICKUP_TASK_INDEX_WEBHOOK_EVENTS,
   exchangeClickUpAuthorizationCode,
   fetchAuthorizedClickUpUser,
   fetchAuthorizedClickUpWorkspaces,
@@ -41,11 +44,14 @@ import { ARTIFACT_LIMITS } from '../../../src/artifacts/limits';
 import {
   clearClickUpTaskIndex,
   initializeClickUpTaskIndex,
+  markClickUpWorkspaceTaskIndexStale,
+  removeClickUpTaskFromIndex,
   searchClickUpTaskIndex,
   setTaskIndexState,
   taskIndexState,
   upsertClickUpTaskIndexPage,
 } from './task-index';
+import { CLICKUP_WEBHOOK_ENDPOINT_HEADER } from './oauth-routes';
 
 interface ClickUpOAuthVaultEnv extends ClickUpOAuthServerEnv {
   readonly ELARA_INSTALLATION_TOKEN?: string;
@@ -56,6 +62,15 @@ type RateLimitRow = {
   limit_count: number | null;
   remaining: number | null;
   reset_at: number | null;
+  updated_at: number;
+};
+
+type WebhookRow = {
+  webhook_id: string;
+  workspace_id: string;
+  secret_cipher: string;
+  secret_iv: string;
+  endpoint: string;
   updated_at: number;
 };
 
@@ -80,6 +95,15 @@ const exchangeSchema = z.object({
 }).strict();
 
 const emptySchema = z.object({}).strict();
+
+const webhookPayloadSchema = z.object({
+  webhook_id: z.string().trim().min(1).max(500),
+  event: z.string().trim().min(1).max(200),
+  task_id: z.union([z.string(), z.number()]).optional(),
+  history_items: z.array(z.object({
+    id: z.union([z.string(), z.number()]),
+  }).passthrough()).max(MAX_WEBHOOK_HISTORY_ITEMS).optional(),
+}).passthrough();
 
 const providerCommandSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('getAuthorizationContext') }).strict(),
@@ -140,6 +164,8 @@ const TASK_INDEX_COLD_PAGES_PER_SEARCH = 5;
 const TASK_INDEX_INCREMENTAL_PAGES = 3;
 const TASK_INDEX_PROVIDER_PAGE_SIZE = 100;
 const TASK_INDEX_REFRESH_OVERLAP_MS = 5_000;
+const WEBHOOK_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60_000;
+const MAX_WEBHOOK_HISTORY_ITEMS = 100;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -218,6 +244,40 @@ function mergeRateLimits(...snapshots: readonly ClickUpRateLimitSnapshot[]): Cli
     remaining: remaining.length ? Math.min(...remaining) : null,
     resetAt: resets.length ? Math.max(...resets) : null,
   };
+}
+
+function safeProviderId(value: unknown): string | null {
+  if (typeof value === 'string' && value.trim()) return value.trim().slice(0, 500);
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return String(value);
+  return null;
+}
+
+async function hmacHex(secret: string, body: string): Promise<string> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const signature = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(body));
+  return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function validWebhookEndpoint(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/clickup/webhook') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
 }
 
 export class ClickUpOAuthVault extends DurableObject {

@@ -321,6 +321,9 @@ for (const marker of [
   "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",
   "headers.set('Authorization'",
   'MAX_PROVIDER_BODY_CHARS',
+  'response.body?.getReader()',
+  'total > MAX_PROVIDER_BODY_CHARS',
+  'reader.cancel()',
 ]) {
   if (!clickUpProvider.includes(marker)) fail(`ClickUp provider egress boundary is missing: ${marker}`);
 }

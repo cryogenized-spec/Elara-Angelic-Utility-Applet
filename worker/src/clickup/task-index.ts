@@ -216,6 +216,21 @@ export function clearClickUpWorkspaceTaskIndex(sql: TaskIndexSql, workspaceId: s
   sql.exec('DELETE FROM clickup_task_index_state WHERE workspace_id = ?', workspaceId);
 }
 
+export function markClickUpWorkspaceTaskIndexStale(sql: TaskIndexSql, workspaceId: string): void {
+  sql.exec(
+    'UPDATE clickup_task_index_state SET last_refresh_at = 0 WHERE workspace_id = ?',
+    workspaceId,
+  );
+}
+
+export function removeClickUpTaskFromIndex(sql: TaskIndexSql, workspaceId: string, taskId: string): void {
+  sql.exec(
+    'DELETE FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
+    workspaceId,
+    taskId,
+  );
+}
+
 export function upsertClickUpTaskIndexPage(
   sql: TaskIndexSql,
   workspaceId: string,

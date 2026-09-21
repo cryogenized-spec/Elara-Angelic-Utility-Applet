@@ -116,14 +116,18 @@ function providerCode(payload: unknown, status: number): string {
   return `http-${status}`;
 }
 
-function providerMessage(payload: unknown, status: number): string {
-  if (payload && typeof payload === 'object') {
-    const record = payload as Record<string, unknown>;
-    for (const key of ['err', 'message', 'error_description', 'error']) {
-      if (typeof record[key] === 'string' && record[key].trim()) return record[key].trim().slice(0, 1000);
-    }
-  }
-  return `ClickUp responded with HTTP ${status}.`;
+function providerMessage(_payload: unknown, status: number): string {
+  // Provider error prose is untrusted external content. Keep the provider code
+  // separately for machine handling, but never echo arbitrary provider text
+  // into MCP/Gemini-visible error messages.
+  if (status === 400) return 'ClickUp rejected the request.';
+  if (status === 401) return 'ClickUp authorization was rejected.';
+  if (status === 403) return 'ClickUp denied access to the requested resource.';
+  if (status === 404) return 'The requested ClickUp resource was not found.';
+  if (status === 409) return 'ClickUp reported a request conflict.';
+  if (status === 429) return 'ClickUp request rate limit was reached.';
+  if (status >= 500) return 'ClickUp is temporarily unavailable.';
+  return `ClickUp request failed with HTTP ${status}.`;
 }
 
 async function readJsonResponse(response: Response): Promise<unknown> {

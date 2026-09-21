@@ -2,6 +2,7 @@ import coreWorker, { type Env as CoreEnv } from './index';
 import { googleOAuthPreflight, handleGoogleOAuthRoute } from './google/oauth-routes';
 import { clickUpOAuthPreflight, handleClickUpOAuthRoute } from './clickup/oauth-routes';
 import { clickUpMcpPreflight, handleClickUpMcpRoute } from './clickup/mcp-route';
+import { clickUpAttachmentPreflight, handleClickUpAttachmentRoute } from './clickup/attachment-route';
 
 export { AutonomyEngine, RoutineRunWorkflow } from './index';
 export { GoogleOAuthVault } from './google/oauth-vault';
@@ -51,6 +52,18 @@ function json(body: unknown, status: number, origin: string | null): Response {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const pathname = new URL(request.url).pathname;
+    if (pathname === '/clickup/attachment') {
+      const origin = request.headers.get('Origin');
+      const corsOrigin = allowedOrigin(request, env);
+      if (origin && !corsOrigin) return json({ code: 'authz', message: 'Origin is not authorized.' }, 403, null);
+      if (request.method === 'OPTIONS') return clickUpAttachmentPreflight(corsOrigin);
+      try {
+        const response = await handleClickUpAttachmentRoute(pathname, request, env, corsOrigin);
+        return response ?? json({ code: 'not_found', message: 'Not found.' }, 404, corsOrigin);
+      } catch {
+        return json({ code: 'internal', message: 'The ClickUp attachment Worker boundary could not complete the request.' }, 500, corsOrigin);
+      }
+    }
     if (pathname === '/mcp/clickup') {
       const origin = request.headers.get('Origin');
       const corsOrigin = allowedOrigin(request, env);

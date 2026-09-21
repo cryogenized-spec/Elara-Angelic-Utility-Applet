@@ -32,7 +32,6 @@ const STATUS = {
   workspaces: [{
     id: '999',
     name: 'Neon Sales',
-    members: [{ id: '183', username: 'Gareth', email: 'gareth@example.com' }],
   }],
   updatedAt: 123456,
 };

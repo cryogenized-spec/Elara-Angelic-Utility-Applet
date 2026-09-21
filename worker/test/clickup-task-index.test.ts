@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { env, reset } from 'cloudflare:test';
+import { env, evictAllDurableObjects, reset } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, signedWrite } from './helpers';
@@ -36,13 +36,17 @@ async function taskSearchPayload(response: Response): Promise<TaskSearchPayload>
   };
 }
 
-beforeEach(async () => {
+beforeEach(() => {
   vi.restoreAllMocks();
   grantRevision = 0;
-  await reset();
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // Drain in-flight DO/RPC work while the provider mock is still available,
+  // then clear persisted state. This avoids workerd tearing down a live
+  // callback when the test file or isolated storage is destroyed.
+  await evictAllDurableObjects();
+  await reset();
   vi.restoreAllMocks();
 });
 

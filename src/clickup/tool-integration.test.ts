@@ -24,8 +24,20 @@ const googleOauth = {
   disconnect: async () => undefined,
 };
 
+const connectedStatus = {
+  connected: true as const,
+  workspaces: [{ id: '999', name: 'Workspace' }],
+  account: { id: '183' },
+  updatedAt: 1,
+};
+
 const clickupConnected = {
-  getStatus: async () => ({ connected: true, workspaces: [{ id: '999', name: 'Workspace' }], account: { id: '183' }, updatedAt: 1 }),
+  getStatus: async () => connectedStatus,
+  getExecutionGrant: async () => ({
+    status: connectedStatus,
+    authorityBinding: 'https://worker.example#test-installation',
+    revision: 1,
+  }),
   beginConnect: async () => { throw new Error('not used'); },
   completeConnect: async () => { throw new Error('not used'); },
   disconnect: async () => undefined,
@@ -33,7 +45,12 @@ const clickupConnected = {
 
 const clickupDisconnected = {
   ...clickupConnected,
-  getStatus: async () => ({ connected: false, workspaces: [] }),
+  getStatus: async () => ({ connected: false as const, workspaces: [] }),
+  getExecutionGrant: async () => ({
+    status: { connected: false as const, workspaces: [] },
+    authorityBinding: 'https://worker.example#test-installation',
+    revision: 0,
+  }),
 };
 
 const sampleArguments: Record<string, Record<string, unknown>> = {
@@ -153,5 +170,43 @@ describe('ClickUp integration with Elara model-tool authority', () => {
     });
     expect(approved).toEqual(expect.objectContaining({ ok: true }));
     expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler).toHaveBeenLastCalledWith(expect.objectContaining({
+      providerGrantRevision: 1,
+      providerAuthorityBinding: 'https://worker.example#test-installation',
+    }));
+  });
+
+  it('does not execute an approved ClickUp mutation if the provider grant changes while confirmation is open', async () => {
+    const handler = vi.fn(async () => ({ id: 'new-task' }));
+    let reads = 0;
+    const switchingAuthority = {
+      ...clickupConnected,
+      getExecutionGrant: async () => {
+        reads += 1;
+        const revision = reads === 1 ? 11 : 12;
+        return {
+          status: {
+            ...connectedStatus,
+            account: { id: reads === 1 ? '183' : '456' },
+            updatedAt: revision,
+          },
+          authorityBinding: 'https://worker.example#test-installation',
+          revision,
+        };
+      },
+    };
+
+    const result = await executeGoogleTool({
+      tool: 'clickup.createTask',
+      arguments: { listId: '123', name: 'Repair S56' },
+    }, {
+      oauth: googleOauth,
+      clickupOAuth: switchingAuthority,
+      handlers: { 'clickup.createTask': handler },
+      confirm: async () => true,
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: false, code: 'AUTHORIZATION_REQUIRED' }));
+    expect(handler).not.toHaveBeenCalled();
   });
 });

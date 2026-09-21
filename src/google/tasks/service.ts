@@ -1,5 +1,7 @@
 import type { GoogleOAuthAuthority } from '../oauth/contracts';
+import { readBoundedProviderJson } from '../provider-json-boundary';
 
+const MAX_PROVIDER_JSON_BYTES = 2 * 1024 * 1024;
 const MAX_TASK_LIST_ID_LENGTH = 500;
 const MAX_TASK_ID_LENGTH = 500;
 const MAX_PAGE_TOKEN_LENGTH = 5_000;
@@ -27,6 +29,8 @@ export interface GoogleTaskAssignmentInfo {
 }
 
 export interface GoogleTask {
+  readonly trust: 'untrusted-external';
+  readonly source: 'tasks';
   readonly id: string;
   readonly title?: string;
   readonly etag?: string;
@@ -43,23 +47,33 @@ export interface GoogleTask {
   readonly links?: readonly GoogleTaskLink[];
   readonly webViewLink?: string;
   readonly assignmentInfo?: GoogleTaskAssignmentInfo;
+  readonly truncatedFields?: readonly string[];
 }
 
 export interface TaskListSummary {
+  readonly trust: 'untrusted-external';
+  readonly source: 'tasks';
   readonly id: string;
   readonly title: string;
   readonly etag?: string;
   readonly updated?: string;
+  readonly truncatedFields?: readonly string[];
 }
 
 export interface GoogleTaskListPage {
+  readonly trust: 'untrusted-external';
+  readonly source: 'tasks';
   readonly items: readonly TaskListSummary[];
   readonly nextPageToken?: string;
+  readonly truncated?: boolean;
 }
 
 export interface GoogleTaskPage {
+  readonly trust: 'untrusted-external';
+  readonly source: 'tasks';
   readonly items: readonly GoogleTask[];
   readonly nextPageToken?: string;
+  readonly truncated?: boolean;
 }
 
 export interface CreateSemanticTaskInput {
@@ -72,7 +86,6 @@ export interface CreateSemanticTaskInput {
 }
 
 export interface UpdateSemanticTaskInput {
-  readonly etag?: string;
   readonly taskListId: string;
   readonly taskId: string;
   readonly title?: string;
@@ -108,6 +121,37 @@ type TaskPayload = {
 type TaskListPayload = { id?: string; etag?: string; title?: string; updated?: string };
 type TasksResponse = { items?: TaskPayload[]; nextPageToken?: string };
 type TaskListsResponse = { items?: TaskListPayload[]; nextPageToken?: string };
+
+const MAX_PROVIDER_LINKS = 20;
+const MAX_PROVIDER_TEXT_LENGTH = 2_000;
+
+function projectedProviderText(
+  value: unknown,
+  maxLength: number,
+  field: string,
+  truncated: Set<string>,
+  trim = false,
+): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = (trim ? value.trim() : value).split('\0').join('');
+  if (!normalized) return undefined;
+  if (normalized.length > maxLength) {
+    truncated.add(field);
+    return normalized.slice(0, maxLength);
+  }
+  return normalized;
+}
+
+function projectedProviderId(value: unknown, maxLength: number, field: string, truncated: Set<string>): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim();
+  if (!normalized) return undefined;
+  if (normalized.length > maxLength) {
+    truncated.add(field);
+    return undefined;
+  }
+  return normalized;
+}
 
 function boundedId(value: string, field: string, maxLength: number): string {
   const normalized = value.trim();
@@ -196,26 +240,32 @@ function assignmentSurface(value: string | undefined): GoogleTaskAssignmentSurfa
 export class GoogleTasksService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
-  private changed(): void {
-    if (typeof window !== 'undefined') window.dispatchEvent(new Event('elara:tasks-changed'));
-  }
-
-  async listTaskLists(pageToken?: string, maxResults?: number, signal?: AbortSignal): Promise<GoogleTaskListPage> {
-    signal?.throwIfAborted();
+  async listTaskLists(pageToken?: string, maxResults?: number): Promise<GoogleTaskListPage> {
     const access = await this.oauth.authorize('tasks.read');
     const url = new URL('https://tasks.googleapis.com/tasks/v1/users/@me/lists');
     const safePageToken = boundedPageToken(pageToken);
     const safeMaxResults = boundedMaxResults(maxResults, MAX_TASK_LIST_RESULTS, 'task-list maxResults');
     if (safePageToken) url.searchParams.set('pageToken', safePageToken);
     if (safeMaxResults !== undefined) url.searchParams.set('maxResults', String(safeMaxResults));
-    const response = await access.fetch(url, { signal });
+    const response = await access.fetch(url);
     const payload = await this.readJson<TaskListsResponse>(response);
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    const items = rawItems.slice(0, MAX_TASK_LIST_RESULTS).flatMap((item) => {
+      try {
+        return [this.mapTaskList(item)];
+      } catch {
+        return [];
+      }
+    });
+    const nextPageToken = typeof payload.nextPageToken === 'string' && payload.nextPageToken.length <= MAX_PAGE_TOKEN_LENGTH
+      ? payload.nextPageToken
+      : undefined;
     return {
-      items: (payload.items ?? []).flatMap((item) => {
-        if (!item.id || !item.title) return [];
-        return [{ id: item.id, title: item.title, etag: item.etag, updated: item.updated }];
-      }),
-      nextPageToken: payload.nextPageToken,
+      trust: 'untrusted-external',
+      source: 'tasks',
+      items,
+      ...(nextPageToken ? { nextPageToken } : {}),
+      ...((rawItems.length > MAX_TASK_LIST_RESULTS || (typeof payload.nextPageToken === 'string' && !nextPageToken)) ? { truncated: true } : {}),
     };
   }
 
@@ -226,40 +276,32 @@ export class GoogleTasksService {
   }
 
   async createTaskList(title: string): Promise<TaskListSummary> {
-    const safeTitle = boundedText(title, 'task list title', MAX_TITLE_LENGTH);
     const access = await this.oauth.authorize('tasks.write');
     const response = await access.fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ title: safeTitle }),
+      body: JSON.stringify({ title: boundedText(title, 'task list title', MAX_TITLE_LENGTH) }),
     });
-    const result = this.mapTaskList(await this.readJson<TaskListPayload>(response));
-    this.changed();
-    return result;
+    return this.mapTaskList(await this.readJson<TaskListPayload>(response));
   }
 
-  async updateTaskList(taskListId: string, title: string, etag?: string): Promise<TaskListSummary> {
+  async updateTaskList(taskListId: string, title: string): Promise<TaskListSummary> {
     const access = await this.oauth.authorize('tasks.write');
     const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, {
       method: 'PATCH',
-      headers: { 'content-type': 'application/json', ...(etag ? { 'If-Match': etag } : {}) },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: boundedText(title, 'task list title', MAX_TITLE_LENGTH) }),
     });
-    const result = this.mapTaskList(await this.readJson<TaskListPayload>(response));
-    this.changed();
-    return result;
+    return this.mapTaskList(await this.readJson<TaskListPayload>(response));
   }
 
-  async deleteTaskList(taskListId: string, etag?: string): Promise<void> {
-    boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH);
+  async deleteTaskList(taskListId: string): Promise<void> {
     const access = await this.oauth.authorize('tasks.write');
-    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {} });
+    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, { method: 'DELETE' });
     await this.assertOk(response);
-    this.changed();
   }
 
-  async listTasks(taskListId: string, options: { signal?: AbortSignal; pageToken?: string; showCompleted?: boolean; showDeleted?: boolean; showHidden?: boolean; showAssigned?: boolean; dueMin?: string; dueMax?: string; updatedMin?: string; completedMin?: string; completedMax?: string; maxResults?: number } = {}): Promise<GoogleTaskPage> {
-    options.signal?.throwIfAborted();
+  async listTasks(taskListId: string, options: { pageToken?: string; showCompleted?: boolean; showDeleted?: boolean; showHidden?: boolean; showAssigned?: boolean; dueMin?: string; dueMax?: string; updatedMin?: string; completedMin?: string; completedMax?: string; maxResults?: number } = {}): Promise<GoogleTaskPage> {
     const access = await this.oauth.authorize('tasks.read');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks`);
     const safePageToken = boundedPageToken(options.pageToken);
@@ -278,9 +320,19 @@ export class GoogleTasksService {
       completedMax: boundedFilterTimestamp(options.completedMax, 'completedMax'),
     };
     this.applyParams(url, params);
-    const response = await access.fetch(url, { signal: options.signal });
+    const response = await access.fetch(url);
     const payload = await this.readJson<TasksResponse>(response);
-    return { items: this.mapTasks(payload.items ?? []), nextPageToken: payload.nextPageToken };
+    const rawItems = Array.isArray(payload.items) ? payload.items : [];
+    const nextPageToken = typeof payload.nextPageToken === 'string' && payload.nextPageToken.length <= MAX_PAGE_TOKEN_LENGTH
+      ? payload.nextPageToken
+      : undefined;
+    return {
+      trust: 'untrusted-external',
+      source: 'tasks',
+      items: this.mapTasks(rawItems.slice(0, MAX_TASK_RESULTS)),
+      ...(nextPageToken ? { nextPageToken } : {}),
+      ...((rawItems.length > MAX_TASK_RESULTS || (typeof payload.nextPageToken === 'string' && !nextPageToken)) ? { truncated: true } : {}),
+    };
   }
 
   async getTask(taskListId: string, taskId: string): Promise<GoogleTask> {
@@ -314,15 +366,13 @@ export class GoogleTasksService {
       'PATCH',
       `lists/${encodeURIComponent(boundedId(input.taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(input.taskId, 'task ID', MAX_TASK_ID_LENGTH))}`,
       body,
-      { etag: input.etag },
     );
   }
 
-  async deleteTask(taskListId: string, taskId: string, etag?: string): Promise<void> {
+  async deleteTask(taskListId: string, taskId: string): Promise<void> {
     const access = await this.oauth.authorize('tasks.write');
-    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {} });
+    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}`, { method: 'DELETE' });
     await this.assertOk(response);
-    this.changed();
   }
 
   async moveTask(taskListId: string, taskId: string, parent?: string, previous?: string, destinationTaskListId?: string): Promise<GoogleTask> {
@@ -332,74 +382,113 @@ export class GoogleTasksService {
     if (parent) url.searchParams.set('parent', boundedId(parent, 'parent ID', MAX_TASK_ID_LENGTH));
     if (previous) url.searchParams.set('previous', boundedId(previous, 'previous task ID', MAX_TASK_ID_LENGTH));
     const response = await access.fetch(url, { method: 'POST' });
-    const result = this.mapTask(await this.readJson<TaskPayload>(response));
-    this.changed();
-    return result;
+    return this.mapTask(await this.readJson<TaskPayload>(response));
   }
 
   async clearCompleted(taskListId: string): Promise<void> {
     const access = await this.oauth.authorize('tasks.write');
     const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/clear`, { method: 'POST' });
     await this.assertOk(response);
-    this.changed();
   }
 
-  private async writeTask(method: 'POST' | 'PATCH', path: string, body: Record<string, unknown>, params: { parent?: string; previous?: string; etag?: string } = {}): Promise<GoogleTask> {
+  private async writeTask(method: 'POST' | 'PATCH', path: string, body: Record<string, unknown>, params: { parent?: string; previous?: string } = {}): Promise<GoogleTask> {
     const access = await this.oauth.authorize('tasks.write');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/${path}`);
     if (params.parent) url.searchParams.set('parent', boundedId(params.parent, 'parent ID', MAX_TASK_ID_LENGTH));
     if (params.previous) url.searchParams.set('previous', boundedId(params.previous, 'previous task ID', MAX_TASK_ID_LENGTH));
-    const response = await access.fetch(url, { method, headers: { 'content-type': 'application/json', ...(params.etag ? { 'If-Match': params.etag } : {}) }, body: JSON.stringify(body) });
-    const result = this.mapTask(await this.readJson<TaskPayload>(response));
-    this.changed();
-    return result;
+    const response = await access.fetch(url, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    return this.mapTask(await this.readJson<TaskPayload>(response));
   }
 
   private async readJson<T extends object>(response: Response): Promise<T> {
-    if (response.status === 412) throw new Error('This item changed in Google. Sync and reopen it before saving.');
     if (!response.ok) throw new Error(`Google Tasks request failed (${response.status}).`);
-    return (await response.json()) as T;
+    return readBoundedProviderJson<T>(response, { operation: 'Google Tasks request', maxBytes: MAX_PROVIDER_JSON_BYTES });
   }
 
   private async assertOk(response: Response): Promise<void> {
-    if (response.status === 412) throw new Error('This item changed in Google. Sync and reopen it before saving.');
     if (!response.ok) throw new Error(`Google Tasks request failed (${response.status}).`);
   }
 
   private mapTaskList(item: TaskListPayload): TaskListSummary {
-    if (!item.id || !item.title) throw new Error('Google Tasks response contained an incomplete task list.');
-    return { id: item.id, title: item.title, etag: item.etag, updated: item.updated };
+    const truncated = new Set<string>();
+    const id = projectedProviderId(item.id, MAX_TASK_LIST_ID_LENGTH, 'id', truncated);
+    const title = projectedProviderText(item.title, MAX_TITLE_LENGTH, 'title', truncated);
+    if (!id || !title) throw new Error('Google Tasks response contained an incomplete task list.');
+    const etag = projectedProviderId(item.etag, 1_024, 'etag', truncated);
+    const updated = projectedProviderText(item.updated, 128, 'updated', truncated, true);
+    return {
+      trust: 'untrusted-external',
+      source: 'tasks',
+      id,
+      title,
+      ...(etag ? { etag } : {}),
+      ...(updated ? { updated } : {}),
+      ...(truncated.size ? { truncatedFields: [...truncated].sort() } : {}),
+    };
   }
 
   private mapTasks(items: TaskPayload[]): GoogleTask[] {
-    return items.flatMap((item) => item.id ? [this.mapTask(item)] : []);
+    return items.flatMap((item) => {
+      try {
+        return item.id ? [this.mapTask(item)] : [];
+      } catch {
+        return [];
+      }
+    });
   }
 
   private mapTask(item: TaskPayload): GoogleTask {
-    if (!item.id) throw new Error('Google Tasks response contained a task without an id.');
+    const truncated = new Set<string>();
+    const id = projectedProviderId(item.id, MAX_TASK_ID_LENGTH, 'id', truncated);
+    if (!id) throw new Error('Google Tasks response contained a task without a usable id.');
     const info = item.assignmentInfo;
     const surfaceType = assignmentSurface(info?.surfaceType);
+    const rawLinks = Array.isArray(item.links) ? item.links : [];
+    if (rawLinks.length > MAX_PROVIDER_LINKS) truncated.add('links');
+    const links = rawLinks.slice(0, MAX_PROVIDER_LINKS).map((link) => ({
+      ...(projectedProviderText(link.type, 128, 'links.type', truncated, true) ? { type: projectedProviderText(link.type, 128, 'links.type', truncated, true) } : {}),
+      ...(projectedProviderText(link.description, MAX_PROVIDER_TEXT_LENGTH, 'links.description', truncated) ? { description: projectedProviderText(link.description, MAX_PROVIDER_TEXT_LENGTH, 'links.description', truncated) } : {}),
+      ...(projectedProviderText(link.link, MAX_PROVIDER_TEXT_LENGTH, 'links.link', truncated, true) ? { link: projectedProviderText(link.link, MAX_PROVIDER_TEXT_LENGTH, 'links.link', truncated, true) } : {}),
+    }));
+    const title = projectedProviderText(item.title, MAX_TITLE_LENGTH, 'title', truncated);
+    const etag = projectedProviderId(item.etag, 1_024, 'etag', truncated);
+    const notes = projectedProviderText(item.notes, MAX_NOTES_LENGTH, 'notes', truncated);
+    const completed = projectedProviderText(item.completed, 128, 'completed', truncated, true);
+    const parent = projectedProviderId(item.parent, MAX_TASK_ID_LENGTH, 'parent', truncated);
+    const position = projectedProviderText(item.position, 256, 'position', truncated, true);
+    const updated = projectedProviderText(item.updated, 128, 'updated', truncated, true);
+    const webViewLink = projectedProviderText(item.webViewLink, MAX_PROVIDER_TEXT_LENGTH, 'webViewLink', truncated, true);
+    const linkToTask = projectedProviderText(info?.linkToTask, MAX_PROVIDER_TEXT_LENGTH, 'assignmentInfo.linkToTask', truncated, true);
+    const driveFileId = projectedProviderId(info?.driveResourceInfo?.driveFileId, 500, 'assignmentInfo.driveFileId', truncated);
+    const resourceKey = projectedProviderText(info?.driveResourceInfo?.resourceKey, 1_024, 'assignmentInfo.resourceKey', truncated, true);
+    const space = projectedProviderText(info?.spaceInfo?.space, 1_024, 'assignmentInfo.space', truncated, true);
+
     return {
-      id: item.id,
-      title: item.title,
-      etag: item.etag,
-      notes: item.notes,
+      trust: 'untrusted-external',
+      source: 'tasks',
+      id,
+      ...(title ? { title } : {}),
+      ...(etag ? { etag } : {}),
+      ...(notes !== undefined ? { notes } : {}),
       scheduledDate: scheduledDateFromProviderDue(item.due),
       status: taskStatus(item.status),
-      completed: item.completed,
-      parent: item.parent,
-      position: item.position,
-      updated: item.updated,
-      deleted: item.deleted,
-      hidden: item.hidden,
-      links: item.links?.map((link) => ({ type: link.type, description: link.description, link: link.link })),
-      webViewLink: item.webViewLink,
-      assignmentInfo: info ? {
-        linkToTask: info.linkToTask,
-        surfaceType,
-        driveResourceInfo: info.driveResourceInfo ? { driveFileId: info.driveResourceInfo.driveFileId, resourceKey: info.driveResourceInfo.resourceKey } : undefined,
-        spaceInfo: info.spaceInfo ? { space: info.spaceInfo.space } : undefined,
-      } : undefined,
+      ...(completed ? { completed } : {}),
+      ...(parent ? { parent } : {}),
+      ...(position ? { position } : {}),
+      ...(updated ? { updated } : {}),
+      ...(typeof item.deleted === 'boolean' ? { deleted: item.deleted } : {}),
+      ...(typeof item.hidden === 'boolean' ? { hidden: item.hidden } : {}),
+      ...(links.length ? { links } : {}),
+      ...(webViewLink ? { webViewLink } : {}),
+      ...(info ? {
+        assignmentInfo: {
+          ...(linkToTask ? { linkToTask } : {}),
+          ...(surfaceType ? { surfaceType } : {}),
+          ...((driveFileId || resourceKey) ? { driveResourceInfo: { ...(driveFileId ? { driveFileId } : {}), ...(resourceKey ? { resourceKey } : {}) } } : {}),
+          ...(space ? { spaceInfo: { space } } : {}),
+        },
+      } : {}),
+      ...(truncated.size ? { truncatedFields: [...truncated].sort() } : {}),
     };
   }
 

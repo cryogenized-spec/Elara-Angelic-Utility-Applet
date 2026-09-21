@@ -32,7 +32,6 @@ import {
 import {
   boardStore,
   currentAccount,
-  orderedTasks,
   overdueDays,
   overdueMemo,
   saveRoutine,

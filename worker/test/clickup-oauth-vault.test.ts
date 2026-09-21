@@ -286,4 +286,189 @@ describe('ClickUpOAuthVault', () => {
     expect(await disconnected.json()).toEqual({ disconnected: true, providerRevoked: false });
     expect(await credentialSnapshot()).toBeNull();
   });
+
+  it('does not let an in-flight OAuth exchange resurrect a grant after disconnect', async () => {
+    let tokenStarted!: () => void;
+    let releaseToken!: () => void;
+    const tokenStartedPromise = new Promise<void>((resolve) => { tokenStarted = resolve; });
+    const releaseTokenPromise = new Promise<void>((resolve) => { releaseToken = resolve; });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT) {
+        tokenStarted();
+        await releaseTokenPromise;
+        return new Response(JSON.stringify({ access_token: 'late-token' }), { status: 200 });
+      }
+      if (request.url === USER_ENDPOINT) {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Late' } }), { status: 200 });
+      }
+      if (request.url === WORKSPACES_ENDPOINT) {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace', members: [] }] }), { status: 200 });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    const pendingExchange = exchange(begun.state, 'slow-code');
+    await tokenStartedPromise;
+
+    const disconnected = await doFetch(await signedWrite('/clickup/oauth/disconnect', '{}'));
+    expect(disconnected.status).toBe(200);
+    releaseToken();
+
+    const lateExchange = await pendingExchange;
+    expect(lateExchange.status).toBe(409);
+    expect(await lateExchange.json()).toEqual(expect.objectContaining({ code: 'oauth_superseded' }));
+    expect(await credentialSnapshot()).toBeNull();
+  });
+
+  it('does not let a delayed old-token failure delete or rate-limit a newer grant', async () => {
+    let oldTaskStarted!: () => void;
+    let releaseOldTask!: () => void;
+    const oldTaskStartedPromise = new Promise<void>((resolve) => { oldTaskStarted = resolve; });
+    const releaseOldTaskPromise = new Promise<void>((resolve) => { releaseOldTask = resolve; });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT && request.method === 'POST') {
+        const body = await request.clone().json() as { code?: string };
+        return new Response(JSON.stringify({
+          access_token: body.code === 'new-code' ? 'token-b' : 'token-a',
+        }), { status: 200 });
+      }
+      if (request.url === USER_ENDPOINT) {
+        const current = request.headers.get('Authorization')?.endsWith('token-b') ? '456' : '183';
+        return new Response(JSON.stringify({ user: { id: Number(current), username: `user-${current}` } }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT) {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace', members: [] }] }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': request.headers.get('Authorization')?.endsWith('token-b') ? '88' : '98',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        });
+      }
+      if (request.url.startsWith('https://api.clickup.com/api/v2/task/86task')) {
+        expect(request.headers.get('Authorization')).toBe('Bearer token-a');
+        oldTaskStarted();
+        await releaseOldTaskPromise;
+        return new Response(JSON.stringify({ ECODE: 'OAUTH_019', err: 'Old token revoked' }), {
+          status: 401,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const first = await start();
+    expect((await exchange(first.state, 'first-code')).status).toBe(200);
+    const firstRevision = (await credentialSnapshot())?.updatedAt ?? 0;
+
+    const oldRequest = internalCommand(
+      { operation: 'getTask', arguments: { taskId: '86task' } },
+      firstRevision,
+    );
+    await oldTaskStartedPromise;
+
+    const second = await start();
+    expect((await exchange(second.state, 'new-code')).status).toBe(200);
+    const newSnapshot = await credentialSnapshot();
+    expect(newSnapshot?.userId).toBe('456');
+    const newRevision = newSnapshot?.updatedAt ?? 0;
+    expect(newRevision).toBeGreaterThan(firstRevision);
+
+    releaseOldTask();
+    const obsolete = await oldRequest;
+    expect(obsolete.status).toBe(409);
+    expect(await obsolete.json()).toEqual(expect.objectContaining({ code: 'grant_changed' }));
+
+    const surviving = await credentialSnapshot();
+    expect(surviving?.userId).toBe('456');
+    expect(surviving?.updatedAt).toBe(newRevision);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 88 }));
+  });
+
+  it('does not raise the local rate budget when concurrent provider responses arrive out of order', async () => {
+    let taskCalls = 0;
+    let bothStarted!: () => void;
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const bothStartedPromise = new Promise<void>((resolve) => { bothStarted = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify({ access_token: 'token-rate' }), { status: 200 });
+      }
+      if (request.url === USER_ENDPOINT) {
+        return new Response(JSON.stringify({ user: { id: 183 } }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT) {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace', members: [] }] }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '98',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        });
+      }
+      if (request.url.startsWith('https://api.clickup.com/api/v2/task/86task')) {
+        taskCalls += 1;
+        const sequence = taskCalls;
+        if (taskCalls === 2) bothStarted();
+        await (sequence === 1 ? firstGate : secondGate);
+        return new Response(JSON.stringify({ id: '86task', name: 'Repair S56' }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': sequence === 1 ? '9' : '8',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const revision = (await credentialSnapshot())?.updatedAt ?? 0;
+
+    const firstRequest = internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } }, revision);
+    const secondRequest = internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } }, revision);
+    await bothStartedPromise;
+
+    releaseSecond();
+    expect((await secondRequest).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 8 }));
+
+    releaseFirst();
+    expect((await firstRequest).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 8 }));
+  });
 });

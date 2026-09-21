@@ -1,4 +1,5 @@
-import { newNonce, signWrite } from '../../src/autonomy/protocol';
+import { deriveInstallationId, newNonce, signWrite } from '../../src/autonomy/protocol';
+import { env } from 'cloudflare:test';
 import type { ElaraRoutine } from '../../src/autonomy/contracts';
 
 // Shared fixtures for the workers-pool tests: signed request construction and
@@ -61,4 +62,19 @@ export async function internalDo(path: string, init: RequestInit = {}): Promise<
     ...init,
     headers: { ...(init.headers as Record<string, string> | undefined), 'X-Elara-Internal': await internalWakeMarker(TOKEN) },
   });
+}
+
+
+/**
+ * Clears only the ClickUp test vault's durable state without invoking the
+ * workers-pool global reset(), which destroys unrelated live Durable Objects.
+ */
+export async function resetClickUpTestState(): Promise<void> {
+  const installationId = await deriveInstallationId(TOKEN);
+  const stub = env.CLICKUP_OAUTH!.get(env.CLICKUP_OAUTH!.idFromName(installationId));
+  const remote = await stub.fetch(new Request('https://clickup-oauth-vault/__test/clickup/reset', {
+    method: 'POST',
+  }));
+  await remote.arrayBuffer();
+  if (!remote.ok) throw new Error(`ClickUp test-state reset failed (HTTP ${remote.status}).`);
 }

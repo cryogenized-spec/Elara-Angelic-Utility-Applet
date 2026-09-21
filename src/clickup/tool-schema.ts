@@ -151,7 +151,7 @@ const updateTaskSchema = z.object({
   assignees: assigneeDeltaSchema.optional(),
   archived: z.boolean().optional(),
 }).strict().superRefine((value, context) => {
-  const changed = Object.keys(value).some((key) => key !== 'taskId');
+  const changed = Object.keys(value).some((key) => key !== 'workspaceId' && key !== 'taskId');
   if (!changed) context.addIssue({ code: 'custom', message: 'Task update requires at least one field change.' });
 });
 

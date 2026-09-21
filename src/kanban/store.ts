@@ -94,9 +94,10 @@ function mergeRemoteTaskMetadata(remote: BoardTask[], previous: BoardTask[], fir
   const previousByTask = new Map(previous.map((task) => [taskKey(task), task]));
   return remote.map((task) => {
     const prior = previousByTask.get(taskKey(task));
+    const hasObservedTimestamp = Boolean(prior?.local?.createdAt || prior?.local?.firstSeenAt);
     return {
       ...task,
-      local: normalizeTaskLocal(prior?.local, prior ? undefined : firstSeenAt),
+      local: normalizeTaskLocal(prior?.local, hasObservedTimestamp ? undefined : firstSeenAt),
     };
   });
 }

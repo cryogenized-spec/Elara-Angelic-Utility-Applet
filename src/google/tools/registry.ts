@@ -1,4 +1,14 @@
 import type { GoogleToolDescriptor, GoogleToolExecutionPlane } from './contracts';
+import { CLICKUP_TOOL_NAMES, clickupToolCatalog } from '../../clickup/tool-schema';
+
+const clickUpToolDescriptors: readonly GoogleToolDescriptor[] = CLICKUP_TOOL_NAMES.map((name) => ({
+  name,
+  risk: clickupToolCatalog[name].risk,
+  capability: clickupToolCatalog[name].risk === 'read' ? 'clickup.read' : 'clickup.write',
+  exposure: 'gemini',
+  executionPlane: 'browser',
+  description: clickupToolCatalog[name].description,
+}));
 
 export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'calendar.listCalendars', risk: 'read', capability: 'calendar.list.read', exposure: 'gemini', description: 'List available calendars with bounded filters and pagination.' },
@@ -85,6 +95,7 @@ export const googleToolRegistry: readonly GoogleToolDescriptor[] = [
   { name: 'memory.save', risk: 'write', capability: 'memory.durable.local', exposure: 'gemini', executionPlane: 'browser', description: 'Save one deliberate durable memory from the current user-approved chat turn. Use this when the user explicitly asks you to remember, retain, keep in mind, or carry something forward. Ordinary conversational learning is handled separately; do not save incidental details or credentials merely because they were mentioned.' },
   { name: 'memory.reconcile', risk: 'write', capability: 'memory.durable.local', exposure: 'gemini', executionPlane: 'browser', description: 'Update remembered knowledge when the user corrects, contradicts, reinforces, relates, or replaces something previously remembered. First use memory.lookup in the same turn to obtain an opaque target reference; raw memory ids are never accepted.' },
   { name: 'youtube.search', risk: 'read', capability: 'media.youtube.read', exposure: 'gemini', executionPlane: 'browser', description: 'Search YouTube for videos or music. Use one concise query by default. Use additional queries only when the user explicitly asks for distinct searches that cannot reasonably be expressed as one query; never pad the call with synonyms or rephrasings. Results contain YouTube-returned titles, channels, thumbnails and canonical links. Set intent to "listen" for music/audio requests and "watch" for video; intent changes presentation only, not the search request. Elara never plays, queues, likes or saves media itself, so describe what was found rather than claiming playback. Results are cached and search quota is deliberately scarce.' },
+  ...clickUpToolDescriptors,
 ];
 
 /**

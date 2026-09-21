@@ -901,7 +901,8 @@ function KanbanWorkspace({
                 };
                 const listId =
                   editor.task?.listId ?? String(data.get("listId"));
-                const createdAt = editor.task ? undefined : new Date().toISOString();
+                const isCreate = !editor.task;
+                const createdAt = editor.task?.local?.createdAt ?? (isCreate ? new Date().toISOString() : undefined);
                 const timeZone = due && dueTime
                   ? Intl.DateTimeFormat().resolvedOptions().timeZone
                   : null;
@@ -919,16 +920,36 @@ function KanbanWorkspace({
                           ...patch,
                           scheduledDate: due || undefined,
                         });
+                    // Once Google accepted a create, convert this dialog to an
+                    // edit immediately. A later IndexedDB failure can then be
+                    // retried without issuing a second provider POST.
+                    if (isCreate) {
+                      setEditor({
+                        kind: "task",
+                        listId,
+                        task: {
+                          ...providerTask,
+                          listId,
+                          local: {
+                            createdAt,
+                            firstSeenAt: createdAt,
+                            dueTime: due && dueTime ? dueTime : undefined,
+                            timeZone: timeZone ?? undefined,
+                            labelIds: draftLabelIds,
+                          },
+                        },
+                      });
+                    }
                     await saveTaskLocalMetadata(
                       listId,
-                      editor.task?.id ?? providerTask.id,
+                      providerTask.id,
                       {
                         dueTime: due && dueTime ? dueTime : null,
                         timeZone,
                         labelIds: draftLabelIds,
                         createdAt,
                         upsertLabels: draftNewLabels,
-                        providerTask: editor.task ? undefined : providerTask,
+                        providerTask,
                       },
                     );
                   },

@@ -2,13 +2,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SELF } from 'cloudflare:test';
 import {
   CLICKUP_GRANT_REVISION_HEADER,
+  CLICKUP_TOOL_CATALOG_HEADER,
   CLICKUP_MCP_PATH,
   CLICKUP_MCP_PROTOCOL_VERSION,
   MCP_META_CLIENT_CAPABILITIES,
   MCP_META_CLIENT_INFO,
   MCP_META_PROTOCOL_VERSION,
 } from '../../src/clickup/mcp-protocol';
-import { CLICKUP_TOOL_NAMES } from '../../src/clickup/tool-schema';
+import { CLICKUP_TOOL_NAMES, clickUpToolCatalogFingerprint } from '../../src/clickup/tool-schema';
 import { resetClickUpTestState, signedWrite, TOKEN } from './helpers';
 import { boundedClickUpMcpResult } from '../src/clickup/mcp-route';
 
@@ -45,7 +46,7 @@ function meta() {
   };
 }
 
-function request(method: string, params: Record<string, unknown>, name?: string, overrides: HeadersInit = {}) {
+async function request(method: string, params: Record<string, unknown>, name?: string, overrides: HeadersInit = {}) {
   const headers = new Headers({
     Origin: ORIGIN,
     Accept: 'application/json, text/event-stream',
@@ -54,7 +55,10 @@ function request(method: string, params: Record<string, unknown>, name?: string,
     'MCP-Protocol-Version': CLICKUP_MCP_PROTOCOL_VERSION,
     'Mcp-Method': method,
     ...(name ? { 'Mcp-Name': name } : {}),
-    ...(method === 'tools/call' ? { [CLICKUP_GRANT_REVISION_HEADER]: '1' } : {}),
+    ...(method === 'tools/call' ? {
+      [CLICKUP_GRANT_REVISION_HEADER]: '1',
+      [CLICKUP_TOOL_CATALOG_HEADER]: await clickUpToolCatalogFingerprint(),
+    } : {}),
   });
   for (const [key, value] of new Headers(overrides)) headers.set(key, value);
   return SELF.fetch(`https://worker.example${CLICKUP_MCP_PATH}`, {
@@ -88,6 +92,7 @@ describe('ClickUp MCP Worker boundary', () => {
     expect(allowed).toContain('Mcp-Method');
     expect(allowed).toContain('Mcp-Name');
     expect(allowed).toContain(CLICKUP_GRANT_REVISION_HEADER);
+    expect(allowed).toContain(CLICKUP_TOOL_CATALOG_HEADER);
   });
 
   it('rejects an untrusted browser origin before parsing JSON-RPC', async () => {
@@ -180,6 +185,19 @@ describe('ClickUp MCP Worker boundary', () => {
     }));
   });
 
+
+  it('rejects tools/call when the browser catalog fingerprint is missing or stale', async () => {
+    for (const supplied of ['', '0'.repeat(64)]) {
+      const response = await request('tools/call', {
+        name: 'clickup.getTask',
+        arguments: { workspaceId: '999', taskId: '86task' },
+      }, 'clickup.getTask', { [CLICKUP_TOOL_CATALOG_HEADER]: supplied });
+      expect(response.status).toBe(409);
+      await expect(response.json()).resolves.toEqual(expect.objectContaining({
+        error: expect.objectContaining({ code: -32024 }),
+      }));
+    }
+  });
 
   it('returns provider authorization failure as a complete tool error rather than JSON-RPC transport failure', async () => {
     const response = await request('tools/call', {

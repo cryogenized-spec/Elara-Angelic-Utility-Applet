@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SELF } from 'cloudflare:test';
 import {
   CLICKUP_GRANT_REVISION_HEADER,
@@ -9,10 +9,24 @@ import {
   MCP_META_PROTOCOL_VERSION,
 } from '../../src/clickup/mcp-protocol';
 import { CLICKUP_TOOL_NAMES } from '../../src/clickup/tool-schema';
-import { resetClickUpTestState, TOKEN } from './helpers';
+import { resetClickUpTestState, signedWrite, TOKEN } from './helpers';
 import { boundedClickUpMcpResult } from '../src/clickup/mcp-route';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
+const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
+
+async function connectClickUp(): Promise<number> {
+  const startBody = JSON.stringify({ redirectUri: REDIRECT_URI });
+  const started = await SELF.fetch(await signedWrite('/clickup/oauth/start', startBody));
+  expect(started.status).toBe(200);
+  const { state } = await started.json() as { state: string };
+  const exchangeBody = JSON.stringify({ code: 'one-time-code', state, redirectUri: REDIRECT_URI });
+  const exchanged = await SELF.fetch(await signedWrite('/clickup/oauth/exchange', exchangeBody));
+  expect(exchanged.status).toBe(200);
+  const status = await exchanged.json() as { updatedAt?: number };
+  expect(status.updatedAt).toBeGreaterThan(0);
+  return status.updatedAt ?? 0;
+}
 
 function record(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Expected object response.');
@@ -56,6 +70,7 @@ function request(method: string, params: Record<string, unknown>, name?: string,
 
 describe('ClickUp MCP Worker boundary', () => {
   beforeEach(async () => {
+    vi.restoreAllMocks();
     await resetClickUpTestState();
   });
 
@@ -180,6 +195,66 @@ describe('ClickUp MCP Worker boundary', () => {
         error: expect.objectContaining({ code: 'authorization_required', status: 401 }),
       }),
     }));
+  });
+
+  it.each([
+    ['set', { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'set' as const, value: 'Ready' }, 'POST'],
+    ['clear', { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'clear' as const }, 'DELETE'],
+  ])('carries the admitted grant revision through Custom Field %s execution', async (_mode, argumentsValue, mutationMethod) => {
+    let customFieldMutations = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const providerRequest = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(providerRequest.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'clickup-token' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace A', members: [] }] }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && providerRequest.method === 'POST') {
+        return new Response(JSON.stringify({ webhook: { id: 'webhook-1', secret: 'webhook-secret' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/task/86task' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: '86task',
+          name: 'Repair S56',
+          team_id: '999',
+          list: { id: '123' },
+          space: { id: '789' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/list/123/field' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          fields: [{ id: 'field_1', name: 'Repair state', type: 'short_text' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/task/86task/field/field_1' && providerRequest.method === mutationMethod) {
+        customFieldMutations += 1;
+        return new Response(JSON.stringify({ id: 'hist-1' }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unexpected provider request: ${providerRequest.method} ${providerRequest.url}`);
+    });
+
+    const revision = await connectClickUp();
+    const response = await request('tools/call', {
+      name: 'clickup.setCustomField',
+      arguments: argumentsValue,
+    }, 'clickup.setCustomField', {
+      [CLICKUP_GRANT_REVISION_HEADER]: String(revision),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await jsonRecord(response);
+    expect(record(body.result)).toEqual(expect.objectContaining({
+      resultType: 'complete',
+      isError: false,
+    }));
+    expect(customFieldMutations).toBe(1);
   });
 
   it('rejects aggregate structured MCP results above the Worker ceiling before transport', () => {

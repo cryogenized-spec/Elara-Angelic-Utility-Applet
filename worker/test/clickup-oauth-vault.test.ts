@@ -65,7 +65,7 @@ function mockProvider(options: { taskStatus?: number; taskRemaining?: number } =
           'content-type': 'application/json',
           'X-RateLimit-Limit': '100',
           'X-RateLimit-Remaining': '99',
-          'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          'X-RateLimit-Reset': String(resetAt),
         },
       });
     }
@@ -84,7 +84,7 @@ function mockProvider(options: { taskStatus?: number; taskRemaining?: number } =
           'content-type': 'application/json',
           'X-RateLimit-Limit': '100',
           'X-RateLimit-Remaining': '98',
-          'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          'X-RateLimit-Reset': String(resetAt),
         },
       });
     }
@@ -96,7 +96,7 @@ function mockProvider(options: { taskStatus?: number; taskRemaining?: number } =
         'content-type': 'application/json',
         'X-RateLimit-Limit': '100',
         'X-RateLimit-Remaining': String(options.taskRemaining ?? 99),
-        'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+        'X-RateLimit-Reset': String(resetAt),
       });
       return new Response(status === 200
         ? JSON.stringify({ id: '86task', name: 'Repair S56', team_id: '999', list: { id: '123' }, space: { id: '789' } })
@@ -383,7 +383,7 @@ describe('ClickUpOAuthVault', () => {
           headers: {
             'X-RateLimit-Limit': '100',
             'X-RateLimit-Remaining': '99',
-            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+            'X-RateLimit-Reset': String(resetAt),
           },
         });
       }
@@ -393,7 +393,7 @@ describe('ClickUpOAuthVault', () => {
           headers: {
             'X-RateLimit-Limit': '100',
             'X-RateLimit-Remaining': request.headers.get('Authorization')?.endsWith('token-b') ? '88' : '98',
-            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+            'X-RateLimit-Reset': String(resetAt),
           },
         });
       }
@@ -410,7 +410,7 @@ describe('ClickUpOAuthVault', () => {
             'content-type': 'application/json',
             'X-RateLimit-Limit': '100',
             'X-RateLimit-Remaining': '0',
-            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+            'X-RateLimit-Reset': String(resetAt),
           },
         });
       }
@@ -592,6 +592,7 @@ describe('ClickUpOAuthVault', () => {
   it('does not raise the local rate budget when concurrent provider responses arrive out of order', async () => {
     let taskCalls = 0;
     let firstStarted = false;
+    const resetAt = Math.floor(Date.now() / 1000) + 600;
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -604,7 +605,7 @@ describe('ClickUpOAuthVault', () => {
           headers: {
             'X-RateLimit-Limit': '100',
             'X-RateLimit-Remaining': '99',
-            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+            'X-RateLimit-Reset': String(resetAt),
           },
         });
       }
@@ -614,7 +615,7 @@ describe('ClickUpOAuthVault', () => {
           headers: {
             'X-RateLimit-Limit': '100',
             'X-RateLimit-Remaining': '98',
-            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+            'X-RateLimit-Reset': String(resetAt),
           },
         });
       }
@@ -631,7 +632,7 @@ describe('ClickUpOAuthVault', () => {
             'content-type': 'application/json',
             'X-RateLimit-Limit': '100',
             'X-RateLimit-Remaining': sequence === 1 ? '9' : '8',
-            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+            'X-RateLimit-Reset': String(resetAt),
           },
         });
       }
@@ -653,6 +654,84 @@ describe('ClickUpOAuthVault', () => {
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 8 }));
 
     expect((await firstRequest).status).toBe(200);
-    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 8 }));
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      remaining: 8,
+      resetAt,
+    }));
+  });
+
+  it('accepts a replenished provider budget only when the reset window actually advances', async () => {
+    let taskCalls = 0;
+    const firstResetAt = Math.floor(Date.now() / 1000) + 600;
+    const secondResetAt = firstResetAt + 60;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify({ access_token: 'token-window-rollover' }), { status: 200 });
+      }
+      if (request.url === USER_ENDPOINT) {
+        return new Response(JSON.stringify({ user: { id: 183 } }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(firstResetAt),
+          },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT) {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace', members: [] }] }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '98',
+            'X-RateLimit-Reset': String(firstResetAt),
+          },
+        });
+      }
+      if (request.url.startsWith('https://api.clickup.com/api/v2/task/86task')) {
+        taskCalls += 1;
+        const newerWindow = taskCalls === 2;
+        return new Response(JSON.stringify({
+          id: '86task',
+          name: 'Repair S56',
+          team_id: '999',
+          list: { id: '123' },
+          space: { id: '789' },
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': newerWindow ? '99' : '9',
+            'X-RateLimit-Reset': String(newerWindow ? secondResetAt : firstResetAt),
+          },
+        });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const revision = (await credentialSnapshot())?.updatedAt ?? 0;
+
+    expect((await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: '86task' },
+    }, revision)).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      remaining: 9,
+      resetAt: firstResetAt,
+    }));
+
+    expect((await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: '86task' },
+    }, revision)).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      remaining: 99,
+      resetAt: secondResetAt,
+    }));
   });
 });

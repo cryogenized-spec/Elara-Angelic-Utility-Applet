@@ -682,7 +682,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
   it('blocks a private provider read proposed from untrusted ClickUp task content', async () => {
     streamReply.mockReturnValueOnce(events(
       { type: 'interaction-created', interactionId: 'interaction-clickup-read-1', model: 'gemini-3.8-flash' },
-      { type: 'tool-call', interactionId: 'interaction-clickup-read-1', index: 0, callId: 'call-clickup-task', name: 'clickup.getTask', arguments: { taskId: '86task' } },
+      { type: 'tool-call', interactionId: 'interaction-clickup-read-1', index: 0, callId: 'call-clickup-task', name: 'clickup.getTask', arguments: { workspaceId: '999', taskId: '86task' } },
     ));
     streamToolResult
       .mockReturnValueOnce(events(
@@ -744,7 +744,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     streamToolResult
       .mockReturnValueOnce(events(
         { type: 'interaction-created', interactionId: 'interaction-clickup-taint-2', model: 'gemini-3.8-flash' },
-        { type: 'tool-call', interactionId: 'interaction-clickup-taint-2', index: 0, callId: 'call-clickup-write', name: 'clickup.updateTask', arguments: { taskId: '86task', status: 'complete' } },
+        { type: 'tool-call', interactionId: 'interaction-clickup-taint-2', index: 0, callId: 'call-clickup-write', name: 'clickup.updateTask', arguments: { workspaceId: '999', taskId: '86task', status: 'complete' } },
       ))
       .mockReturnValueOnce(events(
         { type: 'completed', interactionId: 'interaction-clickup-taint-3', status: 'completed', durationMs: 4 },

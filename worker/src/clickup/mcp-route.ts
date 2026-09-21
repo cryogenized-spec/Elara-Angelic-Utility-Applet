@@ -23,6 +23,7 @@ export interface ClickUpMcpRouteEnv extends ClickUpToolServiceEnv {
 }
 
 const MAX_MCP_REQUEST_BYTES = 128 * 1024;
+const MAX_MCP_STRUCTURED_RESULT_BYTES = 900 * 1024;
 const TOOLS_LIST_TTL_MS = 60_000;
 
 const SERVER_INFO = Object.freeze({
@@ -205,9 +206,20 @@ function headerValidation(
 
 function toolResultContent(value: unknown): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
   const structuredContent = objectValue(value) ?? { value };
-  let text = '';
-  try { text = JSON.stringify(structuredContent); } catch { text = '{"ok":false,"error":"Result could not be serialized."}'; }
-  if (text.length > 12_000) text = `${text.slice(0, 11_999)}…`;
+  let serialized: string;
+  try {
+    serialized = JSON.stringify(structuredContent);
+  } catch {
+    throw new ClickUpToolServiceError('result_invalid', 'ClickUp tool result could not be serialized safely.', 502);
+  }
+  if (new TextEncoder().encode(serialized).byteLength > MAX_MCP_STRUCTURED_RESULT_BYTES) {
+    throw new ClickUpToolServiceError(
+      'result_too_large',
+      'ClickUp tool result exceeded Elara\'s aggregate MCP result limit. Narrow the request or reduce the requested result count.',
+      502,
+    );
+  }
+  const text = serialized.length > 12_000 ? `${serialized.slice(0, 11_999)}…` : serialized;
   return {
     content: [{ type: 'text', text }],
     structuredContent,

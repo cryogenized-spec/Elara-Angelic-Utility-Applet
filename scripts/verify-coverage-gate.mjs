@@ -172,6 +172,13 @@ try {
       'const scoped = { ok: true, task: {} as Record<string, unknown> };',
     ));
   });
+  addMutation('ClickUp scope bypass padded with decorative verifier comment', 'scripts/security-architecture-gate.mjs', 'ClickUp resource-scope enforcement call count changed', (cwd) => {
+    const verifier = 'const scoped = await this.verifyTaskScope(args.workspaceId, args.taskId, args.includeSubtasks ?? false, expectedRevision);';
+    mutateRelative(cwd, 'worker/src/clickup/oauth-vault.ts', (source) => source.replace(
+      verifier,
+      `// ${verifier}\n        const scoped = { ok: true, task: {} as Record<string, unknown> };`,
+    ));
+  });
   addMutation('ClickUp Workspace assignee validation bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp resource-scope enforcement call count changed', (cwd) => {
     mutateRelative(cwd, 'worker/src/clickup/oauth-vault.ts', (source) => source.replace(
       'const invalidAssignees = this.validateWorkspaceUsers(args.workspaceId, args.assigneeIds);',

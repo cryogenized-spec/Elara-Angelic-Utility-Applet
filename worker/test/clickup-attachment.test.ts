@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SELF, reset } from 'cloudflare:test';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, signedWrite } from './helpers';
+import { readClickUpAttachmentBytes } from '../src/clickup/attachment-route';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
 const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
@@ -133,6 +134,15 @@ describe('ClickUp artifact attachment boundary', () => {
     });
     expect(response.status).toBe(403);
     expect(response.headers.get('Access-Control-Allow-Origin')).toBeNull();
+  });
+
+  it('counts attachment request bytes even when Content-Length is absent', async () => {
+    const request = new Request('https://worker.example/clickup/attachment', {
+      method: 'POST',
+      body: new Blob(['0123456789abcdef'], { type: 'application/octet-stream' }),
+    });
+    expect(request.headers.get('Content-Length')).toBeNull();
+    await expect(readClickUpAttachmentBytes(request, 8)).rejects.toThrow('too-large');
   });
 
   it('requires the installation bearer before accepting multipart bytes', async () => {

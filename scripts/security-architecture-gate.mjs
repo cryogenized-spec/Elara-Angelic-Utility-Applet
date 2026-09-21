@@ -353,7 +353,7 @@ for (const marker of [
   "CLICKUP_WEBHOOK_PATH = '/clickup/webhook'",
   'MAX_WEBHOOK_BODY_BYTES',
   "request.headers.get('X-Signature')",
-  "'/internal/clickup/webhook'",
+  "INTERNAL_WEBHOOK_PATH = '/internal/clickup/webhook'",
   'internalWakeMarker',
 ]) {
   if (!clickUpWebhookRoute.includes(marker)) fail(`ClickUp webhook ingress boundary is missing: ${marker}`);

@@ -197,6 +197,111 @@ describe('ClickUp MCP Worker boundary', () => {
     }));
   });
 
+  it('blocks cross-Workspace direct ids and never bleeds rejected provider content into MCP results', async () => {
+    const secret = 'WORKSPACE_B_SECRET_SHOULD_NEVER_REACH_GEMINI';
+    let forbiddenDownstreamCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const providerRequest = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(providerRequest.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'cross-scope-token' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        // Elara admits only Workspace A. The provider token intentionally still
+        // resolves B resources below to model stale/wider provider authority.
+        return new Response(JSON.stringify({
+          teams: [{ id: '999', name: 'Workspace A', members: [] }],
+        }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && providerRequest.method === 'POST') {
+        return new Response(JSON.stringify({ webhook: { id: 'webhook-a', secret: 'webhook-secret' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/space' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          spaces: [{ id: '111', name: 'A Space' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/task/task-b' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: 'task-b',
+          name: secret,
+          markdown_description: secret,
+          team_id: '998',
+          list: { id: '333', name: secret },
+          folder: { id: '444', name: secret },
+          space: { id: '222', name: secret },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/folder/444' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: '444',
+          name: secret,
+          space: { id: '222', name: secret },
+          lists: [{ id: '333', name: secret }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/list/333' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: '333',
+          name: secret,
+          space: { id: '222', name: secret },
+          folder: { id: '444', name: secret },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      if (
+        url.pathname.startsWith('/api/v2/task/task-b/comment')
+        || url.pathname.startsWith('/api/v2/task/task-b/field/')
+        || url.pathname === '/api/v2/task/task-b'
+        || url.pathname === '/api/v2/list/333/task'
+        || url.pathname.startsWith('/api/v2/space/222/')
+      ) {
+        forbiddenDownstreamCalls += 1;
+        throw new Error(`Cross-Workspace downstream call escaped scope verification: ${providerRequest.method} ${providerRequest.url}`);
+      }
+
+      throw new Error(`Unexpected provider request: ${providerRequest.method} ${providerRequest.url}`);
+    });
+
+    const revision = await connectClickUp();
+    const attempts: Array<{ name: typeof CLICKUP_TOOL_NAMES[number]; arguments: Record<string, unknown> }> = [
+      { name: 'clickup.getTask', arguments: { workspaceId: '999', taskId: 'task-b' } },
+      { name: 'clickup.getTaskContext', arguments: { workspaceId: '999', taskId: 'task-b', commentsLimit: 10 } },
+      { name: 'clickup.getTaskComments', arguments: { workspaceId: '999', taskId: 'task-b' } },
+      { name: 'clickup.listHierarchy', arguments: { workspaceId: '999', spaceId: '222' } },
+      { name: 'clickup.listHierarchy', arguments: { workspaceId: '999', folderId: '444' } },
+      { name: 'clickup.createTask', arguments: { workspaceId: '999', listId: '333', name: 'Do not create' } },
+      { name: 'clickup.updateTask', arguments: { workspaceId: '999', taskId: 'task-b', status: 'complete' } },
+      { name: 'clickup.createTaskComment', arguments: { workspaceId: '999', taskId: 'task-b', text: 'Do not post' } },
+      { name: 'clickup.setCustomField', arguments: { workspaceId: '999', taskId: 'task-b', fieldId: 'field-b', value: 'Do not set' } },
+    ];
+
+    for (const attempt of attempts) {
+      const response = await request('tools/call', {
+        name: attempt.name,
+        arguments: attempt.arguments,
+      }, attempt.name, {
+        [CLICKUP_GRANT_REVISION_HEADER]: String(revision),
+      });
+
+      expect(response.status, attempt.name).toBe(200);
+      const body = await jsonRecord(response);
+      const result = record(body.result);
+      expect(result.isError, attempt.name).toBe(true);
+      const structured = record(result.structuredContent);
+      const error = record(structured.error);
+      expect(error.code, attempt.name).toBe('resource_workspace_mismatch');
+      expect(JSON.stringify(body), attempt.name).not.toContain(secret);
+    }
+
+    expect(forbiddenDownstreamCalls).toBe(0);
+  });
+
   it.each([
     ['set', { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'set' as const, value: 'Ready' }, 'POST'],
     ['clear', { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'clear' as const }, 'DELETE'],

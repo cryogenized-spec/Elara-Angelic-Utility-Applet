@@ -771,6 +771,138 @@ export class ClickUpOAuthVault extends DurableObject {
     });
   }
 
+  private webhookRows(): WebhookRow[] {
+    return this.ctx.storage.sql.exec<WebhookRow>(
+      'SELECT webhook_id, workspace_id, secret_cipher, secret_iv, endpoint, updated_at FROM clickup_webhooks ORDER BY workspace_id ASC',
+    ).toArray();
+  }
+
+  private async clearStoredWebhooks(accessToken?: string | null): Promise<void> {
+    const rows = this.webhookRows();
+    if (accessToken) {
+      for (const row of rows) {
+        try {
+          const result = await deleteClickUpWebhook(accessToken, row.webhook_id);
+          this.recordRateLimit(result.rateLimit);
+        } catch (error) {
+          if (error instanceof ClickUpProviderError) this.recordRateLimit(error.rateLimit);
+          // Local secret removal is authoritative even if provider cleanup is unavailable.
+        }
+      }
+    }
+    this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');
+    this.ctx.storage.sql.exec('DELETE FROM clickup_webhook_deliveries');
+  }
+
+  private async registerTaskIndexWebhooks(
+    accessToken: string,
+    workspaces: readonly { id: string }[],
+    endpoint: string | null,
+  ): Promise<void> {
+    if (!endpoint) return;
+    for (const workspace of workspaces) {
+      try {
+        const result = await createClickUpWebhook(
+          accessToken,
+          workspace.id,
+          endpoint,
+          CLICKUP_TASK_INDEX_WEBHOOK_EVENTS,
+        );
+        this.recordRateLimit(result.rateLimit);
+        const root = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+        const webhook = root.webhook && typeof root.webhook === 'object'
+          ? root.webhook as Record<string, unknown>
+          : root;
+        const webhookId = safeProviderId(webhook.id);
+        const secret = typeof webhook.secret === 'string' ? webhook.secret.trim() : '';
+        if (!webhookId || !secret || secret.length > 16_384) continue;
+        const encrypted = await encryptToken(this.vaultSecret(), secret);
+        this.ctx.storage.sql.exec(`
+          INSERT INTO clickup_webhooks (
+            webhook_id, workspace_id, secret_cipher, secret_iv, endpoint, updated_at
+          ) VALUES (?, ?, ?, ?, ?, ?)
+          ON CONFLICT(workspace_id) DO UPDATE SET
+            webhook_id = excluded.webhook_id,
+            secret_cipher = excluded.secret_cipher,
+            secret_iv = excluded.secret_iv,
+            endpoint = excluded.endpoint,
+            updated_at = excluded.updated_at
+        `, webhookId, workspace.id, encrypted.cipher, encrypted.iv, endpoint, Date.now());
+        if (result.rateLimit.remaining !== null && result.rateLimit.remaining <= 1) break;
+      } catch (error) {
+        if (error instanceof ClickUpProviderError) {
+          this.recordRateLimit(error.rateLimit);
+          if (this.providerCredentialRevoked(error)) break;
+        }
+        // Webhooks optimize freshness only. OAuth remains usable without them.
+      }
+    }
+  }
+
+  private async executeWebhook(body: string, signatureHeader: string | null): Promise<Response> {
+    if (!signatureHeader || !/^[a-f0-9]{64}$/i.test(signatureHeader)) {
+      return json({ code: 'webhook_signature', message: 'ClickUp webhook signature is invalid.' }, 401);
+    }
+
+    const parsed = webhookPayloadSchema.safeParse(parseJson(body));
+    if (!parsed.success) return json({ code: 'webhook_payload', message: 'ClickUp webhook payload is invalid.' }, 400);
+    const payload = parsed.data;
+    const row = this.ctx.storage.sql.exec<WebhookRow>(
+      'SELECT webhook_id, workspace_id, secret_cipher, secret_iv, endpoint, updated_at FROM clickup_webhooks WHERE webhook_id = ?',
+      payload.webhook_id,
+    ).toArray()[0];
+
+    // Old/orphan provider registrations are intentionally acknowledged after
+    // local reconnect/disconnect so they cannot create a delivery retry storm.
+    if (!row) return json({ accepted: true, ignored: true });
+
+    const secret = await decryptToken(this.vaultSecret(), row.secret_cipher, row.secret_iv);
+    const expected = await hmacHex(secret, body);
+    if (!constantTimeEqual(signatureHeader.toLocaleLowerCase(), expected)) {
+      return json({ code: 'webhook_signature', message: 'ClickUp webhook signature is invalid.' }, 401);
+    }
+
+    const historyKeys = (payload.history_items ?? []).flatMap((item) => {
+      const historyId = safeProviderId(item.id);
+      return historyId ? [`${payload.webhook_id}:${historyId}`] : [];
+    });
+    const keys = historyKeys.length
+      ? [...new Set(historyKeys)]
+      : [`${payload.webhook_id}:body:${await sha256Hex(body)}`];
+
+    const now = Date.now();
+    const accepted = this.ctx.storage.transactionSync(() => {
+      this.ctx.storage.sql.exec(
+        'DELETE FROM clickup_webhook_deliveries WHERE received_at < ?',
+        now - WEBHOOK_DELIVERY_RETENTION_MS,
+      );
+      const unseen = keys.filter((key) => !this.ctx.storage.sql.exec<{ dedupe_key: string }>(
+        'SELECT dedupe_key FROM clickup_webhook_deliveries WHERE dedupe_key = ?',
+        key,
+      ).toArray()[0]);
+      if (!unseen.length) return false;
+      for (const key of unseen) {
+        this.ctx.storage.sql.exec(
+          'INSERT INTO clickup_webhook_deliveries (dedupe_key, received_at) VALUES (?, ?)',
+          key,
+          now,
+        );
+      }
+      return true;
+    });
+
+    if (!accepted) return json({ accepted: true, duplicate: true });
+
+    const taskId = safeProviderId(payload.task_id);
+    if (payload.event === 'taskDeleted' && taskId) {
+      removeClickUpTaskFromIndex(this.ctx.storage.sql, row.workspace_id, taskId);
+    }
+    if (payload.event.startsWith('task')) {
+      markClickUpWorkspaceTaskIndexStale(this.ctx.storage.sql, row.workspace_id);
+    }
+    return json({ accepted: true });
+  }
+
   private async verifyRead(request: Request): Promise<boolean> {
     const presented = request.headers.get('Authorization')?.replace(/^Bearer\s+/i, '') ?? null;
     return verifyBearerToken(presented, this.installationToken());

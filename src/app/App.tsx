@@ -43,6 +43,7 @@ import { fontFamilyForCss } from '../ui/fontRegistry';
 import { commitNotoEmoji, restoreNotoEmoji, suspendNotoEmojiRendering } from '../ui/noto-emoji';
 import { useVisualViewport } from '../ui/useVisualViewport';
 import { applyPwaUpdate, initPwaUpdater } from '../pwa';
+import { forwardClickUpOAuthCallbackFromPopup } from '../clickup/oauth/popup';
 import { Sidebar } from './components/Sidebar';
 import { SettingsScreen, type SettingsSection } from './components/SettingsScreen';
 import { TopToolRail } from './components/TopToolRail';
@@ -123,6 +124,10 @@ export function App() {
   const chatAppearanceSaveVersionRef = useRef(0);
 
   useVisualViewport();
+
+  useEffect(() => {
+    forwardClickUpOAuthCallbackFromPopup();
+  }, []);
 
   useEffect(() => {
     let cancelled = false;

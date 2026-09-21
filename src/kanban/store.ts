@@ -92,8 +92,17 @@ function normalizeBoard(board: Board): Board {
 
 function mergeRemoteTaskMetadata(remote: BoardTask[], previous: BoardTask[], firstSeenAt: string): BoardTask[] {
   const previousByTask = new Map(previous.map((task) => [taskKey(task), task]));
+  const previousById = new Map<string, BoardTask[]>();
+  for (const task of previous) {
+    const matches = previousById.get(task.id);
+    if (matches) matches.push(task);
+    else previousById.set(task.id, [task]);
+  }
   return remote.map((task) => {
-    const prior = previousByTask.get(taskKey(task));
+    const sameId = previousById.get(task.id) ?? [];
+    // A model/provider cross-list move can retain the task ID. Follow its local
+    // metadata only when the account snapshot proves that ID is unambiguous.
+    const prior = previousByTask.get(taskKey(task)) ?? (sameId.length === 1 ? sameId[0] : undefined);
     const hasObservedTimestamp = Boolean(prior?.local?.createdAt || prior?.local?.firstSeenAt);
     return {
       ...task,

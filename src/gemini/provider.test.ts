@@ -17,6 +17,7 @@ import {
   geminiTurnPort,
 } from './provider';
 import { geminiQuotaSnapshot, reserveGeminiQuota, resetGeminiQuotaLedgerForTests } from './quota-ledger';
+import { GEMINI_STREAM_LIMITS } from './stream-limits';
 
 async function* events(...items: unknown[]) {
   for (const item of items) yield item;
@@ -577,6 +578,58 @@ describe('Gemini provider stream fidelity', () => {
     ]);
 
     expect(collected).toContainEqual(expect.objectContaining({ type: 'tool-call', callId: 'call-initial', name: 'tasks.listTaskLists', arguments: { pageToken: 'next-page' } }));
+  });
+
+  it('fails closed on oversized function-call arguments supplied directly on step.start', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-initial-limit', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-initial-limit', name: 'tasks.listTaskLists', arguments: { pageToken: 'x'.repeat(GEMINI_STREAM_LIMITS.maxFunctionArgumentChars + 1) } } },
+    ]);
+
+    expect(collected.at(-1)).toMatchObject({
+      type: 'failed',
+      error: { message: 'Gemini function-call arguments exceeded the live safety limit.' },
+    });
+    expect(collected.some((event) => (event as { type: string }).type === 'tool-call')).toBe(false);
+  });
+
+  it('fails closed before yielding an oversized streamed function-call payload', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-arg-limit', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'function_call', id: 'call-limit', name: 'calendar.listEvents' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'arguments_delta', arguments: 'x'.repeat(GEMINI_STREAM_LIMITS.maxFunctionArgumentChars + 1) } },
+      { event_type: 'step.stop', index: 0 },
+    ]);
+    expect(collected.some((event) => (event as { type: string }).type === 'tool-call')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({ type: 'failed', error: { message: 'Gemini function-call arguments exceeded the live safety limit.' } });
+  });
+
+  it('fails closed when streamed assistant text exceeds the live character ceiling', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-text-limit', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.delta', index: 0, delta: { type: 'text', text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxTextChars + 1) } },
+    ]);
+    expect(collected.some((event) => (event as { type: string }).type === 'text-delta')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({ type: 'failed', error: { message: 'Gemini response exceeded the live text safety limit.' } });
+  });
+
+  it('fails closed when thought summaries exceed their live character ceiling', async () => {
+    const collected = await collect([
+      { event_type: 'interaction.created', interaction: { id: 'interaction-thought-limit', model: 'gemini-3.8-flash' } },
+      { event_type: 'step.start', index: 0, step: { type: 'thought', summary: [{ text: 'x'.repeat(GEMINI_STREAM_LIMITS.maxThoughtChars + 1) }] } },
+    ]);
+    expect(collected.some((event) => (event as { type: string }).type === 'thought-summary-delta')).toBe(false);
+    expect(collected.at(-1)).toMatchObject({ type: 'failed', error: { message: 'Gemini thought summary exceeded the live safety limit.' } });
+  });
+
+  it('fails closed after the finite provider event budget is exhausted', async () => {
+    async function* overBudgetEvents() {
+      for (let index = 0; index <= GEMINI_STREAM_LIMITS.maxEvents; index += 1) yield { event_type: 'unknown.keepalive', index };
+    }
+    createInteraction.mockResolvedValue(overBudgetEvents());
+    const collected: unknown[] = [];
+    for await (const event of geminiTurnPort.streamReply({ model: 'gemini-3.8-flash', input: 'Hello.' })) collected.push(event);
+    expect(collected.at(-1)).toMatchObject({ type: 'failed', error: { message: 'Gemini stream exceeded the event safety limit.' } });
   });
 
   it('continues to assemble incremental function-call argument deltas', async () => {

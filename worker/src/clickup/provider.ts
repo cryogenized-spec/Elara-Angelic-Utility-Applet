@@ -56,7 +56,7 @@ async function providerFetch(
   const timeout = setTimeout(() => controller.abort(), CLICKUP_REQUEST_TIMEOUT_MS);
   try {
     return await fetcher(input, { ...init, signal: controller.signal });
-  } catch (error) {
+  } catch {
     const timedOut = controller.signal.aborted;
     throw new ClickUpProviderError(
       502,

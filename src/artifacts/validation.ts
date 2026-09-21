@@ -91,6 +91,24 @@ function hasCompatibleSignature(mimeType: string, bytes: Uint8Array): boolean {
   return true;
 }
 
+async function validateImagePixelBudget(file: File, mimeType: string): Promise<void> {
+  if (!mimeType.startsWith('image/') || typeof createImageBitmap !== 'function') return;
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+  } catch (cause) {
+    throw new ArtifactError('UNSUPPORTED_FILE', 'The selected image could not be decoded safely.', cause);
+  }
+  try {
+    const pixels = bitmap.width * bitmap.height;
+    if (!Number.isSafeInteger(pixels) || pixels <= 0 || pixels > ARTIFACT_LIMITS.maxImagePixels) {
+      throw new ArtifactError('FILE_TOO_LARGE', `Image dimensions exceed the ${ARTIFACT_LIMITS.maxImagePixels.toLocaleString()} pixel safety limit.`);
+    }
+  } finally {
+    bitmap.close();
+  }
+}
+
 export async function validateFile(file: File | null | undefined): Promise<ValidatedFile> {
   if (!file || typeof file.size !== 'number') throw new ArtifactError('UNSUPPORTED_FILE', 'No file was selected.');
   if (file.size <= 0) throw new ArtifactError('UNSUPPORTED_FILE', 'The selected file is empty.');
@@ -107,6 +125,7 @@ export async function validateFile(file: File | null | undefined): Promise<Valid
   if (!hasCompatibleSignature(mimeType, bytes)) {
     throw new ArtifactError('UNSUPPORTED_FILE', 'The selected file does not match its declared type.');
   }
+  await validateImagePixelBudget(file, mimeType);
 
   return { file, name, mimeType, kind: kindForMime(mimeType) };
 }

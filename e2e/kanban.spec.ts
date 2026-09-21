@@ -92,6 +92,16 @@ test('Gemini can focus the existing Kanban without gaining a second task mutatio
   // Materialize the canonical board projection before asking the model to focus it.
   await page.getByRole('button', { name: 'Kanban', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+
+  // Leave the target deliberately hidden by a label filter. kanban.focus must
+  // clear presentation filters before trying to locate/scroll the target card.
+  await page.locator('[data-kanban-task-id="task-0"]').click({ position: { x: 220, y: 70 } });
+  await page.getByLabel('New label', { exact: true }).fill('#other');
+  await page.getByRole('button', { name: 'Add label', exact: true }).click();
+  await page.getByRole('button', { name: 'Save to Google', exact: true }).click();
+  await page.getByLabel('Filter by label').selectOption({ label: '#other' });
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toHaveCount(0);
+
   await page.getByRole('button', { name: 'Back to chat' }).click();
   await unlockKanbanGemini(page);
 

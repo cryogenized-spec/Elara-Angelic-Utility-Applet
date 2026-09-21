@@ -212,7 +212,7 @@ function headerValidation(
   return { ok: true };
 }
 
-function toolResultContent(value: unknown): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
+export function boundedClickUpMcpResult(value: unknown): { content: Array<{ type: 'text'; text: string }>; structuredContent: Record<string, unknown> } {
   const structuredContent = objectValue(value) ?? { value };
   let serialized: string;
   try {
@@ -311,7 +311,7 @@ export async function handleClickUpMcpRoute(
       const value = await executeClickUpTool(env, valid.data.name, valid.data.arguments, grantRevision);
       return rpcResult(id, {
         resultType: 'complete',
-        ...toolResultContent(value),
+        ...boundedClickUpMcpResult(value),
         isError: false,
       }, corsOrigin);
     } catch (error) {
@@ -325,7 +325,7 @@ export async function handleClickUpMcpRoute(
         : { code: 'execution_failed', message: 'ClickUp tool execution failed.', status: 502 };
       return rpcResult(id, {
         resultType: 'complete',
-        ...toolResultContent({ ok: false, error: failure }),
+        ...boundedClickUpMcpResult({ ok: false, error: failure }),
         isError: true,
       }, corsOrigin);
     }

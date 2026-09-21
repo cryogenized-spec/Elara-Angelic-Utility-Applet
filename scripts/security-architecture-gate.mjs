@@ -41,6 +41,76 @@ function requireOccurrenceCount(source, needle, expected, label) {
   if (actual !== expected) fail(`${label}: expected ${expected} occurrence(s), found ${actual}`);
 }
 
+function executableSource(source) {
+  let output = '';
+  let mode = 'code';
+  let quote = '';
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const current = source[index];
+    const next = source[index + 1] ?? '';
+
+    if (mode === 'line-comment') {
+      if (current === '\n') {
+        mode = 'code';
+        output += '\n';
+      } else output += ' ';
+      continue;
+    }
+    if (mode === 'block-comment') {
+      if (current === '*' && next === '/') {
+        output += '  ';
+        index += 1;
+        mode = 'code';
+      } else output += current === '\n' ? '\n' : ' ';
+      continue;
+    }
+    if (mode === 'string') {
+      if (escaped) {
+        escaped = false;
+        output += ' ';
+        continue;
+      }
+      if (current === '\\') {
+        escaped = true;
+        output += ' ';
+        continue;
+      }
+      if (current === quote) {
+        mode = 'code';
+        quote = '';
+      }
+      output += current === '\n' ? '\n' : ' ';
+      continue;
+    }
+
+    if (current === '/' && next === '/') {
+      output += '  ';
+      index += 1;
+      mode = 'line-comment';
+      continue;
+    }
+    if (current === '/' && next === '*') {
+      output += '  ';
+      index += 1;
+      mode = 'block-comment';
+      continue;
+    }
+    if (current === "'" || current === '"' || current === '`') {
+      mode = 'string';
+      quote = current;
+      output += ' ';
+      continue;
+    }
+    output += current;
+  }
+  return output;
+}
+
+function requireExecutableOccurrenceCount(source, needle, expected, label) {
+  requireOccurrenceCount(executableSource(source), needle, expected, label);
+}
+
 const runtimeFiles = [...walk('src'), ...walk('worker/src')]
   .filter((file) => /\.(?:ts|tsx|mts|cts|js|mjs)$/.test(file))
   .filter((file) => !/\.d\.ts$/.test(file))
@@ -451,7 +521,7 @@ for (const [marker, expected] of [
   ['validateWorkspaceUsers(args.workspaceId, args.assignees?.add)', 1],
   ['validateWorkspaceUsers(args.workspaceId, args.mentionUserIds)', 2],
 ]) {
-  requireOccurrenceCount(
+  requireExecutableOccurrenceCount(
     clickUpOAuthVault,
     marker,
     expected,

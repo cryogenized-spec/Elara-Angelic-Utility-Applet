@@ -60,6 +60,8 @@ For Gemini, ready files at or below 4 MiB can be sent inline; larger files use t
 
 MIME type, size, readiness and provenance are validated before provider/tool use; filename extensions are not authority. Provider failures surface typed artifact errors. Raw file bytes, base64 data, signed/provider references, credentials and tokens must not enter diagnostics or analytics.
 
+Raster images are governed by the canonical ARTIFACT_LIMITS.maxImagePixels ceiling of 24,000,000 pixels. Intake validates decoded dimensions after signature and MIME checks and rejects over-budget images before persistence. Image preprocessing repeats the same check immediately after decode and before allocating a transform canvas. Byte-size limits and pixel limits are separate defenses: a highly compressed file does not receive a larger decoded-memory budget.
+
 ## 7. Verification and tests
 
 Use `src/artifacts/*.test.ts`, `src/gemini/multimodal.test.ts`, generated-card tests and `npm run verify:artifact-assets`. `scripts/reliability-gate.mjs` also checks binary hydration/corruption semantics and document-compiler safety boundaries.

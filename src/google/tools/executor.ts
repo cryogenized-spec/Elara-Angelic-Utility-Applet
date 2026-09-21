@@ -17,6 +17,10 @@ import { kanbanToolArgumentSchemas, validateKanbanToolArguments, type KanbanTool
 import { loadRoleplayPreferences } from '../../persistence/preferences';
 import { clickupToolNameSchema, validateClickUpToolArguments, type ClickUpToolName } from '../../clickup/tool-schema';
 import type { ClickUpExecutionGrant, ClickUpOAuthAuthority } from '../../clickup/oauth/contracts';
+import {
+  captureClickUpArtifactApprovalSnapshot,
+  type ClickUpArtifactApprovalSnapshot,
+} from '../../clickup/attachment-authority';
 
 export type LocalToolCapability = 'documents.local' | 'media.youtube.read' | 'memory.durable.local' | 'clickup.read' | 'clickup.write';
 export type ToolCapability = GoogleCapabilityKey | LocalToolCapability;
@@ -52,6 +56,8 @@ export interface GoogleToolExecutionContext {
   readonly providerGrantRevision?: number;
   /** Paired Worker identity checked by the executor; never model-supplied. */
   readonly providerAuthorityBinding?: string;
+  /** Exact local artifact payload approved before a ClickUp attachment mutation. */
+  readonly clickupArtifactSnapshot?: ClickUpArtifactApprovalSnapshot;
 }
 export type GoogleToolHandler = (context: GoogleToolExecutionContext) => Promise<unknown>;
 export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandler>>;
@@ -60,6 +66,8 @@ export interface GoogleToolExecutorOptions {
   readonly clickupOAuth?: ClickUpOAuthAuthority;
   /** Exact ClickUp grant captured before an external/grouped confirmation UI. */
   readonly expectedClickUpGrant?: ClickUpExecutionGrant;
+  /** Exact attachment payload captured before an external/grouped confirmation UI. */
+  readonly expectedClickUpArtifactSnapshot?: ClickUpArtifactApprovalSnapshot;
   readonly handlers: GoogleToolHandlers;
   readonly confirm?: (request: WriteConfirmationRequest) => Promise<boolean>;
   readonly now?: () => Date;
@@ -73,6 +81,7 @@ export interface GoogleToolConfirmationContext {
   readonly conversationId?: string;
   readonly messageId?: string;
   readonly generationId?: string;
+  readonly clickupArtifactSnapshot?: ClickUpArtifactApprovalSnapshot;
 }
 export type GoogleToolExecutionResult =
   | { readonly ok: true; readonly correlationId: string; readonly tool: GoogleToolName; readonly result: unknown }
@@ -309,6 +318,13 @@ export function confirmationRequestForCall(
   try { args = validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return null; }
   const request = staticConfirmationRequest(parsed.data.tool, args, descriptor, now.toISOString());
   if (!request) return null;
+  if (parsed.data.tool === 'clickup.attachArtifact' && context.clickupArtifactSnapshot) {
+    const snapshot = context.clickupArtifactSnapshot;
+    return {
+      ...request,
+      resourceSummary: `Attach approved Elara artifact “${snapshot.artifactName}” (${snapshot.mimeType}, ${snapshot.payloadSize} bytes, SHA-256 ${snapshot.sha256.slice(0, 12)}…) to ClickUp task ${value(args, 'taskId') ?? 'selected task'} as “${snapshot.uploadName}”.`,
+    };
+  }
   if (parsed.data.tool !== 'memory.reconcile') return request;
   const targetRef = value(args, 'targetRef');
   const relation = value(args, 'relation') ?? 'related';
@@ -362,12 +378,25 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
       if (authorizationNeeded(status, required)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: required };
     }
   }
+  let clickupArtifactSnapshot = options.expectedClickUpArtifactSnapshot;
+  if (validCall.tool === 'clickup.attachArtifact') {
+    try {
+      clickupArtifactSnapshot ??= await captureClickUpArtifactApprovalSnapshot(args);
+      if (clickupArtifactSnapshot.artifactId !== String(args.artifactId ?? '')) {
+        return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) };
+      }
+    } catch {
+      return { ok: false, correlationId: id, tool: validCall.tool, code: 'EXECUTION_FAILED', failure: classifyGoogleToolFailure({ kind: 'unknown' }) };
+    }
+  }
+
   const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {
     const confirmation = confirmationRequestForCall(validCall, options.now?.() ?? new Date(), {
       conversationId: options.conversationId,
       messageId: options.messageId,
       generationId: options.generationId,
+      ...(clickupArtifactSnapshot ? { clickupArtifactSnapshot } : {}),
     });
     if (!confirmation) return { ok: false, correlationId: id, tool: validCall.tool, code: 'INVALID_TOOL_CALL', failure: classifyGoogleToolFailure({ kind: 'validation' }) };
     const confirm = options.confirm ?? requestGoogleToolConfirmation;
@@ -405,6 +434,7 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
         providerGrantRevision: clickupGrant.revision,
         providerAuthorityBinding: clickupGrant.authorityBinding,
       } : {}),
+      ...(clickupArtifactSnapshot ? { clickupArtifactSnapshot } : {}),
     });
     return { ok: true, correlationId: id, tool: descriptor.name, result };
   }

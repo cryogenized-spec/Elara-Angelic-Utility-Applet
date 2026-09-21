@@ -15,6 +15,7 @@ vi.mock('../autonomy/cloud/pairing', () => ({
   resolvePairingToken,
 }));
 
+import { CLICKUP_GRANT_REVISION_HEADER } from './mcp-protocol';
 import { uploadClickUpArtifact } from './attachment-upload';
 
 describe('ClickUp browser artifact upload', () => {
@@ -23,7 +24,10 @@ describe('ClickUp browser artifact upload', () => {
     artifactGet.mockReset();
     loadPairing.mockReset();
     resolvePairingToken.mockReset();
-    loadPairing.mockReturnValue({ workerUrl: 'https://worker.example' });
+    loadPairing.mockReturnValue({
+      workerUrl: 'https://worker.example',
+      installationId: 'test-installation',
+    });
     resolvePairingToken.mockResolvedValue('installation-token');
   });
 
@@ -44,6 +48,7 @@ describe('ClickUp browser artifact upload', () => {
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers);
       expect(headers.get('Authorization')).toBe('Bearer installation-token');
+      expect(headers.get(CLICKUP_GRANT_REVISION_HEADER)).toBe('123');
       expect(init?.body).toBeInstanceOf(FormData);
       const form = init?.body as FormData;
       expect(form.get('taskId')).toBe('86task');
@@ -65,6 +70,9 @@ describe('ClickUp browser artifact upload', () => {
       taskId: '86task',
       artifactId: 'artifact-1',
       filename: 'repair-note.txt',
+    }, undefined, {
+      revision: 123,
+      authorityBinding: 'https://worker.example#test-installation',
     })).resolves.toEqual({
       provider: 'clickup',
       taskId: '86task',
@@ -98,7 +106,11 @@ describe('ClickUp browser artifact upload', () => {
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }) as unknown as typeof fetch;
 
-    await uploadClickUpArtifact({ taskId: '86task', artifactId: 'artifact-generated' });
+    await uploadClickUpArtifact(
+      { taskId: '86task', artifactId: 'artifact-generated' },
+      undefined,
+      { revision: 123, authorityBinding: 'https://worker.example#test-installation' },
+    );
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
   });
 
@@ -118,7 +130,11 @@ describe('ClickUp browser artifact upload', () => {
     const fetchMock = vi.fn();
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    await expect(uploadClickUpArtifact({ taskId: '86task', artifactId: 'artifact-1' })).rejects.toMatchObject({
+    await expect(uploadClickUpArtifact(
+      { taskId: '86task', artifactId: 'artifact-1' },
+      undefined,
+      { revision: 123, authorityBinding: 'https://worker.example#test-installation' },
+    )).rejects.toMatchObject({
       code: 'artifact-not-ready',
     });
     expect(fetchMock).not.toHaveBeenCalled();

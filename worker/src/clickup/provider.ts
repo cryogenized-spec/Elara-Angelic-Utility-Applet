@@ -344,7 +344,7 @@ export async function listClickUpWorkspaceTasks(
   const query = new URLSearchParams({
     page: String(Math.max(0, Math.floor(filters.page ?? 0))),
     include_closed: String(filters.includeClosed ?? false),
-    subtasks: String(filters.includeSubtasks ?? true),
+    subtasks: String(filters.includeSubtasks ?? false),
     include_markdown_description: 'true',
   });
   appendMany(query, 'space_ids[]', filters.spaceIds);

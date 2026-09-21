@@ -190,6 +190,7 @@ const reviewedPairingTokenConsumers = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
   'src/clickup/oauth/authority.ts',
+  'src/clickup/mcp-client.ts',
 ]);
 const actualPairingTokenConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -204,8 +205,10 @@ const autonomyCredential = read('src/autonomy/cloud/credential.ts');
 const autonomyClient = read('src/autonomy/cloud/client.ts');
 const oauthAuthority = read('src/google/oauth/authority.ts');
 const clickUpOAuthAuthority = read('src/clickup/oauth/authority.ts');
+const clickUpMcpClient = read('src/clickup/mcp-client.ts');
 const clickUpOAuthVault = read('worker/src/clickup/oauth-vault.ts');
 const clickUpProvider = read('worker/src/clickup/provider.ts');
+const clickUpMcpRoute = read('worker/src/clickup/mcp-route.ts');
 if (!pairing.includes("type StoredAutonomyPairing = Omit<AutonomyPairing, 'token'>")) fail('autonomy pairing must exclude token from its durable metadata type');
 if (!pairing.includes('saveAutonomyInstallationToken')) fail('autonomy pairing must route the installation credential through its protected store');
 if (/writeJson\(PAIRING_KEY\s*,\s*\{\s*\.\.\.pairing\s*\}/.test(pairing)) fail('autonomy pairing serializes the complete pairing object, including its credential');
@@ -218,6 +221,7 @@ for (const [path, source] of [
   ['src/autonomy/cloud/client.ts', autonomyClient],
   ['src/google/oauth/authority.ts', oauthAuthority],
   ['src/clickup/oauth/authority.ts', clickUpOAuthAuthority],
+  ['src/clickup/mcp-client.ts', clickUpMcpClient],
 ]) {
   if (/\bconsole\.(?:log|info|warn|error|debug)\s*\(/.test(source)) fail(`${path} must not log from the installation-credential-bearing boundary`);
 }
@@ -243,6 +247,7 @@ const reviewedRawFetchAuthorities = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
   'src/clickup/oauth/authority.ts',
+  'src/clickup/mcp-client.ts',
   'src/ui/noto-emoji.ts',
 ]);
 const reviewedGlobalFetchReferences = new Set([
@@ -306,6 +311,33 @@ for (const marker of [
   if (!clickUpOAuthAuthority.includes(marker)) fail(`durable ClickUp OAuth browser authority is missing: ${marker}`);
 }
 for (const marker of [
+  "CLICKUP_MCP_PROTOCOL_VERSION",
+  "CLICKUP_MCP_PATH",
+  "MCP_META_PROTOCOL_VERSION",
+  "MCP_META_CLIENT_CAPABILITIES",
+  "Accept: 'application/json, text/event-stream'",
+  "'Mcp-Method': method",
+  "'Mcp-Name': name",
+  'validateClickUpToolArguments',
+  'MAX_MCP_RESPONSE_BYTES',
+]) {
+  if (!clickUpMcpClient.includes(marker)) fail(`ClickUp browser MCP boundary is missing: ${marker}`);
+}
+for (const marker of [
+  "method === 'server/discover'",
+  "method === 'tools/list'",
+  "method === 'tools/call'",
+  'clickUpMcpToolDefinitions',
+  'executeClickUpTool',
+  "resultType: 'complete'",
+  "cacheScope: 'private'",
+  'MAX_MCP_REQUEST_BYTES',
+  'verifyBearerToken',
+]) {
+  if (!clickUpMcpRoute.includes(marker)) fail(`ClickUp Worker MCP boundary is missing: ${marker}`);
+}
+
+for (const marker of [
   "VAULT_KEY_CONTEXT = 'elara-clickup-oauth-vault-v1'",
   "name: 'AES-GCM'",
   'clickup_oauth_states',
@@ -324,7 +356,7 @@ for (const marker of [
   "const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;",
   'controller.abort()',
   'response.body?.getReader()',
-  'total > MAX_PROVIDER_BODY_CHARS',
+  'total > MAX_PROVIDER_BODY_BYTES',
   'reader.cancel()',
 ]) {
   if (!clickUpProvider.includes(marker)) fail(`ClickUp provider egress boundary is missing: ${marker}`);
@@ -419,6 +451,7 @@ for (const marker of [
   if (!toolLoop.includes(marker)) fail(`Gemini Workspace provenance boundary changed: ${marker}`);
 }
 if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
+if (!toolLoop.includes("'clickup.'") || !toolLoop.includes('clickUpToolHandlers') || !toolLoop.includes('clickUpOAuthAuthority')) fail('ClickUp tools must remain inside the existing model-tool and untrusted-provider authority');
 if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isExternalEvidenceReadTool') || !toolLoop.includes('EXTERNAL_EVIDENCE_READ_PREFIXES') || !toolLoop.includes('PRIVATE_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('taintedReadContinuationAllowed') || !toolLoop.includes('driveSearchCandidateIds') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must taint external evidence, block post-taint private reads, and limit Drive transfer continuation to same-turn search provenance');
 if (!toolLoop.includes("call.name === 'memory.lookup' || call.name === 'memory.recall'") || !toolLoop.includes('untrustedExternalSeen = true')) fail('Durable-memory recall must taint later private Workspace reads as well as mutations');
 const geminiContracts = read('src/gemini/contracts.ts');

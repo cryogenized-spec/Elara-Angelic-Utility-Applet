@@ -64,6 +64,8 @@ Pages deployment is part of the certified CI workflow. Only a `main` push may pa
 
 Service-worker registration/update failures are non-fatal to normal browser use and are logged as safe PWA errors. Worker-autonomy credentials are unrelated to this service worker. Deployment assets must not embed Gemini or Google OAuth secrets. Pages write and OIDC permissions are confined to the deploy job.
 
+Version coherence is owned by the page as well as the plugin. When a document already has a service-worker controller, any later controllerchange means new worker code has claimed an old JavaScript runtime; that page reloads exactly once. Because Workbox clientsClaim applies to sibling clients, each already-controlled open tab performs the same reload. First-ever installation remains non-disruptive because the document had no previous controller. This prevents old pages from later requesting stale hashed lazy chunks or speaking old client protocols under a newly activated worker.
+
 ## 7. Verification and tests
 
 Use `npm run build`, PWA/update component tests and deployed Pages smoke tests. CI builds, verifies and packages one artifact in the runtime job; deployment consumes that artifact only after runtime certification succeeds. Installed-app update behavior should still be tested on a real Android device because long-lived standalone sessions differ from ordinary navigation.

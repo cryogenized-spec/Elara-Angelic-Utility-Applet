@@ -366,10 +366,7 @@ describe('ClickUpOAuthVault', () => {
   });
 
   it('does not let a delayed old-token failure delete or rate-limit a newer grant', async () => {
-    let oldTaskStarted!: () => void;
-    let releaseOldTask!: () => void;
-    const oldTaskStartedPromise = new Promise<void>((resolve) => { oldTaskStarted = resolve; });
-    const releaseOldTaskPromise = new Promise<void>((resolve) => { releaseOldTask = resolve; });
+    let oldTaskStarted = false;
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -402,8 +399,11 @@ describe('ClickUpOAuthVault', () => {
       }
       if (request.url.startsWith('https://api.clickup.com/api/v2/task/86task')) {
         expect(request.headers.get('Authorization')).toBe('Bearer token-a');
-        oldTaskStarted();
-        await releaseOldTaskPromise;
+        oldTaskStarted = true;
+        // Keep token A in flight without exporting a resolver across workerd
+        // request contexts. The replacement OAuth exchange completes during
+        // this delay, then the stale 401 is allowed to arrive.
+        await new Promise<void>((resolve) => setTimeout(resolve, 250));
         return new Response(JSON.stringify({ ECODE: 'OAUTH_019', err: 'Old token revoked' }), {
           status: 401,
           headers: {
@@ -425,7 +425,10 @@ describe('ClickUpOAuthVault', () => {
       { operation: 'getTask', arguments: { taskId: '86task' } },
       firstRevision,
     );
-    await oldTaskStartedPromise;
+    for (let attempt = 0; attempt < 100 && !oldTaskStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(oldTaskStarted).toBe(true);
 
     const second = await start();
     expect((await exchange(second.state, 'new-code')).status).toBe(200);
@@ -434,7 +437,6 @@ describe('ClickUpOAuthVault', () => {
     const newRevision = newSnapshot?.updatedAt ?? 0;
     expect(newRevision).toBeGreaterThan(firstRevision);
 
-    releaseOldTask();
     const obsolete = await oldRequest;
     expect(obsolete.status).toBe(409);
     expect(await obsolete.json()).toEqual(expect.objectContaining({ code: 'grant_changed' }));
@@ -447,12 +449,7 @@ describe('ClickUpOAuthVault', () => {
 
   it('does not raise the local rate budget when concurrent provider responses arrive out of order', async () => {
     let taskCalls = 0;
-    let bothStarted!: () => void;
-    let releaseFirst!: () => void;
-    let releaseSecond!: () => void;
-    const bothStartedPromise = new Promise<void>((resolve) => { bothStarted = resolve; });
-    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
-    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    let firstStarted = false;
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -482,8 +479,10 @@ describe('ClickUpOAuthVault', () => {
       if (request.url.startsWith('https://api.clickup.com/api/v2/task/86task')) {
         taskCalls += 1;
         const sequence = taskCalls;
-        if (taskCalls === 2) bothStarted();
-        await (sequence === 1 ? firstGate : secondGate);
+        if (sequence === 1) firstStarted = true;
+        // Force response #2 (remaining=8) to settle before response #1
+        // (remaining=9), without exporting promise resolvers across contexts.
+        await new Promise<void>((resolve) => setTimeout(resolve, sequence === 1 ? 200 : 20));
         return new Response(JSON.stringify({ id: '86task', name: 'Repair S56' }), {
           status: 200,
           headers: {
@@ -502,14 +501,15 @@ describe('ClickUpOAuthVault', () => {
     const revision = (await credentialSnapshot())?.updatedAt ?? 0;
 
     const firstRequest = internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } }, revision);
-    const secondRequest = internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } }, revision);
-    await bothStartedPromise;
+    for (let attempt = 0; attempt < 100 && !firstStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(firstStarted).toBe(true);
 
-    releaseSecond();
+    const secondRequest = internalCommand({ operation: 'getTask', arguments: { taskId: '86task' } }, revision);
     expect((await secondRequest).status).toBe(200);
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 8 }));
 
-    releaseFirst();
     expect((await firstRequest).status).toBe(200);
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ remaining: 8 }));
   });

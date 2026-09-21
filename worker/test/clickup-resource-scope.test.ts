@@ -583,18 +583,21 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     expect(bTaskReads).toBe(2);
   });
 
-  it('fails closed when direct task ancestry is absent instead of guessing Workspace ownership', async () => {
+  it('does not reveal whether a direct task exists when its Workspace ancestry cannot be proven', async () => {
     providerFixture();
     await connect();
 
-    const response = await internalCommand({
+    const unverifiable = await internalCommand({
       operation: 'getTask',
       arguments: { workspaceId: '111', taskId: 'no-ancestry' },
     });
+    const missing = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '111', taskId: 'missing-task' },
+    });
 
-    expect(response.status).toBe(502);
-    expect(await responseBody(response)).toEqual(expect.objectContaining({
-      code: 'resource_scope_unverifiable',
-    }));
+    expect(unverifiable.status).toBe(403);
+    expect(missing.status).toBe(403);
+    expect(await responseBody(unverifiable)).toEqual(await responseBody(missing));
   });
 });

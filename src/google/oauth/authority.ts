@@ -184,11 +184,48 @@ function authorizationStorageRevision(): string {
   }
 }
 
+function authorizationAuthorityFingerprint(value: StoredAuthorization): string {
+  return JSON.stringify({
+    account: normalizedAccountEmail(value.account?.email) ?? '',
+    enabledCapabilities: [...value.enabledCapabilities].sort(),
+    grantedProviderScopes: [...value.grantedProviderScopes].sort(),
+    needsReauthorization: Boolean(value.needsReauthorization),
+  });
+}
+
+function storedAuthorizationFromEvent(raw: string | null): StoredAuthorization | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<StoredAuthorization> & { grantedCapabilities?: unknown };
+    const enabledCapabilities = migrateCapabilities(parsed.enabledCapabilities ?? parsed.grantedCapabilities);
+    const grantedProviderScopes = Array.isArray(parsed.grantedProviderScopes)
+      ? parseProviderScopes(parsed.grantedProviderScopes.filter((value): value is string => typeof value === 'string').join(' '))
+      : [];
+    const accountEmail = normalizedAccountEmail(parsed.account?.email);
+    return {
+      version: 3,
+      enabledCapabilities,
+      grantedProviderScopes,
+      ...(accountEmail ? { account: { email: accountEmail, ...(parsed.account?.displayName ? { displayName: parsed.account.displayName } : {}) } } : {}),
+      needsReauthorization: Boolean(parsed.needsReauthorization),
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : '',
+    };
+  } catch {
+    return null;
+  }
+}
+
 function installGoogleAuthorizationCrossTabInvalidation(): void {
   if (typeof window === 'undefined') return;
   window.addEventListener('storage', (event) => {
     if (event.key !== STORAGE_KEY) return;
-    session = null;
+    const previousFingerprint = authorizationAuthorityFingerprint(stored);
+    const next = storedAuthorizationFromEvent(event.newValue);
+    // A sibling tab may refresh the same account with the same authority and
+    // only advance updatedAt. That is not a privilege change, so keep this
+    // tab's still-valid short-lived token. Account/scope/capability/revocation
+    // changes remain fail-closed and invalidate the in-memory credential.
+    if (!next || authorizationAuthorityFingerprint(next) !== previousFingerprint) session = null;
     loadStored();
   });
 }

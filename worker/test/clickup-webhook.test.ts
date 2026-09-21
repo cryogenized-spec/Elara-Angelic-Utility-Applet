@@ -338,10 +338,7 @@ describe('ClickUp signed webhook cache invalidation', () => {
   });
 
   it('cleans up a webhook created by a superseded exchange after disconnect', async () => {
-    let webhookCreateStarted!: () => void;
-    let releaseWebhookCreate!: () => void;
-    const webhookCreateStartedPromise = new Promise<void>((resolve) => { webhookCreateStarted = resolve; });
-    const releaseWebhookCreatePromise = new Promise<void>((resolve) => { releaseWebhookCreate = resolve; });
+    let webhookCreateStarted = false;
     let deleteCalls = 0;
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
@@ -358,8 +355,10 @@ describe('ClickUp signed webhook cache invalidation', () => {
         return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
       }
       if (url.pathname === '/api/v2/team/999/webhook' && request.method === 'POST') {
-        webhookCreateStarted();
-        await releaseWebhookCreatePromise;
+        webhookCreateStarted = true;
+        // Suspend in the provider request's own context; do not carry an I/O
+        // continuation through a resolver invoked by another Worker request.
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
         return new Response(JSON.stringify({
           webhook: { id: WEBHOOK_ID, secret: WEBHOOK_SECRET },
         }), { status: 200 });
@@ -372,14 +371,16 @@ describe('ClickUp signed webhook cache invalidation', () => {
     });
 
     const pendingExchange = connectThroughPublicWorker();
-    await webhookCreateStartedPromise;
+    for (let attempt = 0; attempt < 100 && !webhookCreateStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(webhookCreateStarted).toBe(true);
 
     const disconnected = await SELF.fetch(await signedWrite('/clickup/oauth/disconnect', '{}'));
     expect(disconnected.status).toBe(200);
     expect(await credentialSnapshot()).toBeNull();
     expect(await webhookSnapshot()).toEqual([]);
 
-    releaseWebhookCreate();
     const exchangeResult = await pendingExchange;
     expect(exchangeResult.status).toBe(409);
     expect(await exchangeResult.json()).toEqual(expect.objectContaining({ code: 'oauth_superseded' }));

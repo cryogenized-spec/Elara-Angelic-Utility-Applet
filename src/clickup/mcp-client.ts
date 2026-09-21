@@ -173,7 +173,7 @@ function parseSse(text: string, expectedId: JsonRpcId): JsonRpcResponse | null {
 async function decodeResponse(response: Response, expectedId: JsonRpcId): Promise<JsonRpcResponse> {
   const text = await readBoundedText(response);
   const contentType = (response.headers.get('content-type') ?? '').toLocaleLowerCase();
-  let message: JsonRpcResponse | null = null;
+  let message: JsonRpcResponse | null;
   if (contentType.includes('text/event-stream')) {
     message = parseSse(text, expectedId);
   } else {

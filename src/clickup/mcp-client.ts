@@ -1,5 +1,6 @@
 import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../autonomy/cloud/pairing';
 import {
+  CLICKUP_GRANT_REVISION_HEADER,
   CLICKUP_MCP_CLIENT_INFO,
   CLICKUP_MCP_PATH,
   CLICKUP_MCP_PROTOCOL_VERSION,
@@ -7,6 +8,7 @@ import {
   MCP_META_CLIENT_INFO,
   MCP_META_PROTOCOL_VERSION,
 } from './mcp-protocol';
+import { clickUpPairingAuthorityBinding } from './oauth/authority';
 import {
   CLICKUP_TOOL_NAMES,
   clickUpToolJsonSchema,
@@ -22,10 +24,16 @@ const MCP_REQUEST_TIMEOUT_MS = 30_000;
 
 type JsonRpcId = string | number;
 
+export interface ClickUpAdmittedGrant {
+  readonly revision: number;
+  readonly authorityBinding: string;
+}
+
 type McpSession = {
   readonly baseUrl: string;
   readonly token: string;
   readonly cacheKey: string;
+  readonly grantRevision?: number;
 };
 
 type JsonRpcResponse = {
@@ -76,14 +84,19 @@ async function pairingToken(pairing: AutonomyPairing): Promise<string> {
   return token;
 }
 
-async function currentSession(): Promise<McpSession> {
+async function currentSession(admittedGrant?: ClickUpAdmittedGrant): Promise<McpSession> {
   const pairing = activePairing();
   const baseUrl = workerBaseUrl(pairing);
+  const authorityBinding = clickUpPairingAuthorityBinding(pairing);
+  if (admittedGrant && authorityBinding !== admittedGrant.authorityBinding) {
+    throw new ClickUpMcpError('grant_changed', 'The paired Worker changed after ClickUp authorization was admitted.', 409);
+  }
   const token = await pairingToken(pairing);
   return {
     baseUrl,
     token,
-    cacheKey: `${baseUrl}#${pairing.installationId}`,
+    cacheKey: authorityBinding,
+    ...(admittedGrant ? { grantRevision: admittedGrant.revision } : {}),
   };
 }
 
@@ -211,6 +224,9 @@ async function mcpPost(
         'MCP-Protocol-Version': CLICKUP_MCP_PROTOCOL_VERSION,
         'Mcp-Method': method,
         ...(name ? { 'Mcp-Name': name } : {}),
+        ...(session.grantRevision !== undefined ? {
+          [CLICKUP_GRANT_REVISION_HEADER]: String(session.grantRevision),
+        } : {}),
       },
       body,
       signal: controller.signal,
@@ -309,9 +325,10 @@ export async function callClickUpMcpTool<T extends ClickUpToolName>(
   tool: T,
   rawArguments: unknown,
   signal?: AbortSignal,
+  admittedGrant?: ClickUpAdmittedGrant,
 ): Promise<unknown> {
   const argumentsValue = validateClickUpToolArguments(tool, rawArguments);
-  const session = await currentSession();
+  const session = await currentSession(admittedGrant);
   await listToolsForSession(session, signal);
   const result = completeResult(await mcpPost(session, 'tools/call', {
     name: tool,

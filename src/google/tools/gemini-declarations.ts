@@ -69,6 +69,23 @@ const toolProperties: Record<string, Record<string, unknown>> = {
   'tasks.deleteTask': { taskListId: stringProperty('Task-list id.'), taskId: stringProperty('Task id. If the task is assigned from Docs or Chat, Google may also delete the originating assignment.') },
   'tasks.clearCompleted': { taskListId: stringProperty('Task-list id whose completed tasks should be cleared/hidden.') },
 
+  'kanban.inspect': {
+    listId: stringProperty('Optional Google Tasks list id. Omit to inspect Kanban columns; provide it to inspect that column’s task cards.'),
+    includeCompleted: { type: 'boolean', description: 'Include completed task cards when inspecting one list. Defaults to false.' },
+    offset: { type: 'integer', minimum: 0, maximum: 20000, description: 'Zero-based local projection offset.' },
+    limit: { type: 'integer', minimum: 1, maximum: 50, description: 'Maximum columns or task cards to return. Defaults to 20.' },
+  },
+  'kanban.refresh': {},
+  'kanban.locate': {
+    query: { type: 'string', minLength: 1, maxLength: 200, description: 'Text to match against Kanban list titles, task titles, and bounded task notes.' },
+    includeCompleted: { type: 'boolean', description: 'Include completed task cards in search results. Defaults to false.' },
+    limit: { type: 'integer', minimum: 1, maximum: 20, description: 'Maximum matching lists/cards to return. Defaults to 10.' },
+  },
+  'kanban.focus': {
+    listId: stringProperty('Kanban/Google Tasks list id returned by kanban.inspect or kanban.locate.'),
+    taskId: stringProperty('Optional task id in that list. When present, focus the specific card; otherwise focus the column.'),
+  },
+
   'docs.getDocument': { documentId: stringProperty('Google Docs document id.') },
   'docs.inspectDocument': { documentId: stringProperty('Google Docs document id.') },
   'docs.exportDocument': { documentId: stringProperty('Google Docs document id.'), format: { type: 'string', enum: ['pdf', 'docx'], description: 'Export format.' }, maxBytes: { type: 'integer', minimum: 1, maximum: 10 * 1024 * 1024, description: 'Optional transfer ceiling; never above 10 MiB.' } },
@@ -200,6 +217,8 @@ const requiredByTool: Record<string, readonly string[]> = {
   'tasks.moveTask': ['taskListId', 'taskId'],
   'tasks.deleteTask': ['taskListId', 'taskId'],
   'tasks.clearCompleted': ['taskListId'],
+  'kanban.locate': ['query'],
+  'kanban.focus': ['listId'],
   'docs.getDocument': ['documentId'], 'docs.inspectDocument': ['documentId'], 'docs.exportDocument': ['documentId', 'format'], 'docs.createDocument': ['title'], 'docs.insertText': ['documentId', 'tabId', 'revisionId', 'index', 'text'], 'docs.appendParagraph': ['documentId', 'tabId', 'revisionId', 'text'], 'docs.replaceText': ['documentId', 'tabId', 'revisionId', 'findText', 'replaceText'], 'docs.batchUpdate': ['documentId', 'requests'],
   'document.create_pdf': ['source'],
   'chat.listMessages': ['spaceName'], 'chat.getMessage': ['messageName'], 'chat.createMessage': ['spaceName', 'message'], 'chat.updateMessage': ['messageName', 'message', 'updateMask'], 'chat.deleteMessage': ['messageName'],

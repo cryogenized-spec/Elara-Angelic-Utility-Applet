@@ -273,6 +273,7 @@ async function command<T>(
 
 async function comments(
   env: ClickUpToolServiceEnv,
+  workspaceId: string,
   taskId: string,
   cursorValue: string | undefined,
   limit: number,
@@ -286,6 +287,7 @@ async function comments(
   while (output.length < limit) {
     const raw = await command<Record<string, unknown>>(env, {
       operation: 'getTaskComments',
+      workspaceId,
       taskId,
       ...(cursor ? { start: cursor.start, startId: cursor.startId } : {}),
     }, expectedRevision);
@@ -385,6 +387,7 @@ async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArgume
   if (args.folderId) {
     const raw = await command<Record<string, unknown>>(env, {
       operation: 'getFolder',
+      workspaceId: args.workspaceId,
       folderId: args.folderId,
       includeSubfolders: true,
     }, expectedRevision);
@@ -400,8 +403,8 @@ async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArgume
 
   if (args.spaceId) {
     const [foldersRaw, listsRaw] = await Promise.all([
-      command<Record<string, unknown>>(env, { operation: 'listFolders', spaceId: args.spaceId, archived }, expectedRevision),
-      command<Record<string, unknown>>(env, { operation: 'listFolderlessLists', spaceId: args.spaceId, archived }, expectedRevision),
+      command<Record<string, unknown>>(env, { operation: 'listFolders', workspaceId: args.workspaceId, spaceId: args.spaceId, archived }, expectedRevision),
+      command<Record<string, unknown>>(env, { operation: 'listFolderlessLists', workspaceId: args.workspaceId, spaceId: args.spaceId, archived }, expectedRevision),
     ]);
     return {
       trust: 'untrusted-external' as const,
@@ -479,22 +482,23 @@ export async function executeClickUpTool(
     }
     case 'clickup.getTaskComments': {
       const value = args as ClickUpToolArguments<'clickup.getTaskComments'>;
-      return comments(env, value.taskId, value.cursor, value.limit ?? 25, expectedRevision);
+      return comments(env, value.workspaceId, value.taskId, value.cursor, value.limit ?? 25, expectedRevision);
     }
     case 'clickup.getTaskContext': {
       const value = args as ClickUpToolArguments<'clickup.getTaskContext'>;
       const rawTask = await command<Record<string, unknown>>(env, {
         operation: 'getTask',
-        arguments: { taskId: value.taskId, includeSubtasks: value.includeSubtasks },
+        arguments: { workspaceId: value.workspaceId, taskId: value.taskId, includeSubtasks: value.includeSubtasks },
       }, expectedRevision);
       const task = normalizeClickUpTask(rawTask, { includeAttachments: value.includeAttachments });
       const taskComments = value.commentsLimit === 0
         ? { trust: 'untrusted-external' as const, provider: 'clickup' as const, comments: [], nextCursor: null }
-        : await comments(env, value.taskId, undefined, value.commentsLimit ?? 25, expectedRevision);
+        : await comments(env, value.workspaceId, value.taskId, undefined, value.commentsLimit ?? 25, expectedRevision);
       let customFieldDefinitions: unknown[] | undefined;
       if (value.includeCustomFieldDefinitions && task.list?.id) {
         const rawFields = await command<Record<string, unknown>>(env, {
           operation: 'getListCustomFields',
+          workspaceId: value.workspaceId,
           listId: task.list.id,
         }, expectedRevision);
         const fields = Array.isArray(rawFields.fields) ? rawFields.fields : [];
@@ -545,15 +549,17 @@ export async function executeClickUpTool(
       const raw = value.mode === 'clear'
         ? await command<Record<string, unknown>>(env, {
             operation: 'clearCustomField',
+            workspaceId: value.workspaceId,
             taskId: value.taskId,
             fieldId: value.fieldId,
-          })
+          }, expectedRevision)
         : await command<Record<string, unknown>>(env, {
             operation: 'setCustomField',
+            workspaceId: value.workspaceId,
             taskId: value.taskId,
             fieldId: value.fieldId,
             value: value.value,
-          });
+          }, expectedRevision);
       return normalizeMutationResult(raw);
     }
     case 'clickup.attachArtifact':

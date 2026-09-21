@@ -118,10 +118,12 @@ export async function handleClickUpAttachmentRoute(
     internal.set('Content-Type', contentType);
     internal.set(ELARA_INTERNAL_HEADER, await internalWakeMarker(installationToken));
     internal.set(CLICKUP_GRANT_REVISION_HEADER, String(grantRevision));
+    const forwardedBytes = new Uint8Array(body.byteLength);
+    forwardedBytes.set(body);
     const forwarded = new Request(`https://clickup-oauth-vault${INTERNAL_ATTACHMENT_PATH}`, {
       method: 'POST',
       headers: internal,
-      body,
+      body: forwardedBytes.buffer,
     });
     const response = await (await vaultStub(env)).fetch(forwarded);
     const responseBody = await response.text();

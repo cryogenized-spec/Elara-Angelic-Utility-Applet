@@ -125,6 +125,25 @@ function errorToolResult(call: PendingToolCall, message: string): GeminiToolResu
   return { callId: call.callId, name: call.name, result: { ok: false, error: message } };
 }
 
+function boundedOutcomeValue(value: unknown): string | undefined {
+  if (typeof value === 'string') return value.length > 120 ? `${value.slice(0, 117)}…` : value;
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value);
+  return undefined;
+}
+
+function completedMutationLine(tool: string, value: unknown): string {
+  const details: string[] = [];
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    const record = value as Record<string, unknown>;
+    for (const key of ['id', 'taskId', 'messageId', 'eventId', 'fileId', 'threadId', 'name', 'title', 'subject', 'status']) {
+      const rendered = boundedOutcomeValue(record[key]);
+      if (rendered !== undefined) details.push(`${key}=${rendered}`);
+      if (details.length >= 4) break;
+    }
+  }
+  return `- ${tool}: completed${details.length ? ` (${details.join(', ')})` : ''}`;
+}
+
 function artifactEvent(toolName: string, value: unknown): GeminiStreamEvent | undefined {
   if (!value || typeof value !== 'object') return undefined;
   const result = value as Record<string, unknown>;
@@ -237,6 +256,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
   const seenInteractions = new Set<string>();
   const usageInteractions = new Set<string>();
   const checkpointEntries: ToolLoopCheckpointEntry[] = [];
+  const completedMutationOutcomes: string[] = [];
   const successfulReadEpoch = new Map<string, number>();
   let evidenceEpoch = 0;
   let latestInteractionId = '';
@@ -485,6 +505,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       }
       if (result.ok) {
         results.push({ callId: entry.call.callId, name: entry.call.name, result: result.result });
+        completedMutationOutcomes.push(completedMutationLine(entry.call.name, result.result));
         evidenceEpoch += 1;
         const created = artifactEvent(entry.call.name, result.result);
         if (created) yield created;
@@ -556,7 +577,10 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     }
 
     if (budgetDecision === 'local-fallback') {
-      const fallback = 'I reached the local exploration budget for this turn before another model call could be made safely. I preserved the investigation state rather than risking a provider rate-limit failure; ask me to continue and I can resume from there.';
+      const completedActions = completedMutationOutcomes.length
+        ? `Completed actions before the budget stop:\n${completedMutationOutcomes.join('\n')}\n\n`
+        : '';
+      const fallback = `${completedActions}I reached the local exploration budget for this turn before another model call could be made safely. No further model call was dispatched. If you ask me to continue, I may need to re-read current context; do not repeat any completed actions listed above unless you intend to perform them again.`;
       yield { type: 'text-delta', index: Number.MAX_SAFE_INTEGER, text: fallback };
       yield {
         type: 'completed',

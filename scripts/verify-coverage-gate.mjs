@@ -227,6 +227,12 @@ try {
       '',
     ));
   });
+  addMutation('ClickUp live catalog comparison bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp live catalog admission disappeared', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/mcp-route.ts', (source) => source.replace(
+      'if (!presentedCatalog || presentedCatalog !== liveCatalog)',
+      'if (false)',
+    ));
+  });
 
   addMutation('synthetic Google API key leak', 'scripts/secret-scan.mjs', 'possible Google API key', (cwd) => {
     const token = 'AIza' + 'A'.repeat(35);

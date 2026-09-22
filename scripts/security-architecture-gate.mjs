@@ -642,6 +642,9 @@ for (const marker of [
 ]) {
   if (!clickUpToolService.includes(marker)) fail(`ClickUp Custom Field grant propagation boundary disappeared: ${marker}`);
 }
+if (!/case 'setCustomField':[\s\S]*case 'clearCustomField':[\s\S]*removeClickUpTaskFromAllIndexes\(this\.ctx\.storage\.sql, command\.taskId\)[\s\S]*markAllClickUpTaskIndexesStale/.test(clickUpOAuthVault)) {
+  fail('ClickUp Custom Field writes must invalidate the persisted task projection before it can be reused');
+}
 for (const marker of [
   "const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'",
   "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",

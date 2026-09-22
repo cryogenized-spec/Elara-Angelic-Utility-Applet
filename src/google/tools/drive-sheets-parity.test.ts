@@ -203,7 +203,7 @@ describe('Drive and Sheets executable parity', () => {
     expect(update?.reviewText).toBe(cellValue);
     expect(insert?.resourceSummary).toContain('sheet 42');
     expect(insert?.resourceSummary).toContain('sheet-1');
-    expect(insert?.resourceSummary).toContain('zero-based row index 3');
+    expect(insert?.resourceSummary).toContain('starting at row 4');
     expect(insert?.resourceSummary).toContain('2 row');
   });
 });

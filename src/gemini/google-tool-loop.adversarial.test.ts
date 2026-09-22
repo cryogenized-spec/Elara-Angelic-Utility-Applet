@@ -505,6 +505,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 
@@ -781,6 +782,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 
@@ -844,6 +846,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 
@@ -928,6 +931,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 
@@ -995,6 +999,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 

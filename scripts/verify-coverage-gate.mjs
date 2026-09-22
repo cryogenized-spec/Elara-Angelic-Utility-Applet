@@ -263,6 +263,12 @@ try {
       '',
     ));
   });
+  addMutation('ClickUp comment provider page cap bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp comment cursor authority is missing: MAX_COMMENT_PROVIDER_PAGES', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/tool-service.ts', (source) => source.replaceAll(
+      'MAX_COMMENT_PROVIDER_PAGES',
+      'UNSAFE_COMMENT_PROVIDER_PAGES',
+    ));
+  });
   addMutation('ClickUp live catalog comparison bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp live catalog admission disappeared', (cwd) => {
     mutateRelative(cwd, 'worker/src/clickup/mcp-route.ts', (source) => source.replace(
       'if (!presentedCatalog || presentedCatalog !== liveCatalog)',

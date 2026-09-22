@@ -1362,12 +1362,17 @@ export class ClickUpOAuthVault extends DurableObject {
         }
         const invalidAssignees = await this.validateFreshWorkspaceUsers(args.workspaceId, args.assigneeIds, expectedRevision);
         if (invalidAssignees) return invalidAssignees;
+
+        // Invalidate before provider egress. If ClickUp commits the write and
+        // the Durable Object is interrupted before the response is processed,
+        // recovery must not keep treating a pre-write snapshot as current.
+        // A provider-side rejection merely causes a harmless extra refresh.
+        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         const result = await this.providerData((token) => createClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
         const created = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
         const createdTaskId = safeProviderId(created.id);
         if (createdTaskId) clearClickUpTaskTombstone(this.ctx.storage.sql, args.workspaceId, createdTaskId);
-        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         return json({ ok: true, result: result.data });
       }
       case 'updateTask': {
@@ -1384,10 +1389,14 @@ export class ClickUpOAuthVault extends DurableObject {
         ];
         const invalidAssignees = await this.validateFreshWorkspaceUsers(args.workspaceId, assigneeIds, expectedRevision);
         if (invalidAssignees) return invalidAssignees;
-        const result = await this.providerData((token) => updateClickUpTask(token, args), expectedRevision);
-        if (!result.ok) return result.response;
+
+        // Remove the stale row and advance the index invalidation generation
+        // before the provider mutation. This closes the crash window where
+        // ClickUp accepts the update but Elara dies before clearing its cache.
         removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, args.taskId);
         markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
+        const result = await this.providerData((token) => updateClickUpTask(token, args), expectedRevision);
+        if (!result.ok) return result.response;
         return json({ ok: true, result: result.data });
       }
       case 'createTaskComment': {
@@ -1452,15 +1461,18 @@ export class ClickUpOAuthVault extends DurableObject {
           }
         }
 
+        // Custom Fields are part of the persisted task projection/search
+        // material. Invalidate before provider egress so a crash after ClickUp
+        // commits cannot leave the pre-write task snapshot marked as current.
+        // The generation bump also prevents an in-flight refresh from
+        // re-committing evidence captured before this mutation.
+        removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, command.taskId);
+        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
+
         const mutation = command.operation === 'setCustomField'
           ? await this.providerData((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value), expectedRevision)
           : await this.providerData((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId), expectedRevision);
         if (!mutation.ok) return mutation.response;
-
-        // Custom Fields are part of the persisted task projection/search text.
-        // Never serve the pre-write cached task after Elara has changed it.
-        removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, command.taskId);
-        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         return json({ ok: true, result: mutation.data });
       }
       }

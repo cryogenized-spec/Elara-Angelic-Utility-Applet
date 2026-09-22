@@ -176,7 +176,9 @@ describe('ClickUpOAuthSettings', () => {
     };
     getStatusMock.mockReset();
     getStatusMock.mockResolvedValueOnce(tokenReady).mockResolvedValueOnce(replacement);
-    getConnectionMethodsMock.mockResolvedValueOnce({ oauth: false, personalToken: true });
+    getConnectionMethodsMock
+      .mockResolvedValueOnce({ oauth: false, personalToken: true })
+      .mockResolvedValueOnce({ oauth: false, personalToken: true });
     personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out after Worker commit.'));
 
     await renderSettings();

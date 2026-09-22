@@ -93,6 +93,38 @@ describe('Google confirmation broker', () => {
   });
 
 
+  it('does not toggle approval when the user clicks or inspects review content', async () => {
+    const pending = requestGoogleToolConfirmations([{
+      ...request('clickup.createTaskComment'),
+      untrustedContext: true,
+      reviewText: 'Inspect this without selecting it.',
+    }]);
+    const checkbox = document.querySelector<HTMLInputElement>('[data-confirm-index="0"]');
+    const review = document.querySelector<HTMLElement>('.google-confirmation-item__review-text');
+    const approve = document.querySelector<HTMLButtonElement>('[data-decision="selected"]');
+    expect(checkbox?.checked).toBe(false);
+    review?.click();
+    expect(checkbox?.checked).toBe(false);
+    expect(approve?.disabled).toBe(true);
+
+    dismissGoogleToolConfirmation();
+    await expect(pending).resolves.toEqual([false]);
+  });
+
+  it('makes the rest of the same-tab application inert while approval is open and restores it afterward', async () => {
+    const background = document.createElement('button');
+    background.textContent = 'Background settings';
+    document.body.appendChild(background);
+
+    const pending = requestGoogleToolConfirmations([request()]);
+    expect(background.inert).toBe(true);
+
+    const dialog = document.getElementById('elara-google-confirmation');
+    dialog?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    await expect(pending).resolves.toEqual([false]);
+    expect(background.inert).toBe(false);
+  });
+
   it('renders provider and action labels without exposing raw tool identifiers', async () => {
     const pending = requestGoogleToolConfirmations([request('clickup.createTaskComment')]);
     const dialog = document.getElementById('elara-google-confirmation');

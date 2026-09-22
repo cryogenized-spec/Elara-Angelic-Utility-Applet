@@ -1,8 +1,10 @@
 import { newNonce, signWrite } from '../../autonomy/protocol';
 import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../../autonomy/cloud/pairing';
 import {
+  clickUpConnectionMethodsSchema,
   clickUpOAuthStartSchema,
   clickUpOAuthStatusSchema,
+  type ClickUpConnectionMethods,
   type ClickUpExecutionGrant,
   type ClickUpOAuthAuthority,
   type ClickUpOAuthStart,
@@ -171,6 +173,19 @@ async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatu
   }
 }
 
+async function bearerConnectionMethods(pairing: AutonomyPairing): Promise<ClickUpConnectionMethods> {
+  const token = await workerToken(pairing);
+  assertPairingStillCurrent(pairing);
+  const response = await workerRequest(pairing, '/clickup/oauth/methods', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  // Older Workers do not expose this endpoint and support OAuth only.
+  if (response.status === 404) return { oauth: true, personalToken: false };
+  if (response.status !== 200) throw workerError(response);
+  return clickUpConnectionMethodsSchema.parse(response.body);
+}
+
 async function signedPost<T>(
   pairing: AutonomyPairing,
   path: string,
@@ -201,6 +216,10 @@ async function signedPost<T>(
 export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
   async getStatus(): Promise<ClickUpOAuthStatus> {
     return bearerStatus(activePairing());
+  },
+
+  async getConnectionMethods(): Promise<ClickUpConnectionMethods> {
+    return bearerConnectionMethods(activePairing());
   },
 
   async getExecutionGrant(): Promise<ClickUpExecutionGrant> {

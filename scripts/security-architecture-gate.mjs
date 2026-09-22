@@ -702,7 +702,10 @@ for (const marker of [
   "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",
   "headers.set('Authorization'",
   'clickUpAuthorizationValue',
-  "token.startsWith('pk_') ? token : `Bearer ${token}`",
+  "const CLICKUP_PERSONAL_CREDENTIAL_PREFIX = 'elara-clickup-personal-v1:'",
+  'personalClickUpCredential',
+  'credential.startsWith(CLICKUP_PERSONAL_CREDENTIAL_PREFIX)',
+  'return `Bearer ${credential}`',
   'MAX_PROVIDER_BODY_BYTES',
   "const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;",
   'controller.abort()',
@@ -751,7 +754,7 @@ for (const marker of [
 }
 for (const marker of [
   'this.oauthEnv.CLICKUP_PERSONAL_TOKEN',
-  "!accessToken.startsWith('pk_')",
+  'personalClickUpCredential(personalToken)',
   "UPDATE clickup_connection_epoch SET epoch = ?",
   "DELETE FROM clickup_oauth_states",
   'return this.installCredential(request, accessToken, connectionEpoch, previousAccessToken, now)',

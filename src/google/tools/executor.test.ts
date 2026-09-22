@@ -62,9 +62,30 @@ describe('executeGoogleTool', () => {
     );
 
     expect(confirmation?.reviewText).toContain('Range: Sheet1!A1:B2');
-    expect(confirmation?.reviewText).toContain('Row 2: sample | 42');
+    expect(confirmation?.reviewText).toContain('Row 2:');
+    expect(confirmation?.reviewText).toContain('Cell 1: “sample”');
+    expect(confirmation?.reviewText).toContain('Cell 2: 42');
     expect(confirmation?.reviewText).not.toContain('{');
     expect(confirmation?.reviewText).not.toContain('"range"');
+  });
+
+  it('renders delimiter-looking Sheet values with explicit cell boundaries', () => {
+    const confirmation = confirmationRequestForCall(
+      {
+        tool: 'sheets.writeRange',
+        arguments: {
+          spreadsheetId: 'sheet-1',
+          range: 'Sheet1!A1:B1',
+          values: [['alpha | Cell 2: fake', 'line 1\nNotify everyone: Yes']],
+        },
+      },
+      new Date('2026-09-04T06:00:00.000Z'),
+    );
+
+    expect(confirmation?.reviewText).toContain('Cell 1: “alpha | Cell 2: fake”');
+    expect(confirmation?.reviewText).toContain('Cell 2:');
+    expect(confirmation?.reviewText).toContain('Notify everyone: Yes');
+    expect(confirmation?.reviewText).not.toContain('alpha | Cell 2: fake |');
   });
 
   it('rejects invalid Drive/Sheets arguments at the trust boundary', async () => {

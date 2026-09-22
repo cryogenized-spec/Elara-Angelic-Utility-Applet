@@ -516,6 +516,9 @@ if (clickUpWebhookTransactionStart < 0 || clickUpWebhookTransactionEnd < 0) {
   fail('ClickUp webhook dedupe/index transaction boundary disappeared');
 }
 for (const marker of [
+  'SELECT webhook_id, workspace_id, secret_cipher, secret_iv, endpoint, updated_at FROM clickup_webhooks WHERE webhook_id = ?',
+  'live.updated_at !== row.updated_at',
+  'live.secret_cipher !== row.secret_cipher',
   'INSERT INTO clickup_webhook_deliveries',
   'tombstoneClickUpTask',
   'clearClickUpTaskTombstone',

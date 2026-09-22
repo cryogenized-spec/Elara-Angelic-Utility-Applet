@@ -1338,6 +1338,22 @@ export class ClickUpOAuthVault extends DurableObject {
         if (args.parentTaskId) {
           const parentScope = await this.verifyTaskScope(args.workspaceId, args.parentTaskId, false, expectedRevision);
           if (!parentScope.ok) return parentScope.response;
+          const parentList = parentScope.task.list && typeof parentScope.task.list === 'object' && !Array.isArray(parentScope.task.list)
+            ? parentScope.task.list as Record<string, unknown>
+            : undefined;
+          const parentListId = safeProviderId(parentList?.id);
+          if (!parentListId) {
+            return json({
+              code: 'resource_scope_unverifiable',
+              message: 'ClickUp did not return the parent task List needed to validate subtask creation.',
+            }, 502);
+          }
+          if (parentListId !== args.listId) {
+            return json({
+              code: 'parent_list_mismatch',
+              message: 'ClickUp requires a new subtask parent to belong to the target List.',
+            }, 400);
+          }
         }
         const invalidAssignees = await this.validateFreshWorkspaceUsers(args.workspaceId, args.assigneeIds, expectedRevision);
         if (invalidAssignees) return invalidAssignees;

@@ -1494,6 +1494,7 @@ export class ClickUpOAuthVault extends DurableObject {
     return json({
       ok: true,
       result: {
+        trust: 'untrusted-external',
         provider: 'clickup',
         workspaceId: args.workspaceId,
         taskId: args.taskId,

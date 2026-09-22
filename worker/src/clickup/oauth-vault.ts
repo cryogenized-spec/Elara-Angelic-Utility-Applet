@@ -461,6 +461,10 @@ export class ClickUpOAuthVault extends DurableObject {
         if (!(await this.verifyRead(request))) return json({ code: 'auth', message: 'A valid installation credential is required.' }, 401);
         return json(this.status());
       }
+      if (request.method === 'GET' && url.pathname === '/clickup/oauth/methods') {
+        if (!(await this.verifyRead(request))) return json({ code: 'auth', message: 'A valid installation credential is required.' }, 401);
+        return json(this.connectionMethods());
+      }
 
       if (request.method !== 'POST') return json({ code: 'not_found', message: 'Not found.' }, 404);
       const body = await request.text();
@@ -2081,8 +2085,7 @@ export class ClickUpOAuthVault extends DurableObject {
 
   private status() {
     const context = this.authorizationContext();
-    const connectionMethods = this.connectionMethods();
-    if (!context) return { connected: false, workspaces: [] as unknown[], connectionMethods };
+    if (!context) return { connected: false, workspaces: [] as unknown[] };
     const workspaces = context.workspaces.flatMap((workspace) => {
       const id = typeof workspace.id === 'string' ? workspace.id.trim() : '';
       const name = typeof workspace.name === 'string' ? workspace.name.trim() : '';
@@ -2093,7 +2096,6 @@ export class ClickUpOAuthVault extends DurableObject {
       account: context.account,
       workspaces,
       updatedAt: context.updatedAt,
-      connectionMethods,
     };
   }
 

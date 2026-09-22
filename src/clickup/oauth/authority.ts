@@ -222,14 +222,28 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
   },
 
   async connectPersonalToken(): Promise<ClickUpOAuthStatus> {
-    const status = await signedPost(
-      activePairing(),
-      '/clickup/oauth/personal-token',
-      {},
-      (value) => clickUpOAuthStatusSchema.parse(value),
-    );
-    persistStatus(status);
-    return status;
+    const pairing = activePairing();
+    try {
+      const status = await signedPost(
+        pairing,
+        '/clickup/oauth/personal-token',
+        {},
+        (value) => clickUpOAuthStatusSchema.parse(value),
+      );
+      persistStatus(status);
+      return status;
+    } catch (cause) {
+      // A timeout/network failure is ambiguous: the Worker may already have
+      // committed the replacement grant. Reconcile authoritative status before
+      // surfacing the error. If reconciliation is also unavailable, clear the
+      // cached status so stale identity metadata cannot continue tool election.
+      try {
+        await bearerStatus(pairing);
+      } catch {
+        if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+      }
+      throw cause;
+    }
   },
 
   async disconnect(): Promise<void> {

@@ -13,6 +13,7 @@ const dummyMarker = /(?:test|fake|dummy|never|probe|example|placeholder)/i;
 const patterns = [
   ['Google API key', /(?<![A-Za-z0-9_-])AIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])/g],
   ['GitHub token', /(?<![A-Za-z0-9_])(?:gh[pousr]_[A-Za-z0-9]{36,255}|github_pat_[A-Za-z0-9_]{60,255})(?![A-Za-z0-9_])/g],
+  ['ClickUp personal token', /(?<![A-Za-z0-9_])pk_[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g],
   ['AWS access key', /(?<![A-Z0-9])(?:AKIA|ASIA)[A-Z0-9]{16}(?![A-Z0-9])/g],
   ['Slack token', /(?<![A-Za-z0-9-])xox[baprs]-[A-Za-z0-9-]{20,}(?![A-Za-z0-9-])/g],
   ['OpenAI-style key', /(?<![A-Za-z0-9_-])sk-(?:proj-)?[A-Za-z0-9_-]{20,}(?![A-Za-z0-9_-])/g],

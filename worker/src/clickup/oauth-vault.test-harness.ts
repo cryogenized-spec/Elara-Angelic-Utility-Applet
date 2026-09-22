@@ -102,15 +102,20 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
         const limit = typeof body.limit === 'number' && Number.isSafeInteger(body.limit) ? body.limit : null;
         const remaining = typeof body.remaining === 'number' && Number.isSafeInteger(body.remaining) ? body.remaining : null;
         const resetAt = typeof body.resetAt === 'number' && Number.isSafeInteger(body.resetAt) ? body.resetAt : null;
+        const unknownProbeInFlight = body.unknownProbeInFlight === true ? 1 : 0;
+        const updatedAt = typeof body.updatedAt === 'number' && Number.isSafeInteger(body.updatedAt)
+          ? body.updatedAt
+          : Date.now();
         this.ctx.storage.sql.exec(`
-          INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at)
-          VALUES (1, ?, ?, ?, ?)
+          INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, unknown_probe_in_flight, updated_at)
+          VALUES (1, ?, ?, ?, ?, ?)
           ON CONFLICT(slot) DO UPDATE SET
             limit_count = excluded.limit_count,
             remaining = excluded.remaining,
             reset_at = excluded.reset_at,
+            unknown_probe_in_flight = excluded.unknown_probe_in_flight,
             updated_at = excluded.updated_at
-        `, limit, remaining, resetAt, Date.now());
+        `, limit, remaining, resetAt, unknownProbeInFlight, updatedAt);
         return json({ ok: true });
       }
 

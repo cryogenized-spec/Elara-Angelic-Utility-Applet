@@ -399,7 +399,7 @@ for (const marker of [
   'MAX_WORKER_RESPONSE_BYTES',
   'readBoundedWorkerJson',
   'const body = await readBoundedWorkerJson(response)',
-  "code: 'timeout'",
+  "new ClickUpOAuthError('timeout'",
 ]) {
   if (!clickUpOAuthAuthority.includes(marker)) fail(`durable ClickUp OAuth browser authority is missing: ${marker}`);
 }

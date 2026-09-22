@@ -268,8 +268,9 @@ if (!clickUpOauthVaultSource.includes("name: 'AES-GCM'") || !clickUpOauthVaultSo
 if (!clickUpOauthVaultSource.includes("credential_kind TEXT NOT NULL DEFAULT 'oauth'") || !clickUpOauthVaultSource.includes("ALTER TABLE clickup_oauth_credential ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth'") || !clickUpOauthVaultSource.includes('encrypted.cipher, encrypted.iv, accessToken.kind') || !clickUpOauthVaultSource.includes("row.credential_kind === 'personal'")) throw new Error('Reliability gate: ClickUp credential kind must remain a separate durable discriminator with legacy rows migrating to OAuth.');
 if (!clickUpOauthVaultSource.includes('CLICKUP_PERSONAL_TOKEN') || !clickUpOauthVaultSource.includes('connectPersonalToken')) throw new Error('Reliability gate: ClickUp personal-token activation must remain Worker-secret-only.');
 if (!clickUpOauthVaultSource.includes('clickup_oauth_nonces') || !clickUpOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: ClickUp credential-vault writes must remain signed and replay-protected durably.');
-if (!clickUpOauthRoutesSource.includes('verifySignedWrite') || !clickUpOauthRoutesSource.includes("'/clickup/oauth/personal-token'") || !clickUpOauthRoutesSource.includes("'/clickup/oauth/methods'") || !workerCompositionSource.includes('handleClickUpOAuthRoute')) throw new Error('Reliability gate: public ClickUp credential writes and method discovery must retain the reviewed route boundary.');
+if (!clickUpOauthRoutesSource.includes('verifySignedWrite') || !clickUpOauthRoutesSource.includes("'/clickup/oauth/personal-token'") || !clickUpOauthRoutesSource.includes("'/clickup/oauth/methods'") || !clickUpOauthRoutesSource.includes("'/clickup/oauth/connection-state'") || !workerCompositionSource.includes('handleClickUpOAuthRoute')) throw new Error('Reliability gate: public ClickUp credential writes and method discovery must retain the reviewed route boundary.');
 if (!clickUpOauthVaultSource.includes("url.pathname === '/clickup/oauth/methods'") || !clickUpOauthVaultSource.includes('return json(this.connectionMethods())')) throw new Error('Reliability gate: ClickUp connection methods must remain on their backward-compatible separate read endpoint.');
+if (!clickUpOauthVaultSource.includes("settled_epoch INTEGER NOT NULL DEFAULT 0") || !clickUpOauthVaultSource.includes('settleConnectionEpochIfCurrent') || !clickUpOauthVaultSource.includes("url.pathname === '/clickup/oauth/connection-state'") || !clickUpOauthVaultSource.includes('return json(this.connectionState())')) throw new Error('Reliability gate: ClickUp connection operations must expose durable pending/settled authority.');
 const clickUpBrowserAuthoritySource = readFileSync(join(root, 'src', 'clickup', 'oauth', 'authority.ts'), 'utf8');
 for (const marker of [
   'authorityBinding: clickUpPairingAuthorityBinding(pairing)',
@@ -277,7 +278,9 @@ for (const marker of [
   'PENDING_CONNECTION_KEY',
   'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
   "'connection_pending'",
-  'assertConnectionSettled(pairing)',
+  'ensureConnectionSettled(pairing',
+  'bearerConnectionState',
+  "'/clickup/oauth/connection-state'",
   'markConnectionPending(pairing, operation)',
 ]) {
   if (!clickUpBrowserAuthoritySource.includes(marker)) throw new Error(`Reliability gate: ClickUp browser connection race authority is missing ${marker}.`);

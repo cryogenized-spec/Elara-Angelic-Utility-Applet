@@ -429,17 +429,11 @@ async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArgume
 }
 
 async function resolveAssignees(env: ClickUpToolServiceEnv, args: ClickUpToolArguments<'clickup.resolveAssignees'>, expectedRevision?: number) {
-  const context = await command<Record<string, unknown>>(env, { operation: 'getAuthorizationContext' }, expectedRevision);
-  const workspaces: unknown[] = Array.isArray(context.workspaces) ? context.workspaces as unknown[] : [];
-  const workspace: unknown = workspaces.find((candidate) => providerId(objectValue(candidate)?.id) === args.workspaceId);
-  if (!workspace) {
-    throw new ClickUpToolServiceError(
-      'workspace_forbidden',
-      'The requested ClickUp Workspace is not part of the authorized grant.',
-      403,
-    );
-  }
-  const members = Array.isArray(objectValue(workspace)?.members) ? objectValue(workspace)!.members as unknown[] : [];
+  const workspace = await command<Record<string, unknown>>(env, {
+    operation: 'getWorkspaceAuthorizationContext',
+    workspaceId: args.workspaceId,
+  }, expectedRevision);
+  const members = Array.isArray(workspace.members) ? workspace.members as unknown[] : [];
   const limit = args.limitPerName ?? 5;
 
   const results = args.names.map((name) => {

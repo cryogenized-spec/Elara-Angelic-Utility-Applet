@@ -2,9 +2,11 @@ import { newNonce, signWrite } from '../../autonomy/protocol';
 import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../../autonomy/cloud/pairing';
 import {
   clickUpConnectionMethodsSchema,
+  clickUpConnectionStateSchema,
   clickUpOAuthStartSchema,
   clickUpOAuthStatusSchema,
   type ClickUpConnectionMethods,
+  type ClickUpConnectionState,
   type ClickUpExecutionGrant,
   type ClickUpOAuthAuthority,
   type ClickUpOAuthStart,
@@ -24,7 +26,7 @@ type StoredClickUpStatus = {
 
 type PendingConnectionChange = {
   readonly authorityBinding: string;
-  readonly operation: 'oauth-exchange' | 'personal-token' | 'disconnect';
+  readonly operation: 'oauth-exchange' | 'personal-token' | 'disconnect' | 'worker-pending';
   readonly until: number;
 };
 
@@ -198,7 +200,12 @@ function parsePendingConnection(raw: string | null): PendingConnectionChange | n
     const operation = record.operation;
     if (
       typeof record.authorityBinding !== 'string'
-      || (operation !== 'oauth-exchange' && operation !== 'personal-token' && operation !== 'disconnect')
+      || (
+        operation !== 'oauth-exchange'
+        && operation !== 'personal-token'
+        && operation !== 'disconnect'
+        && operation !== 'worker-pending'
+      )
       || typeof record.until !== 'number'
       || !Number.isFinite(record.until)
     ) return null;
@@ -245,13 +252,42 @@ function clearPendingConnectionForPairing(pairing: AutonomyPairing): void {
   }
 }
 
-function assertConnectionSettled(pairing: AutonomyPairing): void {
-  if (!pendingConnectionForPairing(pairing)) return;
-  throw new ClickUpOAuthError(
+function connectionPendingError(): ClickUpOAuthError {
+  return new ClickUpOAuthError(
     'connection_pending',
     'A ClickUp connection change may still be settling. Refresh status again shortly.',
     409,
   );
+}
+
+async function bearerConnectionState(pairing: AutonomyPairing): Promise<ClickUpConnectionState | null> {
+  const token = await workerToken(pairing);
+  assertPairingStillCurrent(pairing);
+  const response = await workerRequest(pairing, '/clickup/oauth/connection-state', {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  assertPairingStillCurrent(pairing);
+  // Older Workers predate durable operation-state reporting. The browser's
+  // pairing-owned settle timer remains the compatibility fallback.
+  if (response.status === 404) return null;
+  if (response.status !== 200) throw workerError(response);
+  return clickUpConnectionStateSchema.parse(response.body);
+}
+
+async function ensureConnectionSettled(pairing: AutonomyPairing): Promise<void> {
+  const localPending = pendingConnectionForPairing(pairing);
+  const workerState = await bearerConnectionState(pairing);
+  if (workerState) {
+    if (workerState.pending) {
+      if (!localPending) markConnectionPending(pairing, 'worker-pending');
+      else clearCachedStatusForPairing(pairing);
+      throw connectionPendingError();
+    }
+    clearPendingConnectionForPairing(pairing);
+    return;
+  }
+  if (localPending) throw connectionPendingError();
 }
 
 function ambiguousConnectionWriteFailure(cause: unknown): boolean {
@@ -274,7 +310,7 @@ export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
 }
 
 async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
-  assertConnectionSettled(pairing);
+  await ensureConnectionSettled(pairing);
   try {
     const token = await workerToken(pairing);
     assertPairingStillCurrent(pairing);
@@ -339,19 +375,22 @@ async function signedPost<T>(
 
 async function connectionWrite<T>(
   pairing: AutonomyPairing,
-  operation: PendingConnectionChange['operation'],
+  operation: Exclude<PendingConnectionChange['operation'], 'worker-pending'>,
   path: string,
   payload: unknown,
   parse: (value: unknown) => T,
 ): Promise<T> {
-  assertConnectionSettled(pairing);
+  await ensureConnectionSettled(pairing);
+  // Mark before egress so every same-origin tab immediately stops advertising
+  // the old identity while an account-changing request is in flight.
+  markConnectionPending(pairing, operation);
   try {
     const result = await signedPost(pairing, path, payload, parse);
     clearPendingConnectionForPairing(pairing);
     return result;
   } catch (cause) {
-    if (ambiguousConnectionWriteFailure(cause)) {
-      markConnectionPending(pairing, operation);
+    if (!ambiguousConnectionWriteFailure(cause)) {
+      clearPendingConnectionForPairing(pairing);
     }
     throw cause;
   }
@@ -378,7 +417,7 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
 
   async beginConnect(redirectUri: string): Promise<ClickUpOAuthStart> {
     const pairing = activePairing();
-    assertConnectionSettled(pairing);
+    await ensureConnectionSettled(pairing);
     return signedPost(pairing, '/clickup/oauth/start', { redirectUri }, (value) => clickUpOAuthStartSchema.parse(value));
   },
 

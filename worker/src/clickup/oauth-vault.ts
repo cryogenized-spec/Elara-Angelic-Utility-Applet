@@ -2013,9 +2013,12 @@ export class ClickUpOAuthVault extends DurableObject {
     const state = randomState();
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
-      // Only the newest explicit Connect gesture may remain exchangeable.
-      // Without this, two OAuth popups can coexist and an older flow completed
-      // later can silently replace the newer account/grant.
+      // Only the newest explicit Connect gesture may remain authoritative.
+      // Advance the epoch as well as replacing pending state so a previous
+      // exchange already awaiting ClickUp cannot resume later and overwrite
+      // the account chosen by this newer Connect flow.
+      const nextEpoch = this.connectionEpoch() + 1;
+      this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = ? WHERE slot = 1', nextEpoch);
       this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
       this.ctx.storage.sql.exec('INSERT INTO clickup_oauth_states (state, redirect_uri, created_at) VALUES (?, ?, ?)', state, parsed.data.redirectUri, now);
     });

@@ -126,12 +126,12 @@ describe('ClickUp provider wire mapping', () => {
     }) as unknown as typeof fetch;
 
     const pending = fetchAuthorizedClickUpUser('provider-token', fetcher);
-    await vi.advanceTimersByTimeAsync(20_001);
-
-    await expect(pending).rejects.toMatchObject({
+    const rejected = expect(pending).rejects.toMatchObject({
       code: 'timeout',
       status: 502,
     });
+    await vi.advanceTimersByTimeAsync(20_001);
+    await rejected;
   });
 
   it('cancels chunked provider JSON as soon as it crosses the hard byte ceiling', async () => {

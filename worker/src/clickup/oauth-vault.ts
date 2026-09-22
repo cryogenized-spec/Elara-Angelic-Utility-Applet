@@ -52,6 +52,7 @@ import {
   removeClickUpTaskFromIndex,
   searchClickUpTaskIndex,
   setTaskIndexState,
+  taskIndexInvalidationGeneration,
   taskIndexState,
   upsertClickUpTaskIndexPage,
 } from './task-index';
@@ -681,17 +682,12 @@ export class ClickUpOAuthVault extends DurableObject {
     return this.scopeDenied();
   }
 
-  private async normalizeHierarchicalScopeFailure(
-    response: Response,
+  private async padDeniedHierarchicalScope(
     workspaceId: string,
     expectedRevision: number,
   ): Promise<Response> {
-    if (response.status !== 403 && response.status !== 404) return response;
-
-    // A direct Folder/List lookup can reveal whether an otherwise-denied ID
-    // exists through latency/rate-budget shape if only real resources proceed
-    // to Workspace ancestry verification. Spend the same two Space-list probes
-    // for a missing/forbidden direct ID, then return the same generic denial.
+    // Direct Folder/List lookups must have the same observable provider cost
+    // whether the id is missing, forbidden, or exists but lacks usable ancestry.
     const padded = await this.verifySpaceScope(
       workspaceId,
       '__elara_denied_hierarchy_scope_probe__',
@@ -699,6 +695,15 @@ export class ClickUpOAuthVault extends DurableObject {
     );
     if (!padded.ok && padded.response.status !== 403) return padded.response;
     return this.scopeDenied();
+  }
+
+  private async normalizeHierarchicalScopeFailure(
+    response: Response,
+    workspaceId: string,
+    expectedRevision: number,
+  ): Promise<Response> {
+    if (response.status !== 403 && response.status !== 404) return response;
+    return this.padDeniedHierarchicalScope(workspaceId, expectedRevision);
   }
 
   private workspaceMemberIds(workspaceId: string): Set<string> | null {
@@ -828,7 +833,9 @@ export class ClickUpOAuthVault extends DurableObject {
       ? folder.space as Record<string, unknown>
       : undefined;
     const spaceId = safeProviderId(space?.id);
-    if (!spaceId) return { ok: false, response: this.scopeDenied() };
+    if (!spaceId) {
+      return { ok: false, response: await this.padDeniedHierarchicalScope(workspaceId, expectedRevision) };
+    }
     const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
     return scoped.ok ? { ok: true, folder } : scoped;
   }
@@ -853,7 +860,9 @@ export class ClickUpOAuthVault extends DurableObject {
       ? list.space as Record<string, unknown>
       : undefined;
     const spaceId = safeProviderId(space?.id);
-    if (!spaceId) return { ok: false, response: this.scopeDenied() };
+    if (!spaceId) {
+      return { ok: false, response: await this.padDeniedHierarchicalScope(workspaceId, expectedRevision) };
+    }
     const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
     return scoped.ok ? { ok: true, list } : scoped;
   }
@@ -897,7 +906,11 @@ export class ClickUpOAuthVault extends DurableObject {
     return { ok: false, response: this.scopeDenied('The requested ClickUp comment was not found on the admitted task.') };
   }
 
-  private async searchTaskIndex(argumentsValue: unknown, expectedRevision?: number): Promise<Response> {
+  private async searchTaskIndex(
+    argumentsValue: unknown,
+    expectedRevision?: number,
+    retryOnInvalidation = true,
+  ): Promise<Response> {
     const args = validateClickUpToolArguments('clickup.searchTasks', argumentsValue);
     if (!this.workspaceAuthorized(args.workspaceId)) {
       return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
@@ -905,6 +918,18 @@ export class ClickUpOAuthVault extends DurableObject {
 
     let state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
     const now = Date.now();
+    const refreshGeneration = state.invalidationGeneration;
+
+    const restartIfInvalidated = async (): Promise<Response | null> => {
+      if (taskIndexInvalidationGeneration(this.ctx.storage.sql, args.workspaceId) === refreshGeneration) return null;
+      if (retryOnInvalidation) {
+        return this.searchTaskIndex(argumentsValue, expectedRevision, false);
+      }
+      return json({
+        code: 'index_invalidated',
+        message: 'ClickUp task index changed while it was refreshing. Retry the search.',
+      }, 409);
+    };
 
     const fullSnapshotAgeOrigin = state.indexedTasks > 0 ? state.oldestIndexedAt : state.lastRefreshAt;
     if (
@@ -960,6 +985,9 @@ export class ClickUpOAuthVault extends DurableObject {
             break;
           }
 
+          const invalidated = await restartIfInvalidated();
+          if (invalidated) return invalidated;
+
           fetchedAnyPage = true;
           const source = pageResult.data && typeof pageResult.data === 'object' ? pageResult.data as Record<string, unknown> : {};
           const tasks = Array.isArray(source.tasks) ? source.tasks : [];
@@ -975,6 +1003,8 @@ export class ClickUpOAuthVault extends DurableObject {
         }
 
         if (!fullSyncComplete && !refreshError) refreshIncomplete = true;
+        const invalidatedBeforeCommit = await restartIfInvalidated();
+        if (invalidatedBeforeCommit) return invalidatedBeforeCommit;
         setTaskIndexState(this.ctx.storage.sql, {
           workspaceId: args.workspaceId,
           fullSyncComplete,
@@ -1011,6 +1041,9 @@ export class ClickUpOAuthVault extends DurableObject {
             break;
           }
 
+          const invalidated = await restartIfInvalidated();
+          if (invalidated) return invalidated;
+
           fetchedPage = true;
           const source = pageResult.data && typeof pageResult.data === 'object' ? pageResult.data as Record<string, unknown> : {};
           const tasks = Array.isArray(source.tasks) ? source.tasks : [];
@@ -1026,6 +1059,8 @@ export class ClickUpOAuthVault extends DurableObject {
 
         if (completed) {
           refreshIncomplete = false;
+          const invalidatedBeforeCommit = await restartIfInvalidated();
+          if (invalidatedBeforeCommit) return invalidatedBeforeCommit;
           setTaskIndexState(this.ctx.storage.sql, {
             workspaceId: args.workspaceId,
             fullSyncComplete: true,
@@ -1039,6 +1074,8 @@ export class ClickUpOAuthVault extends DurableObject {
           });
         } else {
           refreshIncomplete = true;
+          const invalidatedBeforeCommit = await restartIfInvalidated();
+          if (invalidatedBeforeCommit) return invalidatedBeforeCommit;
           setTaskIndexState(this.ctx.storage.sql, {
             workspaceId: args.workspaceId,
             fullSyncComplete: true,
@@ -1178,7 +1215,11 @@ export class ClickUpOAuthVault extends DurableObject {
           const parentScope = await this.verifyTaskScope(args.workspaceId, args.parentTaskId, false, expectedRevision);
           if (!parentScope.ok) return parentScope.response;
         }
-        const invalidAssignees = this.validateWorkspaceUsers(args.workspaceId, args.assignees?.add);
+        const assigneeIds = [
+          ...(args.assignees?.add ?? []),
+          ...(args.assignees?.remove ?? []),
+        ];
+        const invalidAssignees = this.validateWorkspaceUsers(args.workspaceId, assigneeIds);
         if (invalidAssignees) return invalidAssignees;
         const result = await this.providerData((token) => updateClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
@@ -1709,13 +1750,30 @@ export class ClickUpOAuthVault extends DurableObject {
     if (!emptySchema.safeParse(parseJson(body)).success) {
       return json({ code: 'validation', message: 'ClickUp disconnect payload was invalid.' }, 400);
     }
+
+    // Local disconnect is final before the first await. A reconnect may begin
+    // while provider webhook cleanup is in flight, and the old disconnect must
+    // never resume later and delete the replacement grant.
     this.advanceConnectionEpoch();
-    const token = await this.accessToken().catch(() => null);
-    await this.clearStoredWebhooks(token);
+    const previous = this.credentialRow();
+    const webhookRows = this.detachStoredWebhooks();
     this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
     this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
     this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
     clearClickUpTaskIndex(this.ctx.storage.sql);
+
+    let token: string | null = null;
+    if (previous) {
+      try {
+        token = await decryptToken(this.vaultSecret(), previous.access_cipher, previous.access_iv);
+      } catch {
+        token = null;
+      }
+    }
+    if (token && webhookRows.length) {
+      await this.deleteProviderWebhooks(token, webhookRows);
+    }
+
     return json({ disconnected: true, providerRevoked: false });
   }
 

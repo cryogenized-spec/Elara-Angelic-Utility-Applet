@@ -98,7 +98,7 @@ export function ClickUpOAuthSettings() {
     setError(null);
     try {
       await clickUpOAuthAuthority.disconnect();
-      setStatus(emptyStatus());
+      setStatus(await readCurrentStatus());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'ClickUp could not be disconnected.');
     } finally {

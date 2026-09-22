@@ -410,6 +410,9 @@ for (const marker of [
 if (!/async function workerRequest[\s\S]*const response = await fetch\([\s\S]*const body = await readBoundedWorkerJson\(response\);[\s\S]*finally\s*\{\s*clearTimeout\(timeout\);/.test(clickUpOAuthAuthority)) {
   fail('ClickUp browser OAuth deadline must remain active through bounded Worker response-body consumption');
 }
+if (!/async function bearerStatus[\s\S]*catch \(cause\)[\s\S]*localStorage\.removeItem\(STORAGE_KEY\)[\s\S]*throw cause/.test(clickUpOAuthAuthority)) {
+  fail('ClickUp authoritative status failure must clear stale cached connection metadata');
+}
 for (const marker of [
   "CLICKUP_MCP_PROTOCOL_VERSION",
   "CLICKUP_MCP_PATH",

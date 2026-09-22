@@ -40,6 +40,7 @@ ClickUp-derived content is untrusted external data. Provider authorization permi
 | Existing execution / confirmation | `src/google/tools/executor.ts`, `src/gemini/google-tool-loop.ts` |
 | Browser MCP client | `src/clickup/mcp-client.ts` |
 | Browser OAuth authority | `src/clickup/oauth/*` |
+| Settings connection / identity surface | `src/app/components/ClickUpOAuthSettings.tsx` |
 | Immutable artifact approval | `src/clickup/attachment-authority.ts` |
 | Same-live-turn ClickUp mutation replay fence | `src/clickup/mutation-replay.ts` |
 | Browser artifact transport | `src/clickup/attachment-upload.ts` |
@@ -126,6 +127,23 @@ user gesture
 ```
 
 Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The access token is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
+
+### 5.1 Account identity and Settings surface
+
+ClickUp authorization is independent from Elara's Google Workspace authorization. Elara must never infer that the Google identity used for Gmail, Drive, Calendar or other Workspace tools is also the identity used to sign into ClickUp, and it must never reuse a Google Workspace access token for ClickUp.
+
+If a customer's ClickUp account uses Google's sign-in option, account selection happens inside ClickUp's official authorization/sign-in flow. Elara does not manufacture or force a Google account chooser on ClickUp's behalf. The Settings surface explains this boundary before authorization and then displays the bounded ClickUp account metadata returned by ClickUp so the customer can verify which identity was admitted.
+
+The ClickUp Settings surface is intentionally connection-oriented rather than a second task-management client. It shows:
+
+- connected/disconnected state;
+- the admitted ClickUp account identity when available;
+- authorized Workspace names;
+- whether Elara's first-party ClickUp MCP path is active;
+- refresh, disconnect and explicit **Switch ClickUp account** actions.
+
+Switching accounts is an explicit replacement operation. The browser creates the OAuth popup synchronously under the user's Switch gesture before awaiting disconnect or Worker state, then disconnects the old local ClickUp grant and begins a new official ClickUp OAuth flow. If replacement authorization fails, Settings re-reads the current authority instead of continuing to display stale account metadata.
+
 
 Public OAuth bodies are streamed under a byte ceiling before signature verification/forwarding. Signed writes use timestamp + nonce + body and have durable replay protection. OAuth state is random, redirect-bound, short-lived and single-use. A new Connect gesture replaces older pending states and advances the connection epoch, so an older popup or already-in-flight exchange cannot later overwrite the newer authorization.
 

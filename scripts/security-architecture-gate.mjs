@@ -473,6 +473,33 @@ for (const marker of [
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp webhook vault boundary is missing: ${marker}`);
 }
 
+const clickUpWebhookExecutionStart = clickUpOAuthVault.indexOf('private async executeWebhook(');
+const clickUpWebhookExecutionEnd = clickUpWebhookExecutionStart >= 0
+  ? clickUpOAuthVault.indexOf('private async verifyRead(', clickUpWebhookExecutionStart)
+  : -1;
+if (clickUpWebhookExecutionStart < 0 || clickUpWebhookExecutionEnd < 0) {
+  fail('ClickUp webhook execution authority disappeared');
+}
+const clickUpWebhookExecution = clickUpOAuthVault.slice(clickUpWebhookExecutionStart, clickUpWebhookExecutionEnd);
+const clickUpWebhookTransactionStart = clickUpWebhookExecution.indexOf('const accepted = this.ctx.storage.transactionSync(() => {');
+const clickUpWebhookTransactionEnd = clickUpWebhookTransactionStart >= 0
+  ? clickUpWebhookExecution.indexOf('if (!accepted)', clickUpWebhookTransactionStart)
+  : -1;
+if (clickUpWebhookTransactionStart < 0 || clickUpWebhookTransactionEnd < 0) {
+  fail('ClickUp webhook dedupe/index transaction boundary disappeared');
+}
+for (const marker of [
+  'INSERT INTO clickup_webhook_deliveries',
+  'tombstoneClickUpTask',
+  'clearClickUpTaskTombstone',
+  'markClickUpWorkspaceTaskIndexStale',
+]) {
+  const position = clickUpWebhookExecution.indexOf(marker, clickUpWebhookTransactionStart);
+  if (position < clickUpWebhookTransactionStart || position >= clickUpWebhookTransactionEnd) {
+    fail(`ClickUp webhook delivery dedupe and index effect must remain atomic: ${marker}`);
+  }
+}
+
 for (const marker of [
   'clickup_task_index',
   'clickup_task_index_state',

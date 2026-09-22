@@ -575,6 +575,11 @@ describe('ClickUp Workspace-scoped resource authority', () => {
           headers: { 'content-type': 'application/json' },
         });
       }
+      if (url.pathname === '/api/v2/team/111/space' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          spaces: [{ id: '1111', name: 'A Space' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
       if (url.pathname === '/api/v2/task/task-b' && request.method === 'GET') {
         bTaskReads += 1;
         return new Response(JSON.stringify({

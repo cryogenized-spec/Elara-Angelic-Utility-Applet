@@ -1,7 +1,7 @@
 ---
 id: SYS-CLICKUP
 status: active
-verified_commit: de8078a4d5ade53809c57b479d02eb4dded73df4
+verified_commit: 6f71fb5f9bf9cbb06987a43648d132e3a07909ba
 scope: first-party ClickUp REST, OAuth, MCP, indexed search and artifact contracts
 paths: [src/clickup, worker/src/clickup]
 keywords: [clickup, mcp, oauth, task, comment, assignee, custom-field, attachment, webhook]
@@ -264,7 +264,7 @@ Current documented rate limits are per token:
 
 Elara learns `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` instead of hard-coding 100.
 
-Within one provider window, concurrent/late responses may only merge remaining downward, and a response from an older reset window is ignored after a newer window is established. A small reset-horizon change is treated as same-window jitter and cannot replenish the local budget. A genuine minute-scale reset advance can establish the new provider budget. When the stored reset expires, the vault opens a provisional next-minute budget in place and consumes the current reservation atomically instead of deleting rate state; if the previous limit is unknown, only one request is admitted until fresh provider headers arrive. When the known current window is exhausted, the vault rejects the next provider call locally with 429 and the reset time.
+Within one provider window, concurrent/late responses may only merge remaining downward, and a response from an older reset window is ignored after a newer window is established. A small reset-horizon change is treated as same-window jitter and cannot replenish the local budget. A genuine minute-scale reset advance may update the reset horizon and future limit, but it may not raise immediately available local quota because other provider calls can already hold reservations. When the stored reset expires, the vault opens a provisional next-minute budget in place and consumes the current reservation atomically instead of deleting rate state; if the previous limit is unknown, only one request is admitted until fresh provider headers arrive. OAuth credential replacement commits the already-known merged `/user` + `/team` rate snapshot in the same transaction as the new grant, and OAuth-time webhook registration reserves from that same budget before egress. When the known current window is exhausted, the vault rejects the next provider call locally with 429 and the reset time.
 
 Writes are not blindly replayed after ambiguous network failure because the reviewed ClickUp write endpoints do not expose a general idempotency key.
 

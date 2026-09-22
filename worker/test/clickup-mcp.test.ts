@@ -491,6 +491,84 @@ describe('ClickUp MCP Worker boundary', () => {
     expect(commentCalls).toBe(1);
   });
 
+  it('caps malformed comment-page amplification and returns a continuation cursor', async () => {
+    let commentCalls = 0;
+    const resetAt = Math.floor(Date.now() / 1000) + 600;
+    const providerHeaders = {
+      'content-type': 'application/json',
+      'X-RateLimit-Limit': '100',
+      'X-RateLimit-Remaining': '90',
+      'X-RateLimit-Reset': String(resetAt),
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const providerRequest = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(providerRequest.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'pagination-bound-token' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), {
+          status: 200,
+          headers: providerHeaders,
+        });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace A', members: [] }] }), {
+          status: 200,
+          headers: providerHeaders,
+        });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && providerRequest.method === 'POST') {
+        return new Response(JSON.stringify({ webhook: { id: 'pagination-webhook', secret: 'pagination-secret' } }), {
+          status: 200,
+          headers: providerHeaders,
+        });
+      }
+      if (url.pathname === '/api/v2/task/task-a' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: 'task-a',
+          name: 'Task A',
+          team_id: '999',
+          list: { id: '123' },
+          space: { id: '789' },
+        }), { status: 200, headers: providerHeaders });
+      }
+      if (url.pathname === '/api/v2/task/task-a/comment' && providerRequest.method === 'GET') {
+        commentCalls += 1;
+        const comments = Array.from({ length: 25 }, (_, index) => (
+          index === 0
+            ? {
+                id: String(2000 + commentCalls),
+                comment_text: `Valid comment ${commentCalls}`,
+                date: 1_790_000_000_000 + commentCalls,
+              }
+            : { comment_text: 'malformed provider row without an id' }
+        ));
+        return new Response(JSON.stringify({ comments }), { status: 200, headers: providerHeaders });
+      }
+
+      throw new Error(`Unexpected provider request: ${providerRequest.method} ${providerRequest.url}`);
+    });
+
+    const revision = await connectClickUp();
+    const response = await request('tools/call', {
+      name: 'clickup.getTaskComments',
+      arguments: { workspaceId: '999', taskId: 'task-a', limit: 50 },
+    }, 'clickup.getTaskComments', {
+      [CLICKUP_GRANT_REVISION_HEADER]: String(revision),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await jsonRecord(response);
+    const result = record(record(body.result).structuredContent);
+    expect(result.comments).toHaveLength(4);
+    expect(typeof result.nextCursor).toBe('string');
+    expect(String(result.nextCursor)).toContain('.');
+    expect(commentCalls).toBe(4);
+  });
+
   it('rejects subtask creation when the approved parent belongs to a different List', async () => {
     let createCalls = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

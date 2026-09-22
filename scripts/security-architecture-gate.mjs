@@ -752,6 +752,8 @@ for (const marker of [
 for (const marker of [
   'this.oauthEnv.CLICKUP_PERSONAL_TOKEN',
   "!accessToken.startsWith('pk_')",
+  "UPDATE clickup_connection_epoch SET epoch = ?",
+  "DELETE FROM clickup_oauth_states",
   'return this.installCredential(request, accessToken, connectionEpoch, previousAccessToken, now)',
 ]) {
   if (!personalTokenBody.includes(marker)) fail(`ClickUp personal-token Worker boundary is missing: ${marker}`);

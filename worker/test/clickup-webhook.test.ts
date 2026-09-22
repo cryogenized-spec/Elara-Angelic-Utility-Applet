@@ -339,6 +339,84 @@ describe('ClickUp signed webhook cache invalidation', () => {
     ]);
   });
 
+  it('does not let a slow old disconnect delete a reconnect that completes during webhook cleanup', async () => {
+    let oldDeleteStarted = false;
+    let oldDeleteCalls = 0;
+    let newWebhookCreates = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      const auth = request.headers.get('Authorization') ?? '';
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        const body = await request.clone().json() as { code?: string };
+        return new Response(JSON.stringify({
+          access_token: body.code === 'grant-b' ? 'token-b' : 'token-a',
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/user') {
+        const isB = auth.endsWith('token-b');
+        return new Response(JSON.stringify({
+          user: { id: isB ? 456 : 183, username: isB ? 'Replacement' : 'Original' },
+        }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({
+          teams: [{ id: '999', name: 'Neon Sales', members: [] }],
+        }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && request.method === 'POST') {
+        const isB = auth.endsWith('token-b');
+        if (isB) newWebhookCreates += 1;
+        return new Response(JSON.stringify({
+          webhook: {
+            id: isB ? 'webhook-b' : 'webhook-a',
+            secret: isB ? 'secret-b' : WEBHOOK_SECRET,
+          },
+        }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/webhook/webhook-a' && request.method === 'DELETE') {
+        oldDeleteCalls += 1;
+        oldDeleteStarted = true;
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        return new Response('{}', { status: 200 });
+      }
+      if (url.pathname === '/api/v2/webhook/webhook-b' && request.method === 'DELETE') {
+        return new Response('{}', { status: 200 });
+      }
+
+      throw new Error(`Unexpected provider request: ${request.method} ${request.url}`);
+    });
+
+    expect((await connectThroughPublicWorker('grant-a')).status).toBe(200);
+    expect((await credentialSnapshot())?.userId).toBe('183');
+    expect(await webhookSnapshot()).toEqual([
+      expect.objectContaining({ webhookId: 'webhook-a', workspaceId: '999' }),
+    ]);
+
+    const pendingDisconnect = SELF.fetch(await signedWrite('/clickup/oauth/disconnect', '{}'));
+    for (let attempt = 0; attempt < 100 && !oldDeleteStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(oldDeleteStarted).toBe(true);
+
+    expect((await connectThroughPublicWorker('grant-b')).status).toBe(200);
+    expect((await credentialSnapshot())?.userId).toBe('456');
+    expect(await webhookSnapshot()).toEqual([
+      expect.objectContaining({ webhookId: 'webhook-b', workspaceId: '999' }),
+    ]);
+
+    const disconnected = await pendingDisconnect;
+    expect(disconnected.status).toBe(200);
+    expect(oldDeleteCalls).toBe(1);
+    expect(newWebhookCreates).toBe(1);
+    expect((await credentialSnapshot())?.userId).toBe('456');
+    expect(await webhookSnapshot()).toEqual([
+      expect.objectContaining({ webhookId: 'webhook-b', workspaceId: '999' }),
+    ]);
+  });
+
   it('cleans up a webhook created by a superseded exchange after disconnect', async () => {
     let webhookCreateStarted = false;
     let deleteCalls = 0;

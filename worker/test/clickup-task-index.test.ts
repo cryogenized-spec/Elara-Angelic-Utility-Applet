@@ -488,6 +488,180 @@ describe('ClickUp durable task index', () => {
     expect((await indexSnapshot()).indexedTasks).toBe(1);
   });
 
+  it('keeps the completed live index searchable until a >500-task full reconciliation atomically commits', async () => {
+    let mode: 'initial' | 'reconcile' = 'initial';
+    const providerPages: Array<{ mode: string; page: number }> = [];
+
+    const pageTasks = (prefix: string, page: number, count: number, includeLegacyNeedle = false) =>
+      Array.from({ length: count }, (_, index) => {
+        const ordinal = page * 100 + index;
+        return {
+          id: includeLegacyNeedle && page === 5 && index === 50 ? 'legacy-needle-task' : `${prefix}-${ordinal}`,
+          name: includeLegacyNeedle && page === 5 && index === 50 ? 'Legacy needle retained until swap' : `${prefix} task ${ordinal}`,
+          date_updated: String(1_790_000_000_000 + ordinal),
+          status: { status: 'open' },
+        };
+      });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/task') {
+        expect(url.searchParams.has('date_updated_gt')).toBe(false);
+        const page = Number(url.searchParams.get('page') ?? '0');
+        providerPages.push({ mode, page });
+        if (page < 6) {
+          return new Response(JSON.stringify({
+            tasks: pageTasks(mode === 'initial' ? 'old' : 'new', page, 100, mode === 'initial'),
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({
+          tasks: pageTasks(mode === 'initial' ? 'old' : 'new', page, 1, mode === 'initial'),
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.url}`);
+    });
+
+    await connect();
+
+    // Cold warm-up is deliberately bounded to five pages per call.
+    const firstWarm = await search({ workspaceId: '999', query: 'legacy needle' });
+    expect(firstWarm.status).toBe(200);
+    expect((await taskSearchPayload(firstWarm)).result.tasks).toEqual([]);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      fullSyncComplete: false,
+      indexedTasks: 500,
+      nextPage: 5,
+    }));
+
+    const completedWarm = await search({ workspaceId: '999', query: 'legacy needle' });
+    expect(completedWarm.status).toBe(200);
+    expect((await taskSearchPayload(completedWarm)).result.tasks).toEqual([
+      expect.objectContaining({ id: 'legacy-needle-task' }),
+    ]);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      fullSyncComplete: true,
+      indexedTasks: 601,
+    }));
+
+    mode = 'reconcile';
+    await forceIndexedAt(Date.now() - (7 * 60 * 60_000));
+    await forceRefreshAt(0);
+
+    // The first reconciliation pass stages only pages 0-4. The old completed
+    // live snapshot must remain searchable until the full provider walk ends.
+    const staged = await search({ workspaceId: '999', query: 'legacy needle' });
+    expect(staged.status).toBe(200);
+    const stagedBody = await taskSearchPayload(staged);
+    expect(stagedBody.result.tasks).toEqual([
+      expect.objectContaining({ id: 'legacy-needle-task' }),
+    ]);
+    expect(stagedBody.result.index).toEqual(expect.objectContaining({
+      indexedTasks: 601,
+      fullSyncComplete: true,
+      refreshIncomplete: true,
+    }));
+    expect(providerPages.slice(-5)).toEqual([
+      { mode: 'reconcile', page: 0 },
+      { mode: 'reconcile', page: 1 },
+      { mode: 'reconcile', page: 2 },
+      { mode: 'reconcile', page: 3 },
+      { mode: 'reconcile', page: 4 },
+    ]);
+
+    // Continuation finishes pages 5-6 and atomically swaps the new snapshot.
+    const committed = await search({ workspaceId: '999', query: 'legacy needle' });
+    expect(committed.status).toBe(200);
+    expect((await taskSearchPayload(committed)).result.tasks).toEqual([]);
+    expect(providerPages.slice(-2)).toEqual([
+      { mode: 'reconcile', page: 5 },
+      { mode: 'reconcile', page: 6 },
+    ]);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      fullSyncComplete: true,
+      indexedTasks: 601,
+    }));
+  });
+
+  it('keeps the previous complete snapshot after a mid-reconciliation provider failure', async () => {
+    let reconcile = false;
+    let failPageOne = true;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/task') {
+        const page = Number(url.searchParams.get('page') ?? '0');
+        if (!reconcile) {
+          return new Response(JSON.stringify({
+            tasks: [{ id: 'stable-live-task', name: 'Stable live needle', date_updated: '1790000000000', status: { status: 'open' } }],
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (page === 0) {
+          return new Response(JSON.stringify({
+            tasks: Array.from({ length: 100 }, (_, index) => ({
+              id: `replacement-${index}`,
+              name: `Replacement ${index}`,
+              date_updated: String(1_790_000_100_000 + index),
+              status: { status: 'open' },
+            })),
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (page === 1 && failPageOne) {
+          return new Response(JSON.stringify({ err: 'provider failed during reconciliation' }), {
+            status: 500,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        return new Response(JSON.stringify({
+          tasks: [{ id: 'replacement-final', name: 'Replacement final', date_updated: '1790000200000', status: { status: 'open' } }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.url}`);
+    });
+
+    await connect();
+    const warm = await search({ workspaceId: '999', query: 'stable live needle' });
+    expect(warm.status).toBe(200);
+    expect((await taskSearchPayload(warm)).result.tasks).toEqual([
+      expect.objectContaining({ id: 'stable-live-task' }),
+    ]);
+    expect((await indexSnapshot()).indexedTasks).toBe(1);
+
+    reconcile = true;
+    await forceIndexedAt(Date.now() - (7 * 60 * 60_000));
+    await forceRefreshAt(0);
+
+    const interrupted = await search({ workspaceId: '999', query: 'stable live needle' });
+    expect(interrupted.status).toBe(200);
+    const interruptedBody = await taskSearchPayload(interrupted);
+    expect(interruptedBody.result.tasks).toEqual([
+      expect.objectContaining({ id: 'stable-live-task' }),
+    ]);
+    expect(interruptedBody.result.index).toEqual(expect.objectContaining({
+      indexedTasks: 1,
+      fullSyncComplete: true,
+      refreshIncomplete: true,
+      refreshError: expect.objectContaining({ code: 'provider' }),
+    }));
+    expect((await indexSnapshot()).indexedTasks).toBe(1);
+
+    failPageOne = false;
+    const recovered = await search({ workspaceId: '999', query: 'stable live needle' });
+    expect(recovered.status).toBe(200);
+    expect((await taskSearchPayload(recovered)).result.tasks).toEqual([]);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      fullSyncComplete: true,
+      indexedTasks: 101,
+    }));
+  });
+
   it('rejects search for a Workspace outside the OAuth grant before provider egress', async () => {
     let taskCalls = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

@@ -455,6 +455,7 @@ export class ClickUpOAuthVault extends DurableObject {
 
       if (url.pathname === '/clickup/oauth/start') return await this.start(request, body);
       if (url.pathname === '/clickup/oauth/exchange') return await this.exchange(request, body);
+      if (url.pathname === '/clickup/oauth/personal-token') return await this.connectPersonalToken(request, body);
       if (url.pathname === '/clickup/oauth/disconnect') return await this.disconnect(body);
       return json({ code: 'not_found', message: 'Not found.' }, 404);
     } catch (error) {
@@ -2050,9 +2051,20 @@ export class ClickUpOAuthVault extends DurableObject {
     };
   }
 
+  private connectionMethods() {
+    return {
+      oauth: Boolean(
+        this.oauthEnv.CLICKUP_OAUTH_CLIENT_ID?.trim()
+        && this.oauthEnv.CLICKUP_OAUTH_CLIENT_SECRET?.trim()
+      ),
+      personalToken: Boolean(this.oauthEnv.CLICKUP_PERSONAL_TOKEN?.trim()),
+    };
+  }
+
   private status() {
     const context = this.authorizationContext();
-    if (!context) return { connected: false, workspaces: [] as unknown[] };
+    const connectionMethods = this.connectionMethods();
+    if (!context) return { connected: false, workspaces: [] as unknown[], connectionMethods };
     const workspaces = context.workspaces.flatMap((workspace) => {
       const id = typeof workspace.id === 'string' ? workspace.id.trim() : '';
       const name = typeof workspace.name === 'string' ? workspace.name.trim() : '';
@@ -2063,6 +2075,7 @@ export class ClickUpOAuthVault extends DurableObject {
       account: context.account,
       workspaces,
       updatedAt: context.updatedAt,
+      connectionMethods,
     };
   }
 
@@ -2245,26 +2258,57 @@ export class ClickUpOAuthVault extends DurableObject {
     // replacement authorization is fully validated. A failed reconnect must
     // leave the old credential + auxiliary webhook state intact.
     const accessToken = await exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code);
+    return this.installCredential(request, accessToken, exchangeEpoch, previousAccessToken, now);
+  }
+
+  private async connectPersonalToken(request: Request, body: string): Promise<Response> {
+    if (!emptySchema.safeParse(parseJson(body)).success) {
+      return json({ code: 'validation', message: 'ClickUp personal-token connection payload was invalid.' }, 400);
+    }
+
+    // The personal token is deployment-owned Worker secret material. It is
+    // deliberately never accepted in the browser request body.
+    const accessToken = this.oauthEnv.CLICKUP_PERSONAL_TOKEN?.trim() ?? '';
+    if (!accessToken) {
+      return json({ code: 'configuration', message: 'CLICKUP_PERSONAL_TOKEN is not configured on this Worker.' }, 503);
+    }
+    if (!accessToken.startsWith('pk_') || accessToken.length > 16_384) {
+      return json({ code: 'configuration', message: 'CLICKUP_PERSONAL_TOKEN is not a valid ClickUp personal API token.' }, 503);
+    }
+
+    const now = Date.now();
+    const connectionEpoch = this.advanceConnectionEpoch();
+    const previousAccessToken = await this.accessToken().catch(() => null);
+    return this.installCredential(request, accessToken, connectionEpoch, previousAccessToken, now);
+  }
+
+  private async installCredential(
+    request: Request,
+    accessToken: string,
+    connectionEpoch: number,
+    previousAccessToken: string | null,
+    now: number,
+  ): Promise<Response> {
     const [account, workspaces] = await Promise.all([
       fetchAuthorizedClickUpUser(accessToken),
       fetchAuthorizedClickUpWorkspaces(accessToken),
     ]);
     if (!workspaces.data.length) {
-      return json({ code: 'no_workspace', message: 'ClickUp authorized no Workspaces for this integration.' }, 409);
+      return json({ code: 'no_workspace', message: 'ClickUp returned no Workspaces for this credential.' }, 409);
     }
-    if (this.connectionEpoch() !== exchangeEpoch) {
-      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    if (this.connectionEpoch() !== connectionEpoch) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
     const encrypted = await encryptToken(this.vaultSecret(), accessToken);
-    if (this.connectionEpoch() !== exchangeEpoch) {
-      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    if (this.connectionEpoch() !== connectionEpoch) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
     const initialRateLimit = mergeRateLimits(account.rateLimit, workspaces.rateLimit);
     // Credential replacement and all grant-scoped local state move as one
     // SQLite transaction. A crash must never expose a new account alongside
     // task/index/webhook/rate state that was populated by the previous grant.
     const replacement = this.ctx.storage.transactionSync(() => {
-      if (this.connectionEpoch() !== exchangeEpoch) return null;
+      if (this.connectionEpoch() !== connectionEpoch) return null;
       const previous = this.credentialRow();
       const revision = Math.max(now, (previous?.updated_at ?? 0) + 1);
       const previousWebhookRows = this.webhookRows();
@@ -2303,26 +2347,26 @@ export class ClickUpOAuthVault extends DurableObject {
       return { revision, previousWebhookRows };
     });
     if (!replacement) {
-      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+      return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
     const { revision, previousWebhookRows } = replacement;
 
     if (previousAccessToken && previousWebhookRows.length) {
       await this.deleteProviderWebhooks(previousAccessToken, previousWebhookRows);
     }
-    if (!this.grantLifecycleCurrent(exchangeEpoch, revision)) {
-      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    if (!this.grantLifecycleCurrent(connectionEpoch, revision)) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
 
     await this.registerTaskIndexWebhooks(
       accessToken,
       workspaces.data,
       validWebhookEndpoint(request.headers.get(CLICKUP_WEBHOOK_ENDPOINT_HEADER)),
-      exchangeEpoch,
+      connectionEpoch,
       revision,
     );
-    if (!this.grantLifecycleCurrent(exchangeEpoch, revision)) {
-      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    if (!this.grantLifecycleCurrent(connectionEpoch, revision)) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
 
     return json(this.status());

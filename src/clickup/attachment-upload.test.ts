@@ -240,6 +240,48 @@ describe('ClickUp browser artifact upload', () => {
     });
   });
 
+  it('fails closed if pairing changes while the approved artifact is being revalidated', async () => {
+    const approvedRecord = {
+      id: 'artifact-1',
+      artifactType: 'attachment' as const,
+      kind: 'text' as const,
+      provenance: 'user_upload' as const,
+      status: 'ready' as const,
+      name: 'repair.txt',
+      mimeType: 'text/plain',
+      size: 8,
+      createdAt: 1,
+      data: new Blob(['approved'], { type: 'text/plain' }),
+    };
+
+    artifactGet
+      .mockResolvedValueOnce(approvedRecord)
+      .mockImplementationOnce(async () => {
+        loadPairing.mockReturnValue({
+          workerUrl: 'https://replacement.example',
+          installationId: 'replacement-installation',
+        });
+        return approvedRecord;
+      });
+
+    const args = { workspaceId: '999', taskId: '86task', artifactId: 'artifact-1' };
+    const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(uploadClickUpArtifact(
+      args,
+      undefined,
+      { revision: 123, authorityBinding: 'https://worker.example#test-installation' },
+      approvedArtifact,
+    )).rejects.toMatchObject({
+      code: 'grant_changed',
+      status: 409,
+    });
+
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('uploads the immutable approved Blob rather than a second mutable repository read', async () => {
     const approvedArtifactRecord = {
       id: 'artifact-1',

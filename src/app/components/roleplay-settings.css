@@ -120,3 +120,91 @@
     grid-column:auto;
   }
 }
+
+/* Pass 3: substantial reviews grow into a viewport-aware review sheet.
+   Heading/actions remain outside the scrolling review surface. */
+.google-confirmation-item__review-text{
+  display:block;
+  white-space:pre-wrap;
+  overflow-wrap:anywhere;
+  max-height:min(56dvh,560px);
+  overflow:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+.google-confirmation-item__attachment{
+  display:grid!important;
+  gap:3px;
+  padding:10px 11px;
+  border:1px solid rgba(110,168,255,.14);
+  border-radius:10px;
+  background:rgba(110,168,255,.035);
+}
+.google-confirmation-item__attachment-name{
+  color:var(--text)!important;
+  font-size:11px!important;
+  line-height:1.35!important;
+  overflow-wrap:anywhere;
+}
+.google-confirmation-item__attachment-meta,
+.google-confirmation-item__attachment-upload-name{
+  color:var(--muted)!important;
+  font-size:9px!important;
+  line-height:1.45!important;
+  overflow-wrap:anywhere;
+}
+.google-confirmation-item__preview-note{
+  display:block;
+  color:rgba(247,248,255,.5)!important;
+  font-size:8px!important;
+  line-height:1.45!important;
+}
+.roleplay-confirmation--expanded{
+  top:50%;
+  bottom:auto;
+  width:min(860px,calc(100vw - 28px));
+  height:min(88dvh,820px);
+  max-height:calc(100dvh - 28px);
+  transform:translate(-50%,-50%);
+  display:grid;
+  grid-template-rows:auto minmax(0,1fr) auto;
+}
+.roleplay-confirmation--expanded .google-confirmation-list{
+  min-height:0;
+  max-height:none;
+  overflow:auto;
+  overscroll-behavior:contain;
+  scrollbar-gutter:stable;
+}
+.roleplay-confirmation--expanded[data-confirmation-count="1"] .google-confirmation-list{
+  overflow:hidden;
+}
+.roleplay-confirmation--expanded[data-confirmation-count="1"] .google-confirmation-item{
+  height:100%;
+  min-height:0;
+  overflow:hidden;
+}
+.roleplay-confirmation--expanded[data-confirmation-count="1"] .google-confirmation-item__body{
+  min-height:0;
+  display:flex;
+  flex-direction:column;
+}
+.roleplay-confirmation--expanded[data-confirmation-count="1"] .google-confirmation-item__review{
+  min-height:0;
+  flex:1 1 auto;
+  grid-template-rows:auto minmax(0,1fr) auto;
+}
+.roleplay-confirmation--expanded[data-confirmation-count="1"] .google-confirmation-item__review-text{
+  min-height:0;
+  max-height:none;
+}
+@media(max-width:420px){
+  .roleplay-confirmation--expanded{
+    top:calc(8px + env(safe-area-inset-top));
+    bottom:calc(8px + env(safe-area-inset-bottom));
+    width:calc(100vw - 16px);
+    height:auto;
+    max-height:none;
+    transform:translateX(-50%);
+  }
+}

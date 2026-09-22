@@ -99,10 +99,24 @@ describe('Gmail Pass 3 tool parity', () => {
     expect(confirmationRequestForCall({ tool: 'gmail.deleteLabel', arguments: { labelId: 'Label_1' } }, new Date('2026-09-17T12:00:00Z'))?.resourceSummary).toContain('messages themselves are not deleted');
   });
 
-  it('exposes the entire send/reply body through reviewText before approval', () => {
+  it('exposes recipients, Cc, subject and the entire body through an unambiguous review before approval', () => {
     const body = 'First line\nSecond line\nThird line';
-    expect(confirmationRequestForCall({ tool: 'gmail.sendMessage', arguments: { to: ['bob@example.com'], subject: 'Hello', body } }, new Date('2026-09-17T12:00:00Z'))).toMatchObject({ risk: 'send', reviewText: body });
-    expect(confirmationRequestForCall({ tool: 'gmail.replyMessage', arguments: { threadId: 't1', to: 'bob@example.com', subject: 'Re: Hello', body, inReplyTo: '<m1@example.com>' } }, new Date('2026-09-17T12:00:00Z'))).toMatchObject({ risk: 'send', reviewText: body });
+    const send = confirmationRequestForCall({
+      tool: 'gmail.sendMessage',
+      arguments: { to: ['bob@example.com'], cc: ['carol@example.com'], subject: 'Hello', body },
+    }, new Date('2026-09-17T12:00:00Z'));
+    const reply = confirmationRequestForCall({
+      tool: 'gmail.replyMessage',
+      arguments: { threadId: 't1', to: 'bob@example.com', subject: 'Re: Hello', body, inReplyTo: '<m1@example.com>' },
+    }, new Date('2026-09-17T12:00:00Z'));
+
+    expect(send?.risk).toBe('send');
+    expect(send?.reviewText).toContain('To:\n  Item 1: “bob@example.com”');
+    expect(send?.reviewText).toContain('Cc:\n  Item 1: “carol@example.com”');
+    expect(send?.reviewText).toContain('Subject: “Hello”');
+    expect(send?.reviewText).toContain('Body:\n  │ First line\n  │ Second line\n  │ Third line');
+    expect(reply?.reviewText).toContain('Body:\n  │ First line\n  │ Second line\n  │ Third line');
+    expect(reply?.reviewText).not.toContain('<m1@example.com>');
   });
 
   it('blocks invalid Gmail shapes before capability/confirmation/handler execution', async () => {

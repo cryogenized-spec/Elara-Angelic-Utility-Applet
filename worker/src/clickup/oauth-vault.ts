@@ -1060,7 +1060,7 @@ export class ClickUpOAuthVault extends DurableObject {
         const invalidatedBeforeCommit = await restartIfInvalidated();
         if (invalidatedBeforeCommit) return invalidatedBeforeCommit;
         if (!commitClickUpFullReconcileStage(
-          this.ctx.storage.sql,
+          this.ctx.storage,
           args.workspaceId,
           refreshGeneration,
           now,

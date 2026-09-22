@@ -463,6 +463,10 @@ describe('ClickUpOAuthVault', () => {
       throw new Error(`Unexpected ClickUp personal-token request: ${request.method} ${request.url}`);
     });
 
+    const methods = await doFetch(await bearerRead('/clickup/oauth/methods'));
+    expect(methods.status).toBe(200);
+    expect(await methods.json()).toEqual({ oauth: true, personalToken: true });
+
     const response = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}'));
     expect(response.status).toBe(200);
     const body = await response.json() as Record<string, unknown>;
@@ -470,7 +474,6 @@ describe('ClickUpOAuthVault', () => {
       connected: true,
       account: { id: '183', username: 'Gareth', email: 'gareth@example.com' },
       workspaces: [{ id: '999', name: 'Neon Sales' }],
-      connectionMethods: { oauth: true, personalToken: true },
     }));
     expect(JSON.stringify(body)).not.toContain(PERSONAL_TOKEN);
     expect(userCalls).toBe(1);
@@ -825,7 +828,6 @@ describe('ClickUpOAuthVault', () => {
     expect(await status.json()).toEqual({
       connected: false,
       workspaces: [],
-      connectionMethods: { oauth: true, personalToken: true },
     });
   });
 

@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const oauthMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
+  connectPersonalToken: vi.fn(),
   disconnect: vi.fn(),
 }));
 
@@ -16,6 +17,7 @@ const popupMocks = vi.hoisted(() => ({
 vi.mock('../../clickup/oauth/authority', () => ({
   clickUpOAuthAuthority: {
     getStatus: oauthMocks.getStatus,
+    connectPersonalToken: oauthMocks.connectPersonalToken,
     disconnect: oauthMocks.disconnect,
   },
 }));
@@ -32,6 +34,7 @@ import { ClickUpOAuthSettings } from './ClickUpOAuthSettings';
 
 const getStatusMock = oauthMocks.getStatus;
 const connectMock = popupMocks.connect;
+const personalTokenMock = oauthMocks.connectPersonalToken;
 const switchMock = popupMocks.switchAccount;
 
 const CONNECTED: ClickUpOAuthStatus = {
@@ -65,6 +68,7 @@ describe('ClickUpOAuthSettings', () => {
     root = createRoot(container);
     getStatusMock.mockResolvedValue(CONNECTED);
     connectMock.mockResolvedValue(CONNECTED);
+    personalTokenMock.mockResolvedValue(CONNECTED);
     switchMock.mockResolvedValue(CONNECTED);
   });
 
@@ -120,5 +124,37 @@ describe('ClickUpOAuthSettings', () => {
       await Promise.resolve();
     });
     expect(connectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a Worker-configured personal API token without opening ClickUp OAuth', async () => {
+    const tokenReady: ClickUpOAuthStatus = {
+      connected: false,
+      workspaces: [],
+      connectionMethods: { oauth: false, personalToken: true },
+    };
+    const connected: ClickUpOAuthStatus = {
+      ...CONNECTED,
+      connectionMethods: { oauth: false, personalToken: true },
+    };
+    getStatusMock.mockResolvedValueOnce(tokenReady);
+    personalTokenMock.mockResolvedValueOnce(connected);
+
+    await renderSettings();
+
+    expect(button('Use configured API token')).toBeTruthy();
+    expect(container.textContent).toContain('without exposing the token to this browser');
+    expect(container.textContent).not.toContain('Continue to ClickUp');
+
+    await act(async () => {
+      button('Use configured API token').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(personalTokenMock).toHaveBeenCalledTimes(1);
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('company@example.com');
+    expect(container.textContent).not.toContain('Switch ClickUp account');
+    expect(button('Reload configured API token')).toBeTruthy();
   });
 });

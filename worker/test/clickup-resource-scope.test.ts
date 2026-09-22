@@ -238,7 +238,13 @@ function providerFixture(): ProviderCounters {
 
     if (url.pathname === '/api/v2/list/1112/field' && request.method === 'GET') {
       counters.resourceReads += 1;
-      return new Response(JSON.stringify({ fields: [{ id: 'field-a', name: 'A Field' }] }), {
+      return new Response(JSON.stringify({
+        fields: [
+          { id: 'field-a', name: 'A Field' },
+          { id: 'people-field', name: 'People Field', type: 'users' },
+          { id: 'relationship-field', name: 'Relationship Field', type: 'tasks' },
+        ],
+      }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -284,6 +290,14 @@ function providerFixture(): ProviderCounters {
       return new Response(JSON.stringify({ id: 2 }), { status: 200 });
     }
     if (url.pathname === '/api/v2/task/task-a/field/field-a' && request.method === 'POST') {
+      counters.setField += 1;
+      return new Response('{}', { status: 200 });
+    }
+    if (
+      (url.pathname === '/api/v2/task/task-a/field/people-field'
+        || url.pathname === '/api/v2/task/task-a/field/relationship-field')
+      && request.method === 'POST'
+    ) {
       counters.setField += 1;
       return new Response('{}', { status: 200 });
     }
@@ -453,6 +467,41 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     expect(counters.setField).toBe(0);
     expect(counters.replyComment).toBe(0);
     expect(counters.attachment).toBe(0);
+  });
+
+  it('binds People and Task-relationship Custom Field references to the admitted Workspace', async () => {
+    const counters = providerFixture();
+    await connect();
+
+    const foreignUser = await internalCommand({
+      operation: 'setCustomField',
+      workspaceId: '111',
+      taskId: 'task-a',
+      fieldId: 'people-field',
+      value: { add: ['9999'], rem: [] },
+    });
+    expect(foreignUser.status).toBe(403);
+    expect(await responseBody(foreignUser)).toEqual(expect.objectContaining({
+      code: 'resource_workspace_mismatch',
+    }));
+
+    const foreignTask = await internalCommand({
+      operation: 'setCustomField',
+      workspaceId: '111',
+      taskId: 'task-a',
+      fieldId: 'relationship-field',
+      value: { add: ['task-b'], rem: [] },
+    });
+    expect(foreignTask.status).toBe(403);
+    const foreignTaskBody = await responseBody(foreignTask);
+    expect(foreignTaskBody).toEqual(expect.objectContaining({
+      code: 'resource_workspace_mismatch',
+    }));
+    expect(JSON.stringify(foreignTaskBody)).not.toContain('SECRET_B');
+
+    // Neither hostile embedded reference is allowed to reach ClickUp's field
+    // mutation endpoint even though the provider token can resolve Workspace B.
+    expect(counters.setField).toBe(0);
   });
 
   it.each([

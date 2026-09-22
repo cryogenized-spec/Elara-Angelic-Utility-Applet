@@ -396,6 +396,7 @@ for (const marker of [
   'signWrite',
   "'/clickup/oauth/start'",
   "'/clickup/oauth/exchange'",
+  "'/clickup/oauth/personal-token'",
   "'/clickup/oauth/disconnect'",
   'MAX_WORKER_RESPONSE_BYTES',
   'readBoundedWorkerJson',
@@ -700,6 +701,8 @@ for (const marker of [
   "const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'",
   "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",
   "headers.set('Authorization'",
+  'clickUpAuthorizationValue',
+  "token.startsWith('pk_') ? token : `Bearer ${token}`",
   'MAX_PROVIDER_BODY_BYTES',
   "const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;",
   'controller.abort()',
@@ -725,12 +728,40 @@ for (const marker of [
 }
 
 const exchangeStart = clickUpOAuthVault.indexOf('private async exchange(request: Request, body: string)');
-const exchangeEnd = exchangeStart >= 0 ? clickUpOAuthVault.indexOf('private async disconnect(body: string)', exchangeStart) : -1;
-if (exchangeStart < 0 || exchangeEnd < 0) fail('ClickUp OAuth exchange authority disappeared');
-const exchangeBody = clickUpOAuthVault.slice(exchangeStart, exchangeEnd);
-const replacementTransactionStart = exchangeBody.indexOf('const replacement = this.ctx.storage.transactionSync(() => {');
+const personalTokenStart = exchangeStart >= 0
+  ? clickUpOAuthVault.indexOf('private async connectPersonalToken(request: Request, body: string)', exchangeStart)
+  : -1;
+const installCredentialStart = personalTokenStart >= 0
+  ? clickUpOAuthVault.indexOf('private async installCredential(', personalTokenStart)
+  : -1;
+const disconnectStartForInstall = installCredentialStart >= 0
+  ? clickUpOAuthVault.indexOf('private async disconnect(body: string)', installCredentialStart)
+  : -1;
+if (exchangeStart < 0 || personalTokenStart < 0 || installCredentialStart < 0 || disconnectStartForInstall < 0) {
+  fail('ClickUp credential connection authorities disappeared');
+}
+const exchangeBody = clickUpOAuthVault.slice(exchangeStart, personalTokenStart);
+const personalTokenBody = clickUpOAuthVault.slice(personalTokenStart, installCredentialStart);
+const installCredentialBody = clickUpOAuthVault.slice(installCredentialStart, disconnectStartForInstall);
+for (const marker of [
+  'exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code)',
+  'return this.installCredential(request, accessToken, exchangeEpoch, previousAccessToken, now)',
+]) {
+  if (!exchangeBody.includes(marker)) fail(`ClickUp OAuth exchange path lost shared credential installation: ${marker}`);
+}
+for (const marker of [
+  'this.oauthEnv.CLICKUP_PERSONAL_TOKEN',
+  "!accessToken.startsWith('pk_')",
+  'return this.installCredential(request, accessToken, connectionEpoch, previousAccessToken, now)',
+]) {
+  if (!personalTokenBody.includes(marker)) fail(`ClickUp personal-token Worker boundary is missing: ${marker}`);
+}
+if (/parsed\.data\.(?:token|apiKey|api_key)/.test(personalTokenBody)) {
+  fail('ClickUp personal token must never be accepted from the browser request body');
+}
+const replacementTransactionStart = installCredentialBody.indexOf('const replacement = this.ctx.storage.transactionSync(() => {');
 const replacementTransactionEnd = replacementTransactionStart >= 0
-  ? exchangeBody.indexOf('if (!replacement)', replacementTransactionStart)
+  ? installCredentialBody.indexOf('if (!replacement)', replacementTransactionStart)
   : -1;
 if (replacementTransactionStart < 0 || replacementTransactionEnd < 0) {
   fail('ClickUp grant replacement transaction boundary disappeared');
@@ -742,7 +773,7 @@ for (const marker of [
   "DELETE FROM clickup_rate_limit",
   'clearClickUpTaskIndex',
 ]) {
-  const position = exchangeBody.indexOf(marker, replacementTransactionStart);
+  const position = installCredentialBody.indexOf(marker, replacementTransactionStart);
   if (position < replacementTransactionStart || position >= replacementTransactionEnd) {
     fail(`ClickUp replacement grant and grant-scoped local state must remain atomic: ${marker}`);
   }

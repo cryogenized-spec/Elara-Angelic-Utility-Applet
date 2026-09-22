@@ -500,7 +500,18 @@ export class ClickUpOAuthVault extends DurableObject {
     const nowSeconds = Math.floor(now / 1000);
     return this.ctx.storage.transactionSync(() => {
       const row = this.rateLimitRow();
-      if (!row) return { blocked: false };
+      if (!row) {
+        // Unknown provider budget is not unlimited budget. Admit one probe and
+        // install a provisional local gate before egress so concurrent callers
+        // cannot stampede ClickUp while Elara is still waiting for the first
+        // usable rate-limit headers.
+        this.ctx.storage.sql.exec(
+          'INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at) VALUES (1, NULL, 0, ?, ?)',
+          nowSeconds + RATE_WINDOW_SECONDS,
+          now,
+        );
+        return { blocked: false };
+      }
 
       if (row.reset_at !== null && row.reset_at <= nowSeconds) {
         // Open the next minute window in place instead of deleting the row.

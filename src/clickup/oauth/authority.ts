@@ -275,8 +275,12 @@ async function bearerConnectionState(pairing: AutonomyPairing): Promise<ClickUpC
   return clickUpConnectionStateSchema.parse(response.body);
 }
 
-async function ensureConnectionSettled(pairing: AutonomyPairing): Promise<void> {
+async function ensureConnectionSettled(
+  pairing: AutonomyPairing,
+  verifyWorkerState = false,
+): Promise<void> {
   const localPending = pendingConnectionForPairing(pairing);
+  if (!localPending && !verifyWorkerState) return;
   const workerState = await bearerConnectionState(pairing);
   if (workerState) {
     if (workerState.pending) {
@@ -309,8 +313,11 @@ export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
   return stored.authorityBinding === clickUpPairingAuthorityBinding(pairing) ? stored.status : null;
 }
 
-async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
-  await ensureConnectionSettled(pairing);
+async function bearerStatus(
+  pairing: AutonomyPairing,
+  verifyWorkerState = false,
+): Promise<ClickUpOAuthStatus> {
+  await ensureConnectionSettled(pairing, verifyWorkerState);
   try {
     const token = await workerToken(pairing);
     assertPairingStillCurrent(pairing);
@@ -407,7 +414,7 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
 
   async getExecutionGrant(): Promise<ClickUpExecutionGrant> {
     const pairing = activePairing();
-    const status = await bearerStatus(pairing);
+    const status = await bearerStatus(pairing, true);
     return {
       status,
       authorityBinding: clickUpPairingAuthorityBinding(pairing),

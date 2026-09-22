@@ -199,7 +199,7 @@ test('Sheets mobile flow writes formula-looking text literally unless parsing is
 
   const dialog = page.getByRole('dialog', { name: 'Elara action confirmation' });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('literal RAW input');
+  await expect(dialog).toContainText('literal text, so formulas will not be evaluated');
   await expect(dialog).toContainText('=1+2');
   expect(sheetCalls).toHaveLength(0);
   await dialog.getByRole('button', { name: '✓ Approve' }).click();

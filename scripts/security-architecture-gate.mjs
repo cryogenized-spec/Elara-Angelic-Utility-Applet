@@ -769,13 +769,15 @@ if (/parsed\.data\.(?:token|apiKey|api_key)/.test(personalTokenBody)) {
   fail('ClickUp personal token must never be accepted from the browser request body');
 }
 for (const marker of [
-  'providerCredentialSchema',
-  'encryptProviderCredential',
-  'decryptProviderCredential',
-  "return oauthClickUpCredential(plaintext)",
-  'credential: await decryptProviderCredential',
+  "credential_kind TEXT NOT NULL DEFAULT 'oauth'",
+  "PRAGMA table_info(clickup_oauth_credential)",
+  "ALTER TABLE clickup_oauth_credential ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth'",
+  'slot, access_cipher, access_iv, credential_kind, user_id',
+  'encrypted.cipher, encrypted.iv, accessToken.kind',
+  "previous.credential_kind === 'personal'",
+  "row.credential_kind === 'personal'",
 ]) {
-  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp encrypted credential-kind authority is missing: ${marker}`);
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable credential-kind authority is missing: ${marker}`);
 }
 const replacementTransactionStart = installCredentialBody.indexOf('const replacement = this.ctx.storage.transactionSync(() => {');
 const replacementTransactionEnd = replacementTransactionStart >= 0

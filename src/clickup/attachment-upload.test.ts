@@ -75,6 +75,8 @@ describe('ClickUp browser artifact upload', () => {
       filename: 'repair-note.txt',
     };
     const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
+    expect(approvedArtifact.previewText).toBe('completed');
+    expect(approvedArtifact.previewTruncated).toBeUndefined();
 
     await expect(uploadClickUpArtifact(args, undefined, {
       revision: 123,
@@ -115,6 +117,7 @@ describe('ClickUp browser artifact upload', () => {
 
     const args = { workspaceId: '999', taskId: '86task', artifactId: 'artifact-generated' };
     const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
+    expect(approvedArtifact.previewText).toBe('# Repair notes');
     await uploadClickUpArtifact(
       args,
       undefined,
@@ -122,6 +125,30 @@ describe('ClickUp browser artifact upload', () => {
       approvedArtifact,
     );
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not interpret binary attachments as text previews', async () => {
+    artifactGet.mockResolvedValue({
+      id: 'artifact-pdf',
+      artifactType: 'attachment',
+      kind: 'document',
+      provenance: 'user_upload',
+      status: 'ready',
+      name: 'essay.pdf',
+      mimeType: 'application/pdf',
+      size: 12,
+      createdAt: 1,
+      data: new Blob(['%PDF-binary'], { type: 'application/pdf' }),
+    });
+
+    const approvedArtifact = await captureClickUpArtifactApprovalSnapshot({
+      workspaceId: '999',
+      taskId: '86task',
+      artifactId: 'artifact-pdf',
+    });
+
+    expect(approvedArtifact.previewText).toBeUndefined();
+    expect(approvedArtifact.previewTruncated).toBeUndefined();
   });
 
   it('fails before network egress when the artifact is not ready', async () => {

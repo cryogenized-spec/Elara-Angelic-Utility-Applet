@@ -31,12 +31,14 @@ import {
   listClickUpFolders,
   listClickUpSpaces,
   listClickUpWorkspaceTasks,
+  oauthClickUpCredential,
   personalClickUpCredential,
   replyToClickUpComment,
   setClickUpTaskCustomField,
   updateClickUpTask,
   uploadClickUpTaskAttachment,
   type ClickUpOAuthServerEnv,
+  type ClickUpProviderCredential,
   type ClickUpProviderResult,
   type ClickUpRateLimitSnapshot,
 } from './provider';
@@ -108,6 +110,10 @@ const exchangeSchema = z.object({
 }).strict();
 
 const emptySchema = z.object({}).strict();
+const providerCredentialSchema = z.object({
+  kind: z.enum(['oauth', 'personal']),
+  token: z.string().trim().min(1).max(16_384),
+}).strict();
 const MAX_WEBHOOK_HISTORY_ITEMS = 100;
 
 const webhookPayloadSchema = z.object({
@@ -236,6 +242,29 @@ async function decryptToken(secret: string, cipher: string, iv: string): Promise
     base64UrlToBytes(cipher),
   );
   return new TextDecoder().decode(plaintext);
+}
+
+async function encryptProviderCredential(
+  secret: string,
+  credential: ClickUpProviderCredential,
+): Promise<{ cipher: string; iv: string }> {
+  return encryptToken(secret, JSON.stringify(credential));
+}
+
+async function decryptProviderCredential(
+  secret: string,
+  cipher: string,
+  iv: string,
+): Promise<ClickUpProviderCredential> {
+  const plaintext = await decryptToken(secret, cipher, iv);
+  try {
+    const parsed = providerCredentialSchema.safeParse(JSON.parse(plaintext) as unknown);
+    if (parsed.success) return parsed.data;
+  } catch {
+    // Existing releases stored raw OAuth token text. Treat only that legacy
+    // representation as OAuth; never infer personal-token mode from token bytes.
+  }
+  return oauthClickUpCredential(plaintext);
 }
 
 function parseJson(body: string): unknown {
@@ -702,7 +731,7 @@ export class ClickUpOAuthVault extends DurableObject {
   }
 
   private async providerData<T>(
-    run: (accessToken: string) => Promise<ClickUpProviderResult<T>>,
+    run: (credential: ClickUpProviderCredential) => Promise<ClickUpProviderResult<T>>,
     expectedRevision?: number,
   ): Promise<
     | { ok: true; data: T; grantRevision: number }
@@ -744,7 +773,7 @@ export class ClickUpOAuthVault extends DurableObject {
       };
     }
     try {
-      const result = await run(grant.token);
+      const result = await run(grant.credential);
       if (this.credentialRow()?.updated_at !== grant.revision) {
         return {
           ok: false,
@@ -787,7 +816,7 @@ export class ClickUpOAuthVault extends DurableObject {
   }
 
   private async runProvider<T>(
-    run: (accessToken: string) => Promise<ClickUpProviderResult<T>>,
+    run: (credential: ClickUpProviderCredential) => Promise<ClickUpProviderResult<T>>,
     expectedRevision?: number,
   ): Promise<Response> {
     const result = await this.providerData(run, expectedRevision);
@@ -1794,7 +1823,7 @@ export class ClickUpOAuthVault extends DurableObject {
     return rows;
   }
 
-  private async deleteProviderWebhooks(accessToken: string, rows: readonly WebhookRow[]): Promise<void> {
+  private async deleteProviderWebhooks(accessToken: ClickUpProviderCredential, rows: readonly WebhookRow[]): Promise<void> {
     for (const row of rows) {
       try {
         await deleteClickUpWebhook(accessToken, row.webhook_id);
@@ -1804,7 +1833,7 @@ export class ClickUpOAuthVault extends DurableObject {
     }
   }
 
-  private async clearStoredWebhooks(accessToken?: string | null): Promise<void> {
+  private async clearStoredWebhooks(accessToken?: ClickUpProviderCredential | null): Promise<void> {
     const rows = this.detachStoredWebhooks();
     if (accessToken && rows.length) await this.deleteProviderWebhooks(accessToken, rows);
   }
@@ -1813,7 +1842,7 @@ export class ClickUpOAuthVault extends DurableObject {
     return this.connectionEpoch() === epoch && this.credentialRow()?.updated_at === revision;
   }
 
-  private async cleanupCreatedWebhook(accessToken: string, webhookId: string | null): Promise<void> {
+  private async cleanupCreatedWebhook(accessToken: ClickUpProviderCredential, webhookId: string | null): Promise<void> {
     if (!webhookId) return;
     try {
       await deleteClickUpWebhook(accessToken, webhookId);
@@ -1823,7 +1852,7 @@ export class ClickUpOAuthVault extends DurableObject {
   }
 
   private async registerTaskIndexWebhooks(
-    accessToken: string,
+    accessToken: ClickUpProviderCredential,
     workspaces: readonly { id: string }[],
     endpoint: string | null,
     expectedEpoch: number,
@@ -2253,13 +2282,13 @@ export class ClickUpOAuthVault extends DurableObject {
     if (!acceptedState) return json({ code: 'oauth_state', message: 'ClickUp OAuth state is missing, expired, replayed, or does not match this redirect.' }, 409);
 
     const exchangeEpoch = this.advanceConnectionEpoch();
-    const previousAccessToken = await this.accessToken().catch(() => null);
+    const previousAccessToken = await this.accessCredential().catch(() => null);
 
     // Do not tear down the currently-valid grant's webhook state until the
     // replacement authorization is fully validated. A failed reconnect must
     // leave the old credential + auxiliary webhook state intact.
-    const accessToken = await exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code);
-    return this.installCredential(request, accessToken, exchangeEpoch, previousAccessToken, now);
+    const credential = await exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code);
+    return this.installCredential(request, credential, exchangeEpoch, previousAccessToken, now);
   }
 
   private async connectPersonalToken(request: Request, body: string): Promise<Response> {
@@ -2274,9 +2303,9 @@ export class ClickUpOAuthVault extends DurableObject {
       return json({ code: 'configuration', message: 'CLICKUP_PERSONAL_TOKEN is not configured on this Worker.' }, 503);
     }
 
-    let accessToken: string;
+    let credential: ClickUpProviderCredential;
     try {
-      accessToken = personalClickUpCredential(personalToken);
+      credential = personalClickUpCredential(personalToken);
     } catch {
       return json({ code: 'configuration', message: 'CLICKUP_PERSONAL_TOKEN is not a valid ClickUp personal API token.' }, 503);
     }
@@ -2291,15 +2320,15 @@ export class ClickUpOAuthVault extends DurableObject {
       this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
       return next;
     });
-    const previousAccessToken = await this.accessToken().catch(() => null);
-    return this.installCredential(request, accessToken, connectionEpoch, previousAccessToken, now);
+    const previousAccessToken = await this.accessCredential().catch(() => null);
+    return this.installCredential(request, credential, connectionEpoch, previousAccessToken, now);
   }
 
   private async installCredential(
     request: Request,
-    accessToken: string,
+    accessToken: ClickUpProviderCredential,
     connectionEpoch: number,
-    previousAccessToken: string | null,
+    previousAccessToken: ClickUpProviderCredential | null,
     now: number,
   ): Promise<Response> {
     const [account, workspaces] = await Promise.all([
@@ -2312,7 +2341,7 @@ export class ClickUpOAuthVault extends DurableObject {
     if (this.connectionEpoch() !== connectionEpoch) {
       return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
-    const encrypted = await encryptToken(this.vaultSecret(), accessToken);
+    const encrypted = await encryptProviderCredential(this.vaultSecret(), accessToken);
     if (this.connectionEpoch() !== connectionEpoch) {
       return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
@@ -2408,32 +2437,32 @@ export class ClickUpOAuthVault extends DurableObject {
     });
     const { previous, webhookRows } = detached;
 
-    let token: string | null = null;
+    let credential: ClickUpProviderCredential | null = null;
     if (previous) {
       try {
-        token = await decryptToken(this.vaultSecret(), previous.access_cipher, previous.access_iv);
+        credential = await decryptProviderCredential(this.vaultSecret(), previous.access_cipher, previous.access_iv);
       } catch {
-        token = null;
+        credential = null;
       }
     }
-    if (token && webhookRows.length) {
-      await this.deleteProviderWebhooks(token, webhookRows);
+    if (credential && webhookRows.length) {
+      await this.deleteProviderWebhooks(credential, webhookRows);
     }
 
     return json({ disconnected: true, providerRevoked: false });
   }
 
   /** Provider execution consumes credential material only inside this Durable Object. */
-  private async accessGrant(): Promise<{ token: string; revision: number } | null> {
+  private async accessGrant(): Promise<{ credential: ClickUpProviderCredential; revision: number } | null> {
     const row = this.credentialRow();
     if (!row) return null;
     return {
-      token: await decryptToken(this.vaultSecret(), row.access_cipher, row.access_iv),
+      credential: await decryptProviderCredential(this.vaultSecret(), row.access_cipher, row.access_iv),
       revision: row.updated_at,
     };
   }
 
-  protected async accessToken(): Promise<string | null> {
-    return (await this.accessGrant())?.token ?? null;
+  protected async accessCredential(): Promise<ClickUpProviderCredential | null> {
+    return (await this.accessGrant())?.credential ?? null;
   }
 }

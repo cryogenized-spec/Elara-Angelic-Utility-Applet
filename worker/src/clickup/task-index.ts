@@ -774,7 +774,7 @@ export function searchClickUpTaskIndex(
     // the newest 1,000 rows can otherwise hide an older matching task in a
     // large Workspace. IDs are stored as JSON strings, so quote them in the
     // LIKE pattern to avoid decimal-substring collisions (e.g. 18 vs 183).
-    clauses.push(`(${args.assigneeIds.map(() => "assignee_ids_json LIKE ? ESCAPE '\\\\'").join(' OR ')})`);
+    clauses.push(`(${args.assigneeIds.map(() => "assignee_ids_json LIKE ? ESCAPE '\\'").join(' OR ')})`);
     bindings.push(...args.assigneeIds.map((userId) => `%"${escapeLike(userId)}"%`));
   }
 

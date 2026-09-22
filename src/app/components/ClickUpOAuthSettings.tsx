@@ -16,6 +16,7 @@ export function ClickUpOAuthSettings() {
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<ClickUpBusyAction>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const busy = busyAction !== null;
 
   async function readCurrentStatus(): Promise<ClickUpOAuthStatus> {
@@ -29,6 +30,7 @@ export function ClickUpOAuthSettings() {
   async function refresh() {
     setLoading(true);
     setError(null);
+    setNotice(null);
     try {
       setStatus(await clickUpOAuthAuthority.getStatus());
     } catch (cause) {
@@ -56,6 +58,7 @@ export function ClickUpOAuthSettings() {
   async function connect() {
     setBusyAction('connect');
     setError(null);
+    setNotice(null);
     try {
       setStatus(await connectClickUpWithPopup());
     } catch (cause) {
@@ -68,12 +71,20 @@ export function ClickUpOAuthSettings() {
   async function switchAccount() {
     setBusyAction('switch');
     setError(null);
+    setNotice(null);
+    const previousAccountId = status.account?.id;
     try {
-      setStatus(await switchClickUpAccountWithPopup());
+      const replacement = await switchClickUpAccountWithPopup();
+      setStatus(replacement);
+      if (previousAccountId && replacement.account?.id === previousAccountId) {
+        setNotice('ClickUp reauthorized the same account. If you meant to use a different Google/ClickUp identity, sign out of ClickUp in your browser first and try again.');
+      } else {
+        setNotice('ClickUp connection replaced successfully.');
+      }
     } catch (cause) {
-      // The switch flow intentionally disconnects the old ClickUp grant before
-      // starting the replacement authorization. Re-read authority after any
-      // failure so the UI never displays a stale identity.
+      // Replacement OAuth is non-destructive. Re-read the authoritative
+      // Worker state so a cancelled/failed popup leaves the existing grant and
+      // identity visible rather than pretending the connection was lost.
       setStatus(await readCurrentStatus());
       setError(cause instanceof Error ? cause.message : 'The ClickUp account could not be switched.');
     } finally {
@@ -84,6 +95,7 @@ export function ClickUpOAuthSettings() {
   async function disconnect() {
     setBusyAction('disconnect');
     setError(null);
+    setNotice(null);
     try {
       await clickUpOAuthAuthority.disconnect();
       setStatus(emptyStatus());
@@ -154,12 +166,13 @@ export function ClickUpOAuthSettings() {
       </section>
 
       {error && <div className="google-oauth-settings__error" role="alert">{error}</div>}
+      {notice && <div className="google-oauth-settings__notice" role="status">{notice}</div>}
 
       <div className="setting-card clickup-oauth-settings__account-note">
         <span className="panel-kicker">SEPARATE ACCOUNT</span>
         <strong>Your Google accounts do not have to match</strong>
         <span>
-          Elara’s Google Workspace connection and ClickUp authorization are independent. If ClickUp offers “Continue with Google”, choose the Google account associated with the ClickUp account you want Elara to use. Elara never reuses its Google Workspace token for ClickUp.
+          Elara’s Google Workspace connection and ClickUp authorization are independent. ClickUp owns its own sign-in session and may reuse an account already signed into ClickUp. To deliberately use another Google/ClickUp identity, sign out of ClickUp in your browser first, then choose Switch ClickUp account. Elara never reuses its Google Workspace token for ClickUp.
         </span>
       </div>
 

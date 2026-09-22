@@ -95,7 +95,7 @@ describe('Gmail Pass 3 tool parity', () => {
   });
 
   it('shows exact semantic mailbox actions in confirmation copy', () => {
-    expect(confirmationRequestForCall({ tool: 'gmail.modifyMessage', arguments: { messageId: 'm1', action: 'markUnread' } }, new Date('2026-09-17T12:00:00Z'))?.resourceSummary).toContain('markUnread');
+    expect(confirmationRequestForCall({ tool: 'gmail.modifyMessage', arguments: { messageId: 'm1', action: 'markUnread' } }, new Date('2026-09-17T12:00:00Z'))?.resourceSummary).toContain('Mark as unread');
     expect(confirmationRequestForCall({ tool: 'gmail.deleteLabel', arguments: { labelId: 'Label_1' } }, new Date('2026-09-17T12:00:00Z'))?.resourceSummary).toContain('messages themselves are not deleted');
   });
 

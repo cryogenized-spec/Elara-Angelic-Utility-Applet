@@ -1,6 +1,37 @@
 import type { WriteConfirmationRequest } from './policy';
+import { confirmationToolPresentation } from './presentation';
 
 const HOST_ID = 'elara-google-confirmation';
+const EXPANDED_REVIEW_CHARS = 1_200;
+const EXPANDED_BATCH_REVIEW_CHARS = 2_400;
+
+function reviewSize(request: WriteConfirmationRequest): number {
+  return (request.reviewText?.length ?? 0) + (request.attachmentReview?.previewText?.length ?? 0);
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1_024) return `${bytes} B`;
+  if (bytes < 1_024 * 1_024) return `${(bytes / 1_024).toFixed(bytes < 10 * 1_024 ? 1 : 0)} KB`;
+  return `${(bytes / (1_024 * 1_024)).toFixed(bytes < 10 * 1_024 * 1_024 ? 1 : 0)} MB`;
+}
+
+function appendTextReview(body: HTMLElement, label: string, text: string, truncated = false): void {
+  const review = document.createElement('span');
+  review.className = 'google-confirmation-item__review';
+  const reviewLabel = document.createElement('strong');
+  reviewLabel.textContent = label;
+  const reviewText = document.createElement('span');
+  reviewText.className = 'google-confirmation-item__review-text';
+  reviewText.textContent = text;
+  review.append(reviewLabel, reviewText);
+  if (truncated) {
+    const note = document.createElement('span');
+    note.className = 'google-confirmation-item__preview-note';
+    note.textContent = 'Preview shortened. Approval still applies to the complete file shown above.';
+    review.append(note);
+  }
+  body.append(review);
+}
 let pendingFinish: ((approved: boolean[]) => void) | null = null;
 
 export function requestGoogleToolConfirmation(request: WriteConfirmationRequest, signal?: AbortSignal): Promise<boolean> {
@@ -14,22 +45,27 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     const host = document.createElement('section');
     host.id = HOST_ID;
     host.className = 'roleplay-confirmation roleplay-confirmation--broker roleplay-confirmation--batch';
+    host.dataset.confirmationCount = String(requests.length);
+    const totalReviewChars = requests.reduce((sum, request) => sum + reviewSize(request), 0);
+    const expanded = requests.some((request) => reviewSize(request) >= EXPANDED_REVIEW_CHARS)
+      || totalReviewChars >= EXPANDED_BATCH_REVIEW_CHARS;
+    if (expanded) host.classList.add('roleplay-confirmation--expanded');
     host.setAttribute('role', 'dialog');
     host.setAttribute('aria-modal', 'true');
-    host.setAttribute('aria-label', requests.length === 1 ? 'Google action confirmation' : 'Google action confirmations');
+    host.setAttribute('aria-label', requests.length === 1 ? 'Elara action confirmation' : 'Elara action confirmations');
 
     const heading = document.createElement('div');
     heading.className = 'roleplay-confirmation__heading';
     const mark = document.createElement('span');
     mark.textContent = '✦';
     const title = document.createElement('strong');
-    title.textContent = requests.length === 1 ? 'Elara proposes a change' : `Elara proposes ${requests.length} changes`;
+    title.textContent = requests.length === 1 ? 'Elara wants to make a change' : `Elara wants to make ${requests.length} changes`;
     heading.append(mark, title);
 
     const list = document.createElement('div');
     list.className = 'google-confirmation-list';
     requests.forEach((request, index) => {
-      const riskLabel = request.risk === 'send' ? 'Send' : request.risk === 'destructive' ? 'Destructive change' : 'Change';
+      const presentation = confirmationToolPresentation(request.tool);
       const card = document.createElement('label');
       card.className = 'google-confirmation-item';
 
@@ -37,40 +73,63 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
       checkbox.type = 'checkbox';
       checkbox.dataset.confirmIndex = String(index);
       checkbox.checked = requests.length === 1 && request.untrustedContext !== true;
-      checkbox.setAttribute('aria-label', `Approve ${request.tool}`);
+      checkbox.setAttribute('aria-label', `Approve ${presentation.provider}: ${presentation.action}`);
+      if (requests.length === 1 && request.untrustedContext !== true) checkbox.className = 'google-confirmation-item__check--passive';
 
       const body = document.createElement('span');
       body.className = 'google-confirmation-item__body';
-      const strong = document.createElement('strong');
-      strong.textContent = `${riskLabel} · ${request.tool}`;
+
+      const actionHeader = document.createElement('span');
+      actionHeader.className = 'google-confirmation-item__header';
+      const provider = document.createElement('span');
+      provider.className = 'google-confirmation-item__provider';
+      provider.textContent = presentation.provider;
+      const action = document.createElement('strong');
+      action.className = 'google-confirmation-item__action';
+      action.textContent = presentation.action;
+      actionHeader.append(provider, action);
+
       const summary = document.createElement('span');
+      summary.className = 'google-confirmation-item__summary';
       summary.textContent = request.resourceSummary;
-      body.append(strong, summary);
+      body.append(actionHeader, summary);
 
       if (request.untrustedContext === true) {
         const warning = document.createElement('span');
         warning.className = 'google-confirmation-item__warning';
         warning.dataset.untrustedContext = 'true';
-        warning.textContent = 'External provider content was read before this action was proposed. Treat that content as untrusted and approve only if this exact action matches your intent.';
+        warning.textContent = 'This action was suggested after Elara read external content. Check that it matches what you asked for before approving.';
         body.append(warning);
       }
 
-      if (request.reviewText) {
-        const review = document.createElement('span');
-        review.className = 'google-confirmation-item__review';
-        const reviewLabel = document.createElement('strong');
-        reviewLabel.textContent = 'Full content to review before approval';
-        const reviewText = document.createElement('span');
-        reviewText.className = 'google-confirmation-item__review-text';
-        reviewText.textContent = request.reviewText;
-        reviewText.style.display = 'block';
-        reviewText.style.whiteSpace = 'pre-wrap';
-        reviewText.style.overflowWrap = 'anywhere';
-        reviewText.style.maxHeight = '12rem';
-        reviewText.style.overflow = 'auto';
-        review.append(reviewLabel, reviewText);
-        body.append(review);
+      if (request.attachmentReview) {
+        const attachment = document.createElement('span');
+        attachment.className = 'google-confirmation-item__attachment';
+        const attachmentName = document.createElement('strong');
+        attachmentName.className = 'google-confirmation-item__attachment-name';
+        attachmentName.textContent = request.attachmentReview.name;
+        const attachmentMeta = document.createElement('span');
+        attachmentMeta.className = 'google-confirmation-item__attachment-meta';
+        attachmentMeta.textContent = `${request.attachmentReview.mimeType} · ${formatFileSize(request.attachmentReview.sizeBytes)}`;
+        attachment.append(attachmentName, attachmentMeta);
+        if (request.attachmentReview.uploadName !== request.attachmentReview.name) {
+          const uploadAs = document.createElement('span');
+          uploadAs.className = 'google-confirmation-item__attachment-upload-name';
+          uploadAs.textContent = `Upload as “${request.attachmentReview.uploadName}”`;
+          attachment.append(uploadAs);
+        }
+        body.append(attachment);
+        if (request.attachmentReview.previewText) {
+          appendTextReview(body, 'File preview', request.attachmentReview.previewText, request.attachmentReview.previewTruncated === true);
+        } else {
+          const previewUnavailable = document.createElement('span');
+          previewUnavailable.className = 'google-confirmation-item__preview-note';
+          previewUnavailable.textContent = 'No inline preview is available for this file type.';
+          body.append(previewUnavailable);
+        }
       }
+
+      if (request.reviewText) appendTextReview(body, 'Content to review', request.reviewText);
 
       card.append(checkbox, body);
       list.appendChild(card);

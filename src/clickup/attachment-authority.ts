@@ -3,6 +3,9 @@ import { ARTIFACT_LIMITS } from '../artifacts/limits';
 import type { Artifact } from '../domain/artifact';
 import { validateClickUpToolArguments, type ClickUpToolArguments } from './tool-schema';
 
+const CLICKUP_ARTIFACT_PREVIEW_BYTES = 64 * 1024;
+const CLICKUP_ARTIFACT_PREVIEW_CHARS = 20_000;
+
 export interface ClickUpArtifactApprovalSnapshot {
   readonly artifactId: string;
   readonly artifactName: string;
@@ -11,6 +14,9 @@ export interface ClickUpArtifactApprovalSnapshot {
   readonly metadataSize: number;
   readonly payloadSize: number;
   readonly sha256: string;
+  /** Optional bounded preview derived from the exact approved Blob. */
+  readonly previewText?: string;
+  readonly previewTruncated?: boolean;
   /** Immutable Blob captured before confirmation; never model-visible. */
   readonly blob: Blob;
 }
@@ -40,6 +46,31 @@ function artifactPayload(artifact: Artifact): Blob | undefined {
   return undefined;
 }
 
+function previewableTextMime(mimeType: string): boolean {
+  const normalized = mimeType.toLowerCase().split(';', 1)[0]?.trim() ?? '';
+  return normalized.startsWith('text/')
+    || normalized === 'application/json'
+    || normalized === 'application/xml'
+    || normalized === 'application/yaml'
+    || normalized === 'application/x-yaml'
+    || normalized === 'application/javascript'
+    || normalized === 'application/typescript'
+    || normalized === 'image/svg+xml';
+}
+
+async function artifactPreview(blob: Blob, mimeType: string): Promise<{ previewText?: string; previewTruncated?: boolean }> {
+  if (!previewableTextMime(mimeType) || blob.size === 0) return {};
+  const previewBlob = blob.slice(0, CLICKUP_ARTIFACT_PREVIEW_BYTES);
+  const decoded = new TextDecoder().decode(await blobBytes(previewBlob));
+  const previewText = decoded.slice(0, CLICKUP_ARTIFACT_PREVIEW_CHARS);
+  if (!previewText) return {};
+  const previewTruncated = blob.size > previewBlob.size || decoded.length > previewText.length;
+  return {
+    previewText,
+    ...(previewTruncated ? { previewTruncated: true } : {}),
+  };
+}
+
 async function readyArtifact(artifactId: string): Promise<{ artifact: Artifact; blob: Blob }> {
   const artifact = await artifactRepository.get(artifactId);
   if (artifact.status !== 'ready') {
@@ -58,6 +89,7 @@ export async function captureClickUpArtifactApprovalSnapshot(
 ): Promise<ClickUpArtifactApprovalSnapshot> {
   const args = validateClickUpToolArguments('clickup.attachArtifact', rawArguments) as ClickUpToolArguments<'clickup.attachArtifact'>;
   const { artifact, blob } = await readyArtifact(args.artifactId);
+  const preview = await artifactPreview(blob, artifact.mimeType);
   return Object.freeze({
     artifactId: args.artifactId,
     artifactName: artifact.name,
@@ -66,6 +98,7 @@ export async function captureClickUpArtifactApprovalSnapshot(
     metadataSize: artifact.size,
     payloadSize: blob.size,
     sha256: await sha256Hex(blob),
+    ...preview,
     blob,
   });
 }

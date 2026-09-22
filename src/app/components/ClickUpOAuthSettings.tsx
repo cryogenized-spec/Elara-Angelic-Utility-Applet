@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { clickUpOAuthAuthority } from '../../clickup/oauth/authority';
-import { connectClickUpWithPopup } from '../../clickup/oauth/popup';
+import { connectClickUpWithPopup, switchClickUpAccountWithPopup } from '../../clickup/oauth/popup';
 import type { ClickUpOAuthStatus } from '../../clickup/oauth/contracts';
 import './google-oauth-settings.css';
 
@@ -9,11 +9,22 @@ const emptyStatus = (): ClickUpOAuthStatus => ({
   workspaces: [],
 });
 
+type ClickUpBusyAction = 'connect' | 'switch' | 'disconnect' | null;
+
 export function ClickUpOAuthSettings() {
   const [status, setStatus] = useState<ClickUpOAuthStatus>(emptyStatus());
   const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState<ClickUpBusyAction>(null);
   const [error, setError] = useState<string | null>(null);
+  const busy = busyAction !== null;
+
+  async function readCurrentStatus(): Promise<ClickUpOAuthStatus> {
+    try {
+      return await clickUpOAuthAuthority.getStatus();
+    } catch {
+      return emptyStatus();
+    }
+  }
 
   async function refresh() {
     setLoading(true);
@@ -43,19 +54,35 @@ export function ClickUpOAuthSettings() {
   }, []);
 
   async function connect() {
-    setBusy(true);
+    setBusyAction('connect');
     setError(null);
     try {
       setStatus(await connectClickUpWithPopup());
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'ClickUp authorization could not be completed.');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
+    }
+  }
+
+  async function switchAccount() {
+    setBusyAction('switch');
+    setError(null);
+    try {
+      setStatus(await switchClickUpAccountWithPopup());
+    } catch (cause) {
+      // The switch flow intentionally disconnects the old ClickUp grant before
+      // starting the replacement authorization. Re-read authority after any
+      // failure so the UI never displays a stale identity.
+      setStatus(await readCurrentStatus());
+      setError(cause instanceof Error ? cause.message : 'The ClickUp account could not be switched.');
+    } finally {
+      setBusyAction(null);
     }
   }
 
   async function disconnect() {
-    setBusy(true);
+    setBusyAction('disconnect');
     setError(null);
     try {
       await clickUpOAuthAuthority.disconnect();
@@ -63,79 +90,113 @@ export function ClickUpOAuthSettings() {
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'ClickUp could not be disconnected.');
     } finally {
-      setBusy(false);
+      setBusyAction(null);
     }
   }
 
-  const summary = useMemo(() => {
+  const workspaceSummary = useMemo(() => {
     if (loading) return 'Checking ClickUp connection…';
     if (!status.connected) return 'Not connected';
     const workspaceCount = status.workspaces.length;
-    return `Connected · ${workspaceCount} Workspace${workspaceCount === 1 ? '' : 's'} authorized`;
-  }, [loading, status]);
+    return `MCP ready · ${workspaceCount} Workspace${workspaceCount === 1 ? '' : 's'}`;
+  }, [loading, status.connected, status.workspaces.length]);
+
+  const identityLabel = status.account?.email || status.account?.username || 'Connected ClickUp account';
 
   return (
-    <div className="google-oauth-settings">
+    <div className="google-oauth-settings clickup-oauth-settings">
       <section className={`google-oauth-account setting-card${status.connected ? ' is-ready' : ''}`} aria-labelledby="clickup-account-title">
         <div className="google-oauth-account__copy">
-          <span className="panel-kicker">CLICKUP ACCOUNT</span>
+          <span className="panel-kicker">CLICKUP IDENTITY</span>
           <strong id="clickup-account-title">{status.connected ? 'ClickUp connected' : 'Connect ClickUp'}</strong>
-          {status.account?.username && <span className="google-oauth-account__name">{status.account.username}</span>}
-          {status.account?.email && <span className="google-oauth-account__email">{status.account.email}</span>}
+          {status.connected && <span className="clickup-oauth-settings__identity">{identityLabel}</span>}
+          {status.account?.username && status.account.email && <span className="google-oauth-account__email">{status.account.username}</span>}
           <p>
             {status.connected
-              ? 'Elara can use the Workspaces you authorized through ClickUp’s official OAuth screen. Provider authorization does not approve task changes: model-initiated mutations still require Elara’s normal human confirmation.'
-              : 'Authorize one or more ClickUp Workspaces through ClickUp’s official OAuth screen. The access token and app secret stay inside your paired Worker.'}
+              ? 'This ClickUp identity is separate from the Google Workspace account connected to Elara. Elara can use only the ClickUp Workspaces authorized for this identity.'
+              : 'Connect through ClickUp’s official authorization screen. Your ClickUp identity is independent from the Google Workspace account connected to Elara.'}
           </p>
         </div>
 
         <div className="google-oauth-account__session" aria-live="polite">
           <span className="google-oauth-settings__dot" aria-hidden="true" />
-          <strong>{summary}</strong>
+          <strong>{workspaceSummary}</strong>
         </div>
 
-        <button
-          className="google-oauth-account__primary"
-          type="button"
-          onClick={() => void connect()}
-          disabled={loading || busy}
-        >
-          {busy ? 'Opening ClickUp…' : status.connected ? 'Review ClickUp Workspaces' : 'Connect ClickUp'}
-        </button>
+        {status.connected ? (
+          <div className="google-oauth-account__ready" role="status">First-party ClickUp MCP is active</div>
+        ) : (
+          <button
+            className="google-oauth-account__primary"
+            type="button"
+            onClick={() => void connect()}
+            disabled={loading || busy}
+          >
+            {busyAction === 'connect' ? 'Opening ClickUp…' : 'Continue to ClickUp'}
+          </button>
+        )}
 
         <div className="google-oauth-account__utility">
           <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void refresh()} disabled={loading || busy}>
             {loading ? 'Checking…' : 'Refresh status'}
           </button>
           {status.connected && (
-            <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void disconnect()} disabled={loading || busy}>
-              Disconnect ClickUp
-            </button>
+            <>
+              <button className="google-oauth-settings__button" type="button" onClick={() => void switchAccount()} disabled={loading || busy}>
+                {busyAction === 'switch' ? 'Opening ClickUp…' : 'Switch ClickUp account'}
+              </button>
+              <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void disconnect()} disabled={loading || busy}>
+                {busyAction === 'disconnect' ? 'Disconnecting…' : 'Disconnect ClickUp'}
+              </button>
+            </>
           )}
         </div>
       </section>
 
       {error && <div className="google-oauth-settings__error" role="alert">{error}</div>}
 
+      <div className="setting-card clickup-oauth-settings__account-note">
+        <span className="panel-kicker">SEPARATE ACCOUNT</span>
+        <strong>Your Google accounts do not have to match</strong>
+        <span>
+          Elara’s Google Workspace connection and ClickUp authorization are independent. If ClickUp offers “Continue with Google”, choose the Google account associated with the ClickUp account you want Elara to use. Elara never reuses its Google Workspace token for ClickUp.
+        </span>
+      </div>
+
       {status.connected && (
-        <div className="google-oauth-settings__grid" aria-label="Authorized ClickUp Workspaces">
-          {status.workspaces.map((workspace) => (
-            <article className="google-oauth-service setting-card" key={workspace.id}>
-              <div className="google-oauth-service__copy">
-                <strong>{workspace.name}</strong>
-                <span>Workspace ID {workspace.id}</span>
-              </div>
-              <div className="google-oauth-service__status">
-                <span className="google-oauth-service__badge is-ready">Authorized</span>
-              </div>
-            </article>
-          ))}
-        </div>
+        <section aria-labelledby="clickup-workspaces-title">
+          <div className="clickup-oauth-settings__section-heading">
+            <div>
+              <span className="panel-kicker">AUTHORIZED WORKSPACES</span>
+              <strong id="clickup-workspaces-title">{status.workspaces.length === 1 ? '1 Workspace available' : `${status.workspaces.length} Workspaces available`}</strong>
+            </div>
+            <span className="google-oauth-service__badge is-ready">Authorized</span>
+          </div>
+          <div className="google-oauth-settings__grid" aria-label="Authorized ClickUp Workspaces">
+            {status.workspaces.map((workspace) => (
+              <article className="google-oauth-service setting-card" key={workspace.id}>
+                <div className="google-oauth-service__copy">
+                  <strong>{workspace.name}</strong>
+                  <span>Available to Elara through the current ClickUp grant.</span>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
       )}
 
-      <div className="setting-card">
-        <strong>First-party ClickUp MCP</strong>
-        <span>Gemini → Elara tool authority → browser MCP client → your Worker → ClickUp REST API. ClickUp’s vendor-hosted MCP is not used for normal Elara ClickUp work.</span>
+      <div className="setting-card clickup-oauth-settings__mcp-card">
+        <div>
+          <span className="panel-kicker">FIRST-PARTY MCP</span>
+          <strong>ClickUp MCP</strong>
+          <span>
+            Elara uses its own reviewed ClickUp MCP path through your paired Worker. Chat remains the working interface; a separate ClickUp task-management screen is not required.
+          </span>
+        </div>
+        <div className={`clickup-oauth-settings__mcp-state${status.connected ? ' is-ready' : ''}`} role="status">
+          <span className="google-oauth-settings__dot" aria-hidden="true" />
+          <strong>{status.connected ? 'Active' : 'Connect ClickUp to activate'}</strong>
+        </div>
       </div>
     </div>
   );

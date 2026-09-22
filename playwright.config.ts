@@ -17,7 +17,8 @@ export default defineConfig({
       // Phone-specific reliability, media handoff/delivery, Workspace services/Kanban,
       // and Generation Activity behaviour run against the canonical 9:16-ish
       // Android canvas with reduced motion.
-      testMatch: /(?:kanban|mobile-reliability|vtt|media-handoff|media-delivery\.phase3|media-lifecycle\.acceptance|generation-activity|google-drive|google-picker|google-workspace-pass4)\.spec\.ts/,
+      testMatch: /(?:kanban|mobile-reliability|vtt|media-handoff|media-delivery\.phase3|media-lifecycle\.acceptance|generation-activity|google-drive|google-picker|google-workspace-pass4|confirmation-watchdog)\.spec\.ts/,
+
       use: {
         browserName: 'chromium',
         viewport: { width: 412, height: 915 },

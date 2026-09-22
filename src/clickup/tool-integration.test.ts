@@ -112,6 +112,40 @@ describe('ClickUp integration with Elara model-tool authority', () => {
     }
   });
 
+  it('presents ClickUp comments and attachments without debug-oriented payload details', () => {
+    const comment = confirmationRequestForCall({
+      tool: 'clickup.createTaskComment',
+      arguments: { workspaceId: '999', taskId: '86task', text: 'Inspection complete.' },
+    });
+    expect(comment?.reviewText).toBe('Inspection complete.');
+    expect(comment?.reviewText).not.toContain('workspaceId');
+
+    const attachment = confirmationRequestForCall({
+      tool: 'clickup.attachArtifact',
+      arguments: { workspaceId: '999', taskId: '86task', artifactId: 'artifact-1' },
+    }, new Date('2026-09-21T12:00:00Z'), {
+      clickupArtifactSnapshot: {
+        artifactId: 'artifact-1',
+        artifactName: 'inspection.pdf',
+        uploadName: 'inspection.pdf',
+        mimeType: 'application/pdf',
+        metadataSize: 1200,
+        payloadSize: 1200,
+        sha256: 'a'.repeat(64),
+        blob: new Blob(['approved'], { type: 'application/pdf' }),
+      },
+    });
+    expect(attachment?.resourceSummary).toContain('approved file below');
+    expect(attachment?.resourceSummary).not.toContain('SHA-256');
+    expect(attachment?.reviewText).toBeUndefined();
+    expect(attachment?.attachmentReview).toEqual({
+      name: 'inspection.pdf',
+      uploadName: 'inspection.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 1200,
+    });
+  });
+
   it('blocks a disconnected ClickUp tool before its handler can execute', async () => {
     const handler = vi.fn(async () => ({ id: '86task' }));
     const result = await executeGoogleTool({

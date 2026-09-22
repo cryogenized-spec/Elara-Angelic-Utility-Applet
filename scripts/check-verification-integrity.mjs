@@ -254,6 +254,9 @@ if (namedPrReviewSkill !== canonicalPrReviewSkill) fail('skills/PR_Review.md mus
 
 const workflow = read('.github/workflows/ci.yml');
 const visualEvidenceWorkflow = read('.github/workflows/visual-evidence.yml');
+const visualEvidenceScript = read('scripts/capture-visual-evidence.mjs');
+const playwrightConfig = read('playwright.config.ts');
+const watchdogE2e = read('e2e/confirmation-watchdog.spec.ts');
 for (const marker of ['continue-on-error', 'if: always()', '|| true', 'set +e']) if (workflow.includes(marker)) fail(`CI workflow contains forbidden bypass marker: ${marker}`);
 if (/run:\s+npm install\b/.test(workflow)) fail('CI must use npm ci rather than npm install');
 if (/contents:\s*write/.test(workflow)) fail('certification workflow may not retain repository write authority');
@@ -282,6 +285,14 @@ for (const marker of [
   'name: visual-evidence-pr-${{ steps.pr.outputs.pr_number }}-${{ steps.pr.outputs.head_sha }}',
 ]) {
   if (!visualEvidenceWorkflow.includes(marker)) fail(`remote visual-evidence workflow lost required control: ${marker}`);
+}
+
+for (const marker of ['captureConfirmationWatchdog', 'confirmation-watchdog.evidence.json', 'confirmation-long-dialog.png', 'confirmation-attachment-dialog.png', 'hostileMarkupShownAsText']) {
+  if (!visualEvidenceScript.includes(marker)) fail(`visual-evidence script lost watchdog proof: ${marker}`);
+}
+if (!playwrightConfig.includes('confirmation-watchdog')) fail('Android portrait project lost the confirmation-watchdog E2E.');
+for (const marker of ['roleplay-confirmation--expanded', 'reviewScrollHeight', "locator('script')", "locator('img')"]) {
+  if (!watchdogE2e.includes(marker)) fail(`confirmation watchdog E2E lost release assertion: ${marker}`);
 }
 
 const eslintDisableComment = /(?:\/\/|\/\*)\s*eslint-disable(?:-next-line|-line)?\b/;

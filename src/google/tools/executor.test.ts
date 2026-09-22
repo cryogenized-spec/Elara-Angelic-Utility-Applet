@@ -61,9 +61,10 @@ describe('executeGoogleTool', () => {
       new Date('2026-09-04T06:00:00.000Z'),
     );
 
-    expect(confirmation?.reviewText).toContain('"range": "Sheet1!A1:B2"');
-    expect(confirmation?.reviewText).toContain('"sample"');
-    expect(confirmation?.reviewText).toContain('42');
+    expect(confirmation?.reviewText).toContain('Range: Sheet1!A1:B2');
+    expect(confirmation?.reviewText).toContain('Row 2: sample | 42');
+    expect(confirmation?.reviewText).not.toContain('{');
+    expect(confirmation?.reviewText).not.toContain('"range"');
   });
 
   it('rejects invalid Drive/Sheets arguments at the trust boundary', async () => {

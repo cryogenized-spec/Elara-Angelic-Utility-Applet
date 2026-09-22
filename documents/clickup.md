@@ -40,6 +40,7 @@ ClickUp-derived content is untrusted external data. Provider authorization permi
 | Existing execution / confirmation | `src/google/tools/executor.ts`, `src/gemini/google-tool-loop.ts` |
 | Browser MCP client | `src/clickup/mcp-client.ts` |
 | Browser OAuth authority | `src/clickup/oauth/*` |
+| Settings connection / identity surface | `src/app/components/ClickUpOAuthSettings.tsx` |
 | Immutable artifact approval | `src/clickup/attachment-authority.ts` |
 | Same-live-turn ClickUp mutation replay fence | `src/clickup/mutation-replay.ts` |
 | Browser artifact transport | `src/clickup/attachment-upload.ts` |
@@ -127,6 +128,23 @@ user gesture
 
 Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The access token is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
 
+### 5.1 Account identity and Settings surface
+
+ClickUp authorization is independent from Elara's Google Workspace authorization. Elara must never infer that the Google identity used for Gmail, Drive, Calendar or other Workspace tools is also the identity used to sign into ClickUp, and it must never reuse a Google Workspace access token for ClickUp.
+
+If a customer's ClickUp account uses Google's sign-in option, account selection happens inside ClickUp's official authorization/sign-in flow. Elara does not manufacture or force a Google account chooser on ClickUp's behalf. The Settings surface explains this boundary before authorization and then displays the bounded ClickUp account metadata returned by ClickUp so the customer can verify which identity was admitted.
+
+The ClickUp Settings surface is intentionally connection-oriented rather than a second task-management client. It shows:
+
+- connected/disconnected state;
+- the admitted ClickUp account identity when available;
+- authorized Workspace names;
+- whether Elara's first-party ClickUp MCP path is active;
+- refresh, disconnect and explicit **Switch ClickUp account** actions.
+
+Switching accounts is an explicit replacement operation. The browser creates the OAuth popup synchronously under the user's Switch gesture before awaiting disconnect or Worker state, then disconnects the old local ClickUp grant and begins a new official ClickUp OAuth flow. If replacement authorization fails, Settings re-reads the current authority instead of continuing to display stale account metadata.
+
+
 Public OAuth bodies are streamed under a byte ceiling before signature verification/forwarding. Signed writes use timestamp + nonce + body and have durable replay protection. OAuth state is random, redirect-bound, short-lived and single-use. A new Connect gesture replaces older pending states and advances the connection epoch, so an older popup or already-in-flight exchange cannot later overwrite the newer authorization.
 
 Connect/disconnect/reconnect use a connection epoch. A late exchange cannot resurrect a grant after disconnect. Credential replacement, local webhook/delivery removal, rate-budget removal and ClickUp task-index purge commit in one SQLite transaction, so a new account can never coexist with provider data cached under the previous grant. Provider requests retain the credential revision that issued them; a late response or 401 from an obsolete token cannot mutate the replacement grant or replacement rate budget.
@@ -151,6 +169,17 @@ account identity
 After approval the executor verifies the same grant again. The admitted revision and Worker binding then travel through the browser handler, MCP/attachment transport and Durable Object. The vault checks the revision again immediately before REST egress.
 
 If the account, Workspace grant, credential revision or paired Worker changes while confirmation is open, the mutation fails closed instead of executing as the replacement identity.
+
+### 6.1 Human approval presentation
+
+ClickUp mutations use the shared Elara watchdog rather than a ClickUp-specific confirmation UI. The human surface intentionally does not expose MCP/JSON-RPC envelopes, raw tool identifiers such as `clickup.createTaskComment`, JSON argument objects, schema keys, grant revisions, hashes or other debug-oriented implementation details.
+
+The same validated mutation remains authoritative underneath. The watchdog projects it into human-readable provider/action labels and readable field/value review text. Examples include **ClickUp · Post comment**, **ClickUp · Update task**, and **ClickUp · Attach file**. Comment/reply bodies are shown directly. Attachment review shows the approved filename/type/size and destination while the SHA-256 binding remains internal to the immutable artifact authority.
+
+Review sizing is adaptive. Short actions retain a compact watchdog. Substantial text expands into a viewport-aware review sheet; heading and decision controls remain outside the scrolling content surface so the user can inspect much more of an essay, long comment or document edit without losing Approve/Decline. On narrow mobile viewports expanded mode respects safe-area insets.
+
+External provider content still elevates confirmation. The warning is phrased for the human rather than as security/debug terminology, and the action remains unselected until the user explicitly selects it. Grouped mutations likewise remain individually selectable with no approve-all shortcut.
+
 
 ## 7. Workspace-scoped resource authority
 
@@ -231,9 +260,12 @@ Before confirmation Elara resolves the local ready artifact and captures an immu
 - MIME type;
 - metadata size and Blob size;
 - SHA-256 digest;
-- exact Blob object.
+- exact Blob object;
+- when the MIME type is explicitly text-readable, a bounded preview derived from the beginning of that exact Blob.
 
-The confirmation describes that approved payload. Immediately before transport, Elara re-reads and hashes the mutable repository entry. If bytes or relevant metadata changed under the same artifact ID, upload fails with `artifact-changed` and sends nothing.
+The human confirmation receives only safe attachment presentation fields: filename, upload name, MIME type, size and the optional bounded text preview. Binary formats such as PDF are not opportunistically decoded, OCRed or rendered as fake text previews. A truncated preview is labelled as such and never changes what is approved: approval remains bound to the complete immutable Blob and SHA-256 digest.
+
+Immediately before transport, Elara re-reads and hashes the mutable repository entry. If bytes or relevant metadata changed under the same artifact ID, upload fails with `artifact-changed` and sends nothing.
 
 The uploaded multipart file is the original approved Blob, not the second repository read.
 

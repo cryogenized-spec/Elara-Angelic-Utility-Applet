@@ -1071,6 +1071,7 @@ describe('ClickUpOAuthVault', () => {
     let taskCalls = 0;
     let firstStarted = false;
     let secondStarted = false;
+    let thirdStarted = false;
     const firstResetAt = Math.floor(Date.now() / 1000) + 600;
     const secondResetAt = firstResetAt + 60;
 
@@ -1104,6 +1105,7 @@ describe('ClickUpOAuthVault', () => {
         const sequence = taskCalls;
         if (sequence === 1) firstStarted = true;
         if (sequence === 2) secondStarted = true;
+        if (sequence === 3) thirdStarted = true;
         await new Promise<void>((resolve) => setTimeout(resolve, sequence === 2 ? 220 : sequence === 1 ? 80 : 20));
         return new Response(JSON.stringify({
           id: '86task',
@@ -1159,6 +1161,15 @@ describe('ClickUpOAuthVault', () => {
       operation: 'getTask',
       arguments: { workspaceId: '999', taskId: '86task' },
     }, revision);
+    // Starting an async command does not guarantee its local quota reservation
+    // has happened before the next command begins. Wait for provider egress so
+    // this test deterministically proves that the *next* caller is the one
+    // blocked after the third reservation consumes the last slot.
+    for (let attempt = 0; attempt < 100 && !thirdStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(thirdStarted).toBe(true);
+
     const fourth = await internalCommand({
       operation: 'getTask',
       arguments: { workspaceId: '999', taskId: '86task' },

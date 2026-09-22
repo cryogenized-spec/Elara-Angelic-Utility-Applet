@@ -92,3 +92,80 @@
 .google-oauth-picker__file small { margin-top: 2px; color: var(--muted); font-size: 8px; }
 .google-oauth-picker__file button { min-height: 30px; border: 1px solid rgba(240,123,220,.2); border-radius: 9px; padding: 0 9px; background: rgba(240,123,220,.06); color: var(--muted); font-size: 9px; }
 .google-oauth-picker__file button:disabled { opacity: .55; }
+/* ClickUp reuses the Google account card primitives but keeps its provider
+   identity and MCP state visually explicit. */
+.clickup-oauth-settings__identity {
+  margin-top: 4px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+.clickup-oauth-settings__account-note {
+  display: grid;
+  gap: 5px;
+  border-color: rgba(246,200,95,.18);
+  background: linear-gradient(145deg, rgba(246,200,95,.045), rgba(255,255,255,.02));
+}
+.clickup-oauth-settings__account-note strong { font-size: 13px; }
+.clickup-oauth-settings__account-note > span:last-child {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.55;
+}
+.clickup-oauth-settings__section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 2px 2px 9px;
+}
+.clickup-oauth-settings__section-heading > div { display: grid; gap: 4px; }
+.clickup-oauth-settings__section-heading strong {
+  font-size: 13px;
+  line-height: 1.35;
+}
+.clickup-oauth-settings__mcp-card {
+  display: grid;
+  gap: 12px;
+  border-color: rgba(99,216,255,.18);
+  background: linear-gradient(145deg, rgba(99,216,255,.05), rgba(255,255,255,.02));
+}
+.clickup-oauth-settings__mcp-card > div:first-child { display: grid; gap: 5px; }
+.clickup-oauth-settings__mcp-card > div:first-child strong { font-size: 14px; }
+.clickup-oauth-settings__mcp-card > div:first-child > span:last-child {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+.clickup-oauth-settings__mcp-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  min-height: 30px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255,255,255,.03);
+}
+.clickup-oauth-settings__mcp-state strong {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+.clickup-oauth-settings__mcp-state.is-ready {
+  border-color: rgba(99,216,255,.2);
+  background: rgba(99,216,255,.05);
+}
+.clickup-oauth-settings__mcp-state.is-ready .google-oauth-settings__dot {
+  background: #63d8ff;
+  box-shadow: 0 0 0 3px rgba(99,216,255,.12);
+}
+.clickup-oauth-settings__mcp-state.is-ready strong { color: rgba(219,248,255,.9); }
+@media (min-width: 700px) {
+  .clickup-oauth-settings__mcp-card {
+    grid-template-columns: minmax(0,1fr) auto;
+    align-items: center;
+  }
+}

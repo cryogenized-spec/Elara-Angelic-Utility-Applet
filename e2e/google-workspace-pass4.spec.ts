@@ -143,13 +143,13 @@ test('Docs mobile flow carries tab and revision from inspect into confirmed writ
   await connectWorkspaceService(page, 'Google Docs');
   await ask(page, 'Append a mobile-safe update to the plan.');
 
-  const dialog = page.getByRole('dialog', { name: 'Google action confirmation' });
+  const dialog = page.getByRole('dialog', { name: 'Elara action confirmation' });
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText('tab-1');
   await expect(dialog).toContainText('rev-1');
   expect(docsCalls.filter((call) => call.method === 'POST')).toHaveLength(0);
   await expect(dialog.locator('[data-untrusted-context="true"]')).toBeVisible();
-  await dialog.getByRole('checkbox', { name: 'Approve docs.appendParagraph' }).check();
+  await dialog.getByRole('checkbox', { name: 'Approve Google Docs: Append paragraph' }).check();
   await dialog.getByRole('button', { name: '✓ Approve selected' }).click();
 
   await expect(page.getByRole('region', { name: 'Conversation' })).toContainText('Updated the selected Doc tab safely.', { timeout: 15_000 });
@@ -197,9 +197,9 @@ test('Sheets mobile flow writes formula-looking text literally unless parsing is
   await connectWorkspaceService(page, 'Google Sheets');
   await ask(page, 'Put the literal text =1+2 into A1 without making it a formula.');
 
-  const dialog = page.getByRole('dialog', { name: 'Google action confirmation' });
+  const dialog = page.getByRole('dialog', { name: 'Elara action confirmation' });
   await expect(dialog).toBeVisible();
-  await expect(dialog).toContainText('literal RAW input');
+  await expect(dialog).toContainText('literal text, so formulas will not be evaluated');
   await expect(dialog).toContainText('=1+2');
   expect(sheetCalls).toHaveLength(0);
   await dialog.getByRole('button', { name: '✓ Approve' }).click();

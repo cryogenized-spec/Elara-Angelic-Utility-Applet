@@ -177,19 +177,138 @@ export async function googleToolAuthorizationRequirement(
 function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
 }
-function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<string, unknown>>): string | undefined {
-  if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
-  if ((tool === 'gmail.sendMessage' || tool === 'gmail.replyMessage') && typeof args.body === 'string') return args.body;
-  if (tool === 'sheets.updateCell' && typeof args.value === 'string') return args.value || '(empty string)';
-  // Every other mutation exposes the exact validated argument object. A prose
-  // summary is not enough authority for bulk rows, document edits, task notes,
-  // calendar fields, or Drive metadata that the model actually proposed.
+const FRIENDLY_FIELD_LABELS: Readonly<Record<string, string>> = Object.freeze({
+  workspaceId: 'Workspace',
+  listId: 'List',
+  taskId: 'Task',
+  commentId: 'Comment',
+  fieldId: 'Custom field',
+  artifactId: 'File reference',
+  documentId: 'Document',
+  tabId: 'Tab',
+  revisionId: 'Document version',
+  spreadsheetId: 'Spreadsheet',
+  sheetId: 'Sheet',
+  taskListId: 'Task list',
+  destinationTaskListId: 'Destination task list',
+  eventId: 'Event',
+  messageId: 'Message',
+  threadId: 'Thread',
+  labelId: 'Label',
+  fileId: 'File',
+  parentId: 'Parent',
+  previousParentId: 'Previous folder',
+  parentTaskId: 'Parent task',
+  assigneeIds: 'Assignees',
+  mentionUserIds: 'Mentions',
+  markdownContent: 'Description',
+  notifyAll: 'Notify everyone',
+  dueAt: 'Due',
+  startAt: 'Start',
+  timeEstimateMs: 'Time estimate (milliseconds)',
+  sendUpdates: 'Guest updates',
+  scheduledDate: 'Scheduled date',
+  inputMode: 'Input handling',
+  startIndex: 'Starting row',
+  rowCount: 'Rows',
+  columnCount: 'Columns',
+  firstSheetTitle: 'First sheet',
+  findText: 'Find',
+  replaceText: 'Replace with',
+  spaceName: 'Space',
+  messageName: 'Message',
+  targetRef: 'Memory reference',
+});
+
+function friendlyFieldLabel(key: string): string {
+  const explicit = FRIENDLY_FIELD_LABELS[key];
+  if (explicit) return explicit;
+  const spaced = key.replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').trim();
+  return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Value';
+}
+
+function friendlyScalar(value: unknown): string {
+  if (value === null) return 'None';
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  if (typeof value === 'string') return value || '(empty)';
+  if (typeof value === 'number') return String(value);
+  return String(value);
+}
+
+function appendFriendlyReview(lines: string[], label: string, entry: unknown, depth = 0): void {
+  const indent = '  '.repeat(depth);
+  if (Array.isArray(entry)) {
+    if (entry.length === 0) {
+      lines.push(`${indent}${label}: None`);
+      return;
+    }
+    if (entry.every((item) => Array.isArray(item))) {
+      lines.push(`${indent}${label}:`);
+      entry.forEach((row, index) => {
+        const values = (row as unknown[]).map(friendlyScalar).join(' | ');
+        lines.push(`${indent}  Row ${index + 1}: ${values}`);
+      });
+      return;
+    }
+    if (entry.every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
+      lines.push(`${indent}${label}: ${entry.map(friendlyScalar).join(', ')}`);
+      return;
+    }
+    lines.push(`${indent}${label}:`);
+    entry.forEach((item, index) => appendFriendlyReview(lines, `Item ${index + 1}`, item, depth + 1));
+    return;
+  }
+  if (entry && typeof entry === 'object') {
+    lines.push(`${indent}${label}:`);
+    Object.entries(entry as Record<string, unknown>).forEach(([key, nested]) => {
+      appendFriendlyReview(lines, friendlyFieldLabel(key), nested, depth + 1);
+    });
+    return;
+  }
+  if (typeof entry === 'string' && entry.includes('\n')) {
+    lines.push(`${indent}${label}:`);
+    entry.split('\n').forEach((line) => lines.push(`${indent}  ${line}`));
+    return;
+  }
+  lines.push(`${indent}${label}: ${friendlyScalar(entry)}`);
+}
+
+function friendlyArgumentReview(args: Readonly<Record<string, unknown>>): string | undefined {
   try {
-    return JSON.stringify(args, null, 2);
+    const lines: string[] = [];
+    Object.entries(args).forEach(([key, entry]) => appendFriendlyReview(lines, friendlyFieldLabel(key), entry));
+    return lines.join('\n');
   } catch {
     return undefined;
   }
 }
+
+function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<string, unknown>>): string | undefined {
+  if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
+  if ((tool === 'gmail.sendMessage' || tool === 'gmail.replyMessage') && typeof args.body === 'string') return args.body;
+  if (tool === 'clickup.createTaskComment' || tool === 'clickup.replyToComment') return value(args, 'text');
+  if (tool === 'sheets.updateCell' && typeof args.value === 'string') return args.value || '(empty string)';
+  if (tool === 'clickup.attachArtifact') return undefined;
+  // Every other mutation still exposes the full validated payload for human
+  // inspection, but the presentation is plain language rather than raw JSON.
+  return friendlyArgumentReview(args);
+}
+function gmailActionSummary(action?: string): string {
+  switch (action) {
+    case 'markRead': return 'Mark as read';
+    case 'markUnread': return 'Mark as unread';
+    case 'archive': return 'Archive';
+    case 'moveToInbox': return 'Move to Inbox';
+    case 'markSpam': return 'Mark as spam';
+    case 'markNotSpam': return 'Mark as not spam';
+    case 'star': return 'Star';
+    case 'unstar': return 'Remove star from';
+    case 'applyLabel': return 'Add label to';
+    case 'removeLabel': return 'Remove label from';
+    default: return 'Organize';
+  }
+}
+
 function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, fallback: string): string {
   const id = value(args, 'id') ?? value(args, 'ref');
   switch (tool) {
@@ -244,8 +363,8 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'chat.createMessage': return `Post a Google Chat message to ${value(args, 'spaceName') ?? 'the selected space'}.`;
     case 'chat.updateMessage': return `Update Google Chat message ${value(args, 'messageName') ?? 'selected message'}.`;
     case 'chat.deleteMessage': return `Delete Google Chat message ${value(args, 'messageName') ?? 'selected message'}.`;
-    case 'gmail.modifyMessage': return `${value(args, 'action') ?? 'Organize'} Gmail message ${value(args, 'messageId') ?? 'selected message'}${value(args, 'labelId') ? ` using USER label ${value(args, 'labelId')}` : ''}.`;
-    case 'gmail.modifyThread': return `${value(args, 'action') ?? 'Organize'} Gmail thread ${value(args, 'threadId') ?? 'selected thread'}${value(args, 'labelId') ? ` using USER label ${value(args, 'labelId')}` : ''}.`;
+    case 'gmail.modifyMessage': return `${gmailActionSummary(value(args, 'action'))} Gmail message ${value(args, 'messageId') ?? 'selected message'}${value(args, 'labelId') ? ` using label ${value(args, 'labelId')}` : ''}.`;
+    case 'gmail.modifyThread': return `${gmailActionSummary(value(args, 'action'))} Gmail thread ${value(args, 'threadId') ?? 'selected thread'}${value(args, 'labelId') ? ` using label ${value(args, 'labelId')}` : ''}.`;
     case 'gmail.trashMessage': return `Move Gmail message ${value(args, 'messageId') ?? 'selected message'} to Trash.`;
     case 'gmail.untrashMessage': return `Restore Gmail message ${value(args, 'messageId') ?? 'selected message'} from Trash.`;
     case 'gmail.trashThread': return `Move Gmail thread ${value(args, 'threadId') ?? 'selected thread'} to Trash.`;
@@ -256,7 +375,7 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'gmail.sendMessage': { const to = Array.isArray(args.to) ? args.to.filter((item): item is string => typeof item === 'string').join(', ') : 'recipient'; return `Send a new email to ${to} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`; }
     case 'gmail.replyMessage': return `Reply in Gmail thread ${value(args, 'threadId') ?? 'selected thread'} to ${value(args, 'to') ?? 'recipient'} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`;
     case 'drive.createFile': return `Create the Drive file “${value(args, 'name') ?? 'Untitled'}”.`;
-    case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the requested metadata changes. The write only applies while the file still matches the ETag read for it.`;
+    case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the reviewed changes, only if the file has not changed since Elara read it.`;
     case 'drive.moveFile': {
       const file = value(args, 'fileId') ?? 'selected file';
       const destination = value(args, 'parentId') ?? 'the requested folder';
@@ -268,13 +387,13 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'drive.trashFile': return `Move Drive file ${value(args, 'fileId') ?? 'selected file'} to trash. Trash is recoverable and Elara never permanently deletes files.`;
     case 'sheets.createSpreadsheet': return `Create Google spreadsheet “${value(args, 'title') ?? 'Untitled'}”${value(args, 'firstSheetTitle') ? ` with first sheet “${value(args, 'firstSheetTitle')}”` : ''}.`;
     case 'sheets.addSheet': return `Add sheet “${value(args, 'title') ?? 'Untitled'}” to spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} with ${String(args.rowCount ?? 1000)} row(s) and ${String(args.columnCount ?? 26)} column(s).`;
-    case 'sheets.writeRange': return `Write the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} using ${value(args, 'inputMode') === 'userEntered' ? 'USER_ENTERED parsing (formulas/dates/numbers may be interpreted)' : 'literal RAW input'}.`;
-    case 'sheets.appendRows': return `Append the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} using ${value(args, 'inputMode') === 'userEntered' ? 'USER_ENTERED parsing (formulas/dates/numbers may be interpreted)' : 'literal RAW input'}.`;
-    case 'sheets.updateCell': return `Write one cell at ${value(args, 'range') ?? 'the selected cell'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} using ${value(args, 'inputMode') === 'userEntered' ? 'USER_ENTERED parsing, which can interpret formulas' : 'literal RAW input'}. Review the exact cell input below before approving.`;
-    case 'sheets.insertRows': return `Insert ${String(args.count ?? '?')} row(s) into sheet ${String(args.sheetId ?? '?')} of spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}, starting at zero-based row index ${String(args.startIndex ?? '?')}.`;
+    case 'sheets.writeRange': return `Write the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} as ${value(args, 'inputMode') === 'userEntered' ? 'interpreted input, so formulas, dates, and numbers may be processed' : 'literal text, so formulas will not be interpreted'}.`;
+    case 'sheets.appendRows': return `Append the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} as ${value(args, 'inputMode') === 'userEntered' ? 'interpreted input, so formulas, dates, and numbers may be processed' : 'literal text, so formulas will not be interpreted'}.`;
+    case 'sheets.updateCell': return `Write one cell at ${value(args, 'range') ?? 'the selected cell'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} as ${value(args, 'inputMode') === 'userEntered' ? 'interpreted input, which can evaluate formulas' : 'literal text, so formulas will not be evaluated'}. Review the exact cell input below before approving.`;
+    case 'sheets.insertRows': return `Insert ${String(args.count ?? '?')} row(s) into sheet ${String(args.sheetId ?? '?')} of spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}, starting at row ${typeof args.startIndex === 'number' ? args.startIndex + 1 : '?'}.`;
     case 'sheets.batchUpdate': return `Apply the requested spreadsheet changes to ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}.`;
     case 'roleplay_setting.create': return `Create ${String(args.type)} “${String(args.name)}” under ${typeof args.parentId === 'string' ? args.parentId : 'the world root'}.`;
-    case 'roleplay_setting.update': return `Update ${id ?? 'selected entity'}: ${Object.entries(args).filter(([key]) => !['id', 'ref'].includes(key)).map(([key, entry]) => `${key}=${JSON.stringify(entry)}`).join(', ')}.`;
+    case 'roleplay_setting.update': return `Update ${id ?? 'selected world item'} with the reviewed changes below.`;
     case 'roleplay_setting.move': return `Move ${id ?? 'selected entity'} under ${typeof args.parentId === 'string' ? args.parentId : 'the world root'}.`;
     case 'roleplay_setting.delete': return `Delete ${id ?? 'selected entity'} and any child entities beneath it.`;
     case 'memory.save': return `Save durable memory “${value(args, 'title') ?? 'Untitled'}”. Review the full proposed body below before approving.`;
@@ -320,10 +439,18 @@ export function confirmationRequestForCall(
   if (!request) return null;
   if (parsed.data.tool === 'clickup.attachArtifact' && context.clickupArtifactSnapshot) {
     const snapshot = context.clickupArtifactSnapshot;
-    return {
+    return writeConfirmationSchema.parse({
       ...request,
-      resourceSummary: `Attach approved Elara artifact “${snapshot.artifactName}” (${snapshot.mimeType}, ${snapshot.payloadSize} bytes, SHA-256 ${snapshot.sha256.slice(0, 12)}…) to ClickUp task ${value(args, 'taskId') ?? 'selected task'} as “${snapshot.uploadName}”.`,
-    };
+      resourceSummary: `Attach the approved file below to ClickUp task ${value(args, 'taskId') ?? 'selected task'}.`,
+      attachmentReview: {
+        name: snapshot.artifactName,
+        uploadName: snapshot.uploadName,
+        mimeType: snapshot.mimeType,
+        sizeBytes: snapshot.payloadSize,
+        ...(snapshot.previewText ? { previewText: snapshot.previewText } : {}),
+        ...(snapshot.previewTruncated ? { previewTruncated: true } : {}),
+      },
+    });
   }
   if (parsed.data.tool !== 'memory.reconcile') return request;
   const targetRef = value(args, 'targetRef');

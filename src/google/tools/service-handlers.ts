@@ -464,7 +464,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     return runDriveCreateOnce(
       { tool: 'drive.createFile', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
       input,
-      () => drive.createFile(input, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) }),
+      () => drive.createFile(input, mutationGuard(signal, isGenerationActive, googleExecutionGrant)),
     );
   },
   'drive.updateFile': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
@@ -478,7 +478,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(starred !== undefined ? { starred } : {}),
-    }, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
+    }, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
   'drive.moveFile': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
@@ -488,13 +488,13 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'etag')!,
       stringArg(args, 'parentId')!,
       stringArg(args, 'previousParentId', false),
-      { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
   'drive.trashFile': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'fileId')!);
-    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
+    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
 
   'sheets.getSpreadsheet': async ({ arguments: raw }) => {
@@ -507,7 +507,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     return sheets.readRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!);
   },
-  'sheets.exportSpreadsheet': async ({ arguments: raw, conversationId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
+  'sheets.exportSpreadsheet': async ({ arguments: raw, conversationId, generationId, signal, isGenerationActive }) => {
     const args = objectArgs(raw);
     const spreadsheetId = stringArg(args, 'spreadsheetId')!;
     await assertGooglePickerFileAllowed(spreadsheetId);

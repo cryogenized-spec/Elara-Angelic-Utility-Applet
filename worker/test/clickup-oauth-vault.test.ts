@@ -239,6 +239,12 @@ async function setRateLimitSnapshot(value: {
 }
 
 describe('ClickUp OAuth public boundary', () => {
+  it('serves ClickUp connection methods on a separate authenticated read endpoint', async () => {
+    const response = await SELF.fetch(await bearerRead('/clickup/oauth/methods'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ oauth: true, personalToken: true });
+  });
+
   it('requires a signed installation write for personal-token activation', async () => {
     const response = await SELF.fetch('https://worker.example/clickup/oauth/personal-token', {
       method: 'POST',
@@ -296,6 +302,7 @@ describe('ClickUpOAuthVault', () => {
       workspaces: [{ id: '999', name: 'Neon Sales' }],
     }));
     expect(JSON.stringify(body)).not.toContain('members');
+    expect(body).not.toHaveProperty('connectionMethods');
     expect(JSON.stringify(body)).not.toContain('clickup-access-token-never-returned');
     expect(provider.token).toBe(1);
     expect(provider.user).toBe(1);
@@ -475,6 +482,7 @@ describe('ClickUpOAuthVault', () => {
       account: { id: '183', username: 'Gareth', email: 'gareth@example.com' },
       workspaces: [{ id: '999', name: 'Neon Sales' }],
     }));
+    expect(body).not.toHaveProperty('connectionMethods');
     expect(JSON.stringify(body)).not.toContain(PERSONAL_TOKEN);
     expect(userCalls).toBe(1);
     expect(workspaceCalls).toBe(1);

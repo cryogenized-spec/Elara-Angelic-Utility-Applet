@@ -53,13 +53,19 @@ describe('durable memory write confirmation safety', () => {
     const body = `Persist this durable project note. ${'x'.repeat(600)}`;
     const request = confirmationRequestForCall({
       tool: 'memory.save',
-      arguments: { title: 'Project note', body },
+      arguments: { title: 'Project note', body, kind: 'EPISODIC', confidence: 0.9, importance: 0.8, tags: ['project', 'decision'] },
     }, new Date('2026-09-17T08:00:00Z'));
 
     expect(request?.resourceSummary).toContain('Project note');
     expect(request?.resourceSummary).toMatch(/full proposed body/i);
-    expect(request?.reviewText).toBe(body);
+    expect(request?.reviewText).toContain('Title: “Project note”');
+    expect(request?.reviewText).toContain('Body:');
     expect(request?.reviewText).toContain('x'.repeat(600));
+    expect(request?.reviewText).toContain('Memory kind: “EPISODIC”');
+    expect(request?.reviewText).toContain('Confidence: 0.9');
+    expect(request?.reviewText).toContain('Importance: 0.8');
+    expect(request?.reviewText).toContain('Item 1: “project”');
+    expect(request?.reviewText).toContain('Item 2: “decision”');
   });
 
   it('identifies the reconciliation target and exposes the entire proposed body without leaking its durable id or opaque ref', async () => {
@@ -89,7 +95,10 @@ describe('durable memory write confirmation safety', () => {
     expect(request?.resourceSummary).toContain('Corrected layout preference');
     expect(request?.resourceSummary).not.toContain(target.id);
     expect(request?.resourceSummary).not.toContain(targetRef);
-    expect(request?.reviewText).toBe(proposedBody);
+    expect(request?.reviewText).toContain('Relation: “supersede”');
+    expect(request?.reviewText).toContain('Evidence / replacement title: “Corrected layout preference”');
+    expect(request?.reviewText).toContain('Proposed body:');
+    expect(request?.reviewText).toContain(proposedBody);
     expect(request?.reviewText).toContain('y'.repeat(500));
   });
 

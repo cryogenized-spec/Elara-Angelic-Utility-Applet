@@ -86,6 +86,17 @@ async function search(argumentsValue: Record<string, unknown>) {
   }));
 }
 
+async function materializedSearch(argumentsValue: Record<string, unknown>): Promise<{
+  status: number;
+  payload: TaskSearchPayload;
+}> {
+  const response = await search(argumentsValue);
+  return {
+    status: response.status,
+    payload: await taskSearchPayload(response),
+  };
+}
+
 async function harnessFetch(path: string, init?: RequestInit): Promise<Response> {
   return doFetch(new Request(`https://clickup-oauth-vault${path}`, init));
 }
@@ -626,21 +637,21 @@ describe('ClickUp durable task index', () => {
     await forceIndexedAt(Date.now() - (7 * 60 * 60_000));
     await forceRefreshAt(0);
 
-    const first = search({ workspaceId: '999', query: 'new needle' });
-    const second = search({ workspaceId: '999', query: 'new needle' });
+    const first = materializedSearch({ workspaceId: '999', query: 'new needle' });
+    const second = materializedSearch({ workspaceId: '999', query: 'new needle' });
     await bothStartedPromise;
 
     releaseFirst();
-    const firstResponse = await first;
-    expect(firstResponse.status).toBe(200);
-    expect((await taskSearchPayload(firstResponse)).result.tasks).toEqual([
+    const firstResult = await first;
+    expect(firstResult.status).toBe(200);
+    expect(firstResult.payload.result.tasks).toEqual([
       expect.objectContaining({ id: 'new-task' }),
     ]);
 
     releaseSecond();
-    const secondResponse = await second;
-    expect(secondResponse.status).toBe(200);
-    expect((await taskSearchPayload(secondResponse)).result.tasks).toEqual([
+    const secondResult = await second;
+    expect(secondResult.status).toBe(200);
+    expect(secondResult.payload.result.tasks).toEqual([
       expect.objectContaining({ id: 'new-task' }),
     ]);
     expect(reconcileCalls).toBe(2);
@@ -708,7 +719,10 @@ describe('ClickUp durable task index', () => {
       indexedTasks: 1,
       fullSyncComplete: true,
       refreshIncomplete: true,
-      refreshError: expect.objectContaining({ code: 'provider' }),
+      refreshError: {
+        code: 'http-500',
+        message: 'ClickUp is temporarily unavailable.',
+      },
     }));
     expect((await indexSnapshot()).indexedTasks).toBe(1);
 

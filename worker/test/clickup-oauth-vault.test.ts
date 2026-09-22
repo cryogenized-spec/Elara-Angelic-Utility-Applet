@@ -246,6 +246,18 @@ describe('ClickUp OAuth public boundary', () => {
     expect(await response.json()).toEqual({ oauth: true, personalToken: true });
   });
 
+
+  it('rejects unauthenticated reads and write verbs on the ClickUp methods endpoint', async () => {
+    const unauthenticated = await SELF.fetch('https://worker.example/clickup/oauth/methods', {
+      method: 'GET',
+      headers: { Origin: ORIGIN },
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const writeAttempt = await SELF.fetch(await signedWrite('/clickup/oauth/methods', '{}'));
+    expect(writeAttempt.status).toBe(405);
+  });
+
   it('requires a signed installation write for personal-token activation', async () => {
     const response = await SELF.fetch('https://worker.example/clickup/oauth/personal-token', {
       method: 'POST',

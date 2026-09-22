@@ -11,6 +11,26 @@ const MAX_REQUEST_BODY_BYTES = 1_000_000;
 
 export interface GoogleChatMessageSummary { name: string; text?: string; createTime?: string; senderName?: string; }
 
+export interface GoogleChatMutationOptions {
+  readonly signal?: AbortSignal;
+  readonly isGenerationActive?: () => boolean;
+  readonly beforeProviderFetch?: () => void | Promise<void>;
+}
+
+function requireChatMutationCurrent(options: GoogleChatMutationOptions, operation: string): void {
+  if (options.signal?.aborted || options.isGenerationActive?.() === false) {
+    throw new DOMException(`${operation} lost turn authority.`, 'AbortError');
+  }
+}
+
+function chatProviderMutationGuard(options: GoogleChatMutationOptions, operation: string): () => Promise<void> {
+  return async () => {
+    requireChatMutationCurrent(options, operation);
+    await options.beforeProviderFetch?.();
+    requireChatMutationCurrent(options, operation);
+  };
+}
+
 function bounded(value: string, field: string, maxLength: number): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`Google Chat ${field} is required.`);
@@ -61,33 +81,39 @@ export class GoogleChatService {
     return this.readJson(response);
   }
 
-  async createMessage(spaceName: string, message: Record<string, unknown>, requestId?: string): Promise<unknown> {
+  async createMessage(spaceName: string, message: Record<string, unknown>, requestId?: string, options: GoogleChatMutationOptions = {}): Promise<unknown> {
     const safeSpaceName = bounded(spaceName, 'space name', MAX_SPACE_NAME_LENGTH);
     const safeRequestId = optionalBounded(requestId, 'request ID', MAX_REQUEST_ID_LENGTH);
     const safeMessage = boundedBody(message);
+    requireChatMutationCurrent(options, 'Google Chat write');
     const access = await this.oauth.authorize('chat.write');
+    requireChatMutationCurrent(options, 'Google Chat write');
     const url = new URL('https://chat.googleapis.com/v1/messages');
     url.searchParams.set('parent', safeSpaceName);
     if (safeRequestId) url.searchParams.set('requestId', safeRequestId);
-    const response = await access.fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(safeMessage) });
+    const response = await access.fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(safeMessage), ...(options.signal ? { signal: options.signal } : {}) }, chatProviderMutationGuard(options, 'Google Chat create'));
     return this.readJson(response);
   }
 
-  async updateMessage(messageName: string, message: Record<string, unknown>, updateMask: string): Promise<unknown> {
+  async updateMessage(messageName: string, message: Record<string, unknown>, updateMask: string, options: GoogleChatMutationOptions = {}): Promise<unknown> {
     const safeMessageName = bounded(messageName, 'message name', MAX_MESSAGE_NAME_LENGTH);
     const safeUpdateMask = bounded(updateMask, 'update mask', MAX_UPDATE_MASK_LENGTH);
     const safeMessage = boundedBody(message);
+    requireChatMutationCurrent(options, 'Google Chat write');
     const access = await this.oauth.authorize('chat.write');
+    requireChatMutationCurrent(options, 'Google Chat write');
     const url = new URL(`https://chat.googleapis.com/v1/${safeMessageName}`);
     url.searchParams.set('updateMask', safeUpdateMask);
-    const response = await access.fetch(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(safeMessage) });
+    const response = await access.fetch(url, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(safeMessage), ...(options.signal ? { signal: options.signal } : {}) }, chatProviderMutationGuard(options, 'Google Chat update'));
     return this.readJson(response);
   }
 
-  async deleteMessage(messageName: string): Promise<void> {
+  async deleteMessage(messageName: string, options: GoogleChatMutationOptions = {}): Promise<void> {
     const safeMessageName = bounded(messageName, 'message name', MAX_MESSAGE_NAME_LENGTH);
+    requireChatMutationCurrent(options, 'Google Chat write');
     const access = await this.oauth.authorize('chat.write');
-    const response = await access.fetch(`https://chat.googleapis.com/v1/${safeMessageName}`, { method: 'DELETE' });
+    requireChatMutationCurrent(options, 'Google Chat write');
+    const response = await access.fetch(`https://chat.googleapis.com/v1/${safeMessageName}`, { method: 'DELETE', ...(options.signal ? { signal: options.signal } : {}) }, chatProviderMutationGuard(options, 'Google Chat delete'));
     if (!response.ok) throw new Error(`Google Chat request failed (${response.status}).`);
   }
 

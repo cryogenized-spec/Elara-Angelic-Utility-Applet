@@ -954,6 +954,107 @@ describe('ClickUp durable task index', () => {
     expect((await pendingWrite).status).toBe(200);
   });
 
+  it('re-invalidates a stale refresh that completes while a Custom Field mutation is in flight', async () => {
+    let fieldWriteStarted = false;
+    let customFieldValue = 'old';
+    let workspaceTaskCalls = 0;
+    const resetAt = Math.floor(Date.now() / 1000) + 600;
+    const rateHeaders = {
+      'content-type': 'application/json',
+      'X-RateLimit-Limit': '100',
+      'X-RateLimit-Remaining': '90',
+      'X-RateLimit-Reset': String(resetAt),
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'token-mutation-refresh-race' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200, headers: rateHeaders });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), {
+          status: 200,
+          headers: rateHeaders,
+        });
+      }
+      if (url.pathname === '/api/v2/team/999/task' && request.method === 'GET') {
+        workspaceTaskCalls += 1;
+        return new Response(JSON.stringify({
+          tasks: [{
+            id: 'task-race',
+            name: 'Mutation refresh race',
+            date_updated: customFieldValue === 'old' ? '1790000000000' : '1790000001000',
+            status: { status: 'open' },
+            list: { id: '123', name: 'Repairs' },
+            space: { id: '789' },
+            custom_fields: [{ id: 'field-1', name: 'State', type: 'short_text', value: customFieldValue }],
+          }],
+        }), { status: 200, headers: rateHeaders });
+      }
+      if (url.pathname === '/api/v2/task/task-race' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: 'task-race',
+          name: 'Mutation refresh race',
+          team_id: '999',
+          list: { id: '123', name: 'Repairs' },
+          space: { id: '789' },
+          custom_fields: [{ id: 'field-1', name: 'State', type: 'short_text', value: customFieldValue }],
+        }), { status: 200, headers: rateHeaders });
+      }
+      if (url.pathname === '/api/v2/list/123/field' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          fields: [{ id: 'field-1', name: 'State', type: 'short_text' }],
+        }), { status: 200, headers: rateHeaders });
+      }
+      if (url.pathname === '/api/v2/task/task-race/field/field-1' && request.method === 'POST') {
+        fieldWriteStarted = true;
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        customFieldValue = 'new';
+        return new Response(JSON.stringify({}), { status: 200, headers: rateHeaders });
+      }
+
+      throw new Error(`Unexpected provider request: ${request.method} ${request.url}`);
+    });
+
+    await connect();
+    const warm = await materializedSearch({ workspaceId: '999', query: 'mutation refresh race' });
+    expect(warm.status).toBe(200);
+    expect((warm.payload.result.tasks[0]?.custom_fields as Array<Record<string, unknown>>)[0]?.value).toBe('old');
+
+    const pendingWrite = internalCommand({
+      operation: 'setCustomField',
+      workspaceId: '999',
+      taskId: 'task-race',
+      fieldId: 'field-1',
+      value: 'new',
+    });
+    for (let attempt = 0; attempt < 100 && !fieldWriteStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(fieldWriteStarted).toBe(true);
+
+    // The pre-write invalidation lets this search refresh while ClickUp still
+    // exposes the old value. This is the exact interleaving the second
+    // invalidation must neutralize.
+    const during = await materializedSearch({ workspaceId: '999', query: 'mutation refresh race' });
+    expect((during.payload.result.tasks[0]?.custom_fields as Array<Record<string, unknown>>)[0]?.value).toBe('old');
+    expect(workspaceTaskCalls).toBeGreaterThanOrEqual(2);
+
+    expect((await pendingWrite).status).toBe(200);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      indexedTasks: 0,
+      lastRefreshAt: 0,
+    }));
+
+    const after = await materializedSearch({ workspaceId: '999', query: 'mutation refresh race' });
+    expect((after.payload.result.tasks[0]?.custom_fields as Array<Record<string, unknown>>)[0]?.value).toBe('new');
+  });
+
   it('does not lose an older assignee match behind the 1,000-row search candidate ceiling', async () => {
     let taskCalls = 0;
 

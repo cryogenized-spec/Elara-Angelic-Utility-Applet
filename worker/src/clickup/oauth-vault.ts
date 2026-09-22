@@ -998,7 +998,7 @@ export class ClickUpOAuthVault extends DurableObject {
       fullReconcileHandled = true;
       if (!reconcileStage) {
         reconcileStage = beginClickUpFullReconcileStage(
-          this.ctx.storage,
+          this.ctx.storage.sql,
           args.workspaceId,
           refreshGeneration,
           now,

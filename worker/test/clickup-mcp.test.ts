@@ -365,6 +365,84 @@ describe('ClickUp MCP Worker boundary', () => {
     expect(forbiddenDownstreamCalls).toBe(0);
   });
 
+  it('serializes Space hierarchy reads when ClickUp rate remaining is unknown', async () => {
+    let spaceReads = 0;
+    let folderReads = 0;
+    let listReads = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const providerRequest = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(providerRequest.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'headerless-hierarchy-token' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace A', members: [] }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && providerRequest.method === 'POST') {
+        return new Response(JSON.stringify({ webhook: { id: 'headerless-webhook', secret: 'headerless-secret' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/team/999/space' && providerRequest.method === 'GET') {
+        spaceReads += 1;
+        return new Response(JSON.stringify({ spaces: [{ id: '789', name: 'Operations' }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/space/789/folder' && providerRequest.method === 'GET') {
+        folderReads += 1;
+        return new Response(JSON.stringify({ folders: [{ id: '456', name: 'Repairs', space: { id: '789' } }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/space/789/list' && providerRequest.method === 'GET') {
+        listReads += 1;
+        return new Response(JSON.stringify({ lists: [{ id: '123', name: 'Unfiled', space: { id: '789' } }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected provider request: ${providerRequest.method} ${providerRequest.url}`);
+    });
+
+    const revision = await connectClickUp();
+    const response = await request('tools/call', {
+      name: 'clickup.listHierarchy',
+      arguments: { workspaceId: '999', spaceId: '789' },
+    }, 'clickup.listHierarchy', {
+      [CLICKUP_GRANT_REVISION_HEADER]: String(revision),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await jsonRecord(response);
+    const result = record(body.result);
+    expect(result.isError).not.toBe(true);
+    const structured = record(result.structuredContent);
+    expect(structured.folders).toEqual([expect.objectContaining({ id: '456' })]);
+    expect(structured.lists).toEqual([expect.objectContaining({ id: '123' })]);
+    expect(spaceReads).toBe(2);
+    expect(folderReads).toBe(1);
+    expect(listReads).toBe(1);
+  });
+
   it('authenticates comment cursors and rejects cross-task cursor transplantation before provider egress', async () => {
     let commentCalls = 0;
     let otherTaskReads = 0;

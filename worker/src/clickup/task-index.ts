@@ -769,6 +769,14 @@ export function searchClickUpTaskIndex(
     clauses.push(`status IN (${placeholders(args.statuses)})`);
     bindings.push(...args.statuses);
   }
+  if (args.assigneeIds?.length) {
+    // Apply assignee filtering before the candidate LIMIT. Post-filtering only
+    // the newest 1,000 rows can otherwise hide an older matching task in a
+    // large Workspace. IDs are stored as JSON strings, so quote them in the
+    // LIKE pattern to avoid decimal-substring collisions (e.g. 18 vs 183).
+    clauses.push(`(${args.assigneeIds.map(() => "assignee_ids_json LIKE ? ESCAPE '\\\\'").join(' OR ')})`);
+    bindings.push(...args.assigneeIds.map((userId) => `%"${escapeLike(userId)}"%`));
+  }
 
   const rows = sql.exec<SearchRow>(
     `SELECT task_json, assignee_ids_json

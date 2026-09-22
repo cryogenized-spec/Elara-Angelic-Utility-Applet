@@ -135,9 +135,15 @@ describe('ClickUp integration with Elara model-tool authority', () => {
         blob: new Blob(['approved'], { type: 'application/pdf' }),
       },
     });
-    expect(attachment?.resourceSummary).toContain('inspection.pdf');
+    expect(attachment?.resourceSummary).toContain('approved file below');
     expect(attachment?.resourceSummary).not.toContain('SHA-256');
     expect(attachment?.reviewText).toBeUndefined();
+    expect(attachment?.attachmentReview).toEqual({
+      name: 'inspection.pdf',
+      uploadName: 'inspection.pdf',
+      mimeType: 'application/pdf',
+      sizeBytes: 1200,
+    });
   });
 
   it('blocks a disconnected ClickUp tool before its handler can execute', async () => {

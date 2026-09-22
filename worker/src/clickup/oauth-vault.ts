@@ -1926,7 +1926,29 @@ export class ClickUpOAuthVault extends DurableObject {
 
     const now = Date.now();
     const taskId = safeProviderId(payload.task_id);
+    let registrationCurrent = true;
     const accepted = this.ctx.storage.transactionSync(() => {
+      // AES-GCM/HMAC verification above is asynchronous. A reconnect or
+      // disconnect can delete/replace this registration while verification is
+      // in flight, so bind the delivery to the exact still-current local
+      // webhook row inside the same synchronous transaction as its index
+      // effect. If the row changed, acknowledge the orphan delivery without
+      // touching the replacement grant's cache/index state.
+      const live = this.ctx.storage.sql.exec<WebhookRow>(
+        'SELECT webhook_id, workspace_id, secret_cipher, secret_iv, endpoint, updated_at FROM clickup_webhooks WHERE webhook_id = ?',
+        payload.webhook_id,
+      ).toArray()[0];
+      if (
+        !live
+        || live.workspace_id !== row.workspace_id
+        || live.updated_at !== row.updated_at
+        || live.secret_cipher !== row.secret_cipher
+        || live.secret_iv !== row.secret_iv
+      ) {
+        registrationCurrent = false;
+        return false;
+      }
+
       this.ctx.storage.sql.exec(
         'DELETE FROM clickup_webhook_deliveries WHERE received_at < ?',
         now - WEBHOOK_DELIVERY_RETENTION_MS,
@@ -1959,6 +1981,7 @@ export class ClickUpOAuthVault extends DurableObject {
       return true;
     });
 
+    if (!registrationCurrent) return json({ accepted: true, ignored: true });
     if (!accepted) return json({ accepted: true, duplicate: true });
     return json({ accepted: true });
   }

@@ -2470,7 +2470,11 @@ export class ClickUpOAuthVault extends DurableObject {
     // state, and provider cleanup can safely remain best-effort afterward.
     const detached = this.ctx.storage.transactionSync(() => {
       const nextEpoch = this.connectionEpoch() + 1;
-      this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = ? WHERE slot = 1', nextEpoch);
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_connection_epoch SET epoch = ?, settled_epoch = ? WHERE slot = 1',
+        nextEpoch,
+        nextEpoch,
+      );
       const previous = this.credentialRow();
       const webhookRows = this.webhookRows();
       this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');

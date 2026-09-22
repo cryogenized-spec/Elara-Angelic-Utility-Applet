@@ -238,6 +238,26 @@ async function setRateLimitSnapshot(value: {
 }
 
 describe('ClickUp OAuth public boundary', () => {
+  it('requires a signed installation write for personal-token activation', async () => {
+    const response = await SELF.fetch('https://worker.example/clickup/oauth/personal-token', {
+      method: 'POST',
+      headers: {
+        Origin: ORIGIN,
+        Authorization: `Bearer ${TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it('rejects personal-token bytes in the browser payload even when the write is correctly signed', async () => {
+    const body = JSON.stringify({ token: 'pk_dummy' });
+    const response = await SELF.fetch(await signedWrite('/clickup/oauth/personal-token', body));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: 'validation' }));
+  });
+
   it('rejects oversized OAuth bodies before signature verification or vault buffering', async () => {
     const response = await SELF.fetch('https://worker.example/clickup/oauth/start', {
       method: 'POST',

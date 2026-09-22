@@ -259,6 +259,55 @@ describe('ClickUpOAuthVault', () => {
     expect(await status.json()).toEqual(expect.objectContaining({ connected: true }));
   });
 
+  it('preserves OAuth credential kind across vault encryption when token text collides with the former marker', async () => {
+    const collisionToken = 'elara-clickup-personal-v1:collision-oauth-token';
+    let teamCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT && request.method === 'POST') {
+        return new Response(JSON.stringify({ access_token: collisionToken }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        expect(request.headers.get('Authorization')).toBe(`Bearer ${collisionToken}`);
+        return new Response(JSON.stringify({
+          user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        teamCalls += 1;
+        expect(request.headers.get('Authorization')).toBe(`Bearer ${collisionToken}`);
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '999',
+            name: 'Neon Sales',
+            members: [{ user: { id: 183, username: 'Gareth', email: 'gareth@example.com' } }],
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected collision-token provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state, 'collision-code')).status).toBe(200);
+    expect(teamCalls).toBe(1);
+
+    // This second provider call occurs only after the credential has been
+    // encrypted, persisted, decrypted and reconstructed by accessGrant().
+    const context = await internalCommand({
+      operation: 'getWorkspaceAuthorizationContext',
+      workspaceId: '999',
+    });
+    expect(context.status).toBe(200);
+    expect(teamCalls).toBe(2);
+
+    const snapshot = await credentialSnapshot();
+    expect(snapshot?.accessCipher).toBeTruthy();
+    expect(snapshot?.accessCipher).not.toContain(collisionToken);
+  });
+
   it('activates a configured personal API token entirely inside the Worker and stores only encrypted material', async () => {
     let userCalls = 0;
     let workspaceCalls = 0;

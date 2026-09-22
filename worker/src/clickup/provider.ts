@@ -99,7 +99,7 @@ function boundedToken(value: string, label: string): string {
   return token;
 }
 
-export function oauthClickUpCredential(accessToken: ClickUpProviderCredentialInput): ClickUpProviderCredential {
+export function oauthClickUpCredential(accessToken: string): ClickUpProviderCredential {
   return { kind: 'oauth', token: boundedToken(accessToken, 'OAuth access token') };
 }
 

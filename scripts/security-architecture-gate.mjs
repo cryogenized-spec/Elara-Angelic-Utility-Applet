@@ -396,6 +396,7 @@ for (const marker of [
   'signWrite',
   "'/clickup/oauth/start'",
   "'/clickup/oauth/exchange'",
+  "'/clickup/oauth/methods'",
   "'/clickup/oauth/personal-token'",
   "'/clickup/oauth/disconnect'",
   'MAX_WORKER_RESPONSE_BYTES',
@@ -412,6 +413,24 @@ if (!/async function workerRequest[\s\S]*const response = await fetch\([\s\S]*co
 }
 if (!/async function bearerStatus[\s\S]*catch \(cause\)[\s\S]*localStorage\.removeItem\(STORAGE_KEY\)[\s\S]*throw cause/.test(clickUpOAuthAuthority)) {
   fail('ClickUp authoritative status failure must clear stale cached connection metadata');
+}
+for (const marker of [
+  'bearerConnectionMethods',
+  "'/clickup/oauth/methods'",
+  "if (response.status === 404) return { oauth: true, personalToken: false }",
+]) {
+  if (!clickUpOAuthAuthority.includes(marker)) fail(`ClickUp backward-compatible connection-method discovery is missing: ${marker}`);
+}
+if (!clickUpOAuthVault.includes("url.pathname === '/clickup/oauth/methods'")) {
+  fail('ClickUp Worker connection-method discovery route is missing');
+}
+const clickUpStatusStart = clickUpOAuthVault.indexOf('private status()');
+const clickUpStatusEnd = clickUpStatusStart >= 0
+  ? clickUpOAuthVault.indexOf('private async start(', clickUpStatusStart)
+  : -1;
+if (clickUpStatusStart < 0 || clickUpStatusEnd < 0) fail('ClickUp status authority disappeared');
+if (clickUpOAuthVault.slice(clickUpStatusStart, clickUpStatusEnd).includes('connectionMethods')) {
+  fail('ClickUp legacy status response must not gain connection-method fields');
 }
 for (const marker of [
   "CLICKUP_MCP_PROTOCOL_VERSION",

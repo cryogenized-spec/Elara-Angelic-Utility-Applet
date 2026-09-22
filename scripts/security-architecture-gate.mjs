@@ -749,7 +749,7 @@ const personalTokenBody = clickUpOAuthVault.slice(personalTokenStart, installCre
 const installCredentialBody = clickUpOAuthVault.slice(installCredentialStart, disconnectStartForInstall);
 for (const marker of [
   'exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code)',
-  'return this.installCredential(request, accessToken, exchangeEpoch, previousAccessToken, now)',
+  'return this.installCredential(request, credential, exchangeEpoch, previousAccessToken, now)',
 ]) {
   if (!exchangeBody.includes(marker)) fail(`ClickUp OAuth exchange path lost shared credential installation: ${marker}`);
 }

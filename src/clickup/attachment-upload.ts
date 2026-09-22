@@ -11,6 +11,7 @@ import {
 
 const CLICKUP_ATTACHMENT_PATH = '/clickup/attachment';
 const UPLOAD_TIMEOUT_MS = 60_000;
+const MAX_ATTACHMENT_RESPONSE_BYTES = 256 * 1024;
 
 export class ClickUpAttachmentUploadError extends Error {
   constructor(
@@ -48,8 +49,66 @@ async function installationToken(pairing: AutonomyPairing): Promise<string> {
   return token;
 }
 
+async function boundedResponsePayload(response: Response): Promise<Record<string, unknown> | null> {
+  const declared = Number(response.headers.get('content-length') ?? '0');
+  if (Number.isFinite(declared) && declared > MAX_ATTACHMENT_RESPONSE_BYTES) {
+    throw new ClickUpAttachmentUploadError(
+      'response-too-large',
+      'The ClickUp attachment endpoint returned more data than Elara allows.',
+      response.status,
+    );
+  }
+
+  const reader = response.body?.getReader();
+  let text = '';
+  if (!reader) {
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > MAX_ATTACHMENT_RESPONSE_BYTES) {
+      throw new ClickUpAttachmentUploadError(
+        'response-too-large',
+        'The ClickUp attachment endpoint returned more data than Elara allows.',
+        response.status,
+      );
+    }
+    text = new TextDecoder().decode(bytes);
+  } else {
+    const decoder = new TextDecoder();
+    let total = 0;
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!value?.byteLength) continue;
+        total += value.byteLength;
+        if (total > MAX_ATTACHMENT_RESPONSE_BYTES) {
+          throw new ClickUpAttachmentUploadError(
+            'response-too-large',
+            'The ClickUp attachment endpoint returned more data than Elara allows.',
+            response.status,
+          );
+        }
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } catch (error) {
+      await reader.cancel().catch(() => undefined);
+      throw error;
+    }
+  }
+
+  if (!text) return null;
+  try {
+    const parsed = JSON.parse(text) as unknown;
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function responseError(response: Response): Promise<ClickUpAttachmentUploadError> {
-  const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+  const payload = await boundedResponsePayload(response);
   return new ClickUpAttachmentUploadError(
     typeof payload?.code === 'string' ? payload.code : `http-${response.status}`,
     typeof payload?.message === 'string' ? payload.message : `ClickUp attachment upload failed with HTTP ${response.status}.`,
@@ -126,7 +185,7 @@ export async function uploadClickUpArtifact(
       signal: controller.signal,
     });
     if (!response.ok) throw await responseError(response);
-    const payload = await response.json().catch(() => null) as Record<string, unknown> | null;
+    const payload = await boundedResponsePayload(response);
     if (!payload || payload.ok !== true || !payload.result || typeof payload.result !== 'object' || Array.isArray(payload.result)) {
       throw new ClickUpAttachmentUploadError('protocol', 'The ClickUp attachment endpoint returned an invalid result.', response.status);
     }

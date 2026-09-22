@@ -87,6 +87,7 @@ async function indexSnapshot(): Promise<{
   lastRefreshAt: number;
   lastProviderUpdatedAt: number;
   indexedTasks: number;
+  invalidationGeneration: number;
 }> {
   const response = await harnessFetch('/__test/clickup/task-index?workspaceId=999');
   expect(response.status).toBe(200);
@@ -96,6 +97,7 @@ async function indexSnapshot(): Promise<{
     lastRefreshAt: number;
     lastProviderUpdatedAt: number;
     indexedTasks: number;
+    invalidationGeneration: number;
   };
 }
 
@@ -404,6 +406,82 @@ describe('ClickUp signed webhook cache invalidation', () => {
     });
     expect(orphanDelivery.status).toBe(200);
     expect(await orphanDelivery.json()).toEqual({ accepted: true, ignored: true });
+  });
+
+  it('does not resurrect a task deleted by webhook while an older refresh page is in flight', async () => {
+    let refreshStarted = false;
+    let taskCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/webhook') {
+        return new Response(JSON.stringify({ webhook: { id: WEBHOOK_ID, secret: WEBHOOK_SECRET } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/task') {
+        taskCalls += 1;
+        const incremental = url.searchParams.has('date_updated_gt');
+        if (incremental) {
+          refreshStarted = true;
+          await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        }
+        return new Response(JSON.stringify({
+          tasks: [{
+            id: 'task-repair',
+            name: incremental ? 'STALE_PROVIDER_COPY' : 'Repair S56',
+            date_updated: incremental ? '1790000005000' : '1790000000000',
+            status: { status: 'open' },
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.url}`);
+    });
+
+    await connectThroughPublicWorker();
+    expect((await internalSearch()).status).toBe(200);
+    expect((await indexSnapshot()).indexedTasks).toBe(1);
+
+    const staleResponse = await harnessFetch('/__test/clickup/task-index/refresh-at', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ workspaceId: '999', value: 0 }),
+    });
+    expect(staleResponse.status).toBe(200);
+
+    const pendingRefresh = internalSearch();
+    for (let attempt = 0; attempt < 100 && !refreshStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(refreshStarted).toBe(true);
+
+    const generationBeforeDelete = (await indexSnapshot()).invalidationGeneration;
+    const payload = JSON.stringify({
+      event: 'taskDeleted',
+      task_id: 'task-repair',
+      webhook_id: WEBHOOK_ID,
+      history_items: [{ id: 'history-delete-race' }],
+    });
+    const webhook = await SELF.fetch('https://worker.example/clickup/webhook', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Signature': await signWebhook(payload),
+      },
+      body: payload,
+    });
+    expect(webhook.status).toBe(200);
+    expect((await indexSnapshot()).indexedTasks).toBe(0);
+    expect((await indexSnapshot()).invalidationGeneration).toBeGreaterThan(generationBeforeDelete);
+
+    const refresh = await pendingRefresh;
+    expect([200, 409]).toContain(refresh.status);
+    expect((await indexSnapshot()).indexedTasks).toBe(0);
+    expect(JSON.stringify(await refresh.clone().json())).not.toContain('STALE_PROVIDER_COPY');
+    expect(taskCalls).toBeGreaterThanOrEqual(2);
   });
 
   it('evicts a deleted task immediately without trusting webhook task content', async () => {

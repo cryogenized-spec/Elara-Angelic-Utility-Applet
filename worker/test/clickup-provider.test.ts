@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   ClickUpProviderError,
   buildClickUpCommentBody,
@@ -6,6 +6,10 @@ import {
   buildClickUpUpdateTaskBody,
   fetchAuthorizedClickUpUser,
 } from '../src/clickup/provider';
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('ClickUp provider wire mapping', () => {
   it('maps semantic create-task fields to documented ClickUp JSON names', () => {
@@ -101,6 +105,33 @@ describe('ClickUp provider wire mapping', () => {
       message: (caught as ClickUpProviderError).message,
     })).not.toContain(secret);
     expect((caught as ClickUpProviderError).providerCode).toBe('ACCESS_403');
+  });
+
+  it('keeps the provider deadline active after headers while the body stalls', async () => {
+    vi.useFakeTimers();
+    const fetcher = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const signal = init?.signal;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener('abort', () => {
+            controller.error(new DOMException('Aborted', 'AbortError'));
+          }, { once: true });
+          controller.enqueue(new TextEncoder().encode('{"user":'));
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    const pending = fetchAuthorizedClickUpUser('provider-token', fetcher);
+    await vi.advanceTimersByTimeAsync(20_001);
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'timeout',
+      status: 502,
+    });
   });
 
   it('cancels chunked provider JSON as soon as it crosses the hard byte ceiling', async () => {

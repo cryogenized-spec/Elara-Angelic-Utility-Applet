@@ -618,7 +618,11 @@ describe('ClickUpOAuthVault', () => {
     expect(await credentialSnapshot()).toBeNull();
 
     const status = await doFetch(await bearerRead('/clickup/oauth/status'));
-    expect(await status.json()).toEqual({ connected: false, workspaces: [] });
+    expect(await status.json()).toEqual({
+      connected: false,
+      workspaces: [],
+      connectionMethods: { oauth: true, personalToken: true },
+    });
   });
 
   it('disconnects locally without pretending ClickUp revoked the provider grant', async () => {

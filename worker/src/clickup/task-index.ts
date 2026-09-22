@@ -35,6 +35,7 @@ type SearchRow = {
 
 export const MAX_INDEXED_TASK_JSON_CHARS = 64_000;
 const MAX_SEARCH_CANDIDATES = 1_000;
+const TASK_TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60_000;
 
 function record(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value)
@@ -321,6 +322,15 @@ export function initializeClickUpTaskIndex(sql: TaskIndexSql): void {
   sql.exec('CREATE INDEX IF NOT EXISTS clickup_task_index_workspace_folder ON clickup_task_index(workspace_id, folder_id)');
   sql.exec('CREATE INDEX IF NOT EXISTS clickup_task_index_workspace_space ON clickup_task_index(workspace_id, space_id)');
   sql.exec(`
+    CREATE TABLE IF NOT EXISTS clickup_task_index_tombstones (
+      workspace_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      deleted_at INTEGER NOT NULL,
+      PRIMARY KEY (workspace_id, task_id)
+    )
+  `);
+  sql.exec('CREATE INDEX IF NOT EXISTS clickup_task_index_tombstones_deleted ON clickup_task_index_tombstones(deleted_at)');
+  sql.exec(`
     CREATE TABLE IF NOT EXISTS clickup_task_index_state (
       workspace_id TEXT PRIMARY KEY,
       full_sync_complete INTEGER NOT NULL,
@@ -346,6 +356,7 @@ export function initializeClickUpTaskIndex(sql: TaskIndexSql): void {
 export function clearClickUpTaskIndex(sql: TaskIndexSql): void {
   sql.exec('DELETE FROM clickup_task_index');
   sql.exec('DELETE FROM clickup_task_index_state');
+  sql.exec('DELETE FROM clickup_task_index_tombstones');
 }
 
 export function clearClickUpWorkspaceTaskIndex(sql: TaskIndexSql, workspaceId: string): void {
@@ -372,6 +383,44 @@ export function removeClickUpTaskFromIndex(sql: TaskIndexSql, workspaceId: strin
   );
 }
 
+export function tombstoneClickUpTask(
+  sql: TaskIndexSql,
+  workspaceId: string,
+  taskId: string,
+  deletedAt = Date.now(),
+): void {
+  sql.exec(
+    'DELETE FROM clickup_task_index_tombstones WHERE deleted_at < ?',
+    deletedAt - TASK_TOMBSTONE_RETENTION_MS,
+  );
+  sql.exec(
+    'DELETE FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
+    workspaceId,
+    taskId,
+  );
+  sql.exec(`
+    INSERT INTO clickup_task_index_tombstones (workspace_id, task_id, deleted_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(workspace_id, task_id) DO UPDATE SET deleted_at = excluded.deleted_at
+  `, workspaceId, taskId, deletedAt);
+}
+
+export function clearClickUpTaskTombstone(sql: TaskIndexSql, workspaceId: string, taskId: string): void {
+  sql.exec(
+    'DELETE FROM clickup_task_index_tombstones WHERE workspace_id = ? AND task_id = ?',
+    workspaceId,
+    taskId,
+  );
+}
+
+function clickUpTaskTombstoned(sql: TaskIndexSql, workspaceId: string, taskId: string): boolean {
+  return Boolean(sql.exec<{ task_id: string }>(
+    'SELECT task_id FROM clickup_task_index_tombstones WHERE workspace_id = ? AND task_id = ?',
+    workspaceId,
+    taskId,
+  ).toArray()[0]);
+}
+
 export function removeClickUpTaskFromAllIndexes(sql: TaskIndexSql, taskId: string): void {
   sql.exec('DELETE FROM clickup_task_index WHERE task_id = ?', taskId);
 }
@@ -389,6 +438,7 @@ export function upsertClickUpTaskIndexPage(
     const task = indexedTaskProjection(candidate);
     const taskId = id(task?.id);
     if (!task || !taskId) continue;
+    if (clickUpTaskTombstoned(sql, workspaceId, taskId)) continue;
 
     const status = statusValue(task.status);
     const updatedAt = millis(task.date_updated);

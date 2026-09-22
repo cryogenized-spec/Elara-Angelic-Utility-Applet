@@ -796,7 +796,8 @@ const personalTokenBody = clickUpOAuthVault.slice(personalTokenStart, installCre
 const installCredentialBody = clickUpOAuthVault.slice(installCredentialStart, disconnectStartForInstall);
 for (const marker of [
   'exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code)',
-  'return this.installCredential(request, credential, exchangeEpoch, previousAccessToken, now)',
+  'return await this.installCredential(request, credential, exchangeEpoch, previousAccessToken, now)',
+  'this.settleConnectionEpochIfCurrent(exchangeEpoch)',
 ]) {
   if (!exchangeBody.includes(marker)) fail(`ClickUp OAuth exchange path lost shared credential installation: ${marker}`);
 }
@@ -805,7 +806,8 @@ for (const marker of [
   'personalClickUpCredential(personalToken)',
   "UPDATE clickup_connection_epoch SET epoch = ?",
   "DELETE FROM clickup_oauth_states",
-  'return this.installCredential(request, credential, connectionEpoch, previousAccessToken, now)',
+  'return await this.installCredential(request, credential, connectionEpoch, previousAccessToken, now)',
+  'this.settleConnectionEpochIfCurrent(connectionEpoch)',
 ]) {
   if (!personalTokenBody.includes(marker)) fail(`ClickUp personal-token Worker boundary is missing: ${marker}`);
 }

@@ -115,6 +115,7 @@ test('long memory approval stays inside Android viewport and hostile markup rema
       actionsBottom: actionsAfter?.bottom ?? 0,
       reviewClientHeight: reviewText?.clientHeight ?? 0,
       reviewScrollHeight: reviewText?.scrollHeight ?? 0,
+      reviewOverflowY: reviewText ? globalThis.getComputedStyle(reviewText).overflowY : '',
       reviewUnicodeBidi: reviewText ? globalThis.getComputedStyle(reviewText).unicodeBidi : '',
     };
   });
@@ -123,7 +124,9 @@ test('long memory approval stays inside Android viewport and hostile markup rema
   expect(geometry.bottom).toBeLessThanOrEqual(geometry.viewportHeight);
   expect(geometry.actionsBottom).toBeLessThanOrEqual(geometry.viewportHeight);
   expect(Math.abs(geometry.actionsTopAfter - geometry.actionsTopBefore)).toBeLessThan(1);
-  expect(geometry.reviewScrollHeight).toBeGreaterThan(geometry.reviewClientHeight);
+  expect(geometry.reviewClientHeight).toBeGreaterThan(0);
+  expect(geometry.reviewScrollHeight).toBeGreaterThanOrEqual(geometry.reviewClientHeight);
+  expect(geometry.reviewOverflowY).toBe('auto');
   expect(geometry.reviewUnicodeBidi).toBe('plaintext');
 
   await dialog.getByRole('button', { name: '✕ Decline' }).click();

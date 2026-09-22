@@ -878,6 +878,11 @@ describe('ClickUpOAuthVault', () => {
     expect(disconnected.status).toBe(200);
     expect(await disconnected.json()).toEqual({ disconnected: true, providerRevoked: false });
     expect(await credentialSnapshot()).toBeNull();
+
+    const operationState = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    const operationBody = await operationState.json() as { epoch: number; settledEpoch: number; pending: boolean };
+    expect(operationBody.pending).toBe(false);
+    expect(operationBody.settledEpoch).toBe(operationBody.epoch);
   });
 
   it('does not let an in-flight OAuth exchange resurrect a grant after disconnect', async () => {

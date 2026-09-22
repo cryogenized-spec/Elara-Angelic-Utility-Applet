@@ -24,6 +24,8 @@ export interface Env extends CoreEnv {
   CLICKUP_OAUTH_CLIENT_ID?: string;
   /** ClickUp OAuth application client secret. Wrangler secret only. */
   CLICKUP_OAUTH_CLIENT_SECRET?: string;
+  /** Optional ClickUp personal API token for self-hosters without OAuth-app admin rights. Wrangler secret only. */
+  CLICKUP_PERSONAL_TOKEN?: string;
   /** High-entropy AES-GCM vault material. Wrangler secret only. */
   CLICKUP_OAUTH_VAULT_KEY?: string;
 }

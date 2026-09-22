@@ -251,6 +251,12 @@ try {
       'const body = null;',
     ));
   });
+  addMutation('ClickUp comment cursor task binding bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp comment cursor authority is missing: parsed.taskId !== taskId', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/tool-service.ts', (source) => source.replace(
+      '      || parsed.taskId !== taskId\n',
+      '',
+    ));
+  });
   addMutation('ClickUp live catalog comparison bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp live catalog admission disappeared', (cwd) => {
     mutateRelative(cwd, 'worker/src/clickup/mcp-route.ts', (source) => source.replace(
       'if (!presentedCatalog || presentedCatalog !== liveCatalog)',

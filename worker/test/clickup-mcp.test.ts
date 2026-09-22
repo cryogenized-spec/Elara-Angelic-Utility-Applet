@@ -216,6 +216,50 @@ describe('ClickUp MCP Worker boundary', () => {
     }));
   });
 
+  it('fails resolveAssignees closed for an ungranted Workspace instead of fabricating no matches', async () => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const providerRequest = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(providerRequest.url);
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'assignee-scope-token' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '999',
+            name: 'Workspace A',
+            members: [{ user: { id: 183, username: 'Gareth', email: 'gareth@example.com' } }],
+          }],
+        }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && providerRequest.method === 'POST') {
+        return new Response(JSON.stringify({ webhook: { id: 'webhook-a', secret: 'webhook-secret' } }), { status: 200 });
+      }
+      throw new Error(`Unexpected provider request: ${providerRequest.method} ${providerRequest.url}`);
+    });
+
+    const revision = await connectClickUp();
+    const response = await request('tools/call', {
+      name: 'clickup.resolveAssignees',
+      arguments: { workspaceId: '998', names: ['Gareth'] },
+    }, 'clickup.resolveAssignees', {
+      [CLICKUP_GRANT_REVISION_HEADER]: String(revision),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await jsonRecord(response);
+    const result = record(body.result);
+    expect(result.isError).toBe(true);
+    const error = record(record(result.structuredContent).error);
+    expect(error).toEqual(expect.objectContaining({
+      code: 'workspace_forbidden',
+      status: 403,
+    }));
+  });
+
   it('blocks cross-Workspace direct ids and never bleeds rejected provider content into MCP results', async () => {
     const secret = 'WORKSPACE_B_SECRET_SHOULD_NEVER_REACH_GEMINI';
     let forbiddenDownstreamCalls = 0;

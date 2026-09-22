@@ -407,6 +407,9 @@ for (const marker of [
   "Accept: 'application/json, text/event-stream'",
   "'Mcp-Method': method",
   "'Mcp-Name': name",
+  'CLICKUP_GRANT_REVISION_HEADER',
+  'CLICKUP_TOOL_CATALOG_HEADER',
+  'listToolsForSession(session, signal, true)',
   'validateClickUpToolArguments',
   'MAX_MCP_RESPONSE_BYTES',
 ]) {
@@ -481,6 +484,8 @@ for (const marker of [
   "resultType: 'complete'",
   "cacheScope: 'private'",
   'MAX_MCP_REQUEST_BYTES',
+  'CLICKUP_GRANT_REVISION_HEADER',
+  'CLICKUP_TOOL_CATALOG_HEADER',
   'verifyBearerToken',
 ]) {
   if (!clickUpMcpRoute.includes(marker)) fail(`ClickUp Worker MCP boundary is missing: ${marker}`);
@@ -507,7 +512,9 @@ for (const marker of [
   'verifyCommentBelongsToTask',
   'validateWorkspaceUsers',
   'resource_workspace_mismatch',
-  'normalizeDirectScopeFailure',
+  'normalizeTaskScopeFailure',
+  'padDeniedTaskScope',
+  'RATE_WINDOW_ROLLOVER_MIN_SECONDS',
 ]) {
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth/REST credential boundary is missing: ${marker}`);
 }

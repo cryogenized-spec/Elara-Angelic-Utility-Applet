@@ -9,6 +9,7 @@ const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
 const TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token';
 const USER_ENDPOINT = 'https://api.clickup.com/api/v2/user';
 const WORKSPACES_ENDPOINT = 'https://api.clickup.com/api/v2/team';
+const PERSONAL_TOKEN = 'pk_unit_test_clickup_personal_token_please_ignore';
 
 beforeEach(async () => {
   vi.restoreAllMocks();
@@ -257,6 +258,70 @@ describe('ClickUpOAuthVault', () => {
     const status = await doFetch(await bearerRead('/clickup/oauth/status'));
     expect(await status.json()).toEqual(expect.objectContaining({ connected: true }));
   });
+
+  it('activates a configured personal API token entirely inside the Worker and stores only encrypted material', async () => {
+    let userCalls = 0;
+    let workspaceCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        userCalls += 1;
+        expect(request.headers.get('Authorization')).toBe(PERSONAL_TOKEN);
+        expect(request.headers.get('Authorization')).not.toContain('Bearer ');
+        return new Response(JSON.stringify({
+          user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 600),
+          },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        workspaceCalls += 1;
+        expect(request.headers.get('Authorization')).toBe(PERSONAL_TOKEN);
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '999',
+            name: 'Neon Sales',
+            members: [{ user: { id: 183, username: 'Gareth', email: 'gareth@example.com' } }],
+          }],
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '98',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 600),
+          },
+        });
+      }
+      throw new Error(`Unexpected ClickUp personal-token request: ${request.method} ${request.url}`);
+    });
+
+    const response = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}'));
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toEqual(expect.objectContaining({
+      connected: true,
+      account: { id: '183', username: 'Gareth', email: 'gareth@example.com' },
+      workspaces: [{ id: '999', name: 'Neon Sales' }],
+      connectionMethods: { oauth: true, personalToken: true },
+    }));
+    expect(JSON.stringify(body)).not.toContain(PERSONAL_TOKEN);
+    expect(userCalls).toBe(1);
+    expect(workspaceCalls).toBe(1);
+
+    const snapshot = await credentialSnapshot();
+    expect(snapshot?.accessCipher).toBeTruthy();
+    expect(snapshot?.accessCipher).not.toContain(PERSONAL_TOKEN);
+    expect(snapshot?.accessIv).toBeTruthy();
+    expect(snapshot?.userId).toBe('183');
+  });
+
 
   it('rejects an older OAuth popup state after a newer Connect flow starts', async () => {
     const provider = mockProvider();

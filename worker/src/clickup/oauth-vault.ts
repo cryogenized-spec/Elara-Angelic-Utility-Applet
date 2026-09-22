@@ -2013,7 +2013,10 @@ export class ClickUpOAuthVault extends DurableObject {
     const state = randomState();
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
-      this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states WHERE created_at < ?', now - STATE_TTL_MS);
+      // Only the newest explicit Connect gesture may remain exchangeable.
+      // Without this, two OAuth popups can coexist and an older flow completed
+      // later can silently replace the newer account/grant.
+      this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
       this.ctx.storage.sql.exec('INSERT INTO clickup_oauth_states (state, redirect_uri, created_at) VALUES (?, ?, ?)', state, parsed.data.redirectUri, now);
     });
     const authorize = new URL('https://app.clickup.com/api');

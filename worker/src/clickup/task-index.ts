@@ -401,6 +401,7 @@ export function clearClickUpTaskIndex(sql: TaskIndexSql): void {
 export function clearClickUpWorkspaceTaskIndex(sql: TaskIndexSql, workspaceId: string): void {
   sql.exec('DELETE FROM clickup_task_index WHERE workspace_id = ?', workspaceId);
   sql.exec('DELETE FROM clickup_task_index_state WHERE workspace_id = ?', workspaceId);
+  sql.exec('DELETE FROM clickup_task_index_tombstones WHERE workspace_id = ?', workspaceId);
   sql.exec('DELETE FROM clickup_task_index_reconcile_stage WHERE workspace_id = ?', workspaceId);
   sql.exec('DELETE FROM clickup_task_index_reconcile_state WHERE workspace_id = ?', workspaceId);
 }

@@ -73,6 +73,7 @@ type RateLimitRow = {
   limit_count: number | null;
   remaining: number | null;
   reset_at: number | null;
+  unknown_probe_in_flight: number;
   updated_at: number;
 };
 
@@ -345,9 +346,18 @@ export class ClickUpOAuthVault extends DurableObject {
         limit_count INTEGER,
         remaining INTEGER,
         reset_at INTEGER,
+        unknown_probe_in_flight INTEGER NOT NULL DEFAULT 0,
         updated_at INTEGER NOT NULL
       )
     `);
+    const rateLimitColumns = this.ctx.storage.sql.exec<{ name: string }>(
+      'PRAGMA table_info(clickup_rate_limit)',
+    ).toArray();
+    if (!rateLimitColumns.some((column) => column.name === 'unknown_probe_in_flight')) {
+      this.ctx.storage.sql.exec(
+        'ALTER TABLE clickup_rate_limit ADD COLUMN unknown_probe_in_flight INTEGER NOT NULL DEFAULT 0',
+      );
+    }
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS clickup_webhooks (
         webhook_id TEXT PRIMARY KEY,
@@ -491,7 +501,7 @@ export class ClickUpOAuthVault extends DurableObject {
 
   private rateLimitRow(): RateLimitRow | null {
     return this.ctx.storage.sql.exec<RateLimitRow>(
-      'SELECT limit_count, remaining, reset_at, updated_at FROM clickup_rate_limit WHERE slot = 1',
+      'SELECT limit_count, remaining, reset_at, unknown_probe_in_flight, updated_at FROM clickup_rate_limit WHERE slot = 1',
     ).toArray()[0] ?? null;
   }
 
@@ -501,13 +511,21 @@ export class ClickUpOAuthVault extends DurableObject {
     return this.ctx.storage.transactionSync(() => {
       const row = this.rateLimitRow();
       if (!row) {
-        // Unknown provider budget is not unlimited budget. Admit one probe and
-        // install a provisional local gate before egress so concurrent callers
-        // cannot stampede ClickUp while Elara is still waiting for the first
-        // usable rate-limit headers.
+        // Unknown provider budget is not unlimited budget. Permit exactly one
+        // probe at a time. When it finishes without usable Remaining headers,
+        // recordRateLimit() releases this probe so the next sequential request
+        // may try again without creating a minute-long deadlock.
         this.ctx.storage.sql.exec(
-          'INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at) VALUES (1, NULL, 0, ?, ?)',
-          nowSeconds + RATE_WINDOW_SECONDS,
+          'INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, unknown_probe_in_flight, updated_at) VALUES (1, NULL, NULL, NULL, 1, ?)',
+          now,
+        );
+        return { blocked: false };
+      }
+
+      if (row.remaining === null) {
+        if (row.unknown_probe_in_flight === 1) return { blocked: true };
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_rate_limit SET unknown_probe_in_flight = 1, updated_at = ? WHERE slot = 1',
           now,
         );
         return { blocked: false };
@@ -525,42 +543,39 @@ export class ClickUpOAuthVault extends DurableObject {
           ? Math.max(0, row.limit_count - 1)
           : 0;
         this.ctx.storage.sql.exec(
-          'UPDATE clickup_rate_limit SET remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
+          'UPDATE clickup_rate_limit SET remaining = ?, reset_at = ?, unknown_probe_in_flight = 0, updated_at = ? WHERE slot = 1',
           remainingAfterReservation,
           provisionalReset,
           now,
         );
-        // If ClickUp omitted the limit previously, admit exactly this one
-        // request and keep subsequent callers blocked until fresh headers land.
         return { blocked: false };
       }
 
-      if (row.remaining !== null && row.remaining <= 0) {
+      if (row.remaining <= 0) {
         return { blocked: true, ...(row.reset_at !== null ? { retryAt: row.reset_at * 1000 } : {}) };
       }
-      if (row.remaining !== null) {
-        this.ctx.storage.sql.exec(
-          'UPDATE clickup_rate_limit SET remaining = ?, updated_at = ? WHERE slot = 1',
-          Math.max(0, row.remaining - 1),
-          now,
-        );
-      }
+
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_rate_limit SET remaining = ?, updated_at = ? WHERE slot = 1',
+        Math.max(0, row.remaining - 1),
+        now,
+      );
       return { blocked: false };
     });
   }
 
   private recordRateLimit(rateLimit: ClickUpRateLimitSnapshot): void {
-    if (rateLimit.limit === null && rateLimit.remaining === null && rateLimit.resetAt === null) return;
+    const hasSnapshot = rateLimit.limit !== null || rateLimit.remaining !== null || rateLimit.resetAt !== null;
     const now = Date.now();
     const nowSeconds = Math.floor(now / 1000);
+
     this.ctx.storage.transactionSync(() => {
       const current = this.rateLimitRow();
       if (!current) {
-        // Do not resurrect an already-expired provider window from a late
-        // response. The next request will establish fresh state.
+        if (!hasSnapshot) return;
         if (rateLimit.resetAt !== null && rateLimit.resetAt <= nowSeconds) return;
         this.ctx.storage.sql.exec(
-          'INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at) VALUES (1, ?, ?, ?, ?)',
+          'INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, unknown_probe_in_flight, updated_at) VALUES (1, ?, ?, ?, 0, ?)',
           rateLimit.limit,
           rateLimit.remaining,
           rateLimit.resetAt,
@@ -569,23 +584,27 @@ export class ClickUpOAuthVault extends DurableObject {
         return;
       }
 
+      // A completed unknown-budget probe must always release its single-flight
+      // gate, even when ClickUp (or an intermediary) returns no rate headers.
+      // If Remaining is still unknown, subsequent requests remain serialized:
+      // one probe may run, followers fail locally until that probe completes.
+      if (!hasSnapshot) {
+        if (current.unknown_probe_in_flight === 1) {
+          this.ctx.storage.sql.exec(
+            'UPDATE clickup_rate_limit SET unknown_probe_in_flight = 0, updated_at = ? WHERE slot = 1',
+            now,
+          );
+        }
+        return;
+      }
+
       const currentReset = current.reset_at;
       const incomingReset = rateLimit.resetAt;
 
-      // A provisional unknown-budget gate admits exactly one request. Because
-      // no sibling request can reserve behind it, that probe's first usable
-      // provider snapshot may safely establish the actual window instead of
-      // being merged against the provisional zero.
-      if (
-        current.limit_count === null
-        && current.remaining === 0
-        && rateLimit.limit !== null
-        && rateLimit.remaining !== null
-        && (incomingReset === null || incomingReset > nowSeconds)
-      ) {
+      if (current.remaining === null) {
         this.ctx.storage.sql.exec(
-          'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
-          rateLimit.limit,
+          'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, unknown_probe_in_flight = 0, updated_at = ? WHERE slot = 1',
+          rateLimit.limit ?? current.limit_count,
           rateLimit.remaining,
           incomingReset ?? currentReset,
           now,
@@ -593,12 +612,24 @@ export class ClickUpOAuthVault extends DurableObject {
         return;
       }
 
-      if (currentReset !== null && currentReset <= nowSeconds) return;
+      if (currentReset !== null && currentReset <= nowSeconds) {
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_rate_limit SET unknown_probe_in_flight = 0, updated_at = ? WHERE slot = 1',
+          now,
+        );
+        return;
+      }
 
       // A response from an older provider window may arrive after a newer
       // response has already established the current budget. Never let that
       // stale snapshot consume quota from the newer window.
-      if (currentReset !== null && incomingReset !== null && incomingReset < currentReset) return;
+      if (currentReset !== null && incomingReset !== null && incomingReset < currentReset) {
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_rate_limit SET unknown_probe_in_flight = 0, updated_at = ? WHERE slot = 1',
+          now,
+        );
+        return;
+      }
 
       const providerWindowAdvanced = currentReset !== null
         && incomingReset !== null
@@ -608,11 +639,9 @@ export class ClickUpOAuthVault extends DurableObject {
       if (providerWindowAdvanced) {
         // Advance the provider reset horizon, but never raise immediately
         // available local quota from a response. Other requests may already
-        // have reserved capacity and still be in flight; overwriting remaining
-        // with the provider header would erase those reservations. A new
-        // provider limit may be learned for the *next* local rollover.
+        // have reserved capacity and still be in flight.
         this.ctx.storage.sql.exec(
-          'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
+          'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, unknown_probe_in_flight = 0, updated_at = ? WHERE slot = 1',
           rateLimit.limit ?? current.limit_count,
           minNullable(current.remaining, rateLimit.remaining),
           incomingReset,
@@ -631,7 +660,7 @@ export class ClickUpOAuthVault extends DurableObject {
       );
 
       this.ctx.storage.sql.exec(
-        'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
+        'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, unknown_probe_in_flight = 0, updated_at = ? WHERE slot = 1',
         mergedLimit,
         mergedRemaining,
         mergedReset,
@@ -663,6 +692,18 @@ export class ClickUpOAuthVault extends DurableObject {
         grantRevision: grant.revision,
       };
     }
+
+    // accessGrant() awaits token decryption. A disconnect/reconnect can run
+    // while that await is pending, so the captured row must be revalidated
+    // synchronously immediately before reservation/provider egress.
+    if (this.credentialRow()?.updated_at !== grant.revision) {
+      return {
+        ok: false,
+        response: json({ code: 'grant_changed', message: 'ClickUp authorization changed before this provider request could start.' }, 409),
+        grantRevision: grant.revision,
+      };
+    }
+
     const reservation = this.reserveProviderCall();
     if (reservation.blocked) {
       return {

@@ -239,59 +239,112 @@ describe('ClickUp OAuth browser authority', () => {
     expect(raw).not.toContain('pk_');
   });
 
-  it('keeps an ambiguous personal-token activation unknown until its settle barrier expires', async () => {
+  it('keeps an ambiguous personal-token activation unknown until the Worker reports the operation settled', async () => {
+    const replacement = {
+      ...STATUS,
+      account: { id: '456', username: 'Replacement', email: 'replacement@example.com' },
+      workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
+      updatedAt: 234567,
+    };
+    let operationPending = true;
+    let statusReads = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/personal-token')) {
+        throw new TypeError('response lost after request send');
+      }
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        return new Response(JSON.stringify({
+          epoch: 1,
+          settledEpoch: operationPending ? 0 : 1,
+          pending: operationPending,
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.endsWith('/clickup/oauth/status')) {
+        statusReads += 1;
+        return new Response(JSON.stringify(replacement), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toMatchObject({ code: 'network' });
+    expect(loadStoredClickUpStatus()).toBeNull();
+
+    await expect(clickUpOAuthAuthority.getStatus()).rejects.toMatchObject({
+      code: 'connection_pending',
+      status: 409,
+    });
+    expect(statusReads).toBe(0);
+
+    operationPending = false;
+    await expect(clickUpOAuthAuthority.getStatus()).resolves.toEqual(replacement);
+    expect(statusReads).toBe(1);
+    expect(loadStoredClickUpStatus()).toEqual(replacement);
+  });
+
+  it('keeps an ambiguous OAuth exchange out of execution until the Worker reports it settled', async () => {
+    let operationPending = true;
+    let statusReads = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/exchange')) {
+        throw new TypeError('response lost after request send');
+      }
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        return new Response(JSON.stringify({
+          epoch: 1,
+          settledEpoch: operationPending ? 0 : 1,
+          pending: operationPending,
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.endsWith('/clickup/oauth/status')) {
+        statusReads += 1;
+        return new Response(JSON.stringify(STATUS), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.completeConnect({
+      code: 'authorization-code',
+      state: 'opaque-state-value',
+      redirectUri: 'https://cryogenized-spec.github.io/clickup/oauth/callback',
+    })).rejects.toMatchObject({ code: 'network' });
+
+    await expect(clickUpOAuthAuthority.getExecutionGrant()).rejects.toMatchObject({
+      code: 'connection_pending',
+      status: 409,
+    });
+    expect(statusReads).toBe(0);
+
+    operationPending = false;
+    await expect(clickUpOAuthAuthority.getExecutionGrant()).resolves.toEqual(expect.objectContaining({
+      status: STATUS,
+      revision: STATUS.updatedAt,
+    }));
+    expect(statusReads).toBe(1);
+  });
+
+  it('uses the bounded settle timer when an older Worker lacks operation-state reporting', async () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date('2026-09-22T18:00:00.000Z'));
-      const replacement = {
-        ...STATUS,
-        account: { id: '456', username: 'Replacement', email: 'replacement@example.com' },
-        workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
-        updatedAt: 234567,
-      };
       let statusReads = 0;
       globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
         const url = input instanceof Request ? input.url : String(input);
         if (url.endsWith('/clickup/oauth/personal-token')) {
           throw new TypeError('response lost after request send');
         }
-        if (url.endsWith('/clickup/oauth/status')) {
-          statusReads += 1;
-          return new Response(JSON.stringify(replacement), {
-            status: 200,
+        if (url.endsWith('/clickup/oauth/connection-state')) {
+          return new Response(JSON.stringify({ code: 'not_found', message: 'Not found.' }), {
+            status: 404,
             headers: { 'content-type': 'application/json' },
           });
-        }
-        throw new Error(`Unexpected URL ${url}`);
-      }) as unknown as typeof fetch;
-
-      await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toMatchObject({ code: 'network' });
-      expect(loadStoredClickUpStatus()).toBeNull();
-
-      await expect(clickUpOAuthAuthority.getStatus()).rejects.toMatchObject({
-        code: 'connection_pending',
-        status: 409,
-      });
-      expect(statusReads).toBe(0);
-
-      await vi.advanceTimersByTimeAsync(CLICKUP_CONNECTION_SETTLE_MS + 1);
-      await expect(clickUpOAuthAuthority.getStatus()).resolves.toEqual(replacement);
-      expect(statusReads).toBe(1);
-      expect(loadStoredClickUpStatus()).toEqual(replacement);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('keeps an ambiguous OAuth exchange unknown until its settle barrier expires', async () => {
-    vi.useFakeTimers();
-    try {
-      vi.setSystemTime(new Date('2026-09-22T18:00:00.000Z'));
-      let statusReads = 0;
-      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-        const url = input instanceof Request ? input.url : String(input);
-        if (url.endsWith('/clickup/oauth/exchange')) {
-          throw new TypeError('response lost after request send');
         }
         if (url.endsWith('/clickup/oauth/status')) {
           statusReads += 1;
@@ -303,23 +356,12 @@ describe('ClickUp OAuth browser authority', () => {
         throw new Error(`Unexpected URL ${url}`);
       }) as unknown as typeof fetch;
 
-      await expect(clickUpOAuthAuthority.completeConnect({
-        code: 'authorization-code',
-        state: 'opaque-state-value',
-        redirectUri: 'https://cryogenized-spec.github.io/clickup/oauth/callback',
-      })).rejects.toMatchObject({ code: 'network' });
-
-      await expect(clickUpOAuthAuthority.getExecutionGrant()).rejects.toMatchObject({
-        code: 'connection_pending',
-        status: 409,
-      });
+      await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toMatchObject({ code: 'network' });
+      await expect(clickUpOAuthAuthority.getStatus()).rejects.toMatchObject({ code: 'connection_pending' });
       expect(statusReads).toBe(0);
 
       await vi.advanceTimersByTimeAsync(CLICKUP_CONNECTION_SETTLE_MS + 1);
-      await expect(clickUpOAuthAuthority.getExecutionGrant()).resolves.toEqual(expect.objectContaining({
-        status: STATUS,
-        revision: STATUS.updatedAt,
-      }));
+      await expect(clickUpOAuthAuthority.getStatus()).resolves.toEqual(STATUS);
       expect(statusReads).toBe(1);
     } finally {
       vi.useRealTimers();

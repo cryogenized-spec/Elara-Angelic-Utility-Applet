@@ -540,7 +540,10 @@ for (const [marker, expected] of [
   ['verifyListScope(args.workspaceId, args.listId, expectedRevision)', 1],
   ['verifyCommentBelongsToTask(args.workspaceId, args.taskId, args.commentId, expectedRevision)', 1],
   ['validateWorkspaceUsers(args.workspaceId, args.assigneeIds)', 1],
-  ['validateWorkspaceUsers(args.workspaceId, args.assignees?.add)', 1],
+  ['const assigneeIds = [', 1],
+  ['...(args.assignees?.add ?? [])', 1],
+  ['...(args.assignees?.remove ?? [])', 1],
+  ['validateWorkspaceUsers(args.workspaceId, assigneeIds)', 1],
   ['validateWorkspaceUsers(args.workspaceId, args.mentionUserIds)', 2],
 ]) {
   requireExecutableOccurrenceCount(

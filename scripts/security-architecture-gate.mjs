@@ -621,12 +621,18 @@ for (const marker of [
 ]) {
   if (!clickUpToolService.includes(marker)) fail(`ClickUp assignee resolution must use live Workspace membership: ${marker}`);
 }
+if (!/function normalizeMutationResult[\s\S]*trust: 'untrusted-external' as const/.test(clickUpToolService)) {
+  fail('ClickUp semantic mutation projections must remain explicitly untrusted external data');
+}
 
 for (const marker of [
   "form.set('workspaceId', args.workspaceId)",
   'assertClickUpArtifactSnapshotCurrent',
 ]) {
   if (!clickUpAttachmentUpload.includes(marker)) fail(`ClickUp attachment scope/approval boundary disappeared: ${marker}`);
+}
+if (!clickUpOAuthVault.includes("trust: 'untrusted-external',\n        provider: 'clickup',\n        workspaceId: args.workspaceId")) {
+  fail('ClickUp attachment provider metadata must remain explicitly untrusted');
 }
 for (const marker of [
   "operation: 'clearCustomField'",
@@ -797,6 +803,7 @@ for (const marker of [
 if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
 if (!toolLoop.includes("results.push(errorToolResult(call, UNTRUSTED_CONTEXT_READ_BLOCK));")) fail('Untrusted provider evidence must fail closed before it can manufacture fresh ClickUp mutation authority');
 if (!toolLoop.includes('&& !freshUserExplicitlyRequestedClickUpMutation(request, call.name)')) fail('ClickUp untrusted mutation admission lost fresh-user intent check');
+if (!toolLoop.includes('clickupToolNameSchema.safeParse(entry.call.name).success || containsUntrustedExternal(result.result)')) fail('Every successful ClickUp mutation must taint the next model continuation even if a projection omits its trust marker');
 if (!toolLoop.includes("'clickup.'") || !toolLoop.includes('clickUpToolHandlers') || !toolLoop.includes('clickUpOAuthAuthority')) fail('ClickUp tools must remain inside the existing model-tool and untrusted-provider authority');
 if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isExternalEvidenceReadTool') || !toolLoop.includes('EXTERNAL_EVIDENCE_READ_PREFIXES') || !toolLoop.includes('PRIVATE_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('taintedReadContinuationAllowed') || !toolLoop.includes('driveSearchCandidateIds') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must taint external evidence, block post-taint private reads, and limit Drive transfer continuation to same-turn search provenance');
 if (!/completedMutationOutcomes\.push[\s\S]{0,800}containsUntrustedExternal\(result\.result\)[\s\S]{0,400}untrustedExternalSeen = true[\s\S]{0,200}untrustedContextSeen = true/.test(toolLoop)) fail('Successful provider mutation results must taint the next Gemini continuation before it can request another private read or mutation');

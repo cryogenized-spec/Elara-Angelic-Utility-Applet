@@ -532,6 +532,8 @@ for (const marker of [
   'verifySpaceScope',
   'verifyCommentBelongsToTask',
   'validateWorkspaceUsers',
+  'validateFreshWorkspaceUsers',
+  'refreshWorkspaceAuthorization',
   'resource_workspace_mismatch',
   'normalizeTaskScopeFailure',
   'padDeniedTaskScope',
@@ -548,12 +550,12 @@ for (const [marker, expected] of [
   ['verifyListScope(command.workspaceId, command.listId, expectedRevision)', 2],
   ['verifyListScope(args.workspaceId, args.listId, expectedRevision)', 1],
   ['verifyCommentBelongsToTask(args.workspaceId, args.taskId, args.commentId, expectedRevision)', 1],
-  ['validateWorkspaceUsers(args.workspaceId, args.assigneeIds)', 1],
+  ['validateFreshWorkspaceUsers(args.workspaceId, args.assigneeIds, expectedRevision)', 1],
   ['const assigneeIds = [', 1],
   ['...(args.assignees?.add ?? [])', 1],
   ['...(args.assignees?.remove ?? [])', 1],
-  ['validateWorkspaceUsers(args.workspaceId, assigneeIds)', 1],
-  ['validateWorkspaceUsers(args.workspaceId, args.mentionUserIds)', 2],
+  ['validateFreshWorkspaceUsers(args.workspaceId, assigneeIds, expectedRevision)', 1],
+  ['validateFreshWorkspaceUsers(args.workspaceId, args.mentionUserIds, expectedRevision)', 2],
 ]) {
   requireExecutableOccurrenceCount(
     clickUpOAuthVault,
@@ -562,6 +564,22 @@ for (const [marker, expected] of [
     `ClickUp resource-scope enforcement call count changed: ${marker}`,
   );
 }
+for (const marker of [
+  "operation: z.literal('getWorkspaceAuthorizationContext')",
+  'fetchAuthorizedClickUpWorkspaces(token)',
+  'refreshWorkspaceAuthorization(command.workspaceId, expectedRevision)',
+  'Provider-visible Workspaces',
+  'current[index] = {',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp live Workspace membership authority is missing: ${marker}`);
+}
+for (const marker of [
+  "operation: 'getWorkspaceAuthorizationContext'",
+  'workspaceId: args.workspaceId',
+]) {
+  if (!clickUpToolService.includes(marker)) fail(`ClickUp assignee resolution must use live Workspace membership: ${marker}`);
+}
+
 for (const marker of [
   "form.set('workspaceId', args.workspaceId)",
   'assertClickUpArtifactSnapshotCurrent',

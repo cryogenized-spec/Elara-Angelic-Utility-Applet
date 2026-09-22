@@ -17,6 +17,7 @@ const MAX_OAUTH_BODY_BYTES = 16 * 1024;
 
 const CLICKUP_OAUTH_PATHS = new Set([
   '/clickup/oauth/status',
+  '/clickup/oauth/methods',
   '/clickup/oauth/start',
   '/clickup/oauth/exchange',
   '/clickup/oauth/personal-token',

@@ -91,7 +91,7 @@ The Worker installation token uses a dedicated Dexie store, AES-GCM-256 and a no
 
 The Google refresh token is not a browser secret at all. `GoogleOAuthVault` derives an AES-GCM key from the deployment-owned `GOOGLE_OAUTH_VAULT_KEY` using a domain-separation context, encrypts with a random 12-byte IV and stores ciphertext/IV in the SQLite-backed Durable Object. The refresh token is decrypted only inside the Worker when exchanging for a new short-lived access token or revoking the grant.
 
-Browser Google access tokens remain memory-only. Browser localStorage contains only non-secret capability/scope/account metadata. ClickUp provider credentials do not enter browser memory at all; only schema-validated non-secret account/Workspace connection metadata may persist locally. Inside the encrypted ClickUp vault payload, credential kind is stored as a separate discriminant from token bytes. Legacy raw vault plaintext is treated as OAuth only, so no token prefix or sentinel can silently change Authorization semantics.
+Browser Google access tokens remain memory-only. Browser localStorage contains only non-secret capability/scope/account metadata. ClickUp provider credentials do not enter browser memory at all; only schema-validated non-secret account/Workspace connection metadata may persist locally. `ClickUpOAuthVault` stores credential kind in a separate non-secret durable column while token bytes remain AES-GCM encrypted. Existing rows gain the default `oauth` kind during schema migration without inspecting ciphertext/plaintext, so no token prefix, JSON shape or sentinel can silently change Authorization semantics.
 
 ## 5. Credential invariants
 
@@ -107,7 +107,7 @@ Browser Google access tokens remain memory-only. Browser localStorage contains o
 - Credential-bearing modules do not gain `console.*` logging authority without explicit security review.
 - Google refresh tokens never return to the browser, Gemini, Workspace tool schemas or autonomy storage.
 - ClickUp OAuth access tokens and personal API tokens never return to the browser, Gemini, MCP schemas, conversation state or autonomy storage.
-- ClickUp credential kind is structural encrypted metadata, never inferred from token contents.
+- ClickUp credential kind is a separate durable discriminator, never inferred from encrypted or decrypted token contents.
 - An ambiguous ClickUp connection write triggers authoritative status reconciliation; if that also fails, cached ClickUp status is cleared so stale identity metadata cannot authorize tool election.
 - Lock/idle enforcement clears in-memory Lockbox plaintext.
 - Corrupt/undecryptable sealed material fails closed.

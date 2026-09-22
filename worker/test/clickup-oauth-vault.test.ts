@@ -466,6 +466,11 @@ describe('ClickUpOAuthVault', () => {
       if (url.pathname === '/api/v2/team') {
         return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace A', members: [] }] }), { status: 200 });
       }
+      if (url.pathname === '/api/v2/team/999/space' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          spaces: [{ id: 'space-a', name: 'A Space' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
       if (url.pathname === '/api/v2/task/task-b') {
         taskBReads += 1;
         return new Response(JSON.stringify({

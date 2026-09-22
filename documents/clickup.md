@@ -41,6 +41,7 @@ ClickUp-derived content is untrusted external data. Provider authorization permi
 | Browser MCP client | `src/clickup/mcp-client.ts` |
 | Browser OAuth authority | `src/clickup/oauth/*` |
 | Immutable artifact approval | `src/clickup/attachment-authority.ts` |
+| Same-live-turn ClickUp mutation replay fence | `src/clickup/mutation-replay.ts` |
 | Browser artifact transport | `src/clickup/attachment-upload.ts` |
 | Reviewed REST operation map | `src/clickup/rest-contract.ts` |
 | Worker MCP server | `worker/src/clickup/mcp-route.ts` |
@@ -268,6 +269,10 @@ Within one provider window, concurrent/late responses may only merge remaining d
 
 Writes are not blindly replayed after ambiguous network failure because the reviewed ClickUp write endpoints do not expose a general idempotency key.
 
+For duplicate-prone POST-style mutations (`clickup.createTask`, `clickup.createTaskComment`, `clickup.replyToComment` and `clickup.attachArtifact`), Elara also applies the existing live-turn replay pattern used by other provider creates/sends: the exact same elected conversation/message/generation + Gemini `callId` + validated payload shares the first promise/result or ambiguous failure instead of issuing a second provider mutation. Reusing the same call ID with changed arguments fails closed; distinct call IDs remain distinct intentional actions. Attachment replay identity additionally binds the approved artifact digest and upload metadata.
+
+This fence is deliberately not provider-level exactly-once delivery. A full browser/runtime restart after ClickUp may have accepted an ambiguous write cannot be reconciled deterministically from a client idempotency key, so Elara must not claim that such a retry is safe without checking provider state or obtaining a fresh user decision.
+
 ## 12. Pagination and bounded results
 
 Provider pagination is normalized behind semantic tools:
@@ -313,6 +318,7 @@ Focused tests cover:
 - immutable artifact TOCTOU/substitution rejection;
 - chunked multipart byte ceilings;
 - aggregate MCP result ceilings;
-- hostile/malformed provider payload handling.
+- hostile/malformed provider payload handling;
+- same-live-turn duplicate suppression for ClickUp create/comment/reply/attachment calls, including changed-argument and changed-artifact replay rejection.
 
 The complete release gate remains `AGENTS.md` authority. Because this subsystem changes authentication, authorization, confirmation and credential boundaries, final PR certification also requires the repository PR-review skill, current-main synchronization, exact-head CI and human sign-off.

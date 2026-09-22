@@ -4,7 +4,13 @@ const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
 const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token';
 const MAX_PROVIDER_BODY_BYTES = 1_250_000;
 const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;
-const CLICKUP_PERSONAL_CREDENTIAL_PREFIX = 'elara-clickup-personal-v1:';
+
+export type ClickUpCredentialKind = 'oauth' | 'personal';
+
+export interface ClickUpProviderCredential {
+  readonly kind: ClickUpCredentialKind;
+  readonly token: string;
+}
 
 export interface ClickUpOAuthServerEnv {
   readonly CLICKUP_OAUTH_CLIENT_ID?: string;
@@ -91,21 +97,22 @@ function boundedToken(value: string, label: string): string {
   return token;
 }
 
-export function personalClickUpCredential(personalToken: string): string {
-  const token = boundedToken(personalToken, 'personal API token');
-  if (!token.startsWith('pk_')) throw new Error('ClickUp personal API token is invalid.');
-  return `${CLICKUP_PERSONAL_CREDENTIAL_PREFIX}${token}`;
+export function oauthClickUpCredential(accessToken: ClickUpProviderCredential): ClickUpProviderCredential {
+  return { kind: 'oauth', token: boundedToken(accessToken, 'OAuth access token') };
 }
 
-function clickUpAuthorizationValue(credentialValue: string): string {
-  const credential = boundedToken(credentialValue, 'provider credential');
-  if (credential.startsWith(CLICKUP_PERSONAL_CREDENTIAL_PREFIX)) {
-    return boundedToken(
-      credential.slice(CLICKUP_PERSONAL_CREDENTIAL_PREFIX.length),
-      'personal API token',
-    );
-  }
-  return `Bearer ${credential}`;
+export function personalClickUpCredential(personalToken: string): ClickUpProviderCredential {
+  const token = boundedToken(personalToken, 'personal API token');
+  if (!token.startsWith('pk_')) throw new Error('ClickUp personal API token is invalid.');
+  return { kind: 'personal', token };
+}
+
+function clickUpAuthorizationValue(credential: ClickUpProviderCredential): string {
+  const token = boundedToken(
+    credential.token,
+    credential.kind === 'personal' ? 'personal API token' : 'OAuth access token',
+  );
+  return credential.kind === 'personal' ? token : `Bearer ${token}`;
 }
 
 function boundedId(value: string, label: string): string {
@@ -212,7 +219,7 @@ async function readJsonResponse(response: Response): Promise<unknown> {
 }
 
 async function clickupRequest<T>(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   path: string,
   init: RequestInit = {},
   fetcher: typeof fetch = fetch,
@@ -244,7 +251,7 @@ export async function exchangeClickUpAuthorizationCode(
   env: ClickUpOAuthServerEnv,
   code: string,
   fetcher: typeof fetch = fetch,
-): Promise<string> {
+): Promise<ClickUpProviderCredential> {
   const { response, payload } = await providerJsonRequest(fetcher, CLICKUP_TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json', Accept: 'application/json' },
@@ -266,7 +273,7 @@ export async function exchangeClickUpAuthorizationCode(
   const accessToken = payload && typeof payload === 'object' && typeof (payload as Record<string, unknown>).access_token === 'string'
     ? (payload as Record<string, unknown>).access_token as string
     : '';
-  return boundedToken(accessToken, 'access token');
+  return oauthClickUpCredential(accessToken);
 }
 
 function normalizedUser(value: unknown): ClickUpUserIdentity | null {
@@ -288,7 +295,7 @@ function normalizedUser(value: unknown): ClickUpUserIdentity | null {
 }
 
 export async function fetchAuthorizedClickUpUser(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   fetcher: typeof fetch = fetch,
 ): Promise<ClickUpProviderResult<ClickUpUserIdentity>> {
   const result = await clickupRequest<Record<string, unknown>>(accessToken, '/user', {}, fetcher);
@@ -298,7 +305,7 @@ export async function fetchAuthorizedClickUpUser(
 }
 
 export async function fetchAuthorizedClickUpWorkspaces(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   fetcher: typeof fetch = fetch,
 ): Promise<ClickUpProviderResult<readonly ClickUpWorkspaceIdentity[]>> {
   const result = await clickupRequest<Record<string, unknown>>(accessToken, '/team', {}, fetcher);
@@ -335,32 +342,32 @@ function appendMany(query: URLSearchParams, name: string, values: readonly strin
   for (const value of values ?? []) query.append(name, value);
 }
 
-export async function listClickUpSpaces(accessToken: string, workspaceId: string, archived = false, fetcher: typeof fetch = fetch) {
+export async function listClickUpSpaces(accessToken: ClickUpProviderCredential, workspaceId: string, archived = false, fetcher: typeof fetch = fetch) {
   const query = new URLSearchParams({ archived: String(archived) });
   return clickupRequest<Record<string, unknown>>(accessToken, queryPath(`/team/${boundedId(workspaceId, 'workspace id')}/space`, query), {}, fetcher);
 }
 
-export async function listClickUpFolders(accessToken: string, spaceId: string, archived = false, fetcher: typeof fetch = fetch) {
+export async function listClickUpFolders(accessToken: ClickUpProviderCredential, spaceId: string, archived = false, fetcher: typeof fetch = fetch) {
   const query = new URLSearchParams({ archived: String(archived) });
   return clickupRequest<Record<string, unknown>>(accessToken, queryPath(`/space/${boundedId(spaceId, 'space id')}/folder`, query), {}, fetcher);
 }
 
-export async function getClickUpFolder(accessToken: string, folderId: string, includeSubfolders = true, fetcher: typeof fetch = fetch) {
+export async function getClickUpFolder(accessToken: ClickUpProviderCredential, folderId: string, includeSubfolders = true, fetcher: typeof fetch = fetch) {
   const query = new URLSearchParams({ include_subfolders: String(includeSubfolders) });
   return clickupRequest<Record<string, unknown>>(accessToken, queryPath(`/folder/${boundedId(folderId, 'folder id')}`, query), {}, fetcher);
 }
 
-export async function listClickUpFolderLists(accessToken: string, folderId: string, archived = false, fetcher: typeof fetch = fetch) {
+export async function listClickUpFolderLists(accessToken: ClickUpProviderCredential, folderId: string, archived = false, fetcher: typeof fetch = fetch) {
   const query = new URLSearchParams({ archived: String(archived) });
   return clickupRequest<Record<string, unknown>>(accessToken, queryPath(`/folder/${boundedId(folderId, 'folder id')}/list`, query), {}, fetcher);
 }
 
-export async function listClickUpFolderlessLists(accessToken: string, spaceId: string, archived = false, fetcher: typeof fetch = fetch) {
+export async function listClickUpFolderlessLists(accessToken: ClickUpProviderCredential, spaceId: string, archived = false, fetcher: typeof fetch = fetch) {
   const query = new URLSearchParams({ archived: String(archived) });
   return clickupRequest<Record<string, unknown>>(accessToken, queryPath(`/space/${boundedId(spaceId, 'space id')}/list`, query), {}, fetcher);
 }
 
-export async function getClickUpList(accessToken: string, listId: string, fetcher: typeof fetch = fetch) {
+export async function getClickUpList(accessToken: ClickUpProviderCredential, listId: string, fetcher: typeof fetch = fetch) {
   return clickupRequest<Record<string, unknown>>(accessToken, `/list/${boundedId(listId, 'list id')}`, {}, fetcher);
 }
 
@@ -377,7 +384,7 @@ export interface ClickUpWorkspaceTaskFilters {
 }
 
 export async function listClickUpWorkspaceTasks(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   workspaceId: string,
   filters: ClickUpWorkspaceTaskFilters = {},
   fetcher: typeof fetch = fetch,
@@ -403,7 +410,7 @@ export async function listClickUpWorkspaceTasks(
 }
 
 export async function getClickUpTask(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   taskId: string,
   includeSubtasks = false,
   fetcher: typeof fetch = fetch,
@@ -416,7 +423,7 @@ export async function getClickUpTask(
 }
 
 export async function getClickUpTaskComments(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   taskId: string,
   cursor?: { start: number; startId: string },
   fetcher: typeof fetch = fetch,
@@ -478,7 +485,7 @@ export function buildClickUpUpdateTaskBody(args: ClickUpToolArguments<'clickup.u
 }
 
 async function jsonMutation(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   path: string,
   method: 'POST' | 'PUT',
   body: Record<string, unknown>,
@@ -492,7 +499,7 @@ async function jsonMutation(
 }
 
 export async function createClickUpTask(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   args: ClickUpToolArguments<'clickup.createTask'>,
   fetcher: typeof fetch = fetch,
 ) {
@@ -500,7 +507,7 @@ export async function createClickUpTask(
 }
 
 export async function updateClickUpTask(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   args: ClickUpToolArguments<'clickup.updateTask'>,
   fetcher: typeof fetch = fetch,
 ) {
@@ -528,7 +535,7 @@ export function buildClickUpCommentBody(
 }
 
 export async function createClickUpTaskComment(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   args: ClickUpToolArguments<'clickup.createTaskComment'>,
   fetcher: typeof fetch = fetch,
 ) {
@@ -542,7 +549,7 @@ export async function createClickUpTaskComment(
 }
 
 export async function replyToClickUpComment(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   args: ClickUpToolArguments<'clickup.replyToComment'>,
   fetcher: typeof fetch = fetch,
 ) {
@@ -556,7 +563,7 @@ export async function replyToClickUpComment(
 }
 
 export async function getClickUpListCustomFields(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   listId: string,
   fetcher: typeof fetch = fetch,
 ) {
@@ -565,7 +572,7 @@ export async function getClickUpListCustomFields(
 }
 
 export async function setClickUpTaskCustomField(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   taskId: string,
   fieldId: string,
   value: unknown,
@@ -581,7 +588,7 @@ export async function setClickUpTaskCustomField(
 }
 
 export async function clearClickUpTaskCustomField(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   taskId: string,
   fieldId: string,
   fetcher: typeof fetch = fetch,
@@ -595,7 +602,7 @@ export async function clearClickUpTaskCustomField(
 }
 
 export async function uploadClickUpTaskAttachment(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   taskId: string,
   file: Blob,
   filename: string,
@@ -626,7 +633,7 @@ export const CLICKUP_TASK_INDEX_WEBHOOK_EVENTS = Object.freeze([
 ] as const);
 
 export async function createClickUpWebhook(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   workspaceId: string,
   endpoint: string,
   events: readonly string[] = CLICKUP_TASK_INDEX_WEBHOOK_EVENTS,
@@ -646,7 +653,7 @@ export async function createClickUpWebhook(
 }
 
 export async function deleteClickUpWebhook(
-  accessToken: string,
+  accessToken: ClickUpProviderCredential,
   webhookId: string,
   fetcher: typeof fetch = fetch,
 ) {

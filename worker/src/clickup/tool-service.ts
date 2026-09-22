@@ -351,6 +351,7 @@ function normalizeMutationResult(value: unknown) {
   if (!record) return { ok: true };
   if (providerId(record.id) && boundedText(record.name, 1_000)) return normalizeClickUpTask(record);
   return {
+    trust: 'untrusted-external' as const,
     provider: 'clickup' as const,
     ok: true,
     ...(providerId(record.id) ? { id: providerId(record.id) } : {}),

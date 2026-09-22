@@ -662,6 +662,80 @@ describe('ClickUpOAuthVault', () => {
     }));
   });
 
+  it('does not replenish remaining from small reset-horizon jitter inside the same minute window', async () => {
+    let taskCalls = 0;
+    const resetAt = Math.floor(Date.now() / 1000) + 600;
+    const jitteredResetAt = resetAt + 5;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify({ access_token: 'token-window-jitter' }), { status: 200 });
+      }
+      if (request.url === USER_ENDPOINT) {
+        return new Response(JSON.stringify({ user: { id: 183 } }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(resetAt),
+          },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT) {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace', members: [] }] }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '98',
+            'X-RateLimit-Reset': String(resetAt),
+          },
+        });
+      }
+      if (request.url.startsWith('https://api.clickup.com/api/v2/task/86task')) {
+        taskCalls += 1;
+        return new Response(JSON.stringify({
+          id: '86task',
+          name: 'Repair S56',
+          team_id: '999',
+          list: { id: '123' },
+          space: { id: '789' },
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': taskCalls === 1 ? '9' : '99',
+            'X-RateLimit-Reset': String(taskCalls === 1 ? resetAt : jitteredResetAt),
+          },
+        });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const revision = (await credentialSnapshot())?.updatedAt ?? 0;
+
+    expect((await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: '86task' },
+    }, revision)).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      remaining: 9,
+      resetAt,
+    }));
+
+    expect((await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: '86task' },
+    }, revision)).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      remaining: 8,
+      resetAt,
+    }));
+  });
+
   it('accepts a replenished provider budget only when the reset window actually advances', async () => {
     let taskCalls = 0;
     const firstResetAt = Math.floor(Date.now() / 1000) + 600;

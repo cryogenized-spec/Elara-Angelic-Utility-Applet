@@ -126,6 +126,7 @@ describe('ClickUp artifact attachment boundary', () => {
     expect(body).toEqual({
       ok: true,
       result: {
+        trust: 'untrusted-external',
         provider: 'clickup',
         workspaceId: '999',
         taskId: '86task',

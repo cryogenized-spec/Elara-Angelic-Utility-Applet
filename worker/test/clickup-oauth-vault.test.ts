@@ -189,6 +189,7 @@ async function harnessFetch(path: string): Promise<Response> {
 async function credentialSnapshot(): Promise<{
   accessCipher: string;
   accessIv: string;
+  credentialKind: 'oauth' | 'personal';
   userId: string;
   username: string | null;
   email: string | null;
@@ -304,6 +305,7 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.accessCipher).toBeTruthy();
     expect(snapshot?.accessCipher).not.toContain('clickup-access-token-never-returned');
     expect(snapshot?.accessIv).toBeTruthy();
+    expect(snapshot?.credentialKind).toBe('oauth');
     expect(snapshot?.userId).toBe('183');
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ limit: 100, remaining: 98 }));
 
@@ -354,6 +356,7 @@ describe('ClickUpOAuthVault', () => {
     });
 
     await seedLegacyCredential(legacyToken);
+    expect((await credentialSnapshot())?.credentialKind).toBe('oauth');
 
     const context = await internalCommand({
       operation: 'getWorkspaceAuthorizationContext',
@@ -414,6 +417,7 @@ describe('ClickUpOAuthVault', () => {
     const snapshot = await credentialSnapshot();
     expect(snapshot?.accessCipher).toBeTruthy();
     expect(snapshot?.accessCipher).not.toContain(collisionToken);
+    expect(snapshot?.credentialKind).toBe('oauth');
   });
 
   it('activates a configured personal API token entirely inside the Worker and stores only encrypted material', async () => {
@@ -476,6 +480,7 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.accessCipher).toBeTruthy();
     expect(snapshot?.accessCipher).not.toContain(PERSONAL_TOKEN);
     expect(snapshot?.accessIv).toBeTruthy();
+    expect(snapshot?.credentialKind).toBe('personal');
     expect(snapshot?.userId).toBe('183');
   });
 

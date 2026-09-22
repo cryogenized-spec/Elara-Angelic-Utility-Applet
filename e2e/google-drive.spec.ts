@@ -255,7 +255,7 @@ test.describe('Google Drive tool flow', () => {
     await expect(dialog).toContainText('Google Drive');
     await expect(dialog).toContainText('Update file');
     await expect(dialog).not.toContainText('drive.updateFile');
-    await expect(dialog).toContainText('matches the ETag read for it');
+    await expect(dialog).toContainText('has not changed since Elara read it');
     expect(driveCalls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
 
     await expect(dialog.locator('[data-untrusted-context="true"]')).toBeVisible();

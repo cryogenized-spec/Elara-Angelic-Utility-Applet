@@ -1513,6 +1513,11 @@ export class ClickUpOAuthVault extends DurableObject {
         // A provider-side rejection merely causes a harmless extra refresh.
         markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         const result = await this.providerData((token) => createClickUpTask(token, args), expectedRevision);
+        // A search can begin after the pre-write generation bump but before
+        // ClickUp finishes the mutation. Invalidate again after the outcome so
+        // that an old provider snapshot fetched during the write cannot remain
+        // marked fresh. This also covers ambiguous/network outcomes.
+        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         if (!result.ok) return result.response;
         const created = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
         const createdTaskId = safeProviderId(created.id);
@@ -1540,6 +1545,11 @@ export class ClickUpOAuthVault extends DurableObject {
         removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, args.taskId);
         markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         const result = await this.providerData((token) => updateClickUpTask(token, args), expectedRevision);
+        // Close the after-pre-invalidation race: a refresh that started while
+        // the provider write was pending must not become the durable fresh
+        // projection for the newly-mutated task.
+        removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, args.taskId);
+        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         if (!result.ok) return result.response;
         return json({ ok: true, result: result.data });
       }
@@ -1648,6 +1658,13 @@ export class ClickUpOAuthVault extends DurableObject {
         const mutation = command.operation === 'setCustomField'
           ? await this.providerData((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value), expectedRevision)
           : await this.providerData((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId), expectedRevision);
+
+        // Re-invalidate after the provider outcome as well. A search may have
+        // refreshed the old task after the pre-write bump while this mutation
+        // was still in flight; without this second bump that stale projection
+        // could remain fresh when webhooks are unavailable.
+        removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, command.taskId);
+        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         if (!mutation.ok) return mutation.response;
         return json({ ok: true, result: mutation.data });
       }

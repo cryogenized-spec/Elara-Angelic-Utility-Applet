@@ -8,6 +8,9 @@
   position: relative;
   isolation: isolate;
   font-size: 13px;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
 }
 .kb-screen::before {
   content: "";
@@ -137,31 +140,41 @@
   flex: 1;
   min-width: 0;
   overscroll-behavior: contain;
-  background-image: radial-gradient(
-    circle,
-    rgba(177, 173, 211, 0.23) 0.8px,
-    transparent 0.9px
-  );
-  background-size: 22px 22px;
   scrollbar-color: #454251 transparent;
 }
 .kb-canvas {
   display: flex;
   align-items: flex-start;
   gap: 22px;
-  padding: 30px 38px 150px;
+  position: relative;
+  isolation: isolate;
+  padding: 30px max(38px, 28vw) max(150px, 32vh) 38px;
   width: max-content;
   min-width: 100%;
   min-height: 100%;
+}
+.kb-canvas::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image: radial-gradient(
+    circle,
+    rgba(190, 185, 224, 0.3) 0.9px,
+    transparent 1px
+  );
+  background-size: 22px 22px;
+  background-position: 0 0;
 }
 .kb-column {
   width: 300px;
   flex: none;
   border: 1px solid var(--line);
   border-radius: 15px;
-  background: rgba(20, 20, 30, 0.76);
-  backdrop-filter: blur(10px);
+  background: rgba(20, 20, 30, 0.82);
   padding: 13px 11px;
+  contain: layout paint;
 }
 .kb-column > header {
   display: flex;
@@ -206,6 +219,8 @@
 }
 .kb-card {
   padding: 15px 13px 12px;
+  cursor: pointer;
+  touch-action: manipulation;
   background: linear-gradient(
     125deg,
     rgba(40, 39, 56, 0.76),
@@ -250,6 +265,7 @@
 }
 .kb-card p {
   color: var(--muted);
+  pointer-events: none;
   font-size: 11px;
   line-height: 1.6;
   display: -webkit-box;
@@ -273,6 +289,7 @@
   display: flex;
   align-items: center;
   gap: 5px;
+  font-variant-numeric: tabular-nums;
 }
 .kb-due.is-late {
   color: #eeb29e;
@@ -469,8 +486,7 @@
   box-shadow: 0 30px 120px #0009;
 }
 .kb-dialog::backdrop {
-  background: #02020ab8;
-  backdrop-filter: blur(8px);
+  background: #02020acc;
 }
 .kb-dialog > header {
   display: flex;
@@ -529,6 +545,8 @@
 .kb-form input,
 .kb-form textarea {
   width: 100%;
+  -webkit-user-select: text;
+  user-select: text;
   background: #0d0d1699;
   color: var(--text);
   border: 1px solid var(--line);
@@ -538,6 +556,66 @@
 }
 .kb-form textarea {
   resize: vertical;
+}
+.kb-form-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(120px, .72fr);
+  gap: 12px;
+}
+.kb-card-labels,
+.kb-label-options {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.kb-card-labels {
+  margin: 8px 0 3px;
+  pointer-events: none;
+}
+.kb-label {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 8px;
+  border: 1px solid rgba(166, 160, 247, .22);
+  border-radius: 8px;
+  background: rgba(166, 160, 247, .09);
+  color: #ddd9ff;
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+button.kb-label {
+  min-height: 30px;
+}
+.kb-label[data-color="blue"] { border-color: rgba(121, 184, 220, .3); background: rgba(121, 184, 220, .1); color: #cbe9fa; }
+.kb-label[data-color="amber"] { border-color: rgba(231, 183, 126, .3); background: rgba(231, 183, 126, .1); color: #f4d9b7; }
+.kb-label[data-color="green"] { border-color: rgba(145, 203, 179, .3); background: rgba(145, 203, 179, .1); color: #cef1e2; }
+.kb-label[data-color="rose"] { border-color: rgba(238, 178, 158, .3); background: rgba(238, 178, 158, .1); color: #ffd8cc; }
+.kb-label[data-color="cyan"] { border-color: rgba(99, 216, 255, .3); background: rgba(99, 216, 255, .09); color: #d4f6ff; }
+.kb-label.is-selected {
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+.kb-label-editor {
+  display: grid;
+  gap: 9px;
+}
+.kb-label-editor__title {
+  font-size: 11px;
+  color: #d2cedf;
+}
+.kb-label-options small {
+  color: var(--muted);
+  font-size: 10px;
+}
+.kb-label-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.kb-label-create button {
+  white-space: nowrap;
 }
 .kb-form-actions {
   display: flex;
@@ -611,7 +689,7 @@
     font-size: 10px;
   }
   .kb-canvas {
-    padding: 20px 16px 130px;
+    padding: 20px max(16px, 26vw) max(130px, 28vh) 16px;
     gap: 15px;
   }
   .kb-column {
@@ -642,6 +720,12 @@
   }
   .kb-empty {
     width: calc(100vw - 32px);
+  }
+  .kb-form-row {
+    grid-template-columns: 1fr;
+  }
+  .kb-label-create {
+    grid-template-columns: 1fr;
   }
 }
 

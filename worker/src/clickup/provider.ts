@@ -4,6 +4,7 @@ const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2';
 const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token';
 const MAX_PROVIDER_BODY_BYTES = 1_250_000;
 const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;
+const CLICKUP_PERSONAL_CREDENTIAL_PREFIX = 'elara-clickup-personal-v1:';
 
 export interface ClickUpOAuthServerEnv {
   readonly CLICKUP_OAUTH_CLIENT_ID?: string;
@@ -90,12 +91,21 @@ function boundedToken(value: string, label: string): string {
   return token;
 }
 
-function clickUpAuthorizationValue(tokenValue: string): string {
-  const token = boundedToken(tokenValue, 'access token');
-  // ClickUp documents different Authorization syntax for its two credential
-  // types: personal API tokens are sent raw, while OAuth access tokens use
-  // the Bearer scheme. Personal tokens are provider-defined with a pk_ prefix.
-  return token.startsWith('pk_') ? token : `Bearer ${token}`;
+export function personalClickUpCredential(personalToken: string): string {
+  const token = boundedToken(personalToken, 'personal API token');
+  if (!token.startsWith('pk_')) throw new Error('ClickUp personal API token is invalid.');
+  return `${CLICKUP_PERSONAL_CREDENTIAL_PREFIX}${token}`;
+}
+
+function clickUpAuthorizationValue(credentialValue: string): string {
+  const credential = boundedToken(credentialValue, 'provider credential');
+  if (credential.startsWith(CLICKUP_PERSONAL_CREDENTIAL_PREFIX)) {
+    return boundedToken(
+      credential.slice(CLICKUP_PERSONAL_CREDENTIAL_PREFIX.length),
+      'personal API token',
+    );
+  }
+  return `Bearer ${credential}`;
 }
 
 function boundedId(value: string, label: string): string {

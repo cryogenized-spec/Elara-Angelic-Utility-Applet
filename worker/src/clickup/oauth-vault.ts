@@ -994,6 +994,14 @@ export class ClickUpOAuthVault extends DurableObject {
       return true;
     };
 
+    const reconciliationCommittedByPeer = (startedAt: number): boolean => {
+      if (fullReconcileStageState(this.ctx.storage.sql, args.workspaceId)) return false;
+      const current = taskIndexState(this.ctx.storage.sql, args.workspaceId);
+      return current.fullSyncComplete
+        && current.invalidationGeneration === refreshGeneration
+        && current.lastRefreshAt >= startedAt;
+    };
+
     if (fullReconcileDue) {
       fullReconcileHandled = true;
       if (!reconcileStage) {
@@ -1014,6 +1022,7 @@ export class ClickUpOAuthVault extends DurableObject {
       }
 
       let completed = false;
+      let committedByPeer = false;
       for (let offset = 0; offset < TASK_INDEX_COLD_PAGES_PER_SEARCH; offset += 1) {
         const pageResult = await providerPage(reconcileStage.nextPage);
         if (!pageResult.ok) {
@@ -1043,6 +1052,11 @@ export class ClickUpOAuthVault extends DurableObject {
         if (!nextStage) {
           const invalidatedStage = await restartIfInvalidated();
           if (invalidatedStage) return invalidatedStage;
+          if (reconciliationCommittedByPeer(reconcileStage.startedAt)) {
+            completed = true;
+            committedByPeer = true;
+            break;
+          }
           return json({
             code: 'index_reconcile_lost',
             message: 'ClickUp full task-index reconciliation lost its staging authority. Retry the search.',
@@ -1059,18 +1073,23 @@ export class ClickUpOAuthVault extends DurableObject {
       if (completed) {
         const invalidatedBeforeCommit = await restartIfInvalidated();
         if (invalidatedBeforeCommit) return invalidatedBeforeCommit;
-        if (!commitClickUpFullReconcileStage(
-          this.ctx.storage,
-          args.workspaceId,
-          refreshGeneration,
-          now,
-        )) {
+        if (
+          !committedByPeer
+          && !commitClickUpFullReconcileStage(
+            this.ctx.storage,
+            args.workspaceId,
+            refreshGeneration,
+            now,
+          )
+        ) {
           const invalidatedCommit = await restartIfInvalidated();
           if (invalidatedCommit) return invalidatedCommit;
-          return json({
-            code: 'index_reconcile_lost',
-            message: 'ClickUp full task-index reconciliation could not commit safely. Retry the search.',
-          }, 409);
+          if (!reconciliationCommittedByPeer(reconcileStage.startedAt)) {
+            return json({
+              code: 'index_reconcile_lost',
+              message: 'ClickUp full task-index reconciliation could not commit safely. Retry the search.',
+            }, 409);
+          }
         }
         refreshIncomplete = false;
         state = taskIndexState(this.ctx.storage.sql, args.workspaceId);

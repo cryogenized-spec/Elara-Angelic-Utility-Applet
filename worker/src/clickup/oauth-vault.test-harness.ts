@@ -96,6 +96,23 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
         } : null);
       }
 
+      if (request.method === 'POST' && url.pathname === '/__test/clickup/rate-limit') {
+        const body = await bodyRecord(request);
+        const limit = typeof body.limit === 'number' && Number.isSafeInteger(body.limit) ? body.limit : null;
+        const remaining = typeof body.remaining === 'number' && Number.isSafeInteger(body.remaining) ? body.remaining : null;
+        const resetAt = typeof body.resetAt === 'number' && Number.isSafeInteger(body.resetAt) ? body.resetAt : null;
+        this.ctx.storage.sql.exec(`
+          INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at)
+          VALUES (1, ?, ?, ?, ?)
+          ON CONFLICT(slot) DO UPDATE SET
+            limit_count = excluded.limit_count,
+            remaining = excluded.remaining,
+            reset_at = excluded.reset_at,
+            updated_at = excluded.updated_at
+        `, limit, remaining, resetAt, Date.now());
+        return json({ ok: true });
+      }
+
       if (request.method === 'GET' && url.pathname === '/__test/clickup/task-index') {
         const workspaceId = requiredSearchParam(url, 'workspaceId');
         const row = this.ctx.storage.sql.exec<{

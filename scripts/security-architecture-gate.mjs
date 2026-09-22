@@ -401,6 +401,8 @@ for (const marker of [
   'readBoundedWorkerJson',
   'const body = await readBoundedWorkerJson(response)',
   "new ClickUpOAuthError('timeout'",
+  'assertPairingStillCurrent(pairing)',
+  "new ClickUpOAuthError('grant_changed'",
 ]) {
   if (!clickUpOAuthAuthority.includes(marker)) fail(`durable ClickUp OAuth browser authority is missing: ${marker}`);
 }
@@ -420,6 +422,8 @@ for (const marker of [
   'listToolsForSession(session, signal, true)',
   'validateClickUpToolArguments',
   'MAX_MCP_RESPONSE_BYTES',
+  'const currentPairing = loadPairing()',
+  'clickUpPairingAuthorityBinding(currentPairing) !== session.cacheKey',
 ]) {
   if (!clickUpMcpClient.includes(marker)) fail(`ClickUp browser MCP boundary is missing: ${marker}`);
 }

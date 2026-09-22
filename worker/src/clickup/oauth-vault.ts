@@ -44,16 +44,17 @@ import { CLICKUP_GRANT_REVISION_HEADER } from '../../../src/clickup/mcp-protocol
 import { ARTIFACT_LIMITS } from '../../../src/artifacts/limits';
 import {
   clearClickUpTaskIndex,
+  clearClickUpTaskTombstone,
   clearClickUpWorkspaceTaskIndex,
   initializeClickUpTaskIndex,
   markAllClickUpTaskIndexesStale,
   markClickUpWorkspaceTaskIndexStale,
   removeClickUpTaskFromAllIndexes,
-  removeClickUpTaskFromIndex,
   searchClickUpTaskIndex,
   setTaskIndexState,
   taskIndexInvalidationGeneration,
   taskIndexState,
+  tombstoneClickUpTask,
   upsertClickUpTaskIndexPage,
 } from './task-index';
 import { CLICKUP_WEBHOOK_ENDPOINT_HEADER } from './oauth-routes';
@@ -1234,6 +1235,9 @@ export class ClickUpOAuthVault extends DurableObject {
         if (invalidAssignees) return invalidAssignees;
         const result = await this.providerData((token) => createClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
+        const created = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
+        const createdTaskId = safeProviderId(created.id);
+        if (createdTaskId) clearClickUpTaskTombstone(this.ctx.storage.sql, args.workspaceId, createdTaskId);
         markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
         return json({ ok: true, result: result.data });
       }
@@ -1549,7 +1553,9 @@ export class ClickUpOAuthVault extends DurableObject {
 
     const taskId = safeProviderId(payload.task_id);
     if (payload.event === 'taskDeleted' && taskId) {
-      removeClickUpTaskFromIndex(this.ctx.storage.sql, row.workspace_id, taskId);
+      tombstoneClickUpTask(this.ctx.storage.sql, row.workspace_id, taskId, now);
+    } else if (payload.event === 'taskCreated' && taskId) {
+      clearClickUpTaskTombstone(this.ctx.storage.sql, row.workspace_id, taskId);
     }
     if (payload.event.startsWith('task')) {
       markClickUpWorkspaceTaskIndexStale(this.ctx.storage.sql, row.workspace_id);

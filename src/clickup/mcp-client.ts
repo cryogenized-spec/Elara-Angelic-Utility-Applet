@@ -361,7 +361,10 @@ export async function callClickUpMcpTool<T extends ClickUpToolName>(
     throw new ClickUpMcpError('grant_required', 'ClickUp MCP execution requires an admitted provider grant.', 409);
   }
   const session = await currentSession(admittedGrant);
-  await listToolsForSession(session, signal);
+  // Execution never trusts the tools/list TTL. Revalidate the exact paired
+  // Worker immediately before every call so a same-URL deployment rollback
+  // cannot reuse a previously admitted catalog.
+  await listToolsForSession(session, signal, true);
   const result = completeResult(await mcpPost(session, 'tools/call', {
     name: tool,
     arguments: argumentsValue,

@@ -439,10 +439,18 @@ export function confirmationRequestForCall(
   if (!request) return null;
   if (parsed.data.tool === 'clickup.attachArtifact' && context.clickupArtifactSnapshot) {
     const snapshot = context.clickupArtifactSnapshot;
-    return {
+    return writeConfirmationSchema.parse({
       ...request,
-      resourceSummary: `Attach approved Elara file “${snapshot.artifactName}” (${snapshot.mimeType}, ${snapshot.payloadSize} bytes) to ClickUp task ${value(args, 'taskId') ?? 'selected task'} as “${snapshot.uploadName}”.`,
-    };
+      resourceSummary: `Attach the approved file below to ClickUp task ${value(args, 'taskId') ?? 'selected task'}.`,
+      attachmentReview: {
+        name: snapshot.artifactName,
+        uploadName: snapshot.uploadName,
+        mimeType: snapshot.mimeType,
+        sizeBytes: snapshot.payloadSize,
+        ...(snapshot.previewText ? { previewText: snapshot.previewText } : {}),
+        ...(snapshot.previewTruncated ? { previewTruncated: true } : {}),
+      },
+    });
   }
   if (parsed.data.tool !== 'memory.reconcile') return request;
   const targetRef = value(args, 'targetRef');

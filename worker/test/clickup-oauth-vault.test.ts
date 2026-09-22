@@ -438,8 +438,12 @@ describe('ClickUpOAuthVault', () => {
     expect((await first).status).toBe(200);
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
       limit: 100,
-      remaining: 0,
+      remaining: 99,
     }));
+
+    const third = await internalCommand({ operation: 'listSpaces', workspaceId: '999' }, revision);
+    expect(third.status).toBe(200);
+    expect(spaceCalls).toBe(2);
   });
 
   it('learns the provider rate window and blocks the next call locally when remaining reaches zero', async () => {

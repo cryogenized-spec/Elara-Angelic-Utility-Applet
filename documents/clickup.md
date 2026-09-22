@@ -108,9 +108,11 @@ The Worker verifies:
 
 Structured MCP results have an aggregate Worker-side byte ceiling in addition to bounded semantic projections. The browser independently caps MCP response bytes and cancels oversized streams.
 
-## 5. OAuth and credential authority
+## 5. Credential authority
 
-ClickUp uses OAuth 2.0 Authorization Code. Elara requires a paired self-hosted Worker for ClickUp because the client secret and durable access token are Worker-only.
+Elara supports two ClickUp credential-establishment modes, both behind the same paired self-hosted Worker and the same encrypted vault.
+
+OAuth 2.0 Authorization Code remains the multi-user/app path:
 
 ```text
 user gesture
@@ -126,13 +128,24 @@ user gesture
 -> browser receives bounded account / Workspace metadata only
 ```
 
-Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The access token is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
+A single-user self-hosted deployment may instead configure `CLICKUP_PERSONAL_TOKEN` as a Worker secret. This is useful when the ClickUp user can create a personal API token but is not a Workspace admin and therefore cannot create an OAuth app.
+
+```text
+user gesture
+-> signed POST /clickup/oauth/personal-token with an empty JSON body
+-> Worker reads CLICKUP_PERSONAL_TOKEN from its own secret environment
+-> GET /user + GET /team validate the token and establish account / Workspaces
+-> token AES-GCM encrypted in the same installation-scoped Durable Object
+-> browser receives bounded account / Workspace metadata only
+```
+
+The personal token is never accepted from browser input, returned to the browser, placed in model-visible schemas or persisted in browser storage. Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The credential is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
 
 ### 5.1 Account identity and Settings surface
 
 ClickUp authorization is independent from Elara's Google Workspace authorization. Elara must never infer that the Google identity used for Gmail, Drive, Calendar or other Workspace tools is also the identity used to sign into ClickUp, and it must never reuse a Google Workspace access token for ClickUp.
 
-If a customer's ClickUp account uses Google's sign-in option, account selection happens inside ClickUp's official authorization/sign-in flow. Elara does not manufacture or force a Google account chooser on ClickUp's behalf. The Settings surface explains this boundary before authorization and then displays the bounded ClickUp account metadata returned by ClickUp so the customer can verify which identity was admitted.
+If a customer's ClickUp account uses Google's sign-in option, account selection happens inside ClickUp's official authorization/sign-in flow. Elara does not manufacture or force a Google account chooser on ClickUp's behalf. In personal-token mode the token itself identifies the ClickUp account, and Elara verifies that identity with ClickUp before sealing the credential. The Settings surface displays only bounded account metadata so the customer can verify which identity was admitted.
 
 The ClickUp Settings surface is intentionally connection-oriented rather than a second task-management client. It shows:
 
@@ -273,7 +286,7 @@ The browser attachment route requires installation bearer + admitted grant revis
 
 ## 11. Provider serialization, errors and rate limits
 
-`worker/src/clickup/provider.ts` is the only ClickUp Public API egress authority. Requests are HTTPS to the fixed ClickUp API origin and use `Authorization: Bearer <server-side token>`.
+`worker/src/clickup/provider.ts` is the only ClickUp Public API egress authority. Requests are HTTPS to the fixed ClickUp API origin. OAuth access tokens use `Authorization: Bearer <token>`; ClickUp personal API tokens (provider-defined `pk_` credentials) use the raw `Authorization: <personal_token>` form required by ClickUp.
 
 Reviewed representations include:
 
@@ -317,17 +330,18 @@ Model-facing results are bounded. The model never assembles provider query strin
 
 ## 13. Deployment contract
 
-A ClickUp-enabled self-hosted Worker requires deployment-owned configuration for:
+A ClickUp-enabled self-hosted Worker always requires:
 
-- `CLICKUP_OAUTH_CLIENT_ID`;
-- `CLICKUP_OAUTH_CLIENT_SECRET`;
 - `CLICKUP_OAUTH_VAULT_KEY`;
 - the `CLICKUP_OAUTH` Durable Object binding/migration;
 - the existing Elara installation credential used by the paired browser/Worker authority.
 
-Secrets are never browser build variables.
+It then requires one credential source:
 
-The ClickUp OAuth callback/redirect URI must be registered in the ClickUp app and must match the HTTPS Pages/deployment origin used by that installation.
+- OAuth mode: `CLICKUP_OAUTH_CLIENT_ID` + `CLICKUP_OAUTH_CLIENT_SECRET`; or
+- personal-token mode: `CLICKUP_PERSONAL_TOKEN`.
+
+Secrets are never browser build variables. OAuth mode additionally requires the ClickUp callback/redirect URI to be registered in the ClickUp app and to match the HTTPS Pages/deployment origin used by that installation. Personal-token mode does not require an OAuth app or redirect URI.
 
 ## 14. Verification contract
 
@@ -339,7 +353,8 @@ Focused tests cover:
 - exact grant/pairing confirmation binding;
 - OAuth state + signed-write replay protection;
 - disconnect/exchange and old-token/new-token races;
-- encrypted token storage and revision-guarded revocation;
+- encrypted OAuth/personal-token storage and revision-guarded invalidation;
+- proof that personal-token activation sends no token material from the browser and uses ClickUp's personal-token Authorization form;
 - adaptive/monotonic rate state and genuine-window rollover;
 - provider response byte cancellation;
 - cross-Workspace task/Folder/List/comment/field/attachment denial;

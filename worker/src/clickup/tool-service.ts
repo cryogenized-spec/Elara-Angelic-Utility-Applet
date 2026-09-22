@@ -250,6 +250,7 @@ async function encodeCursor(
   env: ClickUpToolServiceEnv,
   workspaceId: string,
   taskId: string,
+  grantRevision: number,
   start: number,
   startId: string,
 ): Promise<string> {
@@ -257,6 +258,7 @@ async function encodeCursor(
     v: 2,
     workspaceId,
     taskId,
+    grantRevision,
     start,
     startId,
   }));
@@ -268,6 +270,7 @@ async function decodeCursor(
   env: ClickUpToolServiceEnv,
   workspaceId: string,
   taskId: string,
+  grantRevision: number,
   value: string | undefined,
 ): Promise<{ start: number; startId: string } | undefined> {
   if (!value) return undefined;
@@ -286,6 +289,7 @@ async function decodeCursor(
       parsed.v !== 2
       || parsed.workspaceId !== workspaceId
       || parsed.taskId !== taskId
+      || parsed.grantRevision !== grantRevision
       || start === undefined
       || !startId
     ) throw new Error('invalid');
@@ -341,7 +345,8 @@ async function comments(
   limit: number,
   expectedRevision?: number,
 ) {
-  let cursor = await decodeCursor(env, workspaceId, taskId, cursorValue);
+  const cursorGrantRevision = expectedRevision ?? 0;
+  let cursor = await decodeCursor(env, workspaceId, taskId, cursorGrantRevision, cursorValue);
   const output: ReturnType<typeof normalizeComment>[] = [];
   let lastRaw: Record<string, unknown> | undefined;
   let providerHasMore = false;
@@ -375,7 +380,14 @@ async function comments(
   if (providerHasMore && lastRaw) {
     const start = providerMillis(lastRaw.date);
     const startId = providerId(lastRaw.id);
-    if (start !== undefined && startId) nextCursor = await encodeCursor(env, workspaceId, taskId, start, startId);
+    if (start !== undefined && startId) nextCursor = await encodeCursor(
+      env,
+      workspaceId,
+      taskId,
+      cursorGrantRevision,
+      start,
+      startId,
+    );
   }
 
   return {

@@ -247,16 +247,47 @@ function friendlyFieldLabel(key: string): string {
   return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Value';
 }
 
+const REVIEW_MAX_DEPTH = 10;
+const REVIEW_MAX_NODES = 12_000;
+const INTERNAL_REVIEW_FIELDS = new Set([
+  'etag',
+  'revisionId',
+  'targetRef',
+  'artifactId',
+]);
+
+interface ReviewTraversalBudget { nodes: number; }
+
 function friendlyScalar(value: unknown): string {
   if (value === null) return 'None';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'string') return value || '(empty)';
+  if (typeof value === 'string') return value.length ? `“${value.replaceAll('“', '❝').replaceAll('”', '❞').replaceAll('\n', '↵')}”` : '(empty)';
   if (typeof value === 'number') return String(value);
   return String(value);
 }
 
-function appendFriendlyReview(lines: string[], label: string, entry: unknown, depth = 0): void {
+function appendTextBlock(lines: string[], indent: string, label: string, text: string): void {
+  lines.push(`${indent}${label}:`);
+  const parts = text.split('\n');
+  if (!parts.length) {
+    lines.push(`${indent}  │`);
+    return;
+  }
+  for (const line of parts) lines.push(`${indent}  │ ${line}`);
+}
+
+function appendFriendlyReview(
+  lines: string[],
+  label: string,
+  entry: unknown,
+  depth = 0,
+  budget: ReviewTraversalBudget = { nodes: 0 },
+): void {
+  budget.nodes += 1;
+  if (budget.nodes > REVIEW_MAX_NODES) throw new Error('Confirmation review exceeds the traversal budget.');
+  if (depth > REVIEW_MAX_DEPTH) throw new Error('Confirmation review is nested too deeply.');
   const indent = '  '.repeat(depth);
+
   if (Array.isArray(entry)) {
     if (entry.length === 0) {
       lines.push(`${indent}${label}: None`);
@@ -264,53 +295,113 @@ function appendFriendlyReview(lines: string[], label: string, entry: unknown, de
     }
     if (entry.every((item) => Array.isArray(item))) {
       lines.push(`${indent}${label}:`);
-      entry.forEach((row, index) => {
-        const values = (row as unknown[]).map(friendlyScalar).join(' | ');
-        lines.push(`${indent}  Row ${index + 1}: ${values}`);
+      entry.forEach((row, rowIndex) => {
+        lines.push(`${indent}  Row ${rowIndex + 1}:`);
+        (row as unknown[]).forEach((cell, cellIndex) => {
+          if (cell && typeof cell === 'object') {
+            appendFriendlyReview(lines, `Cell ${cellIndex + 1}`, cell, depth + 2, budget);
+          } else if (typeof cell === 'string' && cell.includes('\n')) {
+            appendTextBlock(lines, '  '.repeat(depth + 2), `Cell ${cellIndex + 1}`, cell);
+          } else {
+            lines.push(`${'  '.repeat(depth + 2)}Cell ${cellIndex + 1}: ${friendlyScalar(cell)}`);
+          }
+        });
       });
       return;
     }
-    if (entry.every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
-      lines.push(`${indent}${label}: ${entry.map(friendlyScalar).join(', ')}`);
-      return;
-    }
     lines.push(`${indent}${label}:`);
-    entry.forEach((item, index) => appendFriendlyReview(lines, `Item ${index + 1}`, item, depth + 1));
-    return;
-  }
-  if (entry && typeof entry === 'object') {
-    lines.push(`${indent}${label}:`);
-    Object.entries(entry as Record<string, unknown>).forEach(([key, nested]) => {
-      appendFriendlyReview(lines, friendlyFieldLabel(key), nested, depth + 1);
+    entry.forEach((item, index) => {
+      if (item && typeof item === 'object') appendFriendlyReview(lines, `Item ${index + 1}`, item, depth + 1, budget);
+      else if (typeof item === 'string' && item.includes('\n')) appendTextBlock(lines, '  '.repeat(depth + 1), `Item ${index + 1}`, item);
+      else lines.push(`${'  '.repeat(depth + 1)}Item ${index + 1}: ${friendlyScalar(item)}`);
     });
     return;
   }
-  if (typeof entry === 'string' && entry.includes('\n')) {
+
+  if (entry && typeof entry === 'object') {
     lines.push(`${indent}${label}:`);
-    entry.split('\n').forEach((line) => lines.push(`${indent}  ${line}`));
+    for (const [key, nested] of Object.entries(entry as Record<string, unknown>)) {
+      if (INTERNAL_REVIEW_FIELDS.has(key)) continue;
+      appendFriendlyReview(lines, friendlyFieldLabel(key), nested, depth + 1, budget);
+    }
+    return;
+  }
+
+  if (typeof entry === 'string' && entry.includes('\n')) {
+    appendTextBlock(lines, indent, label, entry);
     return;
   }
   lines.push(`${indent}${label}: ${friendlyScalar(entry)}`);
 }
 
 function friendlyArgumentReview(args: Readonly<Record<string, unknown>>): string | undefined {
-  try {
-    const lines: string[] = [];
-    Object.entries(args).forEach(([key, entry]) => appendFriendlyReview(lines, friendlyFieldLabel(key), entry));
-    return lines.join('\n');
-  } catch {
-    return undefined;
+  const lines: string[] = [];
+  const budget: ReviewTraversalBudget = { nodes: 0 };
+  for (const [key, entry] of Object.entries(args)) {
+    if (INTERNAL_REVIEW_FIELDS.has(key)) continue;
+    appendFriendlyReview(lines, friendlyFieldLabel(key), entry, 0, budget);
   }
+  return lines.length ? lines.join('\n') : undefined;
+}
+
+function specializedReview(fields: readonly [string, unknown][]): string {
+  const lines: string[] = [];
+  const budget: ReviewTraversalBudget = { nodes: 0 };
+  for (const [label, entry] of fields) appendFriendlyReview(lines, label, entry, 0, budget);
+  return lines.join('\n');
 }
 
 function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<string, unknown>>): string | undefined {
-  if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
-  if ((tool === 'gmail.sendMessage' || tool === 'gmail.replyMessage') && typeof args.body === 'string') return args.body;
-  if (tool === 'clickup.createTaskComment' || tool === 'clickup.replyToComment') return value(args, 'text');
-  if (tool === 'sheets.updateCell' && typeof args.value === 'string') return args.value || '(empty string)';
+  if (tool === 'memory.save') {
+    return specializedReview([
+      ['Title', args.title],
+      ['Body', args.body],
+      ['Memory kind', args.kind ?? 'CONTEXTUAL'],
+      ['Confidence', args.confidence ?? 0.7],
+      ['Importance', args.importance ?? 0.5],
+      ['Tags', args.tags ?? []],
+    ]);
+  }
+  if (tool === 'memory.reconcile') {
+    return specializedReview([
+      ['Relation', args.relation],
+      ['Evidence / replacement title', args.title],
+      ['Proposed body', args.body],
+      ['Tags', args.tags ?? []],
+    ]);
+  }
+  if (tool === 'gmail.sendMessage') {
+    return specializedReview([
+      ['To', args.to],
+      ['Cc', args.cc ?? []],
+      ['Subject', args.subject],
+      ['Body', args.body],
+    ]);
+  }
+  if (tool === 'gmail.replyMessage') {
+    return specializedReview([
+      ['To', args.to],
+      ['Subject', args.subject],
+      ['Body', args.body],
+    ]);
+  }
+  if (tool === 'clickup.createTaskComment' || tool === 'clickup.replyToComment') {
+    return specializedReview([
+      ['Comment text', args.text],
+      ['Mentioned ClickUp users', args.mentionUserIds ?? []],
+      ['Notify everyone', args.notifyAll ?? false],
+    ]);
+  }
+  if (tool === 'sheets.updateCell') {
+    return specializedReview([
+      ['Cell input', args.value],
+      ['Input handling', args.inputMode ?? 'literal'],
+    ]);
+  }
   if (tool === 'clickup.attachArtifact') return undefined;
-  // Every other mutation still exposes the full validated payload for human
-  // inspection, but the presentation is plain language rather than raw JSON.
+  // Every other mutation exposes the consequential validated payload through a
+  // bounded, delimiter-safe projection. Authority-only preconditions stay
+  // internal and remain bound by execution/replay logic.
   return friendlyArgumentReview(args);
 }
 function gmailActionSummary(action?: string): string {

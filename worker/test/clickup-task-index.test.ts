@@ -586,6 +586,66 @@ describe('ClickUp durable task index', () => {
     }));
   });
 
+  it('lets concurrent searches adopt a peer full-reconciliation commit instead of returning a false conflict', async () => {
+    let reconcile = false;
+    let reconcileCalls = 0;
+    let bothStarted!: () => void;
+    let releaseFirst!: () => void;
+    let releaseSecond!: () => void;
+    const bothStartedPromise = new Promise<void>((resolve) => { bothStarted = resolve; });
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      if (url.pathname === '/api/v2/team/999/task') {
+        if (!reconcile) {
+          return new Response(JSON.stringify({
+            tasks: [{ id: 'old-task', name: 'Old needle', date_updated: '1790000000000', status: { status: 'open' } }],
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+
+        reconcileCalls += 1;
+        const ordinal = reconcileCalls;
+        if (reconcileCalls === 2) bothStarted();
+        await (ordinal === 1 ? firstGate : secondGate);
+        return new Response(JSON.stringify({
+          tasks: [{ id: 'new-task', name: 'New needle', date_updated: '1790000100000', status: { status: 'open' } }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.url}`);
+    });
+
+    await connect();
+    expect((await search({ workspaceId: '999', query: 'old needle' })).status).toBe(200);
+    reconcile = true;
+    await forceIndexedAt(Date.now() - (7 * 60 * 60_000));
+    await forceRefreshAt(0);
+
+    const first = search({ workspaceId: '999', query: 'new needle' });
+    const second = search({ workspaceId: '999', query: 'new needle' });
+    await bothStartedPromise;
+
+    releaseFirst();
+    const firstResponse = await first;
+    expect(firstResponse.status).toBe(200);
+    expect((await taskSearchPayload(firstResponse)).result.tasks).toEqual([
+      expect.objectContaining({ id: 'new-task' }),
+    ]);
+
+    releaseSecond();
+    const secondResponse = await second;
+    expect(secondResponse.status).toBe(200);
+    expect((await taskSearchPayload(secondResponse)).result.tasks).toEqual([
+      expect.objectContaining({ id: 'new-task' }),
+    ]);
+    expect(reconcileCalls).toBe(2);
+  });
+
   it('keeps the previous complete snapshot after a mid-reconciliation provider failure', async () => {
     let reconcile = false;
     let failPageOne = true;

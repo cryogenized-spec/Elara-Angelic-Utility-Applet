@@ -707,6 +707,13 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
         results.push({ callId: entry.call.callId, name: entry.call.name, result: result.result });
         completedMutationOutcomes.push(completedMutationLine(entry.call.name, result.result));
         evidenceEpoch += 1;
+        if (containsUntrustedExternal(result.result)) {
+          // Mutation responses can echo provider-controlled task/comment text.
+          // Once Gemini has consumed that response, it is evidence rather than
+          // fresh authority for any subsequent private read or mutation class.
+          untrustedExternalSeen = true;
+          untrustedContextSeen = true;
+        }
         const created = artifactEvent(entry.call.name, result.result);
         if (created) yield created;
         const media = mediaEvent(result.result);

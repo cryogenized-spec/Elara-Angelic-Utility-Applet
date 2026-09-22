@@ -50,6 +50,27 @@ describe('ClickUp OAuth browser authority', () => {
       .rejects.toThrow(/paired self-hosted Worker/i);
   });
 
+  it('fails closed if the pairing changes while the installation credential is resolving', async () => {
+    pairingTokenMock.mockImplementationOnce(async () => {
+      pairingMock.mockReturnValue({
+        ...TEST_PAIRING,
+        workerUrl: 'https://replacement.example',
+        installationId: 'replacement-installation',
+      });
+      return 'stale-installation-token';
+    });
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.beginConnect(
+      'https://cryogenized-spec.github.io/clickup/oauth/callback',
+    )).rejects.toMatchObject({
+      code: 'grant_changed',
+      status: 409,
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('starts authorization with a signed Worker write and never stores credentials', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);

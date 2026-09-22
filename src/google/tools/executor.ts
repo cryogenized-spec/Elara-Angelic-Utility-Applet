@@ -230,7 +230,7 @@ function friendlyFieldLabel(key: string): string {
 function friendlyScalar(value: unknown): string {
   if (value === null) return 'None';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'string') return value || '(empty)';
+  if (typeof value === 'string') return value ? `“${value.replace(/“/g, '‹').replace(/”/g, '›')}”` : '(empty)';
   if (typeof value === 'number') return String(value);
   return String(value);
 }
@@ -242,19 +242,16 @@ function appendFriendlyReview(lines: string[], label: string, entry: unknown, de
       lines.push(`${indent}${label}: None`);
       return;
     }
+    lines.push(`${indent}${label}:`);
     if (entry.every((item) => Array.isArray(item))) {
-      lines.push(`${indent}${label}:`);
-      entry.forEach((row, index) => {
-        const values = (row as unknown[]).map(friendlyScalar).join(' | ');
-        lines.push(`${indent}  Row ${index + 1}: ${values}`);
+      entry.forEach((row, rowIndex) => {
+        lines.push(`${indent}  Row ${rowIndex + 1}:`);
+        (row as unknown[]).forEach((cell, cellIndex) => {
+          lines.push(`${indent}    Cell ${cellIndex + 1}: ${friendlyScalar(cell)}`);
+        });
       });
       return;
     }
-    if (entry.every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
-      lines.push(`${indent}${label}: ${entry.map(friendlyScalar).join(', ')}`);
-      return;
-    }
-    lines.push(`${indent}${label}:`);
     entry.forEach((item, index) => appendFriendlyReview(lines, `Item ${index + 1}`, item, depth + 1));
     return;
   }
@@ -267,20 +264,18 @@ function appendFriendlyReview(lines: string[], label: string, entry: unknown, de
   }
   if (typeof entry === 'string' && entry.includes('\n')) {
     lines.push(`${indent}${label}:`);
-    entry.split('\n').forEach((line) => lines.push(`${indent}  ${line}`));
+    lines.push(`${indent}  “`);
+    entry.split('\n').forEach((line) => lines.push(`${indent}  ${line.replace(/“/g, '‹').replace(/”/g, '›')}`));
+    lines.push(`${indent}  ”`);
     return;
   }
   lines.push(`${indent}${label}: ${friendlyScalar(entry)}`);
 }
 
-function friendlyArgumentReview(args: Readonly<Record<string, unknown>>): string | undefined {
-  try {
-    const lines: string[] = [];
-    Object.entries(args).forEach(([key, entry]) => appendFriendlyReview(lines, friendlyFieldLabel(key), entry));
-    return lines.join('\n');
-  } catch {
-    return undefined;
-  }
+function friendlyArgumentReview(args: Readonly<Record<string, unknown>>): string {
+  const lines: string[] = [];
+  Object.entries(args).forEach(([key, entry]) => appendFriendlyReview(lines, friendlyFieldLabel(key), entry));
+  return lines.join('\n');
 }
 
 function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<string, unknown>>): string | undefined {

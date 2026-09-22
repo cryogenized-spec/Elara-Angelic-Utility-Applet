@@ -49,21 +49,26 @@ export interface ClickUpWorkspaceIdentity {
 
 const EMPTY_RATE_LIMIT: ClickUpRateLimitSnapshot = Object.freeze({ limit: null, remaining: null, resetAt: null });
 
-async function providerFetch(
+async function providerJsonRequest(
   fetcher: typeof fetch,
   input: RequestInfo | URL,
   init: RequestInit,
-): Promise<Response> {
+): Promise<{ response: Response; payload: unknown }> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), CLICKUP_REQUEST_TIMEOUT_MS);
   try {
-    return await fetcher(input, { ...init, signal: controller.signal });
-  } catch {
+    const response = await fetcher(input, { ...init, signal: controller.signal });
+    const payload = await readJsonResponse(response);
+    return { response, payload };
+  } catch (error) {
+    if (error instanceof ClickUpProviderError) throw error;
     const timedOut = controller.signal.aborted;
     throw new ClickUpProviderError(
       502,
       timedOut ? 'timeout' : 'network',
-      timedOut ? 'ClickUp did not respond before the request deadline.' : 'ClickUp could not be reached.',
+      timedOut
+        ? 'ClickUp did not complete the response before the request deadline.'
+        : 'ClickUp could not be reached.',
       EMPTY_RATE_LIMIT,
     );
   } finally {
@@ -196,8 +201,11 @@ async function clickupRequest<T>(
   const headers = new Headers(init.headers);
   headers.set('Authorization', `Bearer ${boundedToken(accessToken, 'access token')}`);
   headers.set('Accept', 'application/json');
-  const response = await providerFetch(fetcher, `${CLICKUP_API_BASE}${path}`, { ...init, headers });
-  const payload = await readJsonResponse(response);
+  const { response, payload } = await providerJsonRequest(
+    fetcher,
+    `${CLICKUP_API_BASE}${path}`,
+    { ...init, headers },
+  );
   const rateLimit = rateLimitFromHeaders(response.headers);
   if (!response.ok) {
     const rawProviderCode = providerCode(payload, response.status);
@@ -217,7 +225,7 @@ export async function exchangeClickUpAuthorizationCode(
   code: string,
   fetcher: typeof fetch = fetch,
 ): Promise<string> {
-  const response = await providerFetch(fetcher, CLICKUP_TOKEN_ENDPOINT, {
+  const { response, payload } = await providerJsonRequest(fetcher, CLICKUP_TOKEN_ENDPOINT, {
     method: 'POST',
     headers: { 'content-type': 'application/json', Accept: 'application/json' },
     body: JSON.stringify({
@@ -226,7 +234,6 @@ export async function exchangeClickUpAuthorizationCode(
       code: boundedToken(code, 'authorization code'),
     }),
   });
-  const payload = await readJsonResponse(response);
   if (!response.ok) {
     throw new ClickUpProviderError(
       response.status,

@@ -40,6 +40,7 @@ const clickupConnected = {
   }),
   beginConnect: async () => { throw new Error('not used'); },
   completeConnect: async () => { throw new Error('not used'); },
+  connectPersonalToken: async () => { throw new Error('not used'); },
   disconnect: async () => undefined,
 };
 

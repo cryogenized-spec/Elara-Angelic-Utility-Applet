@@ -798,15 +798,26 @@ export class ClickUpOAuthVault extends DurableObject {
       };
     }
     const record = value as Record<string, unknown>;
-    const add = record.add === undefined ? [] : record.add;
-    const rem = record.rem === undefined ? [] : record.rem;
-    if (!Array.isArray(add) || !Array.isArray(rem) || (!add.length && !rem.length)) {
+    const addValue = record.add;
+    const remValue = record.rem;
+    if (
+      (addValue !== undefined && !Array.isArray(addValue))
+      || (remValue !== undefined && !Array.isArray(remValue))
+    ) {
+      return {
+        ok: false,
+        response: json({ code: 'custom_field_value_invalid', message: 'This ClickUp Custom Field requires add/rem reference arrays.' }, 400),
+      };
+    }
+    const add: unknown[] = Array.isArray(addValue) ? addValue as unknown[] : [];
+    const rem: unknown[] = Array.isArray(remValue) ? remValue as unknown[] : [];
+    if (!add.length && !rem.length) {
       return {
         ok: false,
         response: json({ code: 'custom_field_value_invalid', message: 'This ClickUp Custom Field requires at least one add/rem reference.' }, 400),
       };
     }
-    const raw = [...add, ...rem];
+    const raw: unknown[] = [...add, ...rem];
     if (raw.length > maxReferences) {
       return {
         ok: false,

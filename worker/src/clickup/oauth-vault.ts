@@ -523,7 +523,20 @@ export class ClickUpOAuthVault extends DurableObject {
       }
 
       if (row.remaining === null) {
-        if (row.unknown_probe_in_flight === 1) return { blocked: true };
+        if (row.unknown_probe_in_flight === 1) {
+          const staleAt = row.updated_at + (RATE_WINDOW_SECONDS * 1000);
+          if (now < staleAt) return { blocked: true, retryAt: staleAt };
+
+          // The previous unknown-budget probe never completed (for example,
+          // the Durable Object restarted mid-request). Renew the lease only
+          // after a full provider rate window has elapsed so a durable orphan
+          // cannot deadlock the integration forever.
+          this.ctx.storage.sql.exec(
+            'UPDATE clickup_rate_limit SET unknown_probe_in_flight = 1, updated_at = ? WHERE slot = 1',
+            now,
+          );
+          return { blocked: false };
+        }
         this.ctx.storage.sql.exec(
           'UPDATE clickup_rate_limit SET unknown_probe_in_flight = 1, updated_at = ? WHERE slot = 1',
           now,

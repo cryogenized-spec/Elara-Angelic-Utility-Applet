@@ -2,6 +2,7 @@ import type { GoogleToolHandlers } from '../google/tools/executor';
 import { CLICKUP_TOOL_NAMES, validateClickUpToolArguments } from './tool-schema';
 import { callClickUpMcpTool } from './mcp-client';
 import { uploadClickUpArtifact } from './attachment-upload';
+import { isClickUpReplayTool, runClickUpMutationOnce } from './mutation-replay';
 
 export const clickUpToolHandlers: GoogleToolHandlers = Object.fromEntries(
   CLICKUP_TOOL_NAMES.map((name) => [
@@ -9,6 +10,11 @@ export const clickUpToolHandlers: GoogleToolHandlers = Object.fromEntries(
     async ({
       arguments: raw,
       signal,
+      callId,
+      conversationId,
+      messageId,
+      generationId,
+      isGenerationActive,
       providerGrantRevision,
       providerAuthorityBinding,
       clickupArtifactSnapshot,
@@ -17,10 +23,27 @@ export const clickUpToolHandlers: GoogleToolHandlers = Object.fromEntries(
       const admittedGrant = providerGrantRevision && providerAuthorityBinding
         ? { revision: providerGrantRevision, authorityBinding: providerAuthorityBinding }
         : undefined;
-      if (name === 'clickup.attachArtifact') {
-        return uploadClickUpArtifact(args, signal, admittedGrant, clickupArtifactSnapshot);
-      }
-      return callClickUpMcpTool(name, args, signal, admittedGrant);
+
+      const execute = () => name === 'clickup.attachArtifact'
+        ? uploadClickUpArtifact(args, signal, admittedGrant, clickupArtifactSnapshot)
+        : callClickUpMcpTool(name, args, signal, admittedGrant);
+
+      if (!isClickUpReplayTool(name)) return execute();
+
+      return runClickUpMutationOnce(
+        {
+          tool: name,
+          callId,
+          conversationId,
+          messageId,
+          generationId,
+          signal,
+          isGenerationActive,
+        },
+        args,
+        execute,
+        name === 'clickup.attachArtifact' ? clickupArtifactSnapshot : undefined,
+      );
     },
   ]),
 ) as GoogleToolHandlers;

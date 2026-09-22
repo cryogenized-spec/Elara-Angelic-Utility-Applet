@@ -234,9 +234,9 @@ try {
     ));
   });
   addMutation('ClickUp attachment response bound removed', 'scripts/security-architecture-gate.mjs', 'ClickUp browser attachment transport boundary is missing: MAX_ATTACHMENT_RESPONSE_BYTES', (cwd) => {
-    mutateRelative(cwd, 'src/clickup/attachment-upload.ts', (source) => source.replace(
-      'const MAX_ATTACHMENT_RESPONSE_BYTES = 256 * 1024;',
-      'const UNSAFE_ATTACHMENT_RESPONSE_BYTES = 256 * 1024;',
+    mutateRelative(cwd, 'src/clickup/attachment-upload.ts', (source) => source.replaceAll(
+      'MAX_ATTACHMENT_RESPONSE_BYTES',
+      'UNSAFE_ATTACHMENT_RESPONSE_BYTES',
     ));
   });
   addMutation('ClickUp replay turn key regresses to delimiter concatenation', 'scripts/security-architecture-gate.mjs', 'ClickUp mutation replay authority is missing: JSON.stringify([conversationId, messageId, generationId])', (cwd) => {

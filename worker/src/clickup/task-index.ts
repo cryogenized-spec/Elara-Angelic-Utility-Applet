@@ -33,6 +33,14 @@ type SearchRow = {
   assignee_ids_json: string;
 };
 
+export interface ClickUpFullReconcileStageState {
+  readonly workspaceId: string;
+  readonly nextPage: number;
+  readonly maxProviderUpdatedAt: number;
+  readonly invalidationGeneration: number;
+  readonly startedAt: number;
+}
+
 export const MAX_INDEXED_TASK_JSON_CHARS = 64_000;
 const MAX_SEARCH_CANDIDATES = 1_000;
 const TASK_TOMBSTONE_RETENTION_MS = 30 * 24 * 60 * 60_000;
@@ -331,6 +339,34 @@ export function initializeClickUpTaskIndex(sql: TaskIndexSql): void {
   `);
   sql.exec('CREATE INDEX IF NOT EXISTS clickup_task_index_tombstones_deleted ON clickup_task_index_tombstones(deleted_at)');
   sql.exec(`
+    CREATE TABLE IF NOT EXISTS clickup_task_index_reconcile_stage (
+      workspace_id TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      task_json TEXT NOT NULL,
+      search_text TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      closed INTEGER NOT NULL,
+      archived INTEGER NOT NULL,
+      parent_id TEXT,
+      list_id TEXT,
+      folder_id TEXT,
+      space_id TEXT,
+      status TEXT,
+      assignee_ids_json TEXT NOT NULL,
+      indexed_at INTEGER NOT NULL,
+      PRIMARY KEY (workspace_id, task_id)
+    )
+  `);
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS clickup_task_index_reconcile_state (
+      workspace_id TEXT PRIMARY KEY,
+      next_page INTEGER NOT NULL,
+      max_provider_updated_at INTEGER NOT NULL,
+      invalidation_generation INTEGER NOT NULL,
+      started_at INTEGER NOT NULL
+    )
+  `);
+  sql.exec(`
     CREATE TABLE IF NOT EXISTS clickup_task_index_state (
       workspace_id TEXT PRIMARY KEY,
       full_sync_complete INTEGER NOT NULL,
@@ -357,11 +393,15 @@ export function clearClickUpTaskIndex(sql: TaskIndexSql): void {
   sql.exec('DELETE FROM clickup_task_index');
   sql.exec('DELETE FROM clickup_task_index_state');
   sql.exec('DELETE FROM clickup_task_index_tombstones');
+  sql.exec('DELETE FROM clickup_task_index_reconcile_stage');
+  sql.exec('DELETE FROM clickup_task_index_reconcile_state');
 }
 
 export function clearClickUpWorkspaceTaskIndex(sql: TaskIndexSql, workspaceId: string): void {
   sql.exec('DELETE FROM clickup_task_index WHERE workspace_id = ?', workspaceId);
   sql.exec('DELETE FROM clickup_task_index_state WHERE workspace_id = ?', workspaceId);
+  sql.exec('DELETE FROM clickup_task_index_reconcile_stage WHERE workspace_id = ?', workspaceId);
+  sql.exec('DELETE FROM clickup_task_index_reconcile_state WHERE workspace_id = ?', workspaceId);
 }
 
 export function markClickUpWorkspaceTaskIndexStale(sql: TaskIndexSql, workspaceId: string): void {
@@ -369,10 +409,14 @@ export function markClickUpWorkspaceTaskIndexStale(sql: TaskIndexSql, workspaceI
     'UPDATE clickup_task_index_state SET last_refresh_at = 0, invalidation_generation = invalidation_generation + 1 WHERE workspace_id = ?',
     workspaceId,
   );
+  sql.exec('DELETE FROM clickup_task_index_reconcile_stage WHERE workspace_id = ?', workspaceId);
+  sql.exec('DELETE FROM clickup_task_index_reconcile_state WHERE workspace_id = ?', workspaceId);
 }
 
 export function markAllClickUpTaskIndexesStale(sql: TaskIndexSql): void {
   sql.exec('UPDATE clickup_task_index_state SET last_refresh_at = 0, invalidation_generation = invalidation_generation + 1');
+  sql.exec('DELETE FROM clickup_task_index_reconcile_stage');
+  sql.exec('DELETE FROM clickup_task_index_reconcile_state');
 }
 
 export function removeClickUpTaskFromIndex(sql: TaskIndexSql, workspaceId: string, taskId: string): void {
@@ -395,6 +439,11 @@ export function tombstoneClickUpTask(
   );
   sql.exec(
     'DELETE FROM clickup_task_index WHERE workspace_id = ? AND task_id = ?',
+    workspaceId,
+    taskId,
+  );
+  sql.exec(
+    'DELETE FROM clickup_task_index_reconcile_stage WHERE workspace_id = ? AND task_id = ?',
     workspaceId,
     taskId,
   );
@@ -423,13 +472,15 @@ function clickUpTaskTombstoned(sql: TaskIndexSql, workspaceId: string, taskId: s
 
 export function removeClickUpTaskFromAllIndexes(sql: TaskIndexSql, taskId: string): void {
   sql.exec('DELETE FROM clickup_task_index WHERE task_id = ?', taskId);
+  sql.exec('DELETE FROM clickup_task_index_reconcile_stage WHERE task_id = ?', taskId);
 }
 
-export function upsertClickUpTaskIndexPage(
+function upsertClickUpTaskPageIntoTable(
   sql: TaskIndexSql,
+  table: 'clickup_task_index' | 'clickup_task_index_reconcile_stage',
   workspaceId: string,
   tasks: readonly unknown[],
-  indexedAt = Date.now(),
+  indexedAt: number,
 ): { indexed: number; maxProviderUpdatedAt: number } {
   let indexed = 0;
   let maxProviderUpdatedAt = 0;
@@ -447,7 +498,7 @@ export function upsertClickUpTaskIndexPage(
     const assignees = assigneeIds(task);
 
     sql.exec(`
-      INSERT INTO clickup_task_index (
+      INSERT INTO ${table} (
         workspace_id, task_id, task_json, search_text, updated_at, closed, archived,
         parent_id, list_id, folder_id, space_id, status, assignee_ids_json, indexed_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -485,6 +536,140 @@ export function upsertClickUpTaskIndexPage(
   }
 
   return { indexed, maxProviderUpdatedAt };
+}
+
+export function upsertClickUpTaskIndexPage(
+  sql: TaskIndexSql,
+  workspaceId: string,
+  tasks: readonly unknown[],
+  indexedAt = Date.now(),
+): { indexed: number; maxProviderUpdatedAt: number } {
+  return upsertClickUpTaskPageIntoTable(sql, 'clickup_task_index', workspaceId, tasks, indexedAt);
+}
+
+export function beginClickUpFullReconcileStage(
+  sql: TaskIndexSql,
+  workspaceId: string,
+  invalidationGeneration: number,
+  startedAt = Date.now(),
+): ClickUpFullReconcileStageState {
+  sql.exec('DELETE FROM clickup_task_index_reconcile_stage WHERE workspace_id = ?', workspaceId);
+  sql.exec(`
+    INSERT INTO clickup_task_index_reconcile_state (
+      workspace_id, next_page, max_provider_updated_at, invalidation_generation, started_at
+    ) VALUES (?, 0, 0, ?, ?)
+    ON CONFLICT(workspace_id) DO UPDATE SET
+      next_page = 0,
+      max_provider_updated_at = 0,
+      invalidation_generation = excluded.invalidation_generation,
+      started_at = excluded.started_at
+  `, workspaceId, invalidationGeneration, startedAt);
+  return {
+    workspaceId,
+    nextPage: 0,
+    maxProviderUpdatedAt: 0,
+    invalidationGeneration,
+    startedAt,
+  };
+}
+
+export function fullReconcileStageState(
+  sql: TaskIndexSql,
+  workspaceId: string,
+): ClickUpFullReconcileStageState | null {
+  const row = sql.exec<{
+    workspace_id: string;
+    next_page: number;
+    max_provider_updated_at: number;
+    invalidation_generation: number;
+    started_at: number;
+  }>(`
+    SELECT workspace_id, next_page, max_provider_updated_at, invalidation_generation, started_at
+      FROM clickup_task_index_reconcile_state
+     WHERE workspace_id = ?
+  `, workspaceId).toArray()[0];
+  return row ? {
+    workspaceId: row.workspace_id,
+    nextPage: row.next_page,
+    maxProviderUpdatedAt: row.max_provider_updated_at,
+    invalidationGeneration: row.invalidation_generation,
+    startedAt: row.started_at,
+  } : null;
+}
+
+export function upsertClickUpFullReconcilePage(
+  sql: TaskIndexSql,
+  workspaceId: string,
+  tasks: readonly unknown[],
+  nextPage: number,
+  maxProviderUpdatedAt: number,
+  invalidationGeneration: number,
+  indexedAt = Date.now(),
+): ClickUpFullReconcileStageState | null {
+  const stage = fullReconcileStageState(sql, workspaceId);
+  if (!stage || stage.invalidationGeneration !== invalidationGeneration) return null;
+  const indexed = upsertClickUpTaskPageIntoTable(
+    sql,
+    'clickup_task_index_reconcile_stage',
+    workspaceId,
+    tasks,
+    indexedAt,
+  );
+  const nextMax = Math.max(maxProviderUpdatedAt, indexed.maxProviderUpdatedAt);
+  sql.exec(`
+    UPDATE clickup_task_index_reconcile_state
+       SET next_page = ?, max_provider_updated_at = ?
+     WHERE workspace_id = ? AND invalidation_generation = ?
+  `, nextPage, nextMax, workspaceId, invalidationGeneration);
+  return {
+    ...stage,
+    nextPage,
+    maxProviderUpdatedAt: nextMax,
+  };
+}
+
+export function abortClickUpFullReconcileStage(sql: TaskIndexSql, workspaceId: string): void {
+  sql.exec('DELETE FROM clickup_task_index_reconcile_stage WHERE workspace_id = ?', workspaceId);
+  sql.exec('DELETE FROM clickup_task_index_reconcile_state WHERE workspace_id = ?', workspaceId);
+}
+
+export function commitClickUpFullReconcileStage(
+  sql: TaskIndexSql,
+  workspaceId: string,
+  invalidationGeneration: number,
+  completedAt = Date.now(),
+): boolean {
+  return sql.transactionSync(() => {
+    if (taskIndexInvalidationGeneration(sql, workspaceId) !== invalidationGeneration) return false;
+    const stage = fullReconcileStageState(sql, workspaceId);
+    if (!stage || stage.invalidationGeneration !== invalidationGeneration) return false;
+
+    sql.exec('DELETE FROM clickup_task_index WHERE workspace_id = ?', workspaceId);
+    sql.exec(`
+      INSERT INTO clickup_task_index (
+        workspace_id, task_id, task_json, search_text, updated_at, closed, archived,
+        parent_id, list_id, folder_id, space_id, status, assignee_ids_json, indexed_at
+      )
+      SELECT workspace_id, task_id, task_json, search_text, updated_at, closed, archived,
+             parent_id, list_id, folder_id, space_id, status, assignee_ids_json, indexed_at
+        FROM clickup_task_index_reconcile_stage
+       WHERE workspace_id = ?
+    `, workspaceId);
+    sql.exec(`
+      UPDATE clickup_task_index_state
+         SET full_sync_complete = 1,
+             next_page = 0,
+             last_refresh_at = ?,
+             last_provider_updated_at = ?,
+             incremental_since = 0,
+             incremental_next_page = 0,
+             incremental_max_updated_at = 0
+       WHERE workspace_id = ? AND invalidation_generation = ?
+    `, completedAt, stage.maxProviderUpdatedAt, workspaceId, invalidationGeneration);
+    sql.exec('DELETE FROM clickup_task_index_reconcile_stage WHERE workspace_id = ?', workspaceId);
+    sql.exec('DELETE FROM clickup_task_index_reconcile_state WHERE workspace_id = ?', workspaceId);
+    return true;
+  });
 }
 
 export function taskIndexState(sql: TaskIndexSql, workspaceId: string): ClickUpTaskIndexState {

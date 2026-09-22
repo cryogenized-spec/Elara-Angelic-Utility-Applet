@@ -95,6 +95,44 @@ describe('ClickUp OAuth browser authority', () => {
     expect(loadStoredClickUpStatus()).toEqual(STATUS);
   });
 
+  it('rejects oversized paired-Worker OAuth responses before schema parsing', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      authorizationUrl: `https://app.clickup.com/api?${'x'.repeat(70_000)}`,
+      state: 'opaque-state-value',
+      expiresAt: Date.now() + 600_000,
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.beginConnect('https://cryogenized-spec.github.io/clickup/oauth/callback'))
+      .rejects.toMatchObject({ code: 'response_too_large' });
+  });
+
+  it('keeps the Worker timeout active while an OAuth response body is stalled', async () => {
+    vi.useFakeTimers();
+    try {
+      globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+        const signal = init?.signal;
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            const abort = () => controller.error(new DOMException('Aborted', 'AbortError'));
+            if (signal?.aborted) abort();
+            else signal?.addEventListener('abort', abort, { once: true });
+          },
+        });
+        return new Response(stream, { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as unknown as typeof fetch;
+
+      const pending = clickUpOAuthAuthority.getStatus();
+      const assertion = expect(pending).rejects.toMatchObject({ code: 'timeout' });
+      await vi.advanceTimersByTimeAsync(20_001);
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('refreshes status with bearer admission and clears metadata on disconnect', async () => {
     let calls = 0;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

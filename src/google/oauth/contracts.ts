@@ -69,8 +69,27 @@ export interface GoogleOAuthStatus {
   };
 }
 
+export interface GoogleExecutionGrant {
+  /** Normalized provider identity visible when the mutation was admitted. */
+  readonly accountEmail?: string;
+  /** Browser-only or paired-Worker authority identity. */
+  readonly authorityBinding: string;
+  /** Stable account/capability/scope/recovery fingerprint; excludes token refresh timestamps. */
+  readonly authorityFingerprint: string;
+  /** Durable Worker grant revision when paired; stable across token-only refresh. */
+  readonly providerRevision?: number;
+}
+
 export interface GoogleOAuthAuthority {
   authorize(capability: GoogleCapabilityKey): Promise<AuthorizedGoogleRequest>;
+  /**
+   * Snapshot the provider identity/authority that a consequential mutation is
+   * being approved against. Production authority implements this; optionality
+   * keeps narrow service tests/custom authorities lightweight.
+   */
+  getExecutionGrant?(): Promise<GoogleExecutionGrant>;
+  /** Fail closed when the current authority no longer matches an approved snapshot. */
+  assertExecutionGrant?(expected: GoogleExecutionGrant): Promise<void>;
   /**
    * Obtain transport only from an already-enabled provider grant. This path
    * must never initiate interactive consent; it is for timers/background UI.

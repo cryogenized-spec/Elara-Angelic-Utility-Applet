@@ -221,6 +221,17 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
     return normalized;
   },
 
+  async connectPersonalToken(): Promise<ClickUpOAuthStatus> {
+    const status = await signedPost(
+      activePairing(),
+      '/clickup/oauth/personal-token',
+      {},
+      (value) => clickUpOAuthStatusSchema.parse(value),
+    );
+    persistStatus(status);
+    return status;
+  },
+
   async disconnect(): Promise<void> {
     await signedPost(activePairing(), '/clickup/oauth/disconnect', {}, (value) => {
       if (!value || typeof value !== 'object' || (value as Record<string, unknown>).disconnected !== true) {

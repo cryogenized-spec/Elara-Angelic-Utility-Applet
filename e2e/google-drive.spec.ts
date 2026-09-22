@@ -250,14 +250,16 @@ test.describe('Google Drive tool flow', () => {
     expect(driveCalls.some((call) => call.url.includes('alt=media'))).toBe(true);
 
     // A metadata mutation is proposed but not executed before the human approves.
-    const dialog = page.getByRole('dialog', { name: 'Google action confirmation' });
+    const dialog = page.getByRole('dialog', { name: 'Elara action confirmation' });
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('drive.updateFile');
+    await expect(dialog).toContainText('Google Drive');
+    await expect(dialog).toContainText('Update file');
+    await expect(dialog).not.toContainText('drive.updateFile');
     await expect(dialog).toContainText('matches the ETag read for it');
     expect(driveCalls.filter((call) => call.method === 'PATCH')).toHaveLength(0);
 
     await expect(dialog.locator('[data-untrusted-context="true"]')).toBeVisible();
-    await dialog.getByRole('checkbox', { name: 'Approve drive.updateFile' }).check();
+    await dialog.getByRole('checkbox', { name: 'Approve Google Drive: Update file' }).check();
     await dialog.getByRole('button', { name: '✓ Approve selected' }).click();
 
     await expect.poll(() => driveCalls.filter((call) => call.method === 'PATCH').length).toBe(1);
@@ -282,7 +284,7 @@ test.describe('Google Drive tool flow', () => {
     await ask(page, 'Find the quarterly report and save it here.');
     await expect(page.getByRole('article', { name: 'Document attachment Quarterly report.pdf' })).toBeVisible({ timeout: 15_000 });
 
-    const dialog = page.getByRole('dialog', { name: 'Google action confirmation' });
+    const dialog = page.getByRole('dialog', { name: 'Elara action confirmation' });
     await expect(dialog).toBeVisible();
     await dialog.getByRole('button', { name: '✕ Decline' }).click();
 

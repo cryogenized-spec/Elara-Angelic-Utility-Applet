@@ -572,6 +572,27 @@ export class ClickUpOAuthVault extends DurableObject {
       const currentReset = current.reset_at;
       const incomingReset = rateLimit.resetAt;
 
+      // A provisional unknown-budget gate admits exactly one request. Because
+      // no sibling request can reserve behind it, that probe's first usable
+      // provider snapshot may safely establish the actual window instead of
+      // being merged against the provisional zero.
+      if (
+        current.limit_count === null
+        && current.remaining === 0
+        && rateLimit.limit !== null
+        && rateLimit.remaining !== null
+        && (incomingReset === null || incomingReset > nowSeconds)
+      ) {
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
+          rateLimit.limit,
+          rateLimit.remaining,
+          incomingReset ?? currentReset,
+          now,
+        );
+        return;
+      }
+
       if (currentReset !== null && currentReset <= nowSeconds) return;
 
       // A response from an older provider window may arrive after a newer

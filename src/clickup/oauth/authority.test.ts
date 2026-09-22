@@ -116,6 +116,38 @@ describe('ClickUp OAuth browser authority', () => {
     expect(loadStoredClickUpStatus()).toEqual(STATUS);
   });
 
+  it('reads ClickUp connection methods from the separate capability endpoint', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      expect(url).toBe('https://worker.example/clickup/oauth/methods');
+      expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer installation-token-for-test');
+      return new Response(JSON.stringify({ oauth: false, personalToken: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.getConnectionMethods()).resolves.toEqual({
+      oauth: false,
+      personalToken: true,
+    });
+  });
+
+  it('treats an older Worker without the methods endpoint as OAuth-only', async () => {
+    globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
+      code: 'not_found',
+      message: 'Not found.',
+    }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.getConnectionMethods()).resolves.toEqual({
+      oauth: true,
+      personalToken: false,
+    });
+  });
+
   it('activates a Worker-configured personal token without sending token material from the browser', async () => {
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
@@ -126,14 +158,11 @@ describe('ClickUp OAuth browser authority', () => {
       const headers = new Headers(init?.headers);
       expect(headers.get('Authorization')).toBe('Bearer installation-token-for-test');
       expect(headers.get('X-Elara-Signature')).toBeTruthy();
-      return new Response(JSON.stringify({
-        ...STATUS,
-        connectionMethods: { oauth: false, personalToken: true },
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(JSON.stringify(STATUS), { status: 200, headers: { 'content-type': 'application/json' } });
     }) as unknown as typeof fetch;
 
     const status = await clickUpOAuthAuthority.connectPersonalToken();
-    expect(status.connectionMethods).toEqual({ oauth: false, personalToken: true });
+    expect(status).toEqual(STATUS);
     const raw = localStorage.getItem('elara.clickup.authorization.v1') ?? '';
     expect(raw).toContain('Neon Sales');
     expect(raw).not.toContain('pk_');
@@ -145,7 +174,6 @@ describe('ClickUp OAuth browser authority', () => {
       account: { id: '456', username: 'Replacement', email: 'replacement@example.com' },
       workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
       updatedAt: 234567,
-      connectionMethods: { oauth: false, personalToken: true },
     };
 
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {

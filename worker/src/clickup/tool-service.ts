@@ -236,7 +236,12 @@ async function cursorMac(secret: string, payload: Uint8Array): Promise<Uint8Arra
     false,
     ['sign'],
   );
-  return new Uint8Array(await crypto.subtle.sign('HMAC', key, payload));
+  // WebCrypto requires an ArrayBuffer-backed BufferSource. Copying here makes
+  // that ownership explicit under TS6/TS7 instead of allowing the generic
+  // Uint8Array<ArrayBufferLike> type to include SharedArrayBuffer.
+  const ownedPayload = new Uint8Array(payload.byteLength);
+  ownedPayload.set(payload);
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, ownedPayload.buffer));
 }
 
 function equalBytes(left: Uint8Array, right: Uint8Array): boolean {

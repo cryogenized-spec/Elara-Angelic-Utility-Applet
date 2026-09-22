@@ -764,6 +764,42 @@ export class ClickUpOAuthVault extends DurableObject {
     return this.validateWorkspaceUsers(workspaceId, requested);
   }
 
+  private customFieldDeltaIds(
+    value: unknown,
+    maxReferences: number,
+  ): { ok: true; ids: string[] } | { ok: false; response: Response } {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return {
+        ok: false,
+        response: json({ code: 'custom_field_value_invalid', message: 'This ClickUp Custom Field requires add/rem reference arrays.' }, 400),
+      };
+    }
+    const record = value as Record<string, unknown>;
+    const add = record.add === undefined ? [] : record.add;
+    const rem = record.rem === undefined ? [] : record.rem;
+    if (!Array.isArray(add) || !Array.isArray(rem) || (!add.length && !rem.length)) {
+      return {
+        ok: false,
+        response: json({ code: 'custom_field_value_invalid', message: 'This ClickUp Custom Field requires at least one add/rem reference.' }, 400),
+      };
+    }
+    const raw = [...add, ...rem];
+    if (raw.length > maxReferences) {
+      return {
+        ok: false,
+        response: json({ code: 'custom_field_value_too_large', message: 'This ClickUp Custom Field contains too many referenced resources for one operation.' }, 400),
+      };
+    }
+    const ids = raw.map((entry) => safeProviderId(entry));
+    if (ids.some((entry) => !entry)) {
+      return {
+        ok: false,
+        response: json({ code: 'custom_field_value_invalid', message: 'This ClickUp Custom Field contains an invalid provider reference.' }, 400),
+      };
+    }
+    return { ok: true, ids: [...new Set(ids as string[])] };
+  }
+
   private async verifySpaceScope(
     workspaceId: string,
     spaceId: string,
@@ -1458,6 +1494,38 @@ export class ClickUpOAuthVault extends DurableObject {
               code: 'custom_field_not_applicable',
               message: 'The requested ClickUp Custom Field is not applicable to this task type.',
             }, 400);
+          }
+        }
+
+        if (command.operation === 'setCustomField') {
+          const fieldType = typeof fieldRecord.type === 'string' ? fieldRecord.type.trim() : '';
+
+          if (fieldType === 'users') {
+            const references = this.customFieldDeltaIds(command.value, 100);
+            if (!references.ok) return references.response;
+            const invalidUsers = await this.validateFreshWorkspaceUsers(
+              command.workspaceId,
+              references.ids,
+              expectedRevision,
+            );
+            if (invalidUsers) return invalidUsers;
+          }
+
+          if (fieldType === 'tasks') {
+            // Relationship Custom Fields can carry arbitrary provider task IDs
+            // inside the value. Treat each one as a direct-ID capability and
+            // independently bind it to the admitted Workspace before egress.
+            const references = this.customFieldDeltaIds(command.value, 20);
+            if (!references.ok) return references.response;
+            for (const taskId of references.ids) {
+              const relatedScope = await this.verifyTaskScope(
+                command.workspaceId,
+                taskId,
+                false,
+                expectedRevision,
+              );
+              if (!relatedScope.ok) return relatedScope.response;
+            }
           }
         }
 

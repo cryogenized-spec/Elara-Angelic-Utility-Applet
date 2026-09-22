@@ -174,6 +174,12 @@ const TASK_INDEX_INCREMENTAL_PAGES = 3;
 const TASK_INDEX_PROVIDER_PAGE_SIZE = 100;
 const TASK_INDEX_REFRESH_OVERLAP_MS = 5_000;
 const WEBHOOK_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60_000;
+/**
+ * ClickUp documents request budgets per minute. A reset timestamp that moves by
+ * only a few seconds is treated as same-window jitter and may never replenish
+ * local remaining. A genuine new provider minute advances by ~60 seconds.
+ */
+const RATE_WINDOW_ROLLOVER_MIN_SECONDS = 45;
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -523,20 +529,36 @@ export class ClickUpOAuthVault extends DurableObject {
       }
 
       const currentReset = current.reset_at;
+      const incomingReset = rateLimit.resetAt;
 
-      // The local window boundary is established by the first accepted
-      // provider snapshot and reset only by reserveProviderCall() after local
-      // time crosses it. A concurrent response may report a slightly later
-      // reset horizon; treating that as a new window can raise remaining.
-      // While the current local window is active, merge only downward and keep
-      // its boundary pinned.
       if (currentReset !== null && currentReset <= nowSeconds) return;
 
+      const providerWindowAdvanced = currentReset !== null
+        && incomingReset !== null
+        && incomingReset > nowSeconds
+        && incomingReset - currentReset >= RATE_WINDOW_ROLLOVER_MIN_SECONDS;
+
+      if (providerWindowAdvanced) {
+        // A full minute-scale reset advance is the only condition under which
+        // remaining may rise. This admits a genuine replenished ClickUp window
+        // while preventing tiny reset-horizon jitter or late same-window
+        // responses from inflating the local budget.
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
+          rateLimit.limit ?? current.limit_count,
+          rateLimit.remaining ?? current.remaining,
+          incomingReset,
+          now,
+        );
+        return;
+      }
+
+      // Same window (or ambiguous reset jitter): merge only downward.
       const mergedLimit = minNullable(current.limit_count, rateLimit.limit);
       const mergedRemaining = minNullable(current.remaining, rateLimit.remaining);
       const mergedReset = currentReset ?? (
-        rateLimit.resetAt !== null && rateLimit.resetAt > nowSeconds
-          ? rateLimit.resetAt
+        incomingReset !== null && incomingReset > nowSeconds
+          ? incomingReset
           : null
       );
 
@@ -634,10 +656,29 @@ export class ClickUpOAuthVault extends DurableObject {
     return json({ code: 'resource_workspace_mismatch', message }, 403);
   }
 
-  private normalizeDirectScopeFailure(response: Response): Response {
-    return response.status === 403 || response.status === 404
-      ? this.scopeDenied()
-      : response;
+  private async normalizeTaskScopeFailure(
+    response: Response,
+    workspaceId: string,
+    expectedRevision: number,
+  ): Promise<Response> {
+    if (response.status !== 403 && response.status !== 404) return response;
+    return this.padDeniedTaskScope(workspaceId, expectedRevision);
+  }
+
+  private async padDeniedTaskScope(
+    workspaceId: string,
+    expectedRevision: number,
+  ): Promise<Response> {
+    // Equalize denied direct task IDs. Otherwise a provider-visible task that
+    // needs Space ancestry verification spends more calls than a missing task,
+    // exposing an existence oracle via latency/rate-budget shape.
+    const padded = await this.verifySpaceScope(
+      workspaceId,
+      '__elara_denied_task_scope_probe__',
+      expectedRevision,
+    );
+    if (!padded.ok && padded.response.status !== 403) return padded.response;
+    return this.scopeDenied();
   }
 
   private async normalizeHierarchicalScopeFailure(
@@ -739,19 +780,26 @@ export class ClickUpOAuthVault extends DurableObject {
       (token) => getClickUpTask(token, taskId, includeSubtasks),
       expectedRevision,
     );
-    if (!result.ok) return { ok: false, response: this.normalizeDirectScopeFailure(result.response) };
+    if (!result.ok) {
+      return {
+        ok: false,
+        response: await this.normalizeTaskScopeFailure(result.response, workspaceId, expectedRevision),
+      };
+    }
     const task = result.data && typeof result.data === 'object' ? result.data as Record<string, unknown> : {};
     const teamId = safeProviderId(task.team_id ?? task.teamId);
     if (teamId) {
       return teamId === workspaceId
         ? { ok: true, task }
-        : { ok: false, response: this.scopeDenied() };
+        : { ok: false, response: await this.padDeniedTaskScope(workspaceId, expectedRevision) };
     }
     const space = task.space && typeof task.space === 'object' && !Array.isArray(task.space)
       ? task.space as Record<string, unknown>
       : undefined;
     const spaceId = safeProviderId(space?.id);
-    if (!spaceId) return { ok: false, response: this.scopeDenied() };
+    if (!spaceId) {
+      return { ok: false, response: await this.padDeniedTaskScope(workspaceId, expectedRevision) };
+    }
     const scoped = await this.verifySpaceScope(workspaceId, spaceId, expectedRevision);
     return scoped.ok ? { ok: true, task } : scoped;
   }

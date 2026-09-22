@@ -34,7 +34,7 @@ import { fullSync } from '../autonomy/cloud/sync';
 import { createTurnWatchdog } from '../chat/turn-watchdog';
 import { attachmentsForTurn } from '../chat/turn-lineage';
 import type { GoogleToolName } from '../google/tools/contracts';
-import { googleGeminiFunctionNames } from '../google/tools/gemini-declarations';
+import { defaultGeminiToolsForCurrentSession } from '../clickup/tool-election';
 import { defaultsForModel, effectiveGeminiSettings, normalizeGeminiSettings, type GeminiSettings } from '../gemini/settings-engine';
 import { getGeminiModel } from '../gemini/model-registry';
 import { resolveMasterCharacterInstruction } from '../character/system-instruction';
@@ -63,7 +63,6 @@ import './components/composer-layout.css';
 
 const ACTIVE_THREAD_KEY = 'elara.active-thread';
 const DEFAULT_TITLE = 'New conversation';
-const DEFAULT_GEMINI_TOOLS = googleGeminiFunctionNames() as readonly GoogleToolName[];
 const makeMessage = (role: ChatMessage['role'], text: string, conversationId: string): ChatMessage => ({ id: `${role}-${crypto.randomUUID()}`, role, text, conversationId, createdAt: Date.now() });
 
 function backgroundValue(preferences: ChatAppearancePreferences): string {
@@ -242,7 +241,7 @@ export function App() {
       if (controller.signal.aborted || activeConversationIdRef.current !== conversationId) return;
       setConversation((current) => activeConversationIdRef.current === conversationId ? titled : current); setDraftAttachments([]); await refreshThreads();
       if (activeConversationIdRef.current !== conversationId) return;
-      turnId = await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, attachments: attachmentIds, inputMessageId: userMessage.id, responseGroupId: userMessage.id, responseVariant: 1 });
+      turnId = await streamAssistantTurn(text, titled, conversationId, controller, { systemInstruction, generationConfig, tools: defaultGeminiToolsForCurrentSession(), attachments: attachmentIds, inputMessageId: userMessage.id, responseGroupId: userMessage.id, responseVariant: 1 });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;

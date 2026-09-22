@@ -1418,7 +1418,7 @@ export class ClickUpOAuthVault extends DurableObject {
         const fieldsResult = await this.providerData((token) => getClickUpListCustomFields(token, listId), expectedRevision);
         if (!fieldsResult.ok) return fieldsResult.response;
         const fieldsRoot = fieldsResult.data && typeof fieldsResult.data === 'object' ? fieldsResult.data as Record<string, unknown> : {};
-        const fields = Array.isArray(fieldsRoot.fields) ? fieldsRoot.fields : [];
+        const fields: unknown[] = Array.isArray(fieldsRoot.fields) ? fieldsRoot.fields as unknown[] : [];
         const field = fields.find((entry) => safeProviderId(
           entry && typeof entry === 'object' && !Array.isArray(entry)
             ? (entry as Record<string, unknown>).id
@@ -1433,8 +1433,8 @@ export class ClickUpOAuthVault extends DurableObject {
         // applied_objects does not include this task's custom_item_id, so
         // reject that predictable mismatch before an approved mutation.
         const fieldRecord = field as Record<string, unknown>;
-        const appliedObjects = Array.isArray(fieldRecord.applied_objects)
-          ? fieldRecord.applied_objects
+        const appliedObjects: unknown[] = Array.isArray(fieldRecord.applied_objects)
+          ? fieldRecord.applied_objects as unknown[]
           : [];
         if (appliedObjects.length) {
           const taskCustomItemId = safeProviderId(taskScope.task.custom_item_id) ?? '0';

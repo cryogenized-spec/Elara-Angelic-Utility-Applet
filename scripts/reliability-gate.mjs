@@ -270,6 +270,19 @@ if (!clickUpOauthVaultSource.includes('CLICKUP_PERSONAL_TOKEN') || !clickUpOauth
 if (!clickUpOauthVaultSource.includes('clickup_oauth_nonces') || !clickUpOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: ClickUp credential-vault writes must remain signed and replay-protected durably.');
 if (!clickUpOauthRoutesSource.includes('verifySignedWrite') || !clickUpOauthRoutesSource.includes("'/clickup/oauth/personal-token'") || !clickUpOauthRoutesSource.includes("'/clickup/oauth/methods'") || !workerCompositionSource.includes('handleClickUpOAuthRoute')) throw new Error('Reliability gate: public ClickUp credential writes and method discovery must retain the reviewed route boundary.');
 if (!clickUpOauthVaultSource.includes("url.pathname === '/clickup/oauth/methods'") || !clickUpOauthVaultSource.includes('return json(this.connectionMethods())')) throw new Error('Reliability gate: ClickUp connection methods must remain on their backward-compatible separate read endpoint.');
+const clickUpBrowserAuthoritySource = readFileSync(join(root, 'src', 'clickup', 'oauth', 'authority.ts'), 'utf8');
+for (const marker of [
+  'authorityBinding: clickUpPairingAuthorityBinding(pairing)',
+  'clearCachedStatusForPairing(pairing)',
+  'PENDING_CONNECTION_KEY',
+  'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
+  "'connection_pending'",
+  'assertConnectionSettled(pairing)',
+  'markConnectionPending(pairing, operation)',
+]) {
+  if (!clickUpBrowserAuthoritySource.includes(marker)) throw new Error(`Reliability gate: ClickUp browser connection race authority is missing ${marker}.`);
+}
+
 
 // The scheduler seam exists and names its contracts.
 const portsSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'ports.ts'), 'utf8');

@@ -13,6 +13,10 @@ export const clickUpOAuthStatusSchema = z.object({
     email: z.string().trim().max(320).optional(),
   }).strict().optional(),
   workspaces: z.array(clickUpWorkspaceSchema).max(100),
+  connectionMethods: z.object({
+    oauth: z.boolean(),
+    personalToken: z.boolean(),
+  }).strict().optional(),
   updatedAt: z.number().int().positive().optional(),
 }).strict();
 
@@ -37,5 +41,6 @@ export interface ClickUpOAuthAuthority {
   getExecutionGrant(): Promise<ClickUpExecutionGrant>;
   beginConnect(redirectUri: string): Promise<ClickUpOAuthStart>;
   completeConnect(input: { code: string; state: string; redirectUri: string }): Promise<ClickUpOAuthStatus>;
+  connectPersonalToken(): Promise<ClickUpOAuthStatus>;
   disconnect(): Promise<void>;
 }

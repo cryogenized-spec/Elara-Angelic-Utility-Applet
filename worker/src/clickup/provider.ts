@@ -8,6 +8,8 @@ const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;
 export interface ClickUpOAuthServerEnv {
   readonly CLICKUP_OAUTH_CLIENT_ID?: string;
   readonly CLICKUP_OAUTH_CLIENT_SECRET?: string;
+  /** Deployment-owned personal API token for self-hosters without OAuth-app admin rights. */
+  readonly CLICKUP_PERSONAL_TOKEN?: string;
 }
 
 export interface ClickUpRateLimitSnapshot {
@@ -86,6 +88,14 @@ function boundedToken(value: string, label: string): string {
   const token = value.trim();
   if (!token || token.length > 16_384) throw new Error(`ClickUp ${label} is invalid.`);
   return token;
+}
+
+function clickUpAuthorizationValue(tokenValue: string): string {
+  const token = boundedToken(tokenValue, 'access token');
+  // ClickUp documents different Authorization syntax for its two credential
+  // types: personal API tokens are sent raw, while OAuth access tokens use
+  // the Bearer scheme. Personal tokens are provider-defined with a pk_ prefix.
+  return token.startsWith('pk_') ? token : `Bearer ${token}`;
 }
 
 function boundedId(value: string, label: string): string {
@@ -199,7 +209,7 @@ async function clickupRequest<T>(
 ): Promise<ClickUpProviderResult<T>> {
   if (!path.startsWith('/')) throw new Error('ClickUp provider paths must be relative.');
   const headers = new Headers(init.headers);
-  headers.set('Authorization', `Bearer ${boundedToken(accessToken, 'access token')}`);
+  headers.set('Authorization', clickUpAuthorizationValue(accessToken));
   headers.set('Accept', 'application/json');
   const { response, payload } = await providerJsonRequest(
     fetcher,

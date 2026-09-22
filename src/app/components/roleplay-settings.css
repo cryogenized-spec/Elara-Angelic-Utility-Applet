@@ -65,6 +65,7 @@
   line-height:1.3!important;
 }
 .google-confirmation-item__summary{
+  unicode-bidi:plaintext;
   color:rgba(247,248,255,.76)!important;
   font-size:10px!important;
   line-height:1.55!important;
@@ -125,6 +126,7 @@
    Heading/actions remain outside the scrolling review surface. */
 .google-confirmation-item__review-text{
   display:block;
+  unicode-bidi:plaintext;
   white-space:pre-wrap;
   overflow-wrap:anywhere;
   max-height:min(56dvh,560px);
@@ -141,6 +143,7 @@
   background:rgba(110,168,255,.035);
 }
 .google-confirmation-item__attachment-name{
+  unicode-bidi:plaintext;
   color:var(--text)!important;
   font-size:11px!important;
   line-height:1.35!important;
@@ -148,6 +151,7 @@
 }
 .google-confirmation-item__attachment-meta,
 .google-confirmation-item__attachment-upload-name{
+  unicode-bidi:plaintext;
   color:var(--muted)!important;
   font-size:9px!important;
   line-height:1.45!important;

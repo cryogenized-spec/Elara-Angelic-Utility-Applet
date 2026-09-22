@@ -174,6 +174,19 @@ async function rateLimitSnapshot(): Promise<{
   } | null;
 }
 
+async function setRateLimitSnapshot(value: {
+  limit: number | null;
+  remaining: number | null;
+  resetAt: number | null;
+}): Promise<void> {
+  const response = await doFetch(new Request('https://clickup-oauth-vault/__test/clickup/rate-limit', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(value),
+  }));
+  expect(response.status).toBe(200);
+}
+
 describe('ClickUp OAuth public boundary', () => {
   it('rejects oversized OAuth bodies before signature verification or vault buffering', async () => {
     const response = await SELF.fetch('https://worker.example/clickup/oauth/start', {
@@ -372,6 +385,58 @@ describe('ClickUpOAuthVault', () => {
     expect(second.status).toBe(429);
     expect(await second.json()).toEqual(expect.objectContaining({ code: 'rate_limited' }));
     expect(provider.task).toBe(1);
+  });
+
+  it('keeps post-reset concurrent requests inside a provisional replenished budget', async () => {
+    let taskCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify({ access_token: 'token-reset-reservations' }), { status: 200 });
+      }
+      if (request.url === USER_ENDPOINT) {
+        return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      }
+      if (request.url === WORKSPACES_ENDPOINT) {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace', members: [] }] }), { status: 200 });
+      }
+      if (request.url.startsWith('https://api.clickup.com/api/v2/task/86task')) {
+        taskCalls += 1;
+        await new Promise<void>((resolve) => setTimeout(resolve, 100));
+        return new Response(JSON.stringify({
+          id: '86task',
+          name: 'Repair S56',
+          team_id: '999',
+          list: { id: '123' },
+          space: { id: '789' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const revision = (await credentialSnapshot())?.updatedAt ?? 0;
+
+    await setRateLimitSnapshot({
+      limit: 3,
+      remaining: 0,
+      resetAt: Math.floor(Date.now() / 1000) - 1,
+    });
+
+    const responses = await Promise.all(Array.from({ length: 4 }, () => internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: '86task' },
+    }, revision)));
+
+    expect(responses.map((response) => response.status).sort((a, b) => a - b)).toEqual([200, 200, 200, 429]);
+    expect(taskCalls).toBe(3);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      limit: 3,
+      remaining: 0,
+    }));
+    expect((await rateLimitSnapshot())?.resetAt ?? 0).toBeGreaterThan(Math.floor(Date.now() / 1000));
   });
 
   it('deletes the durable grant when ClickUp reports a revoked token', async () => {

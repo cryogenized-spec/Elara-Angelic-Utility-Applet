@@ -9,3 +9,11 @@ GOOGLE_OAUTH_CLIENT_ID=
 GOOGLE_OAUTH_CLIENT_SECRET=
 # High-entropy value, at least 32 characters; used only by the Worker vault.
 GOOGLE_OAUTH_VAULT_KEY=
+
+# ClickUp: either configure OAuth app credentials, or a personal API token for
+# a single self-hosted user's account. Never commit real values.
+CLICKUP_OAUTH_CLIENT_ID=
+CLICKUP_OAUTH_CLIENT_SECRET=
+CLICKUP_PERSONAL_TOKEN=
+# High-entropy value, at least 32 characters; encrypts the durable ClickUp grant.
+CLICKUP_OAUTH_VAULT_KEY=

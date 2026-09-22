@@ -61,10 +61,73 @@ describe('executeGoogleTool', () => {
       new Date('2026-09-04T06:00:00.000Z'),
     );
 
-    expect(confirmation?.reviewText).toContain('Range: Sheet1!A1:B2');
-    expect(confirmation?.reviewText).toContain('Row 2: sample | 42');
+    expect(confirmation?.reviewText).toContain('Range: “Sheet1!A1:B2”');
+    expect(confirmation?.reviewText).toContain('Row 2:');
+    expect(confirmation?.reviewText).toContain('Cell 1: “sample”');
+    expect(confirmation?.reviewText).toContain('Cell 2: 42');
     expect(confirmation?.reviewText).not.toContain('{');
     expect(confirmation?.reviewText).not.toContain('"range"');
+  });
+
+  it('fails closed when the Google account/grant changes while confirmation is open', async () => {
+    const handler = vi.fn(async () => ({ sent: true }));
+    let account = 'one@example.com';
+    const grant = () => ({
+      accountEmail: account,
+      authorityBinding: 'browser#https://app.example',
+      authorityFingerprint: `account:${account}`,
+    });
+    const oauth: GoogleOAuthAuthority = {
+      ...oauthFor('gmail.send'),
+      getExecutionGrant: async () => grant(),
+      assertExecutionGrant: async (expected) => {
+        const current = grant();
+        if (
+          expected.accountEmail !== current.accountEmail
+          || expected.authorityBinding !== current.authorityBinding
+          || expected.authorityFingerprint !== current.authorityFingerprint
+        ) throw new Error('grant changed');
+      },
+    };
+
+    const result = await executeGoogleTool(
+      { tool: 'gmail.sendMessage', arguments: { to: ['bob@example.com'], subject: 'Hello', body: 'Approved body' } },
+      {
+        oauth,
+        handlers: { 'gmail.sendMessage': handler },
+        confirm: async () => {
+          account = 'two@example.com';
+          return true;
+        },
+      },
+    );
+
+    expect(result).toMatchObject({ ok: false, code: 'AUTHORIZATION_REQUIRED' });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it('carries a stable Google execution grant into the approved handler context', async () => {
+    const stableGrant = {
+      accountEmail: 'one@example.com',
+      authorityBinding: 'browser#https://app.example',
+      authorityFingerprint: 'stable-authority',
+    };
+    const oauth: GoogleOAuthAuthority = {
+      ...oauthFor('sheets.write'),
+      getExecutionGrant: async () => stableGrant,
+      assertExecutionGrant: async (expected) => {
+        expect(expected).toEqual(stableGrant);
+      },
+    };
+    const handler = vi.fn(async (context: GoogleToolExecutionContext) => context.googleExecutionGrant);
+
+    const result = await executeGoogleTool(
+      { tool: 'sheets.writeRange', arguments: { spreadsheetId: 'sheet-1', range: 'Sheet1!A1', values: [['x']] } },
+      { oauth, handlers: { 'sheets.writeRange': handler }, confirm: async () => true },
+    );
+
+    expect(result).toMatchObject({ ok: true, result: stableGrant });
+    expect(handler).toHaveBeenCalledWith(expect.objectContaining({ googleExecutionGrant: stableGrant }));
   });
 
   it('rejects invalid Drive/Sheets arguments at the trust boundary', async () => {

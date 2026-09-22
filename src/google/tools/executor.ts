@@ -298,8 +298,12 @@ function gmailActionSummary(action?: string): string {
     case 'markRead': return 'Mark as read';
     case 'markUnread': return 'Mark as unread';
     case 'archive': return 'Archive';
-    case 'unarchive': return 'Move back to Inbox';
-    case 'addLabel': return 'Add label to';
+    case 'moveToInbox': return 'Move to Inbox';
+    case 'markSpam': return 'Mark as spam';
+    case 'markNotSpam': return 'Mark as not spam';
+    case 'star': return 'Star';
+    case 'unstar': return 'Remove star from';
+    case 'applyLabel': return 'Add label to';
     case 'removeLabel': return 'Remove label from';
     default: return 'Organize';
   }
@@ -371,7 +375,7 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'gmail.sendMessage': { const to = Array.isArray(args.to) ? args.to.filter((item): item is string => typeof item === 'string').join(', ') : 'recipient'; return `Send a new email to ${to} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`; }
     case 'gmail.replyMessage': return `Reply in Gmail thread ${value(args, 'threadId') ?? 'selected thread'} to ${value(args, 'to') ?? 'recipient'} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`;
     case 'drive.createFile': return `Create the Drive file “${value(args, 'name') ?? 'Untitled'}”.`;
-    case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the requested metadata changes. The write only applies while the file still matches the ETag read for it.`;
+    case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the reviewed changes, only if the file has not changed since Elara read it.`;
     case 'drive.moveFile': {
       const file = value(args, 'fileId') ?? 'selected file';
       const destination = value(args, 'parentId') ?? 'the requested folder';
@@ -383,10 +387,10 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'drive.trashFile': return `Move Drive file ${value(args, 'fileId') ?? 'selected file'} to trash. Trash is recoverable and Elara never permanently deletes files.`;
     case 'sheets.createSpreadsheet': return `Create Google spreadsheet “${value(args, 'title') ?? 'Untitled'}”${value(args, 'firstSheetTitle') ? ` with first sheet “${value(args, 'firstSheetTitle')}”` : ''}.`;
     case 'sheets.addSheet': return `Add sheet “${value(args, 'title') ?? 'Untitled'}” to spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} with ${String(args.rowCount ?? 1000)} row(s) and ${String(args.columnCount ?? 26)} column(s).`;
-    case 'sheets.writeRange': return `Write the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} using ${value(args, 'inputMode') === 'userEntered' ? 'USER_ENTERED parsing (formulas/dates/numbers may be interpreted)' : 'literal RAW input'}.`;
-    case 'sheets.appendRows': return `Append the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} using ${value(args, 'inputMode') === 'userEntered' ? 'USER_ENTERED parsing (formulas/dates/numbers may be interpreted)' : 'literal RAW input'}.`;
-    case 'sheets.updateCell': return `Write one cell at ${value(args, 'range') ?? 'the selected cell'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} using ${value(args, 'inputMode') === 'userEntered' ? 'USER_ENTERED parsing, which can interpret formulas' : 'literal RAW input'}. Review the exact cell input below before approving.`;
-    case 'sheets.insertRows': return `Insert ${String(args.count ?? '?')} row(s) into sheet ${String(args.sheetId ?? '?')} of spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}, starting at zero-based row index ${String(args.startIndex ?? '?')}.`;
+    case 'sheets.writeRange': return `Write the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} as ${value(args, 'inputMode') === 'userEntered' ? 'interpreted input, so formulas, dates, and numbers may be processed' : 'literal text, so formulas will not be interpreted'}.`;
+    case 'sheets.appendRows': return `Append the prepared rows to ${value(args, 'range') ?? 'the selected range'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} as ${value(args, 'inputMode') === 'userEntered' ? 'interpreted input, so formulas, dates, and numbers may be processed' : 'literal text, so formulas will not be interpreted'}.`;
+    case 'sheets.updateCell': return `Write one cell at ${value(args, 'range') ?? 'the selected cell'} in spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'} as ${value(args, 'inputMode') === 'userEntered' ? 'interpreted input, which can evaluate formulas' : 'literal text, so formulas will not be evaluated'}. Review the exact cell input below before approving.`;
+    case 'sheets.insertRows': return `Insert ${String(args.count ?? '?')} row(s) into sheet ${String(args.sheetId ?? '?')} of spreadsheet ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}, starting at row ${typeof args.startIndex === 'number' ? args.startIndex + 1 : '?'}.`;
     case 'sheets.batchUpdate': return `Apply the requested spreadsheet changes to ${value(args, 'spreadsheetId') ?? 'the selected spreadsheet'}.`;
     case 'roleplay_setting.create': return `Create ${String(args.type)} “${String(args.name)}” under ${typeof args.parentId === 'string' ? args.parentId : 'the world root'}.`;
     case 'roleplay_setting.update': return `Update ${id ?? 'selected world item'} with the reviewed changes below.`;

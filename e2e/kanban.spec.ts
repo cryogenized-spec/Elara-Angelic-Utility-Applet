@@ -92,6 +92,16 @@ test('Gemini can focus the existing Kanban without gaining a second task mutatio
   // Materialize the canonical board projection before asking the model to focus it.
   await page.getByRole('button', { name: 'Kanban', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toBeVisible();
+
+  // Leave the target deliberately hidden by a label filter. kanban.focus must
+  // clear presentation filters before trying to locate/scroll the target card.
+  await page.locator('[data-kanban-task-id="task-0"]').click({ position: { x: 220, y: 70 } });
+  await page.getByLabel('New label', { exact: true }).fill('#other');
+  await page.getByRole('button', { name: 'Add label', exact: true }).click();
+  await page.getByRole('button', { name: 'Save to Google', exact: true }).click();
+  await page.getByLabel('Filter by label').selectOption({ label: '#other' });
+  await expect(page.getByRole('button', { name: 'Review the launch proposal', exact: true })).toHaveCount(0);
+
   await page.getByRole('button', { name: 'Back to chat' }).click();
   await unlockKanbanGemini(page);
 
@@ -196,6 +206,46 @@ test("kanban command palette, Google writes, memo resolution and two-axis canvas
   await expect(
     page.getByRole("textbox", { name: "Message Elara" }),
   ).toBeVisible();
+});
+
+test("task cards open from the card surface and preserve app-only time and labels", async ({ page }) => {
+  await page.setViewportSize({ width: 412, height: 915 });
+  await page.goto("");
+  await seedWorkspace(page);
+  await page.getByRole("button", { name: "Kanban", exact: true }).click();
+
+  const canvas = page.locator(".kb-canvas");
+  expect(await canvas.evaluate((element) => getComputedStyle(element, "::before").backgroundImage))
+    .toContain("radial-gradient");
+
+  const card = page.locator('[data-kanban-task-id="review"]');
+  await expect(card).toBeVisible();
+  await card.click({ position: { x: 230, y: 88 } });
+
+  const dialog = page.getByRole("dialog", { name: "Edit task" });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByLabel("Title", { exact: true })).not.toBeFocused();
+  await page.getByLabel("Due time", { exact: true }).fill("08:30");
+  await page.getByLabel("New label", { exact: true }).fill("#supplier");
+  await page.getByRole("button", { name: "Add label", exact: true }).click();
+  await expect(page.getByRole("button", { name: "#supplier", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("button", { name: "Save to Google", exact: true }).click();
+
+  await expect(dialog).toHaveCount(0);
+  await expect(card).toContainText("08:30");
+  await expect(card).toContainText("#supplier");
+
+  // The save path reconciles from Google immediately; reopening proves local
+  // metadata survived the provider round-trip rather than living in component state.
+  await card.click({ position: { x: 230, y: 88 } });
+  await expect(page.getByLabel("Due time", { exact: true })).toHaveValue("08:30");
+  await page.getByRole("button", { name: "Cancel", exact: true }).click();
+
+  await page.getByLabel("Filter by label").selectOption({ label: "#supplier" });
+  await expect(page.locator(".kb-card")).toHaveCount(1);
+  await page.getByLabel("Sort tasks by").selectOption("due");
+  await page.getByLabel("Sort direction").selectOption("desc");
+  await expect(page.getByLabel("Sort direction")).toHaveValue("desc");
 });
 
 test("mobile disconnected workspace and accessible modal escape", async ({

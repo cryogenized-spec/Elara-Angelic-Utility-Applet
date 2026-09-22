@@ -26,9 +26,29 @@
 
 * { box-sizing: border-box; }
 html { background: var(--bg); }
-body { min-width: 320px; background: #050507; }
+body {
+  min-width: 320px;
+  background: #050507;
+  -webkit-tap-highlight-color: transparent;
+}
 button, textarea, input, select { font: inherit; }
+button, a, select, summary, label, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+button, select, summary, label, [role="button"] {
+  -webkit-user-select: none;
+  user-select: none;
+}
 button { cursor: pointer; color: inherit; }
+input,
+textarea,
+pre,
+code,
+[contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
+}
 button:focus-visible, textarea:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
 
 /* Shell box model and the control cluster live in layout.css. Only the shared

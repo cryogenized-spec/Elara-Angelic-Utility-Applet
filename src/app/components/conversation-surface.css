@@ -37,6 +37,12 @@
   line-height: var(--chat-line-height);
   overflow-wrap: anywhere;
   white-space: normal;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.message-body * {
+  -webkit-user-select: text;
+  user-select: text;
 }
 .message-body > :first-child { margin-top: 0; }
 .message-body > :last-child { margin-bottom: 0; }

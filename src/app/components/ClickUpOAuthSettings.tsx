@@ -202,7 +202,9 @@ export function ClickUpOAuthSettings() {
         <span className="panel-kicker">SEPARATE ACCOUNT</span>
         <strong>Your Google accounts do not have to match</strong>
         <span>
-          Elara’s Google Workspace connection and ClickUp authorization are independent. If ClickUp offers “Continue with Google”, choose the Google account associated with the ClickUp account you want Elara to use. Elara never reuses its Google Workspace token for ClickUp.
+          Elara’s Google Workspace connection and ClickUp identity are independent. {personalTokenAvailable
+            ? 'With a configured personal API token, ClickUp itself identifies the account behind that token; your Google Workspace login is not involved.'
+            : 'If ClickUp offers “Continue with Google”, choose the Google account associated with the ClickUp account you want Elara to use.'} Elara never reuses its Google Workspace token for ClickUp.
         </span>
       </div>
 

@@ -209,6 +209,16 @@ async function mcpPost(
   const catalogFingerprint = method === 'tools/call'
     ? await clickUpToolCatalogFingerprint()
     : undefined;
+
+  // Catalog hashing and other preflight work can yield after currentSession()
+  // captured the pairing. Re-read authority immediately before network egress
+  // so a re-pair during those awaits cannot send an admitted call to the old
+  // Worker.
+  const currentPairing = loadPairing();
+  if (!currentPairing || clickUpPairingAuthorityBinding(currentPairing) !== session.cacheKey) {
+    throw new ClickUpMcpError('grant_changed', 'The paired Worker changed before ClickUp MCP egress.', 409);
+  }
+
   const body = JSON.stringify({
     jsonrpc: '2.0',
     id,

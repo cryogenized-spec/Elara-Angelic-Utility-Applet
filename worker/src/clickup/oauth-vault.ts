@@ -743,6 +743,18 @@ export class ClickUpOAuthVault extends DurableObject {
     return null;
   }
 
+  private async validateFreshWorkspaceUsers(
+    workspaceId: string,
+    userIds: readonly string[] | undefined,
+    expectedRevision: number,
+  ): Promise<Response | null> {
+    const requested = [...new Set((userIds ?? []).filter(Boolean))];
+    if (!requested.length) return null;
+    const refreshed = await this.refreshWorkspaceAuthorization(workspaceId, expectedRevision);
+    if (!refreshed.ok) return refreshed.response;
+    return this.validateWorkspaceUsers(workspaceId, requested);
+  }
+
   private async verifySpaceScope(
     workspaceId: string,
     spaceId: string,
@@ -1236,7 +1248,7 @@ export class ClickUpOAuthVault extends DurableObject {
           const parentScope = await this.verifyTaskScope(args.workspaceId, args.parentTaskId, false, expectedRevision);
           if (!parentScope.ok) return parentScope.response;
         }
-        const invalidAssignees = this.validateWorkspaceUsers(args.workspaceId, args.assigneeIds);
+        const invalidAssignees = await this.validateFreshWorkspaceUsers(args.workspaceId, args.assigneeIds, expectedRevision);
         if (invalidAssignees) return invalidAssignees;
         const result = await this.providerData((token) => createClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
@@ -1258,7 +1270,7 @@ export class ClickUpOAuthVault extends DurableObject {
           ...(args.assignees?.add ?? []),
           ...(args.assignees?.remove ?? []),
         ];
-        const invalidAssignees = this.validateWorkspaceUsers(args.workspaceId, assigneeIds);
+        const invalidAssignees = await this.validateFreshWorkspaceUsers(args.workspaceId, assigneeIds, expectedRevision);
         if (invalidAssignees) return invalidAssignees;
         const result = await this.providerData((token) => updateClickUpTask(token, args), expectedRevision);
         if (!result.ok) return result.response;
@@ -1270,7 +1282,7 @@ export class ClickUpOAuthVault extends DurableObject {
         const args = validateClickUpToolArguments('clickup.createTaskComment', command.arguments);
         const taskScope = await this.verifyTaskScope(args.workspaceId, args.taskId, false, expectedRevision);
         if (!taskScope.ok) return taskScope.response;
-        const invalidMentions = this.validateWorkspaceUsers(args.workspaceId, args.mentionUserIds);
+        const invalidMentions = await this.validateFreshWorkspaceUsers(args.workspaceId, args.mentionUserIds, expectedRevision);
         if (invalidMentions) return invalidMentions;
         return this.runProvider((token) => createClickUpTaskComment(token, args), expectedRevision);
       }
@@ -1278,7 +1290,7 @@ export class ClickUpOAuthVault extends DurableObject {
         const args = validateClickUpToolArguments('clickup.replyToComment', command.arguments);
         const commentScope = await this.verifyCommentBelongsToTask(args.workspaceId, args.taskId, args.commentId, expectedRevision);
         if (!commentScope.ok) return commentScope.response;
-        const invalidMentions = this.validateWorkspaceUsers(args.workspaceId, args.mentionUserIds);
+        const invalidMentions = await this.validateFreshWorkspaceUsers(args.workspaceId, args.mentionUserIds, expectedRevision);
         if (invalidMentions) return invalidMentions;
         return this.runProvider((token) => replyToClickUpComment(token, args), expectedRevision);
       }

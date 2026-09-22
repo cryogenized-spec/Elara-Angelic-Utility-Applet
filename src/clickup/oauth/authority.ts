@@ -151,16 +151,24 @@ export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
 }
 
 async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
-  const token = await workerToken(pairing);
-  assertPairingStillCurrent(pairing);
-  const response = await workerRequest(pairing, '/clickup/oauth/status', {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (response.status !== 200) throw workerError(response);
-  const parsed = clickUpOAuthStatusSchema.parse(response.body);
-  persistStatus(parsed);
-  return parsed;
+  try {
+    const token = await workerToken(pairing);
+    assertPairingStillCurrent(pairing);
+    const response = await workerRequest(pairing, '/clickup/oauth/status', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (response.status !== 200) throw workerError(response);
+    const parsed = clickUpOAuthStatusSchema.parse(response.body);
+    persistStatus(parsed);
+    return parsed;
+  } catch (cause) {
+    // Cached ClickUp metadata is only a convenience for tool election. If the
+    // Worker cannot authoritatively confirm the grant, fail closed rather than
+    // allowing a stale account/workspace snapshot to keep advertising tools.
+    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+    throw cause;
+  }
 }
 
 async function signedPost<T>(

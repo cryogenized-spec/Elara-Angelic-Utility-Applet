@@ -170,6 +170,15 @@ After approval the executor verifies the same grant again. The admitted revision
 
 If the account, Workspace grant, credential revision or paired Worker changes while confirmation is open, the mutation fails closed instead of executing as the replacement identity.
 
+### 6.1 Human approval presentation
+
+ClickUp mutations use the shared Elara watchdog rather than a ClickUp-specific confirmation UI. The human surface intentionally does not expose MCP/JSON-RPC envelopes, raw tool identifiers such as `clickup.createTaskComment`, JSON argument objects, schema keys, grant revisions, hashes or other debug-oriented implementation details.
+
+The same validated mutation remains authoritative underneath. The watchdog projects it into human-readable provider/action labels and readable field/value review text. Examples include **ClickUp · Post comment**, **ClickUp · Update task**, and **ClickUp · Attach file**. Comment/reply bodies are shown directly. Attachment review shows the approved filename/type/size and destination while the SHA-256 binding remains internal to the immutable artifact authority.
+
+External provider content still elevates confirmation. The warning is phrased for the human rather than as security/debug terminology, and the action remains unselected until the user explicitly selects it. Grouped mutations likewise remain individually selectable with no approve-all shortcut.
+
+
 ## 7. Workspace-scoped resource authority
 
 Model-supplied provider IDs are not accepted as ownership proof.

@@ -485,10 +485,19 @@ async function listHierarchy(env: ClickUpToolServiceEnv, args: ClickUpToolArgume
   }
 
   if (args.spaceId) {
-    const [foldersRaw, listsRaw] = await Promise.all([
-      command<Record<string, unknown>>(env, { operation: 'listFolders', workspaceId: args.workspaceId, spaceId: args.spaceId, archived }, expectedRevision),
-      command<Record<string, unknown>>(env, { operation: 'listFolderlessLists', workspaceId: args.workspaceId, spaceId: args.spaceId, archived }, expectedRevision),
-    ]);
+    // Keep provider reads sequential. When ClickUp's Remaining header is
+    // unavailable, the vault deliberately admits only one probe at a time;
+    // parallel reads would make the second branch self-rate-limit locally.
+    const foldersRaw = await command<Record<string, unknown>>(
+      env,
+      { operation: 'listFolders', workspaceId: args.workspaceId, spaceId: args.spaceId, archived },
+      expectedRevision,
+    );
+    const listsRaw = await command<Record<string, unknown>>(
+      env,
+      { operation: 'listFolderlessLists', workspaceId: args.workspaceId, spaceId: args.spaceId, archived },
+      expectedRevision,
+    );
     return {
       trust: 'untrusted-external' as const,
       provider: 'clickup' as const,

@@ -31,6 +31,7 @@ import {
   listClickUpFolders,
   listClickUpSpaces,
   listClickUpWorkspaceTasks,
+  personalClickUpCredential,
   replyToClickUpComment,
   setClickUpTaskCustomField,
   updateClickUpTask,
@@ -2268,11 +2269,15 @@ export class ClickUpOAuthVault extends DurableObject {
 
     // The personal token is deployment-owned Worker secret material. It is
     // deliberately never accepted in the browser request body.
-    const accessToken = this.oauthEnv.CLICKUP_PERSONAL_TOKEN?.trim() ?? '';
-    if (!accessToken) {
+    const personalToken = this.oauthEnv.CLICKUP_PERSONAL_TOKEN?.trim() ?? '';
+    if (!personalToken) {
       return json({ code: 'configuration', message: 'CLICKUP_PERSONAL_TOKEN is not configured on this Worker.' }, 503);
     }
-    if (!accessToken.startsWith('pk_') || accessToken.length > 16_384) {
+
+    let accessToken: string;
+    try {
+      accessToken = personalClickUpCredential(personalToken);
+    } catch {
       return json({ code: 'configuration', message: 'CLICKUP_PERSONAL_TOKEN is not a valid ClickUp personal API token.' }, 503);
     }
 

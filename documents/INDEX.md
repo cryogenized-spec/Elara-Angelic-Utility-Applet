@@ -42,6 +42,7 @@ Git history is evidence/history only. When prose conflicts with implementation, 
 | `SYS-CHAR` | Character and roleplay | [`character.md`](./character.md) |
 | `SYS-GAUTH` | Google authorization | [`google-auth.md`](./google-auth.md) |
 | `SYS-GWS` | Google Workspace and model tool execution | [`google-workspace.md`](./google-workspace.md) |
+| `SYS-CLICKUP` | First-party ClickUp REST/OAuth/MCP | [`clickup.md`](./clickup.md) |
 | `SYS-MEDIA` | Media / YouTube | [`media.md`](./media.md) |
 | `SYS-AUTO` | Autonomy | [`autonomy.md`](./autonomy.md) |
 | `SYS-SEC` | Lockbox and credentials | [`security.md`](./security.md) |

@@ -31,6 +31,86 @@ function read(path) {
   return readFileSync(absolute, 'utf8');
 }
 
+function countOccurrences(source, needle) {
+  if (!needle) return 0;
+  return source.split(needle).length - 1;
+}
+
+function requireOccurrenceCount(source, needle, expected, label) {
+  const actual = countOccurrences(source, needle);
+  if (actual !== expected) fail(`${label}: expected ${expected} occurrence(s), found ${actual}`);
+}
+
+function executableSource(source) {
+  let output = '';
+  let mode = 'code';
+  let quote = '';
+  let escaped = false;
+  for (let index = 0; index < source.length; index += 1) {
+    const current = source[index];
+    const next = source[index + 1] ?? '';
+
+    if (mode === 'line-comment') {
+      if (current === '\n') {
+        mode = 'code';
+        output += '\n';
+      } else output += ' ';
+      continue;
+    }
+    if (mode === 'block-comment') {
+      if (current === '*' && next === '/') {
+        output += '  ';
+        index += 1;
+        mode = 'code';
+      } else output += current === '\n' ? '\n' : ' ';
+      continue;
+    }
+    if (mode === 'string') {
+      if (escaped) {
+        escaped = false;
+        output += ' ';
+        continue;
+      }
+      if (current === '\\') {
+        escaped = true;
+        output += ' ';
+        continue;
+      }
+      if (current === quote) {
+        mode = 'code';
+        quote = '';
+      }
+      output += current === '\n' ? '\n' : ' ';
+      continue;
+    }
+
+    if (current === '/' && next === '/') {
+      output += '  ';
+      index += 1;
+      mode = 'line-comment';
+      continue;
+    }
+    if (current === '/' && next === '*') {
+      output += '  ';
+      index += 1;
+      mode = 'block-comment';
+      continue;
+    }
+    if (current === "'" || current === '"' || current === '`') {
+      mode = 'string';
+      quote = current;
+      output += ' ';
+      continue;
+    }
+    output += current;
+  }
+  return output;
+}
+
+function requireExecutableOccurrenceCount(source, needle, expected, label) {
+  requireOccurrenceCount(executableSource(source), needle, expected, label);
+}
+
 const runtimeFiles = [...walk('src'), ...walk('worker/src')]
   .filter((file) => /\.(?:ts|tsx|mts|cts|js|mjs)$/.test(file))
   .filter((file) => !/\.d\.ts$/.test(file))
@@ -175,8 +255,8 @@ if (/export\s+(?:async\s+)?function\s+(?:get|read|save|set|store)Secret\b/.test(
 
 // The installation credential is a separate device-local secret boundary used
 // only for the user's own self-hosted Worker. Freeze the direct store consumer
-// (pairing) and the two reviewed plaintext handoff consumers: autonomy cloud
-// transport and durable Google OAuth brokerage.
+// (pairing) and the three reviewed plaintext handoff consumers: autonomy cloud
+// transport plus durable Google and ClickUp OAuth brokerage.
 const reviewedAutonomyCredentialConsumers = new Set(['src/autonomy/cloud/pairing.ts']);
 const actualAutonomyCredentialConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -189,6 +269,9 @@ for (const path of reviewedAutonomyCredentialConsumers) if (!actualAutonomyCrede
 const reviewedPairingTokenConsumers = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
+  'src/clickup/oauth/authority.ts',
+  'src/clickup/mcp-client.ts',
+  'src/clickup/attachment-upload.ts',
 ]);
 const actualPairingTokenConsumers = new Set();
 for (const [path, source] of runtime) {
@@ -202,6 +285,18 @@ const pairing = read('src/autonomy/cloud/pairing.ts');
 const autonomyCredential = read('src/autonomy/cloud/credential.ts');
 const autonomyClient = read('src/autonomy/cloud/client.ts');
 const oauthAuthority = read('src/google/oauth/authority.ts');
+const clickUpOAuthAuthority = read('src/clickup/oauth/authority.ts');
+const clickUpMcpClient = read('src/clickup/mcp-client.ts');
+const clickUpMutationReplay = read('src/clickup/mutation-replay.ts');
+const clickUpAttachmentUpload = read('src/clickup/attachment-upload.ts');
+const clickUpAttachmentAuthority = read('src/clickup/attachment-authority.ts');
+const clickUpOAuthVault = read('worker/src/clickup/oauth-vault.ts');
+const clickUpProvider = read('worker/src/clickup/provider.ts');
+const clickUpMcpRoute = read('worker/src/clickup/mcp-route.ts');
+const clickUpToolService = read('worker/src/clickup/tool-service.ts');
+const clickUpAttachmentRoute = read('worker/src/clickup/attachment-route.ts');
+const clickUpWebhookRoute = read('worker/src/clickup/webhook-route.ts');
+const clickUpTaskIndex = read('worker/src/clickup/task-index.ts');
 if (!pairing.includes("type StoredAutonomyPairing = Omit<AutonomyPairing, 'token'>")) fail('autonomy pairing must exclude token from its durable metadata type');
 if (!pairing.includes('saveAutonomyInstallationToken')) fail('autonomy pairing must route the installation credential through its protected store');
 if (/writeJson\(PAIRING_KEY\s*,\s*\{\s*\.\.\.pairing\s*\}/.test(pairing)) fail('autonomy pairing serializes the complete pairing object, including its credential');
@@ -213,6 +308,9 @@ for (const [path, source] of [
   ['src/autonomy/cloud/pairing.ts', pairing],
   ['src/autonomy/cloud/client.ts', autonomyClient],
   ['src/google/oauth/authority.ts', oauthAuthority],
+  ['src/clickup/oauth/authority.ts', clickUpOAuthAuthority],
+  ['src/clickup/mcp-client.ts', clickUpMcpClient],
+  ['src/clickup/attachment-upload.ts', clickUpAttachmentUpload],
 ]) {
   if (/\bconsole\.(?:log|info|warn|error|debug)\s*\(/.test(source)) fail(`${path} must not log from the installation-credential-bearing boundary`);
 }
@@ -237,6 +335,9 @@ for (const [path, source] of runtime) {
 const reviewedRawFetchAuthorities = new Set([
   'src/autonomy/cloud/client.ts',
   'src/google/oauth/authority.ts',
+  'src/clickup/oauth/authority.ts',
+  'src/clickup/mcp-client.ts',
+  'src/clickup/attachment-upload.ts',
   'src/ui/noto-emoji.ts',
 ]);
 const reviewedGlobalFetchReferences = new Set([
@@ -287,6 +388,390 @@ if (!oauthAuthority.includes("url.protocol !== 'https:'")) fail('Google OAuth eg
 if (!oauthAuthority.includes('assertGoogleApiTarget')) fail('Google authorized fetch must validate its destination');
 for (const marker of ['requestGoogleAuthorizationCode', "'/google/oauth/token'", 'resolvePairingToken', 'signWrite']) {
   if (!oauthAuthority.includes(marker)) fail(`durable Google OAuth browser authority is missing: ${marker}`);
+}
+for (const marker of [
+  "url.protocol !== 'https:'",
+  'url.username || url.password || url.search || url.hash',
+  'resolvePairingToken',
+  'signWrite',
+  "'/clickup/oauth/start'",
+  "'/clickup/oauth/exchange'",
+  "'/clickup/oauth/disconnect'",
+  'MAX_WORKER_RESPONSE_BYTES',
+  'readBoundedWorkerJson',
+  'const body = await readBoundedWorkerJson(response)',
+  "new ClickUpOAuthError('timeout'",
+  'assertPairingStillCurrent(pairing)',
+  "new ClickUpOAuthError('grant_changed'",
+]) {
+  if (!clickUpOAuthAuthority.includes(marker)) fail(`durable ClickUp OAuth browser authority is missing: ${marker}`);
+}
+if (!/async function workerRequest[\s\S]*const response = await fetch\([\s\S]*const body = await readBoundedWorkerJson\(response\);[\s\S]*finally\s*\{\s*clearTimeout\(timeout\);/.test(clickUpOAuthAuthority)) {
+  fail('ClickUp browser OAuth deadline must remain active through bounded Worker response-body consumption');
+}
+for (const marker of [
+  "CLICKUP_MCP_PROTOCOL_VERSION",
+  "CLICKUP_MCP_PATH",
+  "MCP_META_PROTOCOL_VERSION",
+  "MCP_META_CLIENT_CAPABILITIES",
+  "Accept: 'application/json, text/event-stream'",
+  "'Mcp-Method': method",
+  "'Mcp-Name': name",
+  'CLICKUP_GRANT_REVISION_HEADER',
+  'CLICKUP_TOOL_CATALOG_HEADER',
+  'listToolsForSession(session, signal, true)',
+  'validateClickUpToolArguments',
+  'MAX_MCP_RESPONSE_BYTES',
+  'const currentPairing = loadPairing()',
+  'clickUpPairingAuthorityBinding(currentPairing) !== session.cacheKey',
+]) {
+  if (!clickUpMcpClient.includes(marker)) fail(`ClickUp browser MCP boundary is missing: ${marker}`);
+}
+for (const marker of [
+  "CLICKUP_ATTACHMENT_PATH = '/clickup/attachment'",
+  'resolvePairingToken',
+  "Authorization: `Bearer ${token}`",
+  'assertClickUpArtifactSnapshotCurrent',
+  'approvedArtifact.blob',
+  'FormData',
+  'MAX_ATTACHMENT_RESPONSE_BYTES',
+  'boundedResponsePayload',
+  "new ClickUpAttachmentUploadError(\n      'response-too-large'",
+  'const currentPairing = loadPairing()',
+  'clickUpPairingAuthorityBinding(currentPairing) !== admittedGrant.authorityBinding',
+]) {
+  if (!clickUpAttachmentUpload.includes(marker)) fail(`ClickUp browser attachment transport boundary is missing: ${marker}`);
+}
+
+for (const marker of [
+  'MAX_CLICKUP_REPLAYS_PER_TURN',
+  'MAX_CLICKUP_REPLAY_TURNS',
+  'JSON.stringify([conversationId, messageId, generationId])',
+  'JSON.stringify([context.tool, callId])',
+  'payloadSignature',
+  "crypto.subtle.digest('SHA-256'",
+  'assertTurnActive(context)',
+  'existing.signature !== signature',
+  'return existing.promise',
+]) {
+  if (!clickUpMutationReplay.includes(marker)) fail(`ClickUp mutation replay authority is missing: ${marker}`);
+}
+if (!/export async function runClickUpMutationOnce[\s\S]*assertTurnActive\(context\);[\s\S]*payloadSignature[\s\S]*assertTurnActive\(context\);[\s\S]*turn\.entries\.get\(key\)/.test(clickUpMutationReplay)) {
+  fail('ClickUp mutation replay must validate elected-turn authority before and after asynchronous payload hashing');
+}
+for (const marker of [
+  'artifactRepository.get',
+  'ARTIFACT_LIMITS.maxAttachmentBytes',
+  "crypto.subtle.digest('SHA-256'",
+  'captureClickUpArtifactApprovalSnapshot',
+  'assertClickUpArtifactSnapshotCurrent',
+  'artifact.status !== \'ready\'',
+]) {
+  if (!clickUpAttachmentAuthority.includes(marker)) fail(`ClickUp artifact approval authority is missing: ${marker}`);
+}
+for (const marker of [
+  "ATTACHMENT_PATH = '/clickup/attachment'",
+  'verifyBearerToken',
+  'ARTIFACT_LIMITS.maxAttachmentBytes',
+  "INTERNAL_ATTACHMENT_PATH = '/internal/clickup/attachment'",
+  'internalWakeMarker',
+]) {
+  if (!clickUpAttachmentRoute.includes(marker)) fail(`ClickUp Worker attachment boundary is missing: ${marker}`);
+}
+for (const marker of [
+  "CLICKUP_WEBHOOK_PATH = '/clickup/webhook'",
+  'MAX_WEBHOOK_BODY_BYTES',
+  "request.headers.get('X-Signature')",
+  "INTERNAL_WEBHOOK_PATH = '/internal/clickup/webhook'",
+  'internalWakeMarker',
+]) {
+  if (!clickUpWebhookRoute.includes(marker)) fail(`ClickUp webhook ingress boundary is missing: ${marker}`);
+}
+for (const marker of [
+  'clickup_webhooks',
+  'clickup_webhook_deliveries',
+  'hmacHex',
+  'constantTimeEqual',
+  'WEBHOOK_DELIVERY_RETENTION_MS',
+  'markClickUpWorkspaceTaskIndexStale',
+  'tombstoneClickUpTask',
+  'clearClickUpTaskTombstone',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp webhook vault boundary is missing: ${marker}`);
+}
+
+const clickUpWebhookExecutionStart = clickUpOAuthVault.indexOf('private async executeWebhook(');
+const clickUpWebhookExecutionEnd = clickUpWebhookExecutionStart >= 0
+  ? clickUpOAuthVault.indexOf('private async verifyRead(', clickUpWebhookExecutionStart)
+  : -1;
+if (clickUpWebhookExecutionStart < 0 || clickUpWebhookExecutionEnd < 0) {
+  fail('ClickUp webhook execution authority disappeared');
+}
+const clickUpWebhookExecution = clickUpOAuthVault.slice(clickUpWebhookExecutionStart, clickUpWebhookExecutionEnd);
+const clickUpWebhookTransactionStart = clickUpWebhookExecution.indexOf('const accepted = this.ctx.storage.transactionSync(() => {');
+const clickUpWebhookTransactionEnd = clickUpWebhookTransactionStart >= 0
+  ? clickUpWebhookExecution.indexOf('if (!accepted)', clickUpWebhookTransactionStart)
+  : -1;
+if (clickUpWebhookTransactionStart < 0 || clickUpWebhookTransactionEnd < 0) {
+  fail('ClickUp webhook dedupe/index transaction boundary disappeared');
+}
+for (const marker of [
+  'SELECT webhook_id, workspace_id, secret_cipher, secret_iv, endpoint, updated_at FROM clickup_webhooks WHERE webhook_id = ?',
+  'live.updated_at !== row.updated_at',
+  'live.secret_cipher !== row.secret_cipher',
+  'INSERT INTO clickup_webhook_deliveries',
+  'tombstoneClickUpTask',
+  'clearClickUpTaskTombstone',
+  'markClickUpWorkspaceTaskIndexStale',
+]) {
+  const position = clickUpWebhookExecution.indexOf(marker, clickUpWebhookTransactionStart);
+  if (position < clickUpWebhookTransactionStart || position >= clickUpWebhookTransactionEnd) {
+    fail(`ClickUp webhook delivery dedupe and index effect must remain atomic: ${marker}`);
+  }
+}
+
+for (const marker of [
+  'clickup_task_index',
+  'clickup_task_index_state',
+  'searchClickUpTaskIndex',
+  'upsertClickUpTaskIndexPage',
+  'MAX_SEARCH_CANDIDATES',
+  'invalidation_generation',
+  'taskIndexInvalidationGeneration',
+  'invalidation_generation = invalidation_generation + 1',
+  'clickup_task_index_tombstones',
+  'tombstoneClickUpTask',
+  'clearClickUpTaskTombstone',
+  'clickUpTaskTombstoned',
+]) {
+  if (!clickUpTaskIndex.includes(marker)) fail(`ClickUp task-index boundary is missing: ${marker}`);
+}
+for (const marker of [
+  'restartIfInvalidated',
+  'taskIndexInvalidationGeneration',
+  'retryOnInvalidation',
+  "payload.event === 'taskDeleted'",
+  "payload.event === 'taskCreated'",
+  'tombstoneClickUpTask',
+  'clearClickUpTaskTombstone',
+  'padDeniedHierarchicalScope',
+  "...(args.assignees?.remove ?? [])",
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp concurrency/scope hardening disappeared: ${marker}`);
+}
+
+for (const marker of [
+  "method === 'server/discover'",
+  "method === 'tools/list'",
+  "method === 'tools/call'",
+  'clickUpMcpToolDefinitions',
+  'executeClickUpTool',
+  "resultType: 'complete'",
+  "cacheScope: 'private'",
+  'MAX_MCP_REQUEST_BYTES',
+  'CLICKUP_GRANT_REVISION_HEADER',
+  'CLICKUP_TOOL_CATALOG_HEADER',
+  'verifyBearerToken',
+]) {
+  if (!clickUpMcpRoute.includes(marker)) fail(`ClickUp Worker MCP boundary is missing: ${marker}`);
+}
+if (!clickUpMcpRoute.includes('if (!presentedCatalog || presentedCatalog !== liveCatalog)')) {
+  fail('ClickUp live catalog admission disappeared from Worker tools/call');
+}
+
+for (const marker of [
+  "VAULT_KEY_CONTEXT = 'elara-clickup-oauth-vault-v1'",
+  "name: 'AES-GCM'",
+  'clickup_oauth_states',
+  'clickup_oauth_nonces',
+  "'/internal/clickup/command'",
+  "'/internal/clickup/attachment'",
+  'uploadClickUpTaskAttachment',
+  'initializeClickUpTaskIndex',
+  'internalWakeMarker',
+  'validateClickUpToolArguments',
+  'verifyTaskScope',
+  'verifyFolderScope',
+  'verifyListScope',
+  'verifySpaceScope',
+  'verifyCommentBelongsToTask',
+  'validateWorkspaceUsers',
+  'validateFreshWorkspaceUsers',
+  'refreshWorkspaceAuthorization',
+  'resource_workspace_mismatch',
+  'normalizeTaskScopeFailure',
+  'padDeniedTaskScope',
+  'RATE_WINDOW_ROLLOVER_MIN_SECONDS',
+  'incomingReset < currentReset',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth/REST credential boundary is missing: ${marker}`);
+}
+for (const [marker, expected] of [
+  ['verifyTaskScope(args.workspaceId, args.taskId, args.includeSubtasks ?? false, expectedRevision)', 1],
+  ['verifyTaskScope(command.workspaceId, command.taskId, false, expectedRevision)', 2],
+  ['verifyTaskScope(args.workspaceId, args.taskId, false, expectedRevision)', 3],
+  ['verifySpaceScope(command.workspaceId, command.spaceId, expectedRevision)', 2],
+  ['verifyFolderScope(command.workspaceId, command.folderId', 2],
+  ['verifyListScope(command.workspaceId, command.listId, expectedRevision)', 2],
+  ['verifyListScope(args.workspaceId, args.listId, expectedRevision)', 1],
+  ['verifyCommentBelongsToTask(args.workspaceId, args.taskId, args.commentId, expectedRevision)', 1],
+  ['validateFreshWorkspaceUsers(args.workspaceId, args.assigneeIds, expectedRevision)', 1],
+  ['const assigneeIds = [', 1],
+  ['...(args.assignees?.add ?? [])', 1],
+  ['...(args.assignees?.remove ?? [])', 1],
+  ['validateFreshWorkspaceUsers(args.workspaceId, assigneeIds, expectedRevision)', 1],
+  ['validateFreshWorkspaceUsers(args.workspaceId, args.mentionUserIds, expectedRevision)', 2],
+]) {
+  requireExecutableOccurrenceCount(
+    clickUpOAuthVault,
+    marker,
+    expected,
+    `ClickUp resource-scope enforcement call count changed: ${marker}`,
+  );
+}
+for (const forbidden of [
+  "operation: z.literal('getAuthorizationContext')",
+  "case 'getAuthorizationContext'",
+]) {
+  if (clickUpOAuthVault.includes(forbidden)) fail(`ClickUp broad internal authorization context must not be executable: ${forbidden}`);
+}
+
+for (const marker of [
+  "operation: z.literal('getWorkspaceAuthorizationContext')",
+  'fetchAuthorizedClickUpWorkspaces(token)',
+  'refreshWorkspaceAuthorization(command.workspaceId, expectedRevision)',
+  'Provider-visible Workspaces',
+  'current[index] = {',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp live Workspace membership authority is missing: ${marker}`);
+}
+for (const marker of [
+  "operation: 'getWorkspaceAuthorizationContext'",
+  'workspaceId: args.workspaceId',
+]) {
+  if (!clickUpToolService.includes(marker)) fail(`ClickUp assignee resolution must use live Workspace membership: ${marker}`);
+}
+if (!/function normalizeMutationResult[\s\S]*trust: 'untrusted-external' as const/.test(clickUpToolService)) {
+  fail('ClickUp semantic mutation projections must remain explicitly untrusted external data');
+}
+
+for (const marker of [
+  'elara-clickup-comments-cursor-v2',
+  "crypto.subtle.sign('HMAC'",
+  'parsed.workspaceId !== workspaceId',
+  'parsed.taskId !== taskId',
+  'parsed.grantRevision !== grantRevision',
+  'equalBytes(presentedMac, expectedMac)',
+  'MAX_COMMENT_PROVIDER_PAGES',
+  'providerPages < MAX_COMMENT_PROVIDER_PAGES',
+]) {
+  if (!clickUpToolService.includes(marker)) fail(`ClickUp comment cursor authority is missing: ${marker}`);
+}
+
+for (const marker of [
+  "form.set('workspaceId', args.workspaceId)",
+  'assertClickUpArtifactSnapshotCurrent',
+]) {
+  if (!clickUpAttachmentUpload.includes(marker)) fail(`ClickUp attachment scope/approval boundary disappeared: ${marker}`);
+}
+if (!clickUpOAuthVault.includes("trust: 'untrusted-external',\n        provider: 'clickup',\n        workspaceId: args.workspaceId")) {
+  fail('ClickUp attachment provider metadata must remain explicitly untrusted');
+}
+for (const marker of [
+  "operation: 'clearCustomField'",
+  "fieldId: value.fieldId,\n          }, expectedRevision)",
+  "operation: 'setCustomField'",
+  "value: value.value,\n          }, expectedRevision)",
+]) {
+  if (!clickUpToolService.includes(marker)) fail(`ClickUp Custom Field grant propagation boundary disappeared: ${marker}`);
+}
+if (!/case 'setCustomField':[\s\S]*case 'clearCustomField':[\s\S]*removeClickUpTaskFromAllIndexes\(this\.ctx\.storage\.sql, command\.taskId\)[\s\S]*markAllClickUpTaskIndexesStale/.test(clickUpOAuthVault)) {
+  fail('ClickUp Custom Field writes must invalidate the persisted task projection before it can be reused');
+}
+for (const marker of [
+  'fieldRecord.applied_objects',
+  'taskScope.task.custom_item_id',
+  "safeProviderId(applied.object_type) === '19'",
+  'custom_field_not_applicable',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp Custom Field task-type admission disappeared: ${marker}`);
+}
+for (const marker of [
+  "const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'",
+  "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",
+  "headers.set('Authorization'",
+  'MAX_PROVIDER_BODY_BYTES',
+  "const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;",
+  'controller.abort()',
+  'response.body?.getReader()',
+  'total > MAX_PROVIDER_BODY_BYTES',
+  'reader.cancel()',
+  'providerJsonRequest',
+]) {
+  if (!clickUpProvider.includes(marker)) fail(`ClickUp provider egress boundary is missing: ${marker}`);
+}
+if (!/async function providerJsonRequest[\s\S]*const response = await fetcher\([\s\S]*const payload = await readJsonResponse\(response\);[\s\S]*finally\s*\{\s*clearTimeout\(timeout\);/.test(clickUpProvider)) {
+  fail('ClickUp provider deadline must remain active through bounded response-body consumption');
+}
+
+for (const marker of [
+  'unknown_probe_in_flight',
+  'const staleAt = row.updated_at + (RATE_WINDOW_SECONDS * 1000)',
+  'releaseUnknownRateProbe()',
+  'this.credentialRow()?.updated_at !== grant.revision',
+  'const reservation = this.reserveProviderCall()',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable rate/grant authority is missing: ${marker}`);
+}
+
+const exchangeStart = clickUpOAuthVault.indexOf('private async exchange(request: Request, body: string)');
+const exchangeEnd = exchangeStart >= 0 ? clickUpOAuthVault.indexOf('private async disconnect(body: string)', exchangeStart) : -1;
+if (exchangeStart < 0 || exchangeEnd < 0) fail('ClickUp OAuth exchange authority disappeared');
+const exchangeBody = clickUpOAuthVault.slice(exchangeStart, exchangeEnd);
+const replacementTransactionStart = exchangeBody.indexOf('const replacement = this.ctx.storage.transactionSync(() => {');
+const replacementTransactionEnd = replacementTransactionStart >= 0
+  ? exchangeBody.indexOf('if (!replacement)', replacementTransactionStart)
+  : -1;
+if (replacementTransactionStart < 0 || replacementTransactionEnd < 0) {
+  fail('ClickUp grant replacement transaction boundary disappeared');
+}
+for (const marker of [
+  'INSERT INTO clickup_oauth_credential',
+  "DELETE FROM clickup_webhooks",
+  "DELETE FROM clickup_webhook_deliveries",
+  "DELETE FROM clickup_rate_limit",
+  'clearClickUpTaskIndex',
+]) {
+  const position = exchangeBody.indexOf(marker, replacementTransactionStart);
+  if (position < replacementTransactionStart || position >= replacementTransactionEnd) {
+    fail(`ClickUp replacement grant and grant-scoped local state must remain atomic: ${marker}`);
+  }
+}
+
+const disconnectStart = clickUpOAuthVault.indexOf('private async disconnect(body: string)');
+const disconnectEnd = disconnectStart >= 0 ? clickUpOAuthVault.indexOf('/** Provider execution consumes credential material', disconnectStart) : -1;
+if (disconnectStart < 0 || disconnectEnd < 0) fail('ClickUp disconnect authority disappeared');
+const disconnectBody = clickUpOAuthVault.slice(disconnectStart, disconnectEnd);
+const disconnectTransactionStart = disconnectBody.indexOf('const detached = this.ctx.storage.transactionSync(() => {');
+const disconnectTransactionEnd = disconnectTransactionStart >= 0
+  ? disconnectBody.indexOf('const { previous, webhookRows } = detached;', disconnectTransactionStart)
+  : -1;
+if (disconnectTransactionStart < 0 || disconnectTransactionEnd < 0) {
+  fail('ClickUp local disconnect transaction boundary disappeared');
+}
+for (const marker of [
+  "UPDATE clickup_connection_epoch SET epoch = ?",
+  "DELETE FROM clickup_webhooks",
+  "DELETE FROM clickup_webhook_deliveries",
+  "DELETE FROM clickup_oauth_credential",
+  "DELETE FROM clickup_oauth_states",
+  "DELETE FROM clickup_rate_limit",
+  'clearClickUpTaskIndex',
+]) {
+  const position = disconnectBody.indexOf(marker, disconnectTransactionStart);
+  if (position < disconnectTransactionStart || position >= disconnectTransactionEnd) {
+    fail(`ClickUp local disconnect must atomically finalize grant-scoped state: ${marker}`);
+  }
 }
 
 for (const marker of [
@@ -374,11 +859,18 @@ for (const marker of [
   'Only the user, system instruction, and application-owned capability/confirmation boundaries can authorize tool use.',
   'UNTRUSTED_CONTEXT_REQUIRES_FRESH_USER_TURN',
   'batchStartedExternalTainted',
+  'freshUserExplicitlyRequestedClickUpMutation',
+  'CLICKUP_MUTATION_INTENT',
 ]) {
   if (!toolLoop.includes(marker)) fail(`Gemini Workspace provenance boundary changed: ${marker}`);
 }
 if (!toolLoop.includes("else results.push(errorToolResult(call, 'INVALID_TOOL_CALL'));")) fail('Mutations without valid confirmation requests must fail closed before execution');
+if (!toolLoop.includes("results.push(errorToolResult(call, UNTRUSTED_CONTEXT_READ_BLOCK));")) fail('Untrusted provider evidence must fail closed before it can manufacture fresh ClickUp mutation authority');
+if (!toolLoop.includes('&& !freshUserExplicitlyRequestedClickUpMutation(request, call.name)')) fail('ClickUp untrusted mutation admission lost fresh-user intent check');
+if (!toolLoop.includes('clickupToolNameSchema.safeParse(entry.call.name).success || containsUntrustedExternal(result.result)')) fail('Every successful ClickUp mutation must taint the next model continuation even if a projection omits its trust marker');
+if (!toolLoop.includes("'clickup.'") || !toolLoop.includes('clickUpToolHandlers') || !toolLoop.includes('clickUpOAuthAuthority')) fail('ClickUp tools must remain inside the existing model-tool and untrusted-provider authority');
 if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isExternalEvidenceReadTool') || !toolLoop.includes('EXTERNAL_EVIDENCE_READ_PREFIXES') || !toolLoop.includes('PRIVATE_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('taintedReadContinuationAllowed') || !toolLoop.includes('driveSearchCandidateIds') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must taint external evidence, block post-taint private reads, and limit Drive transfer continuation to same-turn search provenance');
+if (!/completedMutationOutcomes\.push[\s\S]{0,800}containsUntrustedExternal\(result\.result\)[\s\S]{0,400}untrustedExternalSeen = true[\s\S]{0,200}untrustedContextSeen = true/.test(toolLoop)) fail('Successful provider mutation results must taint the next Gemini continuation before it can request another private read or mutation');
 if (!toolLoop.includes("call.name === 'memory.lookup' || call.name === 'memory.recall'") || !toolLoop.includes('untrustedExternalSeen = true')) fail('Durable-memory recall must taint later private Workspace reads as well as mutations');
 const geminiContracts = read('src/gemini/contracts.ts');
 const appSource = read('src/app/App.tsx');

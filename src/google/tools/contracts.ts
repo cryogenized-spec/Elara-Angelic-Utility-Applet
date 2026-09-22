@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { CLICKUP_TOOL_NAMES } from '../../clickup/tool-schema';
 
 export const googleToolNameSchema = z.enum([
   'calendar.listCalendars', 'calendar.listEvents', 'calendar.getEvent', 'calendar.getSettings', 'calendar.queryFreeBusy', 'calendar.createEvent', 'calendar.updateEvent', 'calendar.deleteEvent',
@@ -13,6 +14,7 @@ export const googleToolNameSchema = z.enum([
   'roleplay_setting.list', 'roleplay_setting.inspect', 'roleplay_setting.create', 'roleplay_setting.update', 'roleplay_setting.move', 'roleplay_setting.delete',
   'memory.recall', 'memory.lookup', 'memory.save', 'memory.reconcile',
   'youtube.search',
+  ...CLICKUP_TOOL_NAMES,
 ]);
 
 export type GoogleToolName = z.infer<typeof googleToolNameSchema>;
@@ -28,7 +30,7 @@ export type GoogleToolRisk = 'read' | 'write' | 'destructive' | 'send';
 export type GoogleToolExposure = 'gemini' | 'internal';
 export type GoogleToolExecutionPlane = 'browser' | 'worker';
 
-export type ToolActivityCategory = 'google-workspace' | 'youtube' | 'roleplay' | 'documents' | 'memory' | 'other';
+export type ToolActivityCategory = 'google-workspace' | 'clickup' | 'youtube' | 'roleplay' | 'documents' | 'memory' | 'other';
 export interface ToolActivityPresentation {
   readonly category: ToolActivityCategory;
   readonly categoryLabel: string;
@@ -88,6 +90,13 @@ export function toolActivityPresentation(name: string): ToolActivityPresentation
       category: 'memory',
       categoryLabel: 'Memory',
       actionLabel: humanizeToolAction(name.slice('memory.'.length)),
+    };
+  }
+  if (name.startsWith('clickup.')) {
+    return {
+      category: 'clickup',
+      categoryLabel: 'ClickUp',
+      actionLabel: humanizeToolAction(name.slice('clickup.'.length)),
     };
   }
   if (name === 'document.create_pdf') {

@@ -16,7 +16,7 @@ import { googleCapabilityKeySchema } from '../oauth/contracts';
  * tests make that structurally impossible rather than a thing to remember.
  */
 
-const CAPABILITIES_NOT_IN_OAUTH_SCHEMA = ['documents.local', 'media.youtube.read', 'memory.durable.local'];
+const CAPABILITIES_NOT_IN_OAUTH_SCHEMA = ['documents.local', 'media.youtube.read', 'memory.durable.local', 'clickup.read', 'clickup.write'];
 
 describe('tool execution planes', () => {
   it('excludes every browser-only tool from the Worker surface', () => {

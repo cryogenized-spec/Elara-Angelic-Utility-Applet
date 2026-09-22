@@ -102,9 +102,13 @@ for (const marker of ["provider: 'v8'", "reporter: ['text', 'json-summary']", "r
 }
 
 const workerVitest = read('vitest.workers.config.ts');
-if (!workerVitest.includes("include: ['worker/test/**/*.test.ts']")) fail('Worker Vitest must include the complete worker/test tree');
+const clickUpWorkerVitest = read('vitest.clickup.workers.config.ts');
+if (!workerVitest.includes("include: ['worker/test/**/*.test.ts']")) fail('Worker Vitest must begin from the complete worker/test tree');
+if (!workerVitest.includes("exclude: ['worker/test/clickup-*.test.ts']")) fail('Legacy Worker pool must isolate ClickUp suites from global Durable Object reset callers');
 if (!workerVitest.includes('isolatedStorage: true')) fail('Worker tests must keep per-test storage isolation');
-if (/\b(?:testNamePattern|passWithNoTests)\s*:/.test(workerVitest)) fail('Worker Vitest may not narrow named tests or allow an empty suite');
+if (!clickUpWorkerVitest.includes("include: ['worker/test/clickup-*.test.ts']")) fail('Dedicated ClickUp Worker pool must include every ClickUp worker test file');
+if (!clickUpWorkerVitest.includes("from './vitest.workers.config'")) fail('ClickUp Worker pool must reuse the reviewed Worker binding/config factory');
+if (/\b(?:testNamePattern|passWithNoTests)\s*:/.test(workerVitest + clickUpWorkerVitest)) fail('Worker Vitest may not narrow named tests or allow an empty suite');
 
 const packageSource = read('package.json');
 try {
@@ -123,7 +127,7 @@ try {
     'coverage:check': 'node scripts/check-coverage.mjs',
     'test:coverage': 'vitest run --coverage && npm run coverage:check',
     'test:google-oauth-lifecycle': 'node scripts/google-oauth-lifecycle-gate.mjs && vitest run src/google/oauth/authority.test.ts && vitest run --config vitest.workers.config.ts worker/test/google-oauth-vault.test.ts && node scripts/verify-google-oauth-lifecycle-mutations.mjs',
-    'test:workers': 'vitest run --config vitest.workers.config.ts',
+    'test:workers': 'vitest run --config vitest.workers.config.ts && vitest run --config vitest.clickup.workers.config.ts',
     build: 'tsc -p tsconfig.json --noEmit && vite build',
     e2e: 'playwright test',
     'reliability:check': 'npm run docs:check && npm run verify:gates && npm run security:check && npm run secrets:check && npm run supply-chain:check && npm run test:quality && node scripts/reliability-gate.mjs',

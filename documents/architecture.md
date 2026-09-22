@@ -23,7 +23,7 @@ React UI
 -> chat/artifact/preference repositories
 -> Gemini turn port + tool loop
 -> Gemini Interactions API
--> validated application/Google tools when requested
+-> validated application/provider tools when requested
 -> normalized chat state
 -> browser persistence
 ```
@@ -44,6 +44,7 @@ Interactive Gemini is direct from `src/gemini/provider.ts` using the local Lockb
 | `SYS-CHAR` | Character | Character Master, profile/portrait, roleplay/world state | `src/character/`, roleplay domain/persistence |
 | `SYS-GAUTH` | Google auth | GIS, capabilities/scopes, browser token state, durable refresh brokerage | `src/google/oauth/`, Worker OAuth boundary |
 | `SYS-GWS` | Workspace/tools | Google services, executable registry, confirmations, human task workspace/cache | `src/google/` excluding OAuth, `src/kanban/` |
+| `SYS-CLICKUP` | ClickUp | first-party ClickUp semantic schemas, encrypted OAuth/REST authority and normalized task operations | `src/clickup/`, `worker/src/clickup/` |
 | `SYS-MEDIA` | Media | YouTube search, cache/budget, normalized handoff | `src/media/` |
 | `SYS-AUTO` | Autonomy | routines, schedules, authority/context, cloud sync | `src/autonomy/`, `worker/src/autonomy/` |
 | `SYS-SEC` | Security | browser credentials, encryption/unlock session, capability gates | security modules + gates |
@@ -61,7 +62,7 @@ UI is presentation. It may invoke typed application callbacks but must not own r
 
 `SYS-GEM` may consume the Character Master, bounded memory context, prepared artifact IDs/settings and model-visible tool declarations. It does not own Google service logic, artifact persistence, memory persistence or OAuth secrets.
 
-`SYS-GWS` separates model declaration from execution. The registry assigns capability/risk/exposure/execution plane; service schemas validate arguments; mutation confirmation is a separate consent boundary. The model proposes intent; application code validates and admits authority.
+`SYS-GWS` separates model declaration from execution. The registry assigns capability/risk/exposure/execution plane; service schemas validate arguments; mutation confirmation is a separate consent boundary. The model proposes intent; application code validates and admits authority. `SYS-CLICKUP` consumes this same executable registry and confirmation authority; its MCP/REST layer is a provider transport, not a second model-tool authority.
 
 `SYS-GAUTH` separates provider permission from application permission. A provider scope can satisfy an enabled capability but cannot manufacture a write/send capability. The durable vault stores refresh authority; it does not grant autonomous execution authority.
 
@@ -106,7 +107,7 @@ Microphone capture is browser-local. Transcription calls Gemini through its revi
 
 ### 5.3 Self-hosted Worker
 
-`worker/src/entry.ts` is the HTTP composition root. `/google/oauth/*` is isolated into the durable OAuth boundary; all existing health/Gemini/autonomy traffic delegates to the established Worker core. Scheduled execution remains owned by the existing autonomy Worker path.
+`worker/src/entry.ts` is the HTTP composition root. `/google/oauth/*` and `/clickup/oauth/*` are isolated into their provider-specific durable OAuth boundaries; all existing health/Gemini/autonomy traffic delegates to the established Worker core. Scheduled execution remains owned by the existing autonomy Worker path.
 
 The Worker may hold deployment-owned secrets. It still does not replace normal browser chat.
 
@@ -123,7 +124,7 @@ The paired path uses the user's existing installation credential for authenticat
 
 Workspace adapters cover Calendar, Tasks, Gmail, Docs, Drive and Sheets; Google Chat adapter/scope foundations exist but model exposure remains deferred/internal. Consequential Workspace mutations remain confirmation-gated independently of OAuth.
 
-The generic model tool registry also carries application-local tools and browser-only media/memory tools. Treat the registry as the executable model capability surface, not as proof that every tool is a Google API.
+The generic model tool registry also carries application-local tools and browser-only media/memory tools. Treat the registry as the executable model capability surface, not as proof that every tool is a Google API. The first-party ClickUp integration is designed to join this same surface: Gemini proposes a semantic ClickUp tool, the existing executor/confirmation authority admits it, and a browser MCP client delegates provider execution to the authenticated Worker where ClickUp credentials and REST calls remain server-side.
 
 ## 7. Deployment ownership
 

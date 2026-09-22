@@ -92,6 +92,7 @@ type WebhookRow = {
 type CredentialRow = {
   access_cipher: string;
   access_iv: string;
+  credential_kind: 'oauth' | 'personal';
   user_id: string;
   username: string | null;
   email: string | null;
@@ -110,10 +111,6 @@ const exchangeSchema = z.object({
 }).strict();
 
 const emptySchema = z.object({}).strict();
-const providerCredentialSchema = z.object({
-  kind: z.enum(['oauth', 'personal']),
-  token: z.string().trim().min(1).max(16_384),
-}).strict();
 const MAX_WEBHOOK_HISTORY_ITEMS = 100;
 
 const webhookPayloadSchema = z.object({
@@ -244,28 +241,6 @@ async function decryptToken(secret: string, cipher: string, iv: string): Promise
   return new TextDecoder().decode(plaintext);
 }
 
-async function encryptProviderCredential(
-  secret: string,
-  credential: ClickUpProviderCredential,
-): Promise<{ cipher: string; iv: string }> {
-  return encryptToken(secret, JSON.stringify(credential));
-}
-
-async function decryptProviderCredential(
-  secret: string,
-  cipher: string,
-  iv: string,
-): Promise<ClickUpProviderCredential> {
-  const plaintext = await decryptToken(secret, cipher, iv);
-  try {
-    const parsed = providerCredentialSchema.safeParse(JSON.parse(plaintext) as unknown);
-    if (parsed.success) return parsed.data;
-  } catch {
-    // Existing releases stored raw OAuth token text. Treat only that legacy
-    // representation as OAuth; never infer personal-token mode from token bytes.
-  }
-  return oauthClickUpCredential(plaintext);
-}
 
 function parseJson(body: string): unknown {
   try { return JSON.parse(body || '{}') as unknown; } catch { return null; }
@@ -350,6 +325,7 @@ export class ClickUpOAuthVault extends DurableObject {
         slot INTEGER PRIMARY KEY CHECK (slot = 1),
         access_cipher TEXT NOT NULL,
         access_iv TEXT NOT NULL,
+        credential_kind TEXT NOT NULL DEFAULT 'oauth' CHECK (credential_kind IN ('oauth', 'personal')),
         user_id TEXT NOT NULL,
         username TEXT,
         email TEXT,
@@ -357,6 +333,18 @@ export class ClickUpOAuthVault extends DurableObject {
         updated_at INTEGER NOT NULL
       )
     `);
+    const credentialColumns = this.ctx.storage.sql.exec<{ name: string }>(
+      'PRAGMA table_info(clickup_oauth_credential)',
+    ).toArray();
+    if (!credentialColumns.some((column) => column.name === 'credential_kind')) {
+      // Existing releases stored only OAuth access tokens. Schema migration can
+      // therefore assign the explicit OAuth discriminator without inspecting
+      // or decrypting any legacy token bytes.
+      this.ctx.storage.sql.exec(
+        "ALTER TABLE clickup_oauth_credential ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth'",
+      );
+    }
+
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS clickup_oauth_states (
         state TEXT PRIMARY KEY,
@@ -416,7 +404,7 @@ export class ClickUpOAuthVault extends DurableObject {
 
   protected credentialRow(): CredentialRow | null {
     return this.ctx.storage.sql.exec<CredentialRow>(
-      'SELECT access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
+      'SELECT access_cipher, access_iv, credential_kind, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
     ).toArray()[0] ?? null;
   }
 
@@ -2341,7 +2329,7 @@ export class ClickUpOAuthVault extends DurableObject {
     if (this.connectionEpoch() !== connectionEpoch) {
       return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
-    const encrypted = await encryptProviderCredential(this.vaultSecret(), accessToken);
+    const encrypted = await encryptToken(this.vaultSecret(), accessToken.token);
     if (this.connectionEpoch() !== connectionEpoch) {
       return json({ code: 'oauth_superseded', message: 'This ClickUp connection was superseded by a newer connect or disconnect action.' }, 409);
     }
@@ -2357,17 +2345,18 @@ export class ClickUpOAuthVault extends DurableObject {
 
       this.ctx.storage.sql.exec(`
         INSERT INTO clickup_oauth_credential (
-          slot, access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at
-        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+          slot, access_cipher, access_iv, credential_kind, user_id, username, email, workspaces_json, updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(slot) DO UPDATE SET
           access_cipher = excluded.access_cipher,
           access_iv = excluded.access_iv,
+          credential_kind = excluded.credential_kind,
           user_id = excluded.user_id,
           username = excluded.username,
           email = excluded.email,
           workspaces_json = excluded.workspaces_json,
           updated_at = excluded.updated_at
-      `, encrypted.cipher, encrypted.iv, account.data.id, account.data.username ?? null, account.data.email ?? null, JSON.stringify(workspaces.data), revision);
+      `, encrypted.cipher, encrypted.iv, accessToken.kind, account.data.id, account.data.username ?? null, account.data.email ?? null, JSON.stringify(workspaces.data), revision);
       this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');
       this.ctx.storage.sql.exec('DELETE FROM clickup_webhook_deliveries');
       this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
@@ -2440,7 +2429,10 @@ export class ClickUpOAuthVault extends DurableObject {
     let credential: ClickUpProviderCredential | null = null;
     if (previous) {
       try {
-        credential = await decryptProviderCredential(this.vaultSecret(), previous.access_cipher, previous.access_iv);
+        const token = await decryptToken(this.vaultSecret(), previous.access_cipher, previous.access_iv);
+        credential = previous.credential_kind === 'personal'
+          ? personalClickUpCredential(token)
+          : oauthClickUpCredential(token);
       } catch {
         credential = null;
       }
@@ -2457,7 +2449,9 @@ export class ClickUpOAuthVault extends DurableObject {
     const row = this.credentialRow();
     if (!row) return null;
     return {
-      credential: await decryptProviderCredential(this.vaultSecret(), row.access_cipher, row.access_iv),
+      credential: row.credential_kind === 'personal'
+        ? personalClickUpCredential(await decryptToken(this.vaultSecret(), row.access_cipher, row.access_iv))
+        : oauthClickUpCredential(await decryptToken(this.vaultSecret(), row.access_cipher, row.access_iv)),
       revision: row.updated_at,
     };
   }

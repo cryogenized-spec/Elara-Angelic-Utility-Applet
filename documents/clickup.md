@@ -147,7 +147,7 @@ ClickUp authorization is independent from Elara's Google Workspace authorization
 
 If a customer's ClickUp account uses Google's sign-in option, account selection happens inside ClickUp's official authorization/sign-in flow. Elara does not manufacture or force a Google account chooser on ClickUp's behalf. In personal-token mode the token itself identifies the ClickUp account, and Elara verifies that identity with ClickUp before sealing the credential. The Settings surface displays only bounded account metadata so the customer can verify which identity was admitted.
 
-The ClickUp Settings surface is intentionally connection-oriented rather than a second task-management client. It shows:
+The ClickUp Settings surface is intentionally connection-oriented rather than a second task-management client. The existing strict `/clickup/oauth/status` response remains unchanged for stale-service-worker/older-browser compatibility; Worker credential-method availability is discovered separately through authenticated `GET /clickup/oauth/methods`. A new browser talking to an older Worker treats a 404 on that endpoint as OAuth-only, matching the older Worker's actual capability. It shows:
 
 - connected/disconnected state;
 - the admitted ClickUp account identity when available;

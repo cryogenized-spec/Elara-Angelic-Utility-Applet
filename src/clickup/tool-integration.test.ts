@@ -33,6 +33,7 @@ const connectedStatus = {
 
 const clickupConnected = {
   getStatus: async () => connectedStatus,
+  getConnectionMethods: async () => ({ oauth: true, personalToken: false }),
   getExecutionGrant: async () => ({
     status: connectedStatus,
     authorityBinding: 'https://worker.example#test-installation',

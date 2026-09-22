@@ -669,6 +669,91 @@ describe('ClickUpOAuthVault', () => {
     }));
   });
 
+  it('ignores a delayed response from the previous rate window after the provider window rolls over', async () => {
+    let taskCalls = 0;
+    let firstStarted = false;
+    const firstResetAt = Math.floor(Date.now() / 1000) + 600;
+    const secondResetAt = firstResetAt + 60;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify({ access_token: 'token-rate-rollover-race' }), { status: 200 });
+      }
+      if (request.url === USER_ENDPOINT) {
+        return new Response(JSON.stringify({ user: { id: 183 } }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(firstResetAt),
+          },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT) {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace', members: [] }] }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '98',
+            'X-RateLimit-Reset': String(firstResetAt),
+          },
+        });
+      }
+      if (request.url.startsWith('https://api.clickup.com/api/v2/task/86task')) {
+        taskCalls += 1;
+        const sequence = taskCalls;
+        if (sequence === 1) firstStarted = true;
+        await new Promise<void>((resolve) => setTimeout(resolve, sequence === 1 ? 200 : 20));
+        return new Response(JSON.stringify({
+          id: '86task',
+          name: 'Repair S56',
+          team_id: '999',
+          list: { id: '123' },
+          space: { id: '789' },
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': sequence === 1 ? '0' : '99',
+            'X-RateLimit-Reset': String(sequence === 1 ? firstResetAt : secondResetAt),
+          },
+        });
+      }
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const revision = (await credentialSnapshot())?.updatedAt ?? 0;
+
+    const oldWindowRequest = internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: '86task' },
+    }, revision);
+    for (let attempt = 0; attempt < 100 && !firstStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(firstStarted).toBe(true);
+
+    const newWindowRequest = internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: '86task' },
+    }, revision);
+    expect((await newWindowRequest).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      remaining: 99,
+      resetAt: secondResetAt,
+    }));
+
+    expect((await oldWindowRequest).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      remaining: 99,
+      resetAt: secondResetAt,
+    }));
+  });
+
   it('does not replenish remaining from small reset-horizon jitter inside the same minute window', async () => {
     let taskCalls = 0;
     const resetAt = Math.floor(Date.now() / 1000) + 600;

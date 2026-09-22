@@ -916,6 +916,87 @@ describe('ClickUp durable task index', () => {
     expect((await pendingWrite).status).toBe(200);
   });
 
+  it('does not lose an older assignee match behind the 1,000-row search candidate ceiling', async () => {
+    let taskCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'token-assignee-candidate-limit' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '999',
+            name: 'Neon Sales',
+            members: [{ user: { id: 183, username: 'Gareth' } }, { user: { id: 456, username: 'Other' } }],
+          }],
+        }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/task' && request.method === 'GET') {
+        taskCalls += 1;
+        const page = Number(url.searchParams.get('page') ?? '0');
+        const count = page < 10 ? 100 : 2;
+        const tasks = Array.from({ length: count }, (_, index) => {
+          const ordinal = page * 100 + index;
+          const isNeedle = page === 10 && index === 1;
+          return {
+            id: isNeedle ? 'old-assignee-needle' : `bulk-${ordinal}`,
+            name: isNeedle ? 'Repair needle assigned to Gareth' : `Repair bulk task ${ordinal}`,
+            // Keep the desired assignee match older than the first 1,000
+            // candidates when ordered by updated_at DESC.
+            date_updated: String(isNeedle ? 1_000 : 2_000_000 + ordinal),
+            status: { status: 'open' },
+            assignees: [{ id: isNeedle ? 183 : 456, username: isNeedle ? 'Gareth' : 'Other' }],
+            list: { id: '123', name: 'Repairs' },
+            space: { id: '789' },
+          };
+        });
+        return new Response(JSON.stringify({ tasks }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected provider request: ${request.method} ${request.url}`);
+    });
+
+    await connect();
+
+    // Cold index hydration is capped at five provider pages per search.
+    expect((await search({ workspaceId: '999', query: 'repair', includeSubtasks: true, includeClosed: true })).status).toBe(200);
+    expect((await indexSnapshot()).indexedTasks).toBe(500);
+
+    expect((await search({ workspaceId: '999', query: 'repair', includeSubtasks: true, includeClosed: true })).status).toBe(200);
+    expect((await indexSnapshot()).indexedTasks).toBe(1_000);
+
+    expect((await search({ workspaceId: '999', query: 'repair', includeSubtasks: true, includeClosed: true })).status).toBe(200);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      indexedTasks: 1_002,
+      fullSyncComplete: true,
+    }));
+
+    const beforeFilteredCalls = taskCalls;
+    const filtered = await search({
+      workspaceId: '999',
+      query: 'repair',
+      includeSubtasks: true,
+      includeClosed: true,
+      assigneeIds: ['183'],
+      limit: 20,
+    });
+    expect(filtered.status).toBe(200);
+    expect((await taskSearchPayload(filtered)).result.tasks).toEqual([
+      expect.objectContaining({ id: 'old-assignee-needle' }),
+    ]);
+    expect(taskCalls).toBe(beforeFilteredCalls);
+  });
+
   it('rejects search for a Workspace outside the OAuth grant before provider egress', async () => {
     let taskCalls = 0;
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

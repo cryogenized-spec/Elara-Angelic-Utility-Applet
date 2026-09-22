@@ -77,11 +77,19 @@ function rollingTotal(entries: readonly StoredGeminiQuotaLedger['entries'][numbe
   return entries.reduce((sum, entry) => sum + effectiveTokens(entry), 0);
 }
 
-function normalizedEstimate(estimatedInputTokens: number | undefined, entries: readonly StoredGeminiQuotaLedger['entries'][number][]): number {
+export function conservativeGeminiInputReserve(
+  estimatedInputTokens: number | undefined,
+  recentMaximum: number,
+): number {
   const estimate = finiteNonNegativeInteger(estimatedInputTokens) ? estimatedInputTokens : 0;
-  const recentMaximum = entries.reduce((max, entry) => Math.max(max, effectiveTokens(entry)), 0);
-  const adaptive = recentMaximum > 0 ? Math.ceil(recentMaximum * RECENT_RESERVE_MULTIPLIER) : DEFAULT_FIRST_RESERVE;
+  const recent = finiteNonNegativeInteger(recentMaximum) ? recentMaximum : 0;
+  const adaptive = recent > 0 ? Math.ceil(recent * RECENT_RESERVE_MULTIPLIER) : DEFAULT_FIRST_RESERVE;
   return Math.max(MIN_RESERVE, estimate, adaptive);
+}
+
+function normalizedEstimate(estimatedInputTokens: number | undefined, entries: readonly StoredGeminiQuotaLedger['entries'][number][]): number {
+  const recentMaximum = entries.reduce((max, entry) => Math.max(max, effectiveTokens(entry)), 0);
+  return conservativeGeminiInputReserve(estimatedInputTokens, recentMaximum);
 }
 
 function retryAfterFor(

@@ -220,18 +220,20 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.userId).toBe('183');
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ limit: 100, remaining: 98 }));
 
-    const contextResponse = await internalCommand({ operation: 'getAuthorizationContext' });
+    const contextResponse = await internalCommand({
+      operation: 'getWorkspaceAuthorizationContext',
+      workspaceId: '999',
+    });
     expect(contextResponse.status).toBe(200);
     expect(await contextResponse.json()).toEqual(expect.objectContaining({
       ok: true,
       result: expect.objectContaining({
-        workspaces: [expect.objectContaining({
-          id: '999',
-          name: 'Neon Sales',
-          members: [expect.objectContaining({ id: '183', username: 'Gareth' })],
-        })],
+        id: '999',
+        name: 'Neon Sales',
+        members: [expect.objectContaining({ id: '183', username: 'Gareth' })],
       }),
     }));
+    expect(provider.teams).toBe(2);
 
     const status = await doFetch(await bearerRead('/clickup/oauth/status'));
     expect(await status.json()).toEqual(expect.objectContaining({ connected: true }));

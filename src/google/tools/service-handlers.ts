@@ -319,9 +319,14 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     return chat.listMessages(stringArg(args, 'spaceName')!, optionalNumber(args, 'pageSize'), stringArg(args, 'pageToken', false), stringArg(args, 'filter', false));
   },
   'chat.getMessage': async ({ arguments: raw }) => chat.getMessage(stringArg(objectArgs(raw), 'messageName')!),
-  'chat.createMessage': async ({ arguments: raw }) => {
+  'chat.createMessage': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
-    return chat.createMessage(stringArg(args, 'spaceName')!, recordArg(args, 'message')!, stringArg(args, 'requestId', false));
+    return chat.createMessage(
+      stringArg(args, 'spaceName')!,
+      recordArg(args, 'message')!,
+      stringArg(args, 'requestId', false),
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
+    );
   },
   'chat.updateMessage': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);

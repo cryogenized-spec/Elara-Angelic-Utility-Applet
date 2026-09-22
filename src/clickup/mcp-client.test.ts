@@ -238,6 +238,39 @@ describe('ClickUp MCP browser client', () => {
     expect(methods).toEqual(['server/discover', 'tools/list']);
   });
 
+  it('revalidates tools/list before execution even when a canonical catalog is already cached', async () => {
+    const methods: string[] = [];
+    let drift = false;
+
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = requestBody(init);
+      methods.push(body.method);
+
+      if (body.method === 'server/discover') return discover(body.id);
+      if (body.method === 'tools/list') {
+        const tools = drift
+          ? clickUpMcpToolDefinitions.map((tool, index) => index === 0
+            ? { ...tool, description: `${tool.description} rolled-back` }
+            : tool)
+          : clickUpMcpToolDefinitions;
+        return toolsList(body.id, tools);
+      }
+      throw new Error('tools/call must not execute after same-URL Worker catalog rollback.');
+    }) as unknown as typeof fetch;
+
+    await expect(listClickUpMcpTools()).resolves.toEqual(clickUpMcpToolDefinitions);
+    drift = true;
+
+    await expect(callClickUpMcpTool(
+      'clickup.getTask',
+      { workspaceId: '999', taskId: '86task' },
+      undefined,
+      ADMITTED,
+    )).rejects.toThrow(/description drifted/i);
+
+    expect(methods).toEqual(['server/discover', 'tools/list', 'tools/list']);
+  });
+
   it('fails closed if the paired Worker changes after grant admission', async () => {
     pairingMock.mockReturnValue({ ...PAIRING, workerUrl: 'https://replacement.example' });
     const fetchMock = vi.fn();

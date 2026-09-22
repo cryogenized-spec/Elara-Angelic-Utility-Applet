@@ -9,7 +9,7 @@ const emptyStatus = (): ClickUpOAuthStatus => ({
   workspaces: [],
 });
 
-type ClickUpBusyAction = 'connect' | 'switch' | 'disconnect' | null;
+type ClickUpBusyAction = 'connect' | 'personal-token' | 'switch' | 'disconnect' | null;
 
 export function ClickUpOAuthSettings() {
   const [status, setStatus] = useState<ClickUpOAuthStatus>(emptyStatus());
@@ -65,6 +65,18 @@ export function ClickUpOAuthSettings() {
     }
   }
 
+  async function connectPersonalToken() {
+    setBusyAction('personal-token');
+    setError(null);
+    try {
+      setStatus(await clickUpOAuthAuthority.connectPersonalToken());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The configured ClickUp API token could not be connected.');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   async function switchAccount() {
     setBusyAction('switch');
     setError(null);
@@ -102,6 +114,10 @@ export function ClickUpOAuthSettings() {
   }, [loading, status.connected, status.workspaces.length]);
 
   const identityLabel = status.account?.email || status.account?.username || 'Connected ClickUp account';
+  const personalTokenAvailable = status.connectionMethods?.personalToken === true;
+  // Older paired Workers predate capability advertisement and supported OAuth
+  // only, so preserve that path until they are upgraded.
+  const oauthAvailable = status.connectionMethods ? status.connectionMethods.oauth : true;
 
   return (
     <div className="google-oauth-settings clickup-oauth-settings">
@@ -114,7 +130,11 @@ export function ClickUpOAuthSettings() {
           <p>
             {status.connected
               ? 'This ClickUp identity is separate from the Google Workspace account connected to Elara. Elara can use only the ClickUp Workspaces authorized for this identity.'
-              : 'Connect through ClickUp’s official authorization screen. Your ClickUp identity is independent from the Google Workspace account connected to Elara.'}
+              : personalTokenAvailable
+                ? 'Your paired Worker has a personal ClickUp API token configured. Elara can validate it server-side and seal it in the encrypted ClickUp vault without exposing the token to this browser.'
+                : oauthAvailable
+                  ? 'Connect through ClickUp’s official authorization screen. Your ClickUp identity is independent from the Google Workspace account connected to Elara.'
+                  : 'Configure a ClickUp personal API token or OAuth app credentials on your paired Worker to connect ClickUp.'}
           </p>
         </div>
 
@@ -125,7 +145,16 @@ export function ClickUpOAuthSettings() {
 
         {status.connected ? (
           <div className="google-oauth-account__ready" role="status">First-party ClickUp MCP is active</div>
-        ) : (
+        ) : personalTokenAvailable ? (
+          <button
+            className="google-oauth-account__primary"
+            type="button"
+            onClick={() => void connectPersonalToken()}
+            disabled={loading || busy}
+          >
+            {busyAction === 'personal-token' ? 'Connecting…' : 'Use configured API token'}
+          </button>
+        ) : oauthAvailable ? (
           <button
             className="google-oauth-account__primary"
             type="button"
@@ -134,17 +163,31 @@ export function ClickUpOAuthSettings() {
           >
             {busyAction === 'connect' ? 'Opening ClickUp…' : 'Continue to ClickUp'}
           </button>
+        ) : (
+          <div className="google-oauth-account__ready" role="status">Worker credentials required</div>
         )}
 
         <div className="google-oauth-account__utility">
           <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void refresh()} disabled={loading || busy}>
             {loading ? 'Checking…' : 'Refresh status'}
           </button>
+          {!status.connected && personalTokenAvailable && oauthAvailable && (
+            <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void connect()} disabled={loading || busy}>
+              {busyAction === 'connect' ? 'Opening ClickUp…' : 'Use OAuth instead'}
+            </button>
+          )}
           {status.connected && (
             <>
-              <button className="google-oauth-settings__button" type="button" onClick={() => void switchAccount()} disabled={loading || busy}>
-                {busyAction === 'switch' ? 'Opening ClickUp…' : 'Switch ClickUp account'}
-              </button>
+              {personalTokenAvailable && (
+                <button className="google-oauth-settings__button" type="button" onClick={() => void connectPersonalToken()} disabled={loading || busy}>
+                  {busyAction === 'personal-token' ? 'Connecting…' : 'Reload configured API token'}
+                </button>
+              )}
+              {oauthAvailable && (
+                <button className="google-oauth-settings__button" type="button" onClick={() => void switchAccount()} disabled={loading || busy}>
+                  {busyAction === 'switch' ? 'Opening ClickUp…' : 'Switch ClickUp account'}
+                </button>
+              )}
               <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void disconnect()} disabled={loading || busy}>
                 {busyAction === 'disconnect' ? 'Disconnecting…' : 'Disconnect ClickUp'}
               </button>

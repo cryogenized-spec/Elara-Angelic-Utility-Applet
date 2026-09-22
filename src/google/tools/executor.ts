@@ -2,7 +2,7 @@ import { googleToolCallSchema, type GoogleToolCall, type GoogleToolDescriptor, t
 import { googleToolRegistry } from './registry';
 import { evaluateWriteConfirmation, isConfirmationFresh, MAX_CONFIRMATION_REVIEW_CHARS, writeConfirmationSchema, type WriteConfirmationRequest } from '../confirmation/policy';
 import { requestGoogleToolConfirmation } from '../confirmation/broker';
-import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus } from '../oauth/contracts';
+import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleExecutionGrant, type GoogleOAuthAuthority, type GoogleOAuthStatus } from '../oauth/contracts';
 import { isCapabilityAuthorized } from '../oauth/capability-policy';
 import { classifyGoogleToolFailure, type GoogleToolFailure } from './diagnostics';
 import { validateDriveSheetsToolArguments, driveSheetsToolArgumentSchemas, type DriveSheetsToolName } from './drive-sheets-schemas';
@@ -52,6 +52,8 @@ export interface GoogleToolExecutionContext {
   readonly signal?: AbortSignal;
   readonly generationId?: string;
   readonly isGenerationActive?: () => boolean;
+  /** Exact Google account/grant snapshot captured before consequential approval. */
+  readonly googleExecutionGrant?: GoogleExecutionGrant;
   /** Provider grant checked by the executor; never model-supplied. */
   readonly providerGrantRevision?: number;
   /** Paired Worker identity checked by the executor; never model-supplied. */
@@ -64,6 +66,8 @@ export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandle
 export interface GoogleToolExecutorOptions {
   readonly oauth: GoogleOAuthAuthority;
   readonly clickupOAuth?: ClickUpOAuthAuthority;
+  /** Exact Google grant captured before an external/grouped confirmation UI. */
+  readonly expectedGoogleGrant?: GoogleExecutionGrant;
   /** Exact ClickUp grant captured before an external/grouped confirmation UI. */
   readonly expectedClickUpGrant?: ClickUpExecutionGrant;
   /** Exact attachment payload captured before an external/grouped confirmation UI. */
@@ -173,6 +177,22 @@ export async function googleToolAuthorizationRequirement(
 ): Promise<GoogleCapabilityKey | null> {
   const requirement = await toolAuthorizationRequirement(call, oauth);
   return requirement?.provider === 'google' ? requirement.capability : null;
+}
+
+/**
+ * Capture the exact Google authority a consequential model mutation will be
+ * reviewed against. Local-only and ClickUp tools intentionally return no grant.
+ */
+export async function captureGoogleExecutionGrantForCall(
+  call: GoogleToolCall,
+  oauth: GoogleOAuthAuthority,
+): Promise<GoogleExecutionGrant | undefined> {
+  const parsed = googleToolCallSchema.safeParse(call);
+  if (!parsed.success) return undefined;
+  const descriptor = findDescriptor(parsed.data.tool);
+  if (!descriptor || !oauthCapabilitiesForDescriptor(descriptor).length || !oauth.getExecutionGrant) return undefined;
+  try { validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return undefined; }
+  return oauth.getExecutionGrant();
 }
 function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
@@ -505,6 +525,18 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
       if (authorizationNeeded(status, required)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: required };
     }
   }
+
+  const decision = evaluateWriteConfirmation(descriptor.risk);
+  let googleGrant = options.expectedGoogleGrant;
+  if (decision.requiresConfirmation && oauthCapabilities.length && options.oauth.getExecutionGrant) {
+    try {
+      if (googleGrant && options.oauth.assertExecutionGrant) await options.oauth.assertExecutionGrant(googleGrant);
+      else googleGrant = await options.oauth.getExecutionGrant();
+    } catch {
+      return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+    }
+  }
+
   let clickupArtifactSnapshot = options.expectedClickUpArtifactSnapshot;
   if (validCall.tool === 'clickup.attachArtifact') {
     try {
@@ -517,7 +549,6 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
     }
   }
 
-  const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {
     const confirmation = confirmationRequestForCall(validCall, options.now?.() ?? new Date(), {
       conversationId: options.conversationId,
@@ -531,6 +562,13 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
     let confirmationInvoked = false;
     try { confirmationInvoked = true; approved = await confirm(confirmation) && isConfirmationFresh(confirmation.requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
     if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: confirmationInvoked ? 'USER_DECLINED' : 'CONFIRMATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
+  }
+  if (googleGrant && decision.requiresConfirmation && options.oauth.assertExecutionGrant) {
+    try {
+      await options.oauth.assertExecutionGrant(googleGrant);
+    } catch {
+      return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+    }
   }
   if (isClickUpTool && clickupGrant && decision.requiresConfirmation) {
     try {
@@ -557,6 +595,7 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
       signal: options.signal,
       generationId: options.generationId,
       isGenerationActive: options.isGenerationActive,
+      ...(googleGrant ? { googleExecutionGrant: googleGrant } : {}),
       ...(clickupGrant ? {
         providerGrantRevision: clickupGrant.revision,
         providerAuthorityBinding: clickupGrant.authorityBinding,

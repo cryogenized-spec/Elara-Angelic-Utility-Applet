@@ -162,9 +162,9 @@ Public OAuth bodies are streamed under a byte ceiling before signature verificat
 
 Connect/disconnect/reconnect use a connection epoch. A late exchange cannot resurrect a grant after disconnect. Credential replacement, local webhook/delivery removal, rate-budget removal and ClickUp task-index purge commit in one SQLite transaction, so a new account can never coexist with provider data cached under the previous grant. Provider requests retain the credential revision that issued them; a late response or 401 from an obsolete token cannot mutate the replacement grant or replacement rate budget.
 
-ClickUp currently documents OAuth access tokens as non-expiring, but Elara treats them as revocable. Provider authorization failure removes only the credential revision that actually produced that failure.
+ClickUp currently documents OAuth access tokens as non-expiring and personal API tokens as non-expiring until regenerated, but Elara treats either credential as invalidatable. Provider authorization failure removes only the durable credential revision that actually produced that failure.
 
-Disconnect deletes the local encrypted grant. ClickUp does not document a general OAuth token revocation endpoint, so Elara does not claim provider-side revocation.
+Disconnect deletes Elara's local encrypted grant and grant-scoped caches/webhooks. In personal-token mode it does not and cannot delete the deployment owner's `CLICKUP_PERSONAL_TOKEN` Cloudflare secret; removing or rotating that Worker secret is a separate deployment operation. In OAuth mode ClickUp does not document a general OAuth token revocation endpoint, so Elara does not claim provider-side revocation.
 
 ## 6. Confirmation and exact-grant binding
 

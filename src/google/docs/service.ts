@@ -34,6 +34,7 @@ export interface GoogleDocumentSummary {
 export interface GoogleDocsMutationOptions {
   readonly signal?: AbortSignal;
   readonly isGenerationActive?: () => boolean;
+  readonly beforeProviderFetch?: () => void | Promise<void>;
 }
 
 export type GoogleDocsExportFormat = 'pdf' | 'docx';
@@ -91,6 +92,14 @@ function requireMutationCurrent(options: GoogleDocsMutationOptions, operation: s
   if (options.signal?.aborted || options.isGenerationActive?.() === false) {
     throw new DOMException(`${operation} lost turn authority.`, 'AbortError');
   }
+}
+
+function providerMutationGuard(options: GoogleDocsMutationOptions, operation: string): () => Promise<void> {
+  return async () => {
+    requireMutationCurrent(options, operation);
+    await options.beforeProviderFetch?.();
+    requireMutationCurrent(options, operation);
+  };
 }
 
 function boundedRequests(requests: readonly Record<string, unknown>[]): readonly Record<string, unknown>[] {
@@ -326,7 +335,7 @@ export class GoogleDocsService {
     const response = await access.fetch(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(safeDocumentId)}/export?mimeType=${encodeURIComponent(target.mimeType)}`,
       options.signal ? { signal: options.signal } : undefined,
-      () => requireMutationCurrent(options, 'Google Docs export'),
+      providerMutationGuard(options, 'Google Docs export'),
     );
     const content = await readBoundedGoogleContent(response, 'Google Docs export', boundedGoogleTransferLimit(options.maxBytes), options.signal);
     return { format, mimeType: target.mimeType, extension: target.extension, bytes: content.bytes };
@@ -342,7 +351,7 @@ export class GoogleDocsService {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: safeTitle }),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Docs create'));
+    }, providerMutationGuard(options, 'Google Docs create'));
     const payload = await this.readJson(response);
     if (!payload.documentId) throw new Error('Google Docs response did not contain a document ID.');
     return { documentId: payload.documentId, title: payload.title ?? safeTitle, revisionId: payload.revisionId };
@@ -361,7 +370,7 @@ export class GoogleDocsService {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Docs update'));
+    }, providerMutationGuard(options, 'Google Docs update'));
     if (response.status === 400 && writeControl && Object.prototype.hasOwnProperty.call(writeControl, 'requiredRevisionId')) {
       throw new Error('Google Docs rejected the write revision. Re-read the document before editing.');
     }

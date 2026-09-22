@@ -322,6 +322,41 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.userId).toBe('183');
   });
 
+  it('invalidates a pending OAuth popup when the user chooses the configured personal token', async () => {
+    let oauthTokenCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT) {
+        oauthTokenCalls += 1;
+        throw new Error('A stale OAuth state must be rejected before token exchange.');
+      }
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        expect(request.headers.get('Authorization')).toBe(PERSONAL_TOKEN);
+        return new Response(JSON.stringify({
+          user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        expect(request.headers.get('Authorization')).toBe(PERSONAL_TOKEN);
+        return new Response(JSON.stringify({
+          teams: [{ id: '999', name: 'Neon Sales', members: [] }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected ClickUp request: ${request.method} ${request.url}`);
+    });
+
+    const pendingOAuth = await start();
+    const personal = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}'));
+    expect(personal.status).toBe(200);
+    expect((await credentialSnapshot())?.userId).toBe('183');
+
+    const staleOAuth = await exchange(pendingOAuth.state, 'stale-oauth-code');
+    expect(staleOAuth.status).toBe(409);
+    expect(await staleOAuth.json()).toEqual(expect.objectContaining({ code: 'oauth_state' }));
+    expect(oauthTokenCalls).toBe(0);
+    expect((await credentialSnapshot())?.userId).toBe('183');
+  });
+
 
   it('rejects an older OAuth popup state after a newer Connect flow starts', async () => {
     const provider = mockProvider();

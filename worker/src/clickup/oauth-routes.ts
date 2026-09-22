@@ -19,6 +19,7 @@ const CLICKUP_OAUTH_PATHS = new Set([
   '/clickup/oauth/status',
   '/clickup/oauth/start',
   '/clickup/oauth/exchange',
+  '/clickup/oauth/personal-token',
   '/clickup/oauth/disconnect',
 ]);
 
@@ -106,7 +107,7 @@ async function forward(env: ClickUpOAuthRouteEnv, request: Request, body: string
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  if (url.pathname === '/clickup/oauth/exchange') {
+  if (url.pathname === '/clickup/oauth/exchange' || url.pathname === '/clickup/oauth/personal-token') {
     headers.set(CLICKUP_WEBHOOK_ENDPOINT_HEADER, `${url.origin}/clickup/webhook`);
   }
   const response = await (await vaultStub(env)).fetch(new Request(`https://clickup-oauth-vault${url.pathname}`, {

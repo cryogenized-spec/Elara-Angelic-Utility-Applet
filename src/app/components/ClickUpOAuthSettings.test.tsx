@@ -163,7 +163,7 @@ describe('ClickUpOAuthSettings', () => {
   });
 
 
-  it('reconciles authoritative status after an ambiguous personal-token activation failure', async () => {
+  it('keeps an ambiguous personal-token activation unknown until a later refresh resolves it', async () => {
     const tokenReady: ClickUpOAuthStatus = {
       connected: false,
       workspaces: [],
@@ -175,11 +175,14 @@ describe('ClickUpOAuthSettings', () => {
       updatedAt: 234567,
     };
     getStatusMock.mockReset();
-    getStatusMock.mockResolvedValueOnce(tokenReady).mockResolvedValueOnce(replacement);
+    getStatusMock
+      .mockResolvedValueOnce(tokenReady)
+      .mockRejectedValueOnce(new Error('A ClickUp connection change may still be settling. Refresh status again shortly.'))
+      .mockResolvedValueOnce(replacement);
     getConnectionMethodsMock
       .mockResolvedValueOnce({ oauth: false, personalToken: true })
       .mockResolvedValueOnce({ oauth: false, personalToken: true });
-    personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out after Worker commit.'));
+    personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out after request send.'));
 
     await renderSettings();
     await act(async () => {
@@ -190,6 +193,19 @@ describe('ClickUpOAuthSettings', () => {
     });
 
     expect(getStatusMock).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('ClickUp status unavailable');
+    expect(container.textContent).toContain('Connection state unknown');
+    expect(container.textContent).toContain('Refresh status before continuing');
+    expect(container.textContent).not.toContain('replacement@example.com');
+
+    await act(async () => {
+      button('Refresh status').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getStatusMock).toHaveBeenCalledTimes(3);
     expect(container.textContent).toContain('replacement@example.com');
     expect(container.textContent).toContain('Replacement Workspace');
     expect(container.textContent).not.toContain('Connection state unknown');

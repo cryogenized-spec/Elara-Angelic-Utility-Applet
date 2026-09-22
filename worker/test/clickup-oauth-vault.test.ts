@@ -246,6 +246,12 @@ describe('ClickUp OAuth public boundary', () => {
     expect(await response.json()).toEqual({ oauth: true, personalToken: true });
   });
 
+  it('serves ClickUp connection operation state on a separate authenticated read endpoint', async () => {
+    const response = await SELF.fetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ epoch: 0, settledEpoch: 0, pending: false });
+  });
+
 
   it('rejects unauthenticated reads and write verbs on the ClickUp methods endpoint', async () => {
     const unauthenticated = await SELF.fetch('https://worker.example/clickup/oauth/methods', {
@@ -255,6 +261,17 @@ describe('ClickUp OAuth public boundary', () => {
     expect(unauthenticated.status).toBe(401);
 
     const writeAttempt = await SELF.fetch(await signedWrite('/clickup/oauth/methods', '{}'));
+    expect(writeAttempt.status).toBe(405);
+  });
+
+  it('rejects unauthenticated reads and write verbs on the ClickUp connection-state endpoint', async () => {
+    const unauthenticated = await SELF.fetch('https://worker.example/clickup/oauth/connection-state', {
+      method: 'GET',
+      headers: { Origin: ORIGIN },
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const writeAttempt = await SELF.fetch(await signedWrite('/clickup/oauth/connection-state', '{}'));
     expect(writeAttempt.status).toBe(405);
   });
 
@@ -891,6 +908,11 @@ describe('ClickUpOAuthVault', () => {
     }
     expect(tokenFetchStarted).toBe(true);
 
+    const pendingState = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(await pendingState.json()).toEqual(expect.objectContaining({
+      pending: true,
+    }));
+
     const disconnected = await doFetch(await signedWrite('/clickup/oauth/disconnect', '{}'));
     expect(disconnected.status).toBe(200);
 
@@ -898,6 +920,10 @@ describe('ClickUpOAuthVault', () => {
     expect(lateExchange.status).toBe(409);
     expect(await lateExchange.json()).toEqual(expect.objectContaining({ code: 'oauth_superseded' }));
     expect(await credentialSnapshot()).toBeNull();
+    const settledState = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    const settledBody = await settledState.json() as { epoch: number; settledEpoch: number; pending: boolean };
+    expect(settledBody.pending).toBe(false);
+    expect(settledBody.settledEpoch).toBe(settledBody.epoch);
   });
 
   it('does not let a delayed old-token failure delete or rate-limit a newer grant', async () => {

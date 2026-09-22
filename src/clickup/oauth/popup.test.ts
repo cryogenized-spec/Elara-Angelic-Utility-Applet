@@ -40,17 +40,15 @@ describe('ClickUp OAuth popup account switching', () => {
     vi.clearAllMocks();
   });
 
-  it('opens the replacement popup before awaiting disconnect', async () => {
+  it('preserves the current grant when replacement OAuth cannot start', async () => {
     const popup = popupStub();
     const open = vi.spyOn(window, 'open').mockReturnValue(popup.window);
-    disconnectMock.mockRejectedValueOnce(new Error('disconnect failed'));
+    beginMock.mockRejectedValueOnce(new Error('start failed'));
 
-    await expect(switchClickUpAccountWithPopup()).rejects.toThrow('disconnect failed');
+    await expect(switchClickUpAccountWithPopup()).rejects.toThrow('start failed');
 
     expect(open).toHaveBeenCalledTimes(1);
-    expect(disconnectMock).toHaveBeenCalledTimes(1);
-    expect(open.mock.invocationCallOrder[0]).toBeLessThan(disconnectMock.mock.invocationCallOrder[0]);
-    expect(beginMock).not.toHaveBeenCalled();
+    expect(disconnectMock).not.toHaveBeenCalled();
     expect(popup.close).toHaveBeenCalledTimes(1);
   });
 

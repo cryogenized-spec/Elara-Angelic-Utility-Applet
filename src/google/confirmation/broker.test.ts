@@ -82,7 +82,7 @@ describe('Google confirmation broker', () => {
     expect(checkbox?.checked).toBe(false);
     expect(approve?.disabled).toBe(true);
     expect(approve?.textContent).toContain('Approve selected');
-    expect(warning?.textContent).toContain('External provider content was read');
+    expect(warning?.textContent).toContain('suggested after Elara read external content');
 
     if (!checkbox) throw new Error('expected elevated confirmation checkbox');
     checkbox.checked = true;
@@ -90,6 +90,21 @@ describe('Google confirmation broker', () => {
     expect(approve?.disabled).toBe(false);
     approve?.click();
     await expect(pending).resolves.toEqual([true]);
+  });
+
+
+  it('renders provider and action labels without exposing raw tool identifiers', async () => {
+    const pending = requestGoogleToolConfirmations([request('clickup.createTaskComment')]);
+    const dialog = document.getElementById('elara-google-confirmation');
+    expect(dialog?.getAttribute('aria-label')).toBe('Elara action confirmation');
+    expect(dialog?.textContent).toContain('ClickUp');
+    expect(dialog?.textContent).toContain('Post comment');
+    expect(dialog?.textContent).not.toContain('clickup.createTaskComment');
+    expect(dialog?.textContent).not.toContain('{');
+    expect(dialog?.textContent).not.toContain('workspaceId');
+
+    dismissGoogleToolConfirmation();
+    await expect(pending).resolves.toEqual([false]);
   });
 
   it('renders the entire durable-memory review text before approval', async () => {

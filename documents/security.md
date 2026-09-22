@@ -108,7 +108,8 @@ Browser Google access tokens remain memory-only. Browser localStorage contains o
 - Google refresh tokens never return to the browser, Gemini, Workspace tool schemas or autonomy storage.
 - ClickUp OAuth access tokens and personal API tokens never return to the browser, Gemini, MCP schemas, conversation state or autonomy storage.
 - ClickUp credential kind is a separate durable discriminator, never inferred from encrypted or decrypted token contents.
-- An ambiguous ClickUp connection write triggers authoritative status reconciliation; if that also fails, cached ClickUp status is cleared so stale identity metadata cannot authorize tool election.
+- An ambiguous ClickUp identity-changing write creates a pairing-owned bounded settle barrier; cached status for that pairing is cleared and status reads/execution grants fail closed until the barrier expires and a fresh authoritative read succeeds.
+- Browser ClickUp status cache entries are owned by the exact Worker authority binding, so a superseded in-flight request cannot erase or overwrite a newer pairing's cache; legacy unowned cache entries are ignored.
 - Lock/idle enforcement clears in-memory Lockbox plaintext.
 - Corrupt/undecryptable sealed material fails closed.
 - Cryptographic/storage migration failures preserve recoverable legacy state instead of deleting the only credential.

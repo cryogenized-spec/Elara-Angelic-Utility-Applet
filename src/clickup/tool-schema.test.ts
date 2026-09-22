@@ -99,6 +99,15 @@ describe('ClickUp canonical model/MCP tool schemas', () => {
     });
   });
 
+  it('rejects aggregate Custom Field values before MCP serialization becomes oversized', () => {
+    expect(() => validateClickUpToolArguments('clickup.setCustomField', {
+      workspaceId: '999',
+      taskId: '86abc',
+      fieldId: 'field-1',
+      value: ['x'.repeat(20_000), 'y'.repeat(20_000), 'z'.repeat(20_000)],
+    })).toThrow(/serialized bytes/i);
+  });
+
   it('uses decimal strings for provider numeric identifiers at the model boundary', () => {
     expect(validateClickUpToolArguments('clickup.resolveAssignees', {
       workspaceId: '12345678901234567890',

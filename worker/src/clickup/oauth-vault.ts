@@ -186,6 +186,7 @@ const WEBHOOK_DELIVERY_RETENTION_MS = 7 * 24 * 60 * 60_000;
  * only a few seconds is treated as same-window jitter and may never replenish
  * local remaining. A genuine new provider minute advances by ~60 seconds.
  */
+const RATE_WINDOW_SECONDS = 60;
 const RATE_WINDOW_ROLLOVER_MIN_SECONDS = 45;
 
 function json(body: unknown, status = 200): Response {
@@ -495,24 +496,46 @@ export class ClickUpOAuthVault extends DurableObject {
   }
 
   private reserveProviderCall(): { blocked: boolean; retryAt?: number } {
-    const row = this.rateLimitRow();
-    if (!row) return { blocked: false };
-    const nowSeconds = Math.floor(Date.now() / 1000);
-    if (row.reset_at !== null && row.reset_at <= nowSeconds) {
-      this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+    const now = Date.now();
+    const nowSeconds = Math.floor(now / 1000);
+    return this.ctx.storage.transactionSync(() => {
+      const row = this.rateLimitRow();
+      if (!row) return { blocked: false };
+
+      if (row.reset_at !== null && row.reset_at <= nowSeconds) {
+        // Open the next minute window in place instead of deleting the row.
+        // Durable Object requests can interleave while provider I/O is awaited;
+        // keeping a provisional budget ensures every post-reset request still
+        // reserves capacity before leaving for ClickUp.
+        const elapsed = Math.max(0, nowSeconds - row.reset_at);
+        const windowsElapsed = Math.floor(elapsed / RATE_WINDOW_SECONDS) + 1;
+        const provisionalReset = row.reset_at + (windowsElapsed * RATE_WINDOW_SECONDS);
+        const remainingAfterReservation = row.limit_count !== null
+          ? Math.max(0, row.limit_count - 1)
+          : 0;
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_rate_limit SET remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
+          remainingAfterReservation,
+          provisionalReset,
+          now,
+        );
+        // If ClickUp omitted the limit previously, admit exactly this one
+        // request and keep subsequent callers blocked until fresh headers land.
+        return { blocked: false };
+      }
+
+      if (row.remaining !== null && row.remaining <= 0) {
+        return { blocked: true, ...(row.reset_at !== null ? { retryAt: row.reset_at * 1000 } : {}) };
+      }
+      if (row.remaining !== null) {
+        this.ctx.storage.sql.exec(
+          'UPDATE clickup_rate_limit SET remaining = ?, updated_at = ? WHERE slot = 1',
+          Math.max(0, row.remaining - 1),
+          now,
+        );
+      }
       return { blocked: false };
-    }
-    if (row.remaining !== null && row.remaining <= 0) {
-      return { blocked: true, ...(row.reset_at !== null ? { retryAt: row.reset_at * 1000 } : {}) };
-    }
-    if (row.remaining !== null) {
-      this.ctx.storage.sql.exec(
-        'UPDATE clickup_rate_limit SET remaining = ?, updated_at = ? WHERE slot = 1',
-        Math.max(0, row.remaining - 1),
-        Date.now(),
-      );
-    }
-    return { blocked: false };
+    });
   }
 
   private recordRateLimit(rateLimit: ClickUpRateLimitSnapshot): void {

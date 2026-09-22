@@ -376,6 +376,72 @@ describe('ClickUpOAuthVault', () => {
     expect(provider.task).toBe(0);
   });
 
+  it('admits only one provider probe while the ClickUp rate budget is still unknown', async () => {
+    let spaceCalls = 0;
+    let firstStarted = false;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (request.url === TOKEN_ENDPOINT) {
+        return new Response(JSON.stringify({ access_token: 'token-unknown-rate' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (request.url === USER_ENDPOINT) {
+        return new Response(JSON.stringify({ user: { id: 183 } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT) {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace', members: [] }] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/team/999/space' && request.method === 'GET') {
+        spaceCalls += 1;
+        firstStarted = true;
+        await new Promise<void>((resolve) => setTimeout(resolve, 150));
+        return new Response(JSON.stringify({ spaces: [] }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 60),
+          },
+        });
+      }
+
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const revision = (await credentialSnapshot())?.updatedAt ?? 0;
+    expect(await rateLimitSnapshot()).toBeNull();
+
+    const first = internalCommand({ operation: 'listSpaces', workspaceId: '999' }, revision);
+    for (let attempt = 0; attempt < 100 && !firstStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(firstStarted).toBe(true);
+
+    const second = await internalCommand({ operation: 'listSpaces', workspaceId: '999' }, revision);
+    expect(second.status).toBe(429);
+    expect(spaceCalls).toBe(1);
+
+    expect((await first).status).toBe(200);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      limit: 100,
+      remaining: 0,
+    }));
+  });
+
   it('learns the provider rate window and blocks the next call locally when remaining reaches zero', async () => {
     const provider = mockProvider({ taskRemaining: 0 });
     const begun = await start();

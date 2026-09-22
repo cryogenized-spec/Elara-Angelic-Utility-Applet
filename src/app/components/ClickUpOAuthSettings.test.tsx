@@ -157,4 +157,61 @@ describe('ClickUpOAuthSettings', () => {
     expect(container.textContent).not.toContain('Switch ClickUp account');
     expect(button('Reload configured API token')).toBeTruthy();
   });
+
+
+  it('reconciles authoritative status after an ambiguous personal-token activation failure', async () => {
+    const tokenReady: ClickUpOAuthStatus = {
+      connected: false,
+      workspaces: [],
+      connectionMethods: { oauth: false, personalToken: true },
+    };
+    const replacement: ClickUpOAuthStatus = {
+      connected: true,
+      account: { id: '200', username: 'Replacement', email: 'replacement@example.com' },
+      workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
+      updatedAt: 234567,
+      connectionMethods: { oauth: false, personalToken: true },
+    };
+    getStatusMock.mockReset();
+    getStatusMock.mockResolvedValueOnce(tokenReady).mockResolvedValueOnce(replacement);
+    personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out after Worker commit.'));
+
+    await renderSettings();
+    await act(async () => {
+      button('Use configured API token').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getStatusMock).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('replacement@example.com');
+    expect(container.textContent).toContain('Replacement Workspace');
+    expect(container.textContent).not.toContain('Connection state unknown');
+  });
+
+  it('marks ClickUp authority unknown and hides mutation-prone connection actions when reconciliation fails', async () => {
+    const tokenReady: ClickUpOAuthStatus = {
+      connected: false,
+      workspaces: [],
+      connectionMethods: { oauth: false, personalToken: true },
+    };
+    getStatusMock.mockReset();
+    getStatusMock.mockResolvedValueOnce(tokenReady).mockRejectedValueOnce(new Error('Worker unreachable.'));
+    personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out.'));
+
+    await renderSettings();
+    await act(async () => {
+      button('Use configured API token').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('ClickUp status unavailable');
+    expect(container.textContent).toContain('Connection state unknown');
+    expect(container.textContent).toContain('Refresh status before continuing');
+    expect(Array.from(container.querySelectorAll('button')).some((entry) => entry.textContent?.trim() === 'Use configured API token')).toBe(false);
+    expect(Array.from(container.querySelectorAll('button')).some((entry) => entry.textContent?.trim() === 'Continue to ClickUp')).toBe(false);
+  });
 });

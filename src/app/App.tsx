@@ -281,7 +281,7 @@ export function App() {
     setError(null); setStructuredError(null); setFailedAttempt(null); setStatus('streaming');
     let turnId: string | null = null;
     try {
-      turnId = await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, previousInteractionId, attachments: prompt.attachments, inputMessageId: prompt.id, responseGroupId: groupId, responseVariant: nextVariant, supersedesGenerationId: target.providerTurn?.generationId });
+      turnId = await streamAssistantTurn(prompt.text, workingConversation, workingConversation.id, controller, { systemInstruction, generationConfig, tools: defaultGeminiToolsForCurrentSession(), previousInteractionId, attachments: prompt.attachments, inputMessageId: prompt.id, responseGroupId: groupId, responseVariant: nextVariant, supersedesGenerationId: target.providerTurn?.generationId });
     } catch (cause) {
       if (activeConversationIdRef.current !== workingConversation.id) return;
       if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;
@@ -468,7 +468,7 @@ export function App() {
     const generationConfig = effectiveGeminiSettings(geminiModel, selectedSettings);
     let turnId: string | null = null;
     try {
-      turnId = await streamAssistantTurn(attempt.input, attempt.base, conversationId, controller, { systemInstruction, generationConfig, tools: DEFAULT_GEMINI_TOOLS, inputMessageId: attempt.inputMessageId, responseGroupId: attempt.responseGroupId, responseVariant: attempt.responseVariant, supersedesGenerationId: attempt.generationId });
+      turnId = await streamAssistantTurn(attempt.input, attempt.base, conversationId, controller, { systemInstruction, generationConfig, tools: defaultGeminiToolsForCurrentSession(), inputMessageId: attempt.inputMessageId, responseGroupId: attempt.responseGroupId, responseVariant: attempt.responseVariant, supersedesGenerationId: attempt.generationId });
     } catch (cause) {
       if (activeConversationIdRef.current !== conversationId) return;
       if (turnId !== null && !generationArbiterRef.current.isActive(turnId)) return;

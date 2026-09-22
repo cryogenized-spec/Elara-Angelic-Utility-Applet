@@ -1,19 +1,24 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const authorityMocks = vi.hoisted(() => ({
+  beginConnect: vi.fn(),
+  completeConnect: vi.fn(),
+  disconnect: vi.fn(),
+}));
+
 vi.mock('./authority', () => ({
   clickUpOAuthAuthority: {
-    beginConnect: vi.fn(),
-    completeConnect: vi.fn(),
-    disconnect: vi.fn(),
+    beginConnect: authorityMocks.beginConnect,
+    completeConnect: authorityMocks.completeConnect,
+    disconnect: authorityMocks.disconnect,
   },
 }));
 
-import { clickUpOAuthAuthority } from './authority';
 import { connectClickUpWithPopup, switchClickUpAccountWithPopup } from './popup';
 
-const beginMock = vi.mocked(clickUpOAuthAuthority.beginConnect);
-const disconnectMock = vi.mocked(clickUpOAuthAuthority.disconnect);
+const beginMock = authorityMocks.beginConnect;
+const disconnectMock = authorityMocks.disconnect;
 
 function popupStub() {
   const close = vi.fn();

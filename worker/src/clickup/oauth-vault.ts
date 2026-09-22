@@ -574,14 +574,15 @@ export class ClickUpOAuthVault extends DurableObject {
         && incomingReset - currentReset >= RATE_WINDOW_ROLLOVER_MIN_SECONDS;
 
       if (providerWindowAdvanced) {
-        // A full minute-scale reset advance is the only condition under which
-        // remaining may rise. This admits a genuine replenished ClickUp window
-        // while preventing tiny reset-horizon jitter or late same-window
-        // responses from inflating the local budget.
+        // Advance the provider reset horizon, but never raise immediately
+        // available local quota from a response. Other requests may already
+        // have reserved capacity and still be in flight; overwriting remaining
+        // with the provider header would erase those reservations. A new
+        // provider limit may be learned for the *next* local rollover.
         this.ctx.storage.sql.exec(
           'UPDATE clickup_rate_limit SET limit_count = ?, remaining = ?, reset_at = ?, updated_at = ? WHERE slot = 1',
           rateLimit.limit ?? current.limit_count,
-          rateLimit.remaining ?? current.remaining,
+          minNullable(current.remaining, rateLimit.remaining),
           incomingReset,
           now,
         );
@@ -1709,6 +1710,13 @@ export class ClickUpOAuthVault extends DurableObject {
     for (const workspace of workspaces) {
       if (!this.grantLifecycleCurrent(expectedEpoch, expectedRevision)) return;
 
+      // Webhook registration is provider egress under the same token as normal
+      // tool calls, so it must consume the same durable rate authority before
+      // leaving the vault. A failed/network-ambiguous registration keeps its
+      // reservation consumed conservatively.
+      const reservation = this.reserveProviderCall();
+      if (reservation.blocked) return;
+
       try {
         const result = await createClickUpWebhook(
           accessToken,
@@ -2105,6 +2113,7 @@ export class ClickUpOAuthVault extends DurableObject {
     if (this.connectionEpoch() !== exchangeEpoch) {
       return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
     }
+    const initialRateLimit = mergeRateLimits(account.rateLimit, workspaces.rateLimit);
     // Credential replacement and all grant-scoped local state move as one
     // SQLite transaction. A crash must never expose a new account alongside
     // task/index/webhook/rate state that was populated by the previous grant.
@@ -2130,6 +2139,19 @@ export class ClickUpOAuthVault extends DurableObject {
       this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');
       this.ctx.storage.sql.exec('DELETE FROM clickup_webhook_deliveries');
       this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+      if (
+        initialRateLimit.limit !== null
+        || initialRateLimit.remaining !== null
+        || initialRateLimit.resetAt !== null
+      ) {
+        this.ctx.storage.sql.exec(
+          'INSERT INTO clickup_rate_limit (slot, limit_count, remaining, reset_at, updated_at) VALUES (1, ?, ?, ?, ?)',
+          initialRateLimit.limit,
+          initialRateLimit.remaining,
+          initialRateLimit.resetAt,
+          Date.now(),
+        );
+      }
       clearClickUpTaskIndex(this.ctx.storage.sql);
 
       return { revision, previousWebhookRows };
@@ -2138,11 +2160,6 @@ export class ClickUpOAuthVault extends DurableObject {
       return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
     }
     const { revision, previousWebhookRows } = replacement;
-
-    // Fresh rate metadata belongs to the replacement grant. It is safe to
-    // repopulate after the atomic swap: a crash here loses only a local budget
-    // hint, never account-scoped provider data.
-    this.recordRateLimit(mergeRateLimits(account.rateLimit, workspaces.rateLimit));
 
     if (previousAccessToken && previousWebhookRows.length) {
       await this.deleteProviderWebhooks(previousAccessToken, previousWebhookRows);

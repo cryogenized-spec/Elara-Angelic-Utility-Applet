@@ -107,6 +107,38 @@ describe('ClickUpOAuthSettings', () => {
     expect(container.textContent).toContain('Company Workspace');
   });
 
+  it('warns when ClickUp reauthorizes the same account instead of pretending a switch occurred', async () => {
+    switchMock.mockResolvedValueOnce({ ...CONNECTED, updatedAt: 234567 });
+
+    await renderSettings();
+    await act(async () => {
+      button('Switch ClickUp account').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('reauthorized the same account');
+    expect(container.textContent).toContain('sign out of ClickUp in your browser first');
+    expect(container.textContent).toContain('company@example.com');
+  });
+
+  it('keeps the previous authoritative identity visible when replacement OAuth fails', async () => {
+    switchMock.mockRejectedValueOnce(new Error('authorization cancelled'));
+    getStatusMock.mockResolvedValue(CONNECTED);
+
+    await renderSettings();
+    await act(async () => {
+      button('Switch ClickUp account').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('authorization cancelled');
+    expect(container.textContent).toContain('company@example.com');
+    expect(container.textContent).toContain('Neon Sales');
+  });
+
   it('presents a provider-owned connect action when disconnected', async () => {
     getStatusMock.mockResolvedValueOnce({ connected: false, workspaces: [] });
     await renderSettings();

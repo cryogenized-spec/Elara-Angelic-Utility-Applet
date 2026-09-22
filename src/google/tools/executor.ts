@@ -13,6 +13,7 @@ import { validateRoleplayWorldToolArguments, roleplayWorldToolArgumentSchemas, t
 import { validateYouTubeToolArguments, youtubeToolArgumentSchemas, type YouTubeToolName } from '../../media/youtube-schema';
 import { validateMemoryToolArguments, memoryToolArgumentSchemas, type MemoryToolName } from '../../memory/tool-schema';
 import { describeMemoryReconcileTarget } from '../../memory/tool-handler';
+import { normalizeTags } from '../../memory/normalize';
 import { kanbanToolArgumentSchemas, validateKanbanToolArguments, type KanbanToolName } from '../../kanban/tool-schema';
 import { loadRoleplayPreferences } from '../../persistence/preferences';
 import { clickupToolNameSchema, validateClickUpToolArguments } from '../../clickup/tool-schema';
@@ -304,6 +305,32 @@ function gmailActionSummary(action?: string): string {
   }
 }
 
+function stringList(args: Readonly<Record<string, unknown>>, key: string): string[] {
+  const raw = args[key];
+  return Array.isArray(raw) ? raw.filter((entry): entry is string => typeof entry === 'string') : [];
+}
+
+function clickUpCommentEffects(args: Readonly<Record<string, unknown>>): string {
+  const mentions = stringList(args, 'mentionUserIds');
+  const mentionText = mentions.length
+    ? `Mention ClickUp member ID${mentions.length === 1 ? '' : 's'} ${mentions.join(', ')}`
+    : 'No direct member mentions';
+  return `${mentionText}; notify everyone: ${args.notifyAll === true ? 'Yes' : 'No'}`;
+}
+
+function memorySaveEffects(args: Readonly<Record<string, unknown>>): string {
+  const kind = value(args, 'kind') ?? 'CONTEXTUAL';
+  const confidence = typeof args.confidence === 'number' ? args.confidence : 0.7;
+  const importance = typeof args.importance === 'number' ? args.importance : 0.5;
+  const tags = normalizeTags(stringList(args, 'tags'));
+  return `Kind: ${kind}; confidence: ${confidence}; importance: ${importance}; tags: ${tags.length ? tags.join(', ') : 'none'}`;
+}
+
+function memoryReconcileEffects(args: Readonly<Record<string, unknown>>): string {
+  const tags = normalizeTags(stringList(args, 'tags'));
+  return `Tags on the new evidence: ${tags.length ? tags.join(', ') : 'none'}`;
+}
+
 function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string, unknown>>, fallback: string): string {
   const id = value(args, 'id') ?? value(args, 'ref');
   switch (tool) {
@@ -367,7 +394,7 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'gmail.createLabel': return `Create Gmail USER label “${value(args, 'name') ?? 'Untitled'}”.`;
     case 'gmail.updateLabel': return `Rename Gmail USER label ${value(args, 'labelId') ?? 'selected label'} to “${value(args, 'name') ?? 'Untitled'}”.`;
     case 'gmail.deleteLabel': return `Delete Gmail USER label ${value(args, 'labelId') ?? 'selected label'} permanently and remove that label from messages and threads. The messages themselves are not deleted.`;
-    case 'gmail.sendMessage': { const to = Array.isArray(args.to) ? args.to.filter((item): item is string => typeof item === 'string').join(', ') : 'recipient'; return `Send a new email to ${to} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`; }
+    case 'gmail.sendMessage': { const to = stringList(args, 'to').join(', ') || 'recipient'; const cc = stringList(args, 'cc'); return `Send a new email to ${to}${cc.length ? `; Cc: ${cc.join(', ')}` : ''} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`; }
     case 'gmail.replyMessage': return `Reply in Gmail thread ${value(args, 'threadId') ?? 'selected thread'} to ${value(args, 'to') ?? 'recipient'} with subject “${value(args, 'subject') ?? '(no subject)'}”. Review the full body below before approving.`;
     case 'drive.createFile': return `Create the Drive file “${value(args, 'name') ?? 'Untitled'}”.`;
     case 'drive.updateFile': return `Update Drive file ${value(args, 'fileId') ?? 'selected file'} with the reviewed changes, only if the file has not changed since Elara read it.`;
@@ -391,12 +418,12 @@ function confirmationSummary(tool: GoogleToolName, args: Readonly<Record<string,
     case 'roleplay_setting.update': return `Update ${id ?? 'selected world item'} with the reviewed changes below.`;
     case 'roleplay_setting.move': return `Move ${id ?? 'selected entity'} under ${typeof args.parentId === 'string' ? args.parentId : 'the world root'}.`;
     case 'roleplay_setting.delete': return `Delete ${id ?? 'selected entity'} and any child entities beneath it.`;
-    case 'memory.save': return `Save durable memory “${value(args, 'title') ?? 'Untitled'}”. Review the full proposed body below before approving.`;
-    case 'memory.reconcile': return `Reconcile the selected durable memory as ${value(args, 'relation') ?? 'related'} using new evidence “${value(args, 'title') ?? 'Untitled evidence'}”. Review the full proposed body below before approving.`;
+    case 'memory.save': return `Save durable memory “${value(args, 'title') ?? 'Untitled'}”. ${memorySaveEffects(args)}. Review the full proposed body below before approving.`;
+    case 'memory.reconcile': return `Reconcile the selected durable memory as ${value(args, 'relation') ?? 'related'} using new evidence “${value(args, 'title') ?? 'Untitled evidence'}”. ${memoryReconcileEffects(args)}. Review the full proposed body below before approving.`;
     case 'clickup.createTask': return `Create ClickUp task “${value(args, 'name') ?? 'Untitled'}” in list ${value(args, 'listId') ?? 'selected list'}.`;
     case 'clickup.updateTask': return `Update ClickUp task ${value(args, 'taskId') ?? 'selected task'} with the reviewed field changes.`;
-    case 'clickup.createTaskComment': return `Post the reviewed comment to ClickUp task ${value(args, 'taskId') ?? 'selected task'}.`;
-    case 'clickup.replyToComment': return `Post the reviewed reply to ClickUp comment ${value(args, 'commentId') ?? 'selected comment'}.`;
+    case 'clickup.createTaskComment': return `Post the reviewed comment to ClickUp task ${value(args, 'taskId') ?? 'selected task'}. ${clickUpCommentEffects(args)}.`;
+    case 'clickup.replyToComment': return `Post the reviewed reply to ClickUp comment ${value(args, 'commentId') ?? 'selected comment'}. ${clickUpCommentEffects(args)}.`;
     case 'clickup.setCustomField': return `${value(args, 'mode') === 'clear' ? 'Clear' : 'Set'} ClickUp Custom Field ${value(args, 'fieldId') ?? 'selected field'} on task ${value(args, 'taskId') ?? 'selected task'}.`;
     case 'clickup.attachArtifact': return `Attach Elara artifact ${value(args, 'artifactId') ?? 'selected artifact'} to ClickUp task ${value(args, 'taskId') ?? 'selected task'}.`;
     default: return fallback;
@@ -455,7 +482,7 @@ export function confirmationRequestForCall(
     const target = describeMemoryReconcileTarget(targetRef, context.conversationId, context.messageId, context.generationId);
     return {
       ...request,
-      resourceSummary: `Reconcile durable memory “${target.title}” (${target.kind}; ${target.lifecycle}) as ${relation}. Current content: “${target.excerpt}”. Proposed evidence/replacement: “${value(args, 'title') ?? 'Untitled evidence'}”. Review the full proposed body below before approving.`,
+      resourceSummary: `Reconcile durable memory “${target.title}” (${target.kind}; ${target.lifecycle}) as ${relation}. Current content: “${target.excerpt}”. Proposed evidence/replacement: “${value(args, 'title') ?? 'Untitled evidence'}”. ${memoryReconcileEffects(args)}. Review the full proposed body below before approving.`,
     };
   } catch {
     return null;

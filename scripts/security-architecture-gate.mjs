@@ -646,6 +646,14 @@ if (!/case 'setCustomField':[\s\S]*case 'clearCustomField':[\s\S]*removeClickUpT
   fail('ClickUp Custom Field writes must invalidate the persisted task projection before it can be reused');
 }
 for (const marker of [
+  'fieldRecord.applied_objects',
+  'taskScope.task.custom_item_id',
+  "safeProviderId(applied.object_type) === '19'",
+  'custom_field_not_applicable',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp Custom Field task-type admission disappeared: ${marker}`);
+}
+for (const marker of [
   "const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'",
   "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",
   "headers.set('Authorization'",

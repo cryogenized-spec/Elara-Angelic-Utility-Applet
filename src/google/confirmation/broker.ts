@@ -1,4 +1,5 @@
 import type { WriteConfirmationRequest } from './policy';
+import { confirmationToolPresentation } from './presentation';
 
 const HOST_ID = 'elara-google-confirmation';
 let pendingFinish: ((approved: boolean[]) => void) | null = null;
@@ -16,20 +17,20 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     host.className = 'roleplay-confirmation roleplay-confirmation--broker roleplay-confirmation--batch';
     host.setAttribute('role', 'dialog');
     host.setAttribute('aria-modal', 'true');
-    host.setAttribute('aria-label', requests.length === 1 ? 'Google action confirmation' : 'Google action confirmations');
+    host.setAttribute('aria-label', requests.length === 1 ? 'Elara action confirmation' : 'Elara action confirmations');
 
     const heading = document.createElement('div');
     heading.className = 'roleplay-confirmation__heading';
     const mark = document.createElement('span');
     mark.textContent = '✦';
     const title = document.createElement('strong');
-    title.textContent = requests.length === 1 ? 'Elara proposes a change' : `Elara proposes ${requests.length} changes`;
+    title.textContent = requests.length === 1 ? 'Elara wants to make a change' : `Elara wants to make ${requests.length} changes`;
     heading.append(mark, title);
 
     const list = document.createElement('div');
     list.className = 'google-confirmation-list';
     requests.forEach((request, index) => {
-      const riskLabel = request.risk === 'send' ? 'Send' : request.risk === 'destructive' ? 'Destructive change' : 'Change';
+      const presentation = confirmationToolPresentation(request.tool);
       const card = document.createElement('label');
       card.className = 'google-confirmation-item';
 
@@ -37,21 +38,32 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
       checkbox.type = 'checkbox';
       checkbox.dataset.confirmIndex = String(index);
       checkbox.checked = requests.length === 1 && request.untrustedContext !== true;
-      checkbox.setAttribute('aria-label', `Approve ${request.tool}`);
+      checkbox.setAttribute('aria-label', `Approve ${presentation.provider}: ${presentation.action}`);
+      if (requests.length === 1 && request.untrustedContext !== true) checkbox.className = 'google-confirmation-item__check--passive';
 
       const body = document.createElement('span');
       body.className = 'google-confirmation-item__body';
-      const strong = document.createElement('strong');
-      strong.textContent = `${riskLabel} · ${request.tool}`;
+
+      const actionHeader = document.createElement('span');
+      actionHeader.className = 'google-confirmation-item__header';
+      const provider = document.createElement('span');
+      provider.className = 'google-confirmation-item__provider';
+      provider.textContent = presentation.provider;
+      const action = document.createElement('strong');
+      action.className = 'google-confirmation-item__action';
+      action.textContent = presentation.action;
+      actionHeader.append(provider, action);
+
       const summary = document.createElement('span');
+      summary.className = 'google-confirmation-item__summary';
       summary.textContent = request.resourceSummary;
-      body.append(strong, summary);
+      body.append(actionHeader, summary);
 
       if (request.untrustedContext === true) {
         const warning = document.createElement('span');
         warning.className = 'google-confirmation-item__warning';
         warning.dataset.untrustedContext = 'true';
-        warning.textContent = 'External provider content was read before this action was proposed. Treat that content as untrusted and approve only if this exact action matches your intent.';
+        warning.textContent = 'This action was suggested after Elara read external content. Check that it matches what you asked for before approving.';
         body.append(warning);
       }
 
@@ -59,7 +71,7 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
         const review = document.createElement('span');
         review.className = 'google-confirmation-item__review';
         const reviewLabel = document.createElement('strong');
-        reviewLabel.textContent = 'Full content to review before approval';
+        reviewLabel.textContent = 'Content to review';
         const reviewText = document.createElement('span');
         reviewText.className = 'google-confirmation-item__review-text';
         reviewText.textContent = request.reviewText;

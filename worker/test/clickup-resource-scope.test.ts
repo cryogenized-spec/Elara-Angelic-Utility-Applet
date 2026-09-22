@@ -3,6 +3,7 @@ import { env } from 'cloudflare:test';
 import { deriveInstallationId, internalWakeMarker } from '../../src/autonomy/protocol';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../src/clickup/mcp-protocol';
 import { TOKEN, resetClickUpTestState, signedWrite } from './helpers';
+import { executeClickUpTool } from '../src/clickup/tool-service';
 
 const ORIGIN = 'https://cryogenized-spec.github.io';
 const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
@@ -528,6 +529,82 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     expect(counters.updateTask).toBe(0);
     expect(counters.createComment).toBe(0);
     expect(counters.replyComment).toBe(0);
+  });
+
+  it('refreshes admitted Workspace membership before assignee resolution and user-id writes', async () => {
+    let teamReads = 0;
+    let updateCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'token-membership-refresh' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/team') {
+        teamReads += 1;
+        const members = teamReads === 1
+          ? [
+              { user: { id: 183, username: 'Gareth' } },
+              { user: { id: 9999, username: 'Departed User', email: 'departed@example.com' } },
+            ]
+          : [{ user: { id: 183, username: 'Gareth' } }];
+        return new Response(JSON.stringify({
+          teams: [{ id: '111', name: 'Workspace A', members }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/task/task-a' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: 'task-a',
+          name: 'A task',
+          team_id: '111',
+          list: { id: '1112', name: 'A List' },
+          space: { id: '1111' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/task/task-a' && request.method === 'PUT') {
+        updateCalls += 1;
+        return new Response(JSON.stringify({ id: 'task-a', name: 'mutated' }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected membership-refresh provider request: ${request.method} ${request.url}`);
+    });
+
+    await connect();
+
+    const resolved = await executeClickUpTool(
+      env,
+      'clickup.resolveAssignees',
+      { workspaceId: '111', names: ['Departed User'] },
+      grantRevision,
+    ) as { results?: Array<{ matches?: unknown[] }> };
+
+    expect(teamReads).toBe(2);
+    expect(resolved.results?.[0]?.matches).toEqual([]);
+
+    const staleWrite = await internalCommand({
+      operation: 'updateTask',
+      arguments: {
+        workspaceId: '111',
+        taskId: 'task-a',
+        assignees: { add: ['9999'] },
+      },
+    });
+
+    expect(staleWrite.status).toBe(403);
+    expect(await responseBody(staleWrite)).toEqual(expect.objectContaining({ code: 'resource_workspace_mismatch' }));
+    expect(teamReads).toBe(3);
+    expect(updateCalls).toBe(0);
   });
 
   it('rejects stale grant revisions for Custom Field set and clear before scope/provider work', async () => {

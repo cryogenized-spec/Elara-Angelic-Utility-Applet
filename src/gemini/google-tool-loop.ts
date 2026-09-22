@@ -255,12 +255,12 @@ function readFingerprint(call: PendingToolCall): string {
 }
 
 const CLICKUP_MUTATION_INTENT: Readonly<Partial<Record<ClickUpToolName, RegExp>>> = {
-  'clickup.createTask': /\b(?:create|add|make|log|record|open)\b[\s\S]{0,48}\btask\b|\btask\b[\s\S]{0,48}\b(?:create|add|make|log|record|open)\b/i,
-  'clickup.updateTask': /\b(?:update|change|edit|modify|mark|complete|close|reopen|archive|unarchive|assign|rename|move|fix)\b/i,
-  'clickup.createTaskComment': /\b(?:comment|post|note|message|mention|tell|ask)\b/i,
-  'clickup.replyToComment': /\b(?:reply|respond|answer)\b/i,
-  'clickup.setCustomField': /\b(?:custom\s+field|field)\b[\s\S]{0,32}\b(?:set|clear|change|update|edit)\b|\b(?:set|clear|change|update|edit)\b[\s\S]{0,32}\b(?:custom\s+field|field)\b/i,
-  'clickup.attachArtifact': /\b(?:attach|upload)\b|\b(?:add|include)\b[\s\S]{0,24}\b(?:file|artifact|document|attachment)\b/i,
+  'clickup.createTask': /\b(?:create|add|make|log|record|open)\b[\s\S]{0,48}\b(?:task|ticket|work\s+item)\b|\b(?:task|ticket|work\s+item)\b[\s\S]{0,48}\b(?:create|add|make|log|record|open)\b/i,
+  'clickup.updateTask': /(?:\bupdate\s+(?:(?:the|this|that)\s+)?(?:task|ticket|work\s+item)\b)|(?:\b(?:then|and)\s+update\s+it\b)|(?:\b(?:set|change|edit)\b[\s\S]{0,32}\b(?:status|priority|assignee|due\s+date|start\s+date|task\s+name|task\s+title)\b)|(?:\bupdate\s+(?:(?:the|this|that)\s+)?(?:task\s+)?(?:status|priority|assignee|due\s+date|start\s+date|name|title)\b)|(?:\bmark\s+(?:(?:the|this|that)\s+task|it)\s+(?:complete|completed|done|closed)\b)|(?:\b(?:complete|close|reopen|archive|unarchive|rename|move)\b[\s\S]{0,32}\b(?:task|ticket|work\s+item)\b)|(?:\bassign\b[\s\S]{0,48}\b(?:task|ticket|work\s+item)\b)|(?:\b(?:task|ticket|work\s+item)\b[\s\S]{0,32}\b(?:to|as)\b[\s\S]{0,16}\b(?:complete|closed|archived)\b)/i,
+  'clickup.createTaskComment': /\b(?:comment\s+on|post|leave|add)\b[\s\S]{0,32}\b(?:comment|note|message|task)\b|\b(?:mention|tell|ask)\b[\s\S]{0,48}\b(?:in|on)\s+(?:the\s+)?(?:task|comment)\b/i,
+  'clickup.replyToComment': /\b(?:reply|respond|answer)\b[\s\S]{0,24}\b(?:comment|thread|message)\b|\breply\s+to\s+(?:it|that)\b/i,
+  'clickup.setCustomField': /\b(?:set|clear|change|edit)\b[\s\S]{0,32}\b(?:custom\s+field|field)\b|\b(?:custom\s+field|field)\b[\s\S]{0,32}\b(?:to|as|=)\b/i,
+  'clickup.attachArtifact': /\b(?:attach|upload)\b[\s\S]{0,32}\b(?:file|artifact|document|attachment|it|this|that)\b|\b(?:add|include)\b[\s\S]{0,24}\b(?:file|artifact|document|attachment)\b/i,
 };
 
 function freshUserExplicitlyRequestedClickUpMutation(request: GeminiTurnRequest, tool: string): boolean {

@@ -1,7 +1,7 @@
 ---
 id: SYS-CLICKUP
 status: active
-verified_commit: f2ef848522f04fc277fb8423b194178746c64dc6
+verified_commit: de8078a4d5ade53809c57b479d02eb4dded73df4
 scope: first-party ClickUp REST, OAuth, MCP, indexed search and artifact contracts
 paths: [src/clickup, worker/src/clickup]
 keywords: [clickup, mcp, oauth, task, comment, assignee, custom-field, attachment, webhook]
@@ -76,7 +76,7 @@ clickup.attachArtifact
 
 The surface is intentionally semantic and compact. There is no `rawRequest`, URL fetcher, arbitrary endpoint/method/header authority or permanent-delete tool.
 
-Numeric ClickUp identifiers are semantic decimal strings where the provider documents numeric IDs. Opaque task/List/Folder/field identifiers remain bounded strings. The REST adapter performs only documented representation changes and rejects unsafe integer conversion rather than silently losing precision.
+Numeric ClickUp identifiers are semantic decimal strings where the provider documents numeric IDs. Opaque task/List/Folder/field identifiers remain bounded strings. The REST adapter performs only documented representation changes and rejects unsafe integer conversion rather than silently losing precision. Custom Field values also have an aggregate serialized-byte ceiling so combinatorial nested values fail at semantic validation before MCP transport.
 
 ## 4. MCP contract
 
@@ -126,9 +126,9 @@ user gesture
 
 Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The access token is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
 
-Public OAuth bodies are streamed under a byte ceiling before signature verification/forwarding. Signed writes use timestamp + nonce + body and have durable replay protection. OAuth state is random, redirect-bound, short-lived and single-use.
+Public OAuth bodies are streamed under a byte ceiling before signature verification/forwarding. Signed writes use timestamp + nonce + body and have durable replay protection. OAuth state is random, redirect-bound, short-lived and single-use. A new Connect gesture replaces older pending states and advances the connection epoch, so an older popup or already-in-flight exchange cannot later overwrite the newer authorization.
 
-Connect/disconnect/reconnect use a connection epoch. A late exchange cannot resurrect a grant after disconnect. Provider requests retain the credential revision that issued them; a late response or 401 from an obsolete token cannot mutate the replacement grant or replacement rate budget.
+Connect/disconnect/reconnect use a connection epoch. A late exchange cannot resurrect a grant after disconnect. Credential replacement, local webhook/delivery removal, rate-budget removal and ClickUp task-index purge commit in one SQLite transaction, so a new account can never coexist with provider data cached under the previous grant. Provider requests retain the credential revision that issued them; a late response or 401 from an obsolete token cannot mutate the replacement grant or replacement rate budget.
 
 ClickUp currently documents OAuth access tokens as non-expiring, but Elara treats them as revocable. Provider authorization failure removes only the credential revision that actually produced that failure.
 
@@ -163,8 +163,12 @@ The vault verifies, as applicable:
 - task `team_id` or Space ancestry belongs to that Workspace;
 - Folder/List ancestry resolves through an admitted Space;
 - comments belong to the admitted task;
-- Custom Fields belong to the admitted task's List;
+- Custom Fields belong to the admitted task's List and are applicable to the task type;
+- People Custom Field add/remove IDs belong to current admitted Workspace members;
+- Task-relationship Custom Field add/remove IDs independently pass the same task Workspace proof as direct task reads;
 - assignee and mention user IDs belong to the admitted Workspace.
+
+Subtask creation additionally proves the requested parent task belongs to the same target List required by ClickUp's Create Task contract.
 
 Cross-Workspace, missing and otherwise-unverifiable direct resources return a generic scope denial. Task/Folder/List denial paths use fixed ancestry probes where necessary so existence is not exposed through response body, status, timing or rate-budget shape.
 
@@ -180,10 +184,12 @@ Behavior:
 
 - a cold search progressively warms bounded provider pages;
 - repeated searches use the local index and consume no additional ClickUp request while fresh;
+- query/list/folder/space/status and assignee filters are applied before the bounded SQL candidate limit so older valid matches are not hidden by newer unrelated rows;
 - incremental refresh uses `date_updated_gt` with a small overlap;
 - multi-page incremental refresh persists its original low-water mark and next page until all pages are consumed;
 - the durable provider watermark advances only after the incremental result set completes;
 - periodic full reconciliation removes tasks missed by webhook delivery or incremental deletion semantics;
+- provider mutations that can change indexed task evidence invalidate the affected cached evidence before REST egress, preventing a post-provider-commit crash from leaving the pre-write snapshot current;
 - reconnect/revocation clears affected index state.
 
 Each persisted task is normalized into a bounded projection. Nested provider objects are reduced to reviewed fields and `task_json` has a hard per-task ceiling with a minimal identity/location fallback.
@@ -209,7 +215,7 @@ POST /clickup/webhook
 
 Webhook content never directly becomes trusted indexed task state or Gemini context. The next task read/search still uses the reviewed REST/index path.
 
-The documented `webhook_id:history_item_id` identity is used for replay dedupe when history items are present; body hash is the fallback dedupe identity.
+The documented `webhook_id:history_item_id` identity is used for replay dedupe when history items are present; body hash is the fallback dedupe identity. Dedupe persistence and the corresponding tombstone/cache-invalidation effect commit in the same SQLite transaction so a crash cannot mark a delivery processed while losing its index mutation.
 
 Reconnect/disconnect lifecycle is epoch/revision guarded. A failed reconnect leaves the previous valid webhook state intact. A webhook created by a superseded exchange is not persisted and is best-effort deleted at ClickUp. Locally unknown/orphaned webhook IDs are acknowledged and ignored so stale provider registrations cannot create a retry storm.
 
@@ -242,7 +248,8 @@ Reviewed representations include:
 - ISO date/time -> documented millisecond fields;
 - assignee add/remove structures;
 - structured comment user mentions;
-- Custom Field `{value: ...}`;
+- Custom Field `{value: ...}` with Workspace-bound People/Task relationship references;
+- subtask `parent` only after same-List validation;
 - task attachment multipart `attachment[0]`.
 
 Provider response streams are byte-counted and canceled above the ceiling before JSON parsing. Arbitrary provider error prose is never projected into MCP/Gemini-visible error messages.
@@ -257,7 +264,7 @@ Current documented rate limits are per token:
 
 Elara learns `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` instead of hard-coding 100.
 
-Within one provider window, concurrent/late responses may only merge remaining downward. A small reset-horizon change is treated as same-window jitter and cannot replenish the local budget. A genuine minute-scale reset advance can establish the new provider budget. When the known current window is exhausted, the vault rejects the next provider call locally with 429 and the reset time.
+Within one provider window, concurrent/late responses may only merge remaining downward, and a response from an older reset window is ignored after a newer window is established. A small reset-horizon change is treated as same-window jitter and cannot replenish the local budget. A genuine minute-scale reset advance can establish the new provider budget. When the stored reset expires, the vault opens a provisional next-minute budget in place and consumes the current reservation atomically instead of deleting rate state; if the previous limit is unknown, only one request is admitted until fresh provider headers arrive. When the known current window is exhausted, the vault rejects the next provider call locally with 429 and the reset time.
 
 Writes are not blindly replayed after ambiguous network failure because the reviewed ClickUp write endpoints do not expose a general idempotency key.
 

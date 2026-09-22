@@ -1425,9 +1425,16 @@ export class ClickUpOAuthVault extends DurableObject {
             : undefined,
         ) === command.fieldId);
         if (!fieldAllowed) return this.scopeDenied('The requested ClickUp Custom Field is not available on the admitted task.');
-        return command.operation === 'setCustomField'
-          ? this.runProvider((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value), expectedRevision)
-          : this.runProvider((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId), expectedRevision);
+        const mutation = command.operation === 'setCustomField'
+          ? await this.providerData((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value), expectedRevision)
+          : await this.providerData((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId), expectedRevision);
+        if (!mutation.ok) return mutation.response;
+
+        // Custom Fields are part of the persisted task projection/search text.
+        // Never serve the pre-write cached task after Elara has changed it.
+        removeClickUpTaskFromAllIndexes(this.ctx.storage.sql, command.taskId);
+        markAllClickUpTaskIndexesStale(this.ctx.storage.sql);
+        return json({ ok: true, result: mutation.data });
       }
       }
     } catch (error) {

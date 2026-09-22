@@ -55,7 +55,7 @@ Normal browser chat continues to call `src/gemini/provider.ts` directly.
 | Worker tests | `worker/test/`, `vitest.workers.config.ts` |
 | Client cloud protocol | `src/autonomy/cloud/`, `src/autonomy/protocol.ts` |
 
-Google authorization semantics are canonical in `SYS-GAUTH / google-auth.md`; ClickUp authorization and REST execution semantics are canonical in `SYS-CLICKUP / clickup.md`.
+Google authorization semantics are canonical in `SYS-GAUTH / google-auth.md`; ClickUp authorization and REST execution semantics are canonical in `SYS-CLICKUP / clickup.md`. ClickUp's legacy `/clickup/oauth/status` JSON shape remains stable; credential-method discovery is a separate authenticated `/clickup/oauth/methods` read so stale browser bundles remain compatible with upgraded Workers.
 
 ## 4. Data and contracts
 

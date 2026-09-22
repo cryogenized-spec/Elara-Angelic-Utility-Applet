@@ -214,6 +214,16 @@ describe('ClickUp OAuth browser authority', () => {
     }
   });
 
+  it('clears stale cached identity when authoritative Worker status cannot be verified', async () => {
+    localStorage.setItem('elara.clickup.authorization.v1', JSON.stringify(STATUS));
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError('Worker unreachable');
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.getStatus()).rejects.toBeInstanceOf(Error);
+    expect(loadStoredClickUpStatus()).toBeNull();
+  });
+
   it('refreshes status with bearer admission and clears metadata on disconnect', async () => {
     let calls = 0;
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {

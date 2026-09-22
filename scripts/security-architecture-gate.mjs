@@ -287,6 +287,7 @@ const autonomyClient = read('src/autonomy/cloud/client.ts');
 const oauthAuthority = read('src/google/oauth/authority.ts');
 const clickUpOAuthAuthority = read('src/clickup/oauth/authority.ts');
 const clickUpMcpClient = read('src/clickup/mcp-client.ts');
+const clickUpMutationReplay = read('src/clickup/mutation-replay.ts');
 const clickUpAttachmentUpload = read('src/clickup/attachment-upload.ts');
 const clickUpAttachmentAuthority = read('src/clickup/attachment-authority.ts');
 const clickUpOAuthVault = read('worker/src/clickup/oauth-vault.ts');
@@ -429,8 +430,30 @@ for (const marker of [
   'assertClickUpArtifactSnapshotCurrent',
   'approvedArtifact.blob',
   'FormData',
+  'MAX_ATTACHMENT_RESPONSE_BYTES',
+  'boundedResponsePayload',
+  "new ClickUpAttachmentUploadError(\n      'response-too-large'",
+  'const currentPairing = loadPairing()',
+  'clickUpPairingAuthorityBinding(currentPairing) !== admittedGrant.authorityBinding',
 ]) {
   if (!clickUpAttachmentUpload.includes(marker)) fail(`ClickUp browser attachment transport boundary is missing: ${marker}`);
+}
+
+for (const marker of [
+  'MAX_CLICKUP_REPLAYS_PER_TURN',
+  'MAX_CLICKUP_REPLAY_TURNS',
+  'JSON.stringify([conversationId, messageId, generationId])',
+  'JSON.stringify([context.tool, callId])',
+  'payloadSignature',
+  "crypto.subtle.digest('SHA-256'",
+  'assertTurnActive(context)',
+  'existing.signature !== signature',
+  'return existing.promise',
+]) {
+  if (!clickUpMutationReplay.includes(marker)) fail(`ClickUp mutation replay authority is missing: ${marker}`);
+}
+if (!/export async function runClickUpMutationOnce[\s\S]*assertTurnActive\(context\);[\s\S]*payloadSignature[\s\S]*assertTurnActive\(context\);[\s\S]*turn\.entries\.get\(key\)/.test(clickUpMutationReplay)) {
+  fail('ClickUp mutation replay must validate elected-turn authority before and after asynchronous payload hashing');
 }
 for (const marker of [
   'artifactRepository.get',

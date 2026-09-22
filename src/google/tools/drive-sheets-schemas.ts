@@ -12,6 +12,52 @@ const valuesSchema = z.array(rowSchema).min(1).max(1000).superRefine((rows, cont
   if (cellCount > 10_000) context.addIssue({ code: 'custom', message: 'Google Sheets writes are limited to 10,000 cells per operation.' });
   if (new TextEncoder().encode(JSON.stringify({ values: rows })).byteLength > 1_000_000) context.addIssue({ code: 'custom', message: 'Google Sheets write exceeds the application request limit.' });
 });
+const MAX_BATCH_UPDATE_BODY_BYTES = 1_000_000;
+const MAX_BATCH_UPDATE_DEPTH = 20;
+const MAX_BATCH_UPDATE_NODES = 50_000;
+const MAX_BATCH_UPDATE_KEYS_PER_OBJECT = 1_000;
+
+function validateBatchUpdateStructure(value: readonly Record<string, unknown>[], context: z.RefinementCtx): void {
+  let serialized: string;
+  try {
+    serialized = JSON.stringify({ requests: value });
+  } catch {
+    context.addIssue({ code: 'custom', message: 'Google Sheets batchUpdate requests must be JSON-serializable.' });
+    return;
+  }
+  if (new TextEncoder().encode(serialized).byteLength > MAX_BATCH_UPDATE_BODY_BYTES) {
+    context.addIssue({ code: 'custom', message: 'Google Sheets batchUpdate exceeds the application request limit.' });
+    return;
+  }
+
+  const stack: Array<{ value: unknown; depth: number }> = value.map((entry) => ({ value: entry, depth: 1 }));
+  let nodes = 0;
+  while (stack.length) {
+    const current = stack.pop()!;
+    nodes += 1;
+    if (nodes > MAX_BATCH_UPDATE_NODES) {
+      context.addIssue({ code: 'custom', message: 'Google Sheets batchUpdate contains too many nested values.' });
+      return;
+    }
+    if (current.depth > MAX_BATCH_UPDATE_DEPTH) {
+      context.addIssue({ code: 'custom', message: 'Google Sheets batchUpdate nesting is too deep.' });
+      return;
+    }
+    if (Array.isArray(current.value)) {
+      for (const nested of current.value) stack.push({ value: nested, depth: current.depth + 1 });
+      continue;
+    }
+    if (!current.value || typeof current.value !== 'object') continue;
+
+    const entries = Object.entries(current.value as Record<string, unknown>);
+    if (entries.length > MAX_BATCH_UPDATE_KEYS_PER_OBJECT) {
+      context.addIssue({ code: 'custom', message: 'Google Sheets batchUpdate object contains too many keys.' });
+      return;
+    }
+    for (const [, nested] of entries) stack.push({ value: nested, depth: current.depth + 1 });
+  }
+}
+
 const updateRequestSchema = z.record(z.string(), z.unknown());
 const inputModeSchema = z.enum(['literal', 'userEntered']).optional();
 
@@ -129,7 +175,10 @@ export const driveSheetsToolArgumentSchemas = {
     startIndex: z.number().int().min(0).max(100_000),
     count: z.number().int().min(1).max(100),
   }).strict(),
-  'sheets.batchUpdate': z.object({ spreadsheetId: fileIdSchema, requests: z.array(updateRequestSchema).min(1).max(100) }).strict(),
+  'sheets.batchUpdate': z.object({
+    spreadsheetId: fileIdSchema,
+    requests: z.array(updateRequestSchema).min(1).max(100).superRefine(validateBatchUpdateStructure),
+  }).strict(),
 } as const;
 
 export type DriveSheetsToolName = keyof typeof driveSheetsToolArgumentSchemas;

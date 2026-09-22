@@ -85,6 +85,37 @@ describe('ClickUp live-turn mutation replay fence', () => {
     expect(operation).toHaveBeenCalledTimes(1);
   });
 
+  it('does not collide elected turns when identity components contain delimiter characters', async () => {
+    const operation = vi.fn(async (label: string) => ({ label }));
+    const payload = { workspaceId: '999', listId: '123', name: 'Repair S56' };
+
+    const firstContext = context({
+      conversationId: 'a',
+      messageId: 'b\u0000c',
+      generationId: 'd',
+    });
+    const secondContext = context({
+      conversationId: 'a\u0000b',
+      messageId: 'c',
+      generationId: 'd',
+    });
+
+    const first = await runClickUpMutationOnce(
+      firstContext,
+      payload,
+      () => operation('first'),
+    );
+    const second = await runClickUpMutationOnce(
+      secondContext,
+      payload,
+      () => operation('second'),
+    );
+
+    expect(first).toEqual({ label: 'first' });
+    expect(second).toEqual({ label: 'second' });
+    expect(operation).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps distinct call ids independent even when their payloads are identical', async () => {
     const operation = vi.fn(async () => ({ ok: true }));
     const payload = { workspaceId: '999', taskId: '86task', text: 'Confirmed.' };

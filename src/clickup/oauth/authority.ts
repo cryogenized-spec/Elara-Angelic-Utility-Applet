@@ -10,6 +10,7 @@ import {
 } from './contracts';
 
 const WORKER_TIMEOUT_MS = 20_000;
+const MAX_WORKER_RESPONSE_BYTES = 64 * 1024;
 const STORAGE_KEY = 'elara.clickup.authorization.v1';
 
 export class ClickUpOAuthError extends Error {
@@ -47,26 +48,74 @@ async function workerToken(pairing: AutonomyPairing): Promise<string> {
   return token;
 }
 
-async function workerRequest(pairing: AutonomyPairing, path: string, init: RequestInit): Promise<Response> {
+interface WorkerJsonResponse {
+  readonly status: number;
+  readonly body: unknown;
+}
+
+async function readBoundedWorkerJson(response: Response): Promise<unknown> {
+  const reader = response.body?.getReader();
+  if (!reader) return null;
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value?.byteLength) continue;
+      total += value.byteLength;
+      if (total > MAX_WORKER_RESPONSE_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new ClickUpOAuthError('response_too_large', 'The paired Worker returned an oversized ClickUp response.', response.status);
+      }
+      chunks.push(value);
+    }
+  } catch (error) {
+    if (error instanceof ClickUpOAuthError) throw error;
+    throw error;
+  }
+
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  if (!bytes.byteLength) return null;
+  try {
+    return JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+  } catch {
+    throw new ClickUpOAuthError('protocol', 'The paired Worker returned invalid ClickUp JSON.', response.status);
+  }
+}
+
+async function workerRequest(pairing: AutonomyPairing, path: string, init: RequestInit): Promise<WorkerJsonResponse> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), WORKER_TIMEOUT_MS);
   try {
-    return await fetch(`${normalizeWorkerBaseUrl(pairing.workerUrl)}${path}`, { ...init, signal: controller.signal });
+    const response = await fetch(`${normalizeWorkerBaseUrl(pairing.workerUrl)}${path}`, { ...init, signal: controller.signal });
+    const body = await readBoundedWorkerJson(response);
+    return { status: response.status, body };
   } catch (error) {
     if (error instanceof ClickUpOAuthError) throw error;
-    throw new ClickUpOAuthError('network', error instanceof Error ? error.message : 'The self-hosted Worker could not be reached.', 0);
+    if (controller.signal.aborted) {
+      throw new ClickUpOAuthError('timeout', 'The paired Worker ClickUp request timed out.', 0);
+    }
+    throw new ClickUpOAuthError('network', 'The self-hosted Worker could not be reached.', 0);
   } finally {
     clearTimeout(timeout);
   }
 }
 
-async function workerError(response: Response): Promise<ClickUpOAuthError> {
-  const body = await response.json().catch(() => null) as { code?: string; message?: string } | null;
-  return new ClickUpOAuthError(
-    body?.code ?? `http-${response.status}`,
-    body?.message ?? `The self-hosted Worker responded with HTTP ${response.status}.`,
-    response.status,
-  );
+function workerError(response: WorkerJsonResponse): ClickUpOAuthError {
+  const record = response.body && typeof response.body === 'object' && !Array.isArray(response.body)
+    ? response.body as Record<string, unknown>
+    : undefined;
+  const code = typeof record?.code === 'string' ? record.code.slice(0, 100) : `http-${response.status}`;
+  const message = typeof record?.message === 'string'
+    ? record.message.slice(0, 1_000)
+    : `The self-hosted Worker responded with HTTP ${response.status}.`;
+  return new ClickUpOAuthError(code, message, response.status);
 }
 
 function persistStatus(status: ClickUpOAuthStatus): void {
@@ -96,8 +145,8 @@ async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatu
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   });
-  if (response.status !== 200) throw await workerError(response);
-  const parsed = clickUpOAuthStatusSchema.parse(await response.json());
+  if (response.status !== 200) throw workerError(response);
+  const parsed = clickUpOAuthStatusSchema.parse(response.body);
   persistStatus(parsed);
   return parsed;
 }
@@ -124,8 +173,8 @@ async function signedPost<T>(
     },
     body,
   });
-  if (response.status !== 200) throw await workerError(response);
-  return parse(await response.json());
+  if (response.status !== 200) throw workerError(response);
+  return parse(response.body);
 }
 
 export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {

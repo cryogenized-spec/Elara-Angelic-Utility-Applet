@@ -1637,6 +1637,7 @@ export class ClickUpOAuthVault extends DurableObject {
       : [`${payload.webhook_id}:body:${await sha256Hex(body)}`];
 
     const now = Date.now();
+    const taskId = safeProviderId(payload.task_id);
     const accepted = this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec(
         'DELETE FROM clickup_webhook_deliveries WHERE received_at < ?',
@@ -1647,6 +1648,11 @@ export class ClickUpOAuthVault extends DurableObject {
         key,
       ).toArray()[0]);
       if (!unseen.length) return false;
+
+      // Commit webhook idempotency and its cache/index effect together. If the
+      // Durable Object is interrupted after this transaction commits, a
+      // provider redelivery cannot be mistaken for "already processed" while
+      // the corresponding delete/stale mutation was actually lost.
       for (const key of unseen) {
         this.ctx.storage.sql.exec(
           'INSERT INTO clickup_webhook_deliveries (dedupe_key, received_at) VALUES (?, ?)',
@@ -1654,20 +1660,18 @@ export class ClickUpOAuthVault extends DurableObject {
           now,
         );
       }
+      if (payload.event === 'taskDeleted' && taskId) {
+        tombstoneClickUpTask(this.ctx.storage.sql, row.workspace_id, taskId, now);
+      } else if (payload.event === 'taskCreated' && taskId) {
+        clearClickUpTaskTombstone(this.ctx.storage.sql, row.workspace_id, taskId);
+      }
+      if (payload.event.startsWith('task')) {
+        markClickUpWorkspaceTaskIndexStale(this.ctx.storage.sql, row.workspace_id);
+      }
       return true;
     });
 
     if (!accepted) return json({ accepted: true, duplicate: true });
-
-    const taskId = safeProviderId(payload.task_id);
-    if (payload.event === 'taskDeleted' && taskId) {
-      tombstoneClickUpTask(this.ctx.storage.sql, row.workspace_id, taskId, now);
-    } else if (payload.event === 'taskCreated' && taskId) {
-      clearClickUpTaskTombstone(this.ctx.storage.sql, row.workspace_id, taskId);
-    }
-    if (payload.event.startsWith('task')) {
-      markClickUpWorkspaceTaskIndexStale(this.ctx.storage.sql, row.workspace_id);
-    }
     return json({ accepted: true });
   }
 

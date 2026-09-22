@@ -40,7 +40,15 @@ export const clickUpToolHandlers: GoogleToolHandlers = Object.fromEntries(
           signal,
           isGenerationActive,
         },
-        args,
+        {
+          arguments: args,
+          admittedGrant: admittedGrant
+            ? {
+                revision: admittedGrant.revision,
+                authorityBinding: admittedGrant.authorityBinding,
+              }
+            : null,
+        },
         execute,
         name === 'clickup.attachArtifact' ? clickupArtifactSnapshot : undefined,
       );

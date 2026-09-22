@@ -13,14 +13,17 @@ export const clickUpOAuthStatusSchema = z.object({
     email: z.string().trim().max(320).optional(),
   }).strict().optional(),
   workspaces: z.array(clickUpWorkspaceSchema).max(100),
-  connectionMethods: z.object({
-    oauth: z.boolean(),
-    personalToken: z.boolean(),
-  }).strict().optional(),
   updatedAt: z.number().int().positive().optional(),
 }).strict();
 
 export type ClickUpOAuthStatus = z.infer<typeof clickUpOAuthStatusSchema>;
+
+export const clickUpConnectionMethodsSchema = z.object({
+  oauth: z.boolean(),
+  personalToken: z.boolean(),
+}).strict();
+
+export type ClickUpConnectionMethods = z.infer<typeof clickUpConnectionMethodsSchema>;
 
 export interface ClickUpExecutionGrant {
   readonly status: ClickUpOAuthStatus;
@@ -38,6 +41,7 @@ export type ClickUpOAuthStart = z.infer<typeof clickUpOAuthStartSchema>;
 
 export interface ClickUpOAuthAuthority {
   getStatus(): Promise<ClickUpOAuthStatus>;
+  getConnectionMethods(): Promise<ClickUpConnectionMethods>;
   getExecutionGrant(): Promise<ClickUpExecutionGrant>;
   beginConnect(redirectUri: string): Promise<ClickUpOAuthStart>;
   completeConnect(input: { code: string; state: string; redirectUri: string }): Promise<ClickUpOAuthStatus>;

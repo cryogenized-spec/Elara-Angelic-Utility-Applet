@@ -99,6 +99,20 @@ describe('Gmail Pass 3 tool parity', () => {
     expect(confirmationRequestForCall({ tool: 'gmail.deleteLabel', arguments: { labelId: 'Label_1' } }, new Date('2026-09-17T12:00:00Z'))?.resourceSummary).toContain('messages themselves are not deleted');
   });
 
+  it('shows every send recipient class before approval', () => {
+    const request = confirmationRequestForCall({
+      tool: 'gmail.sendMessage',
+      arguments: {
+        to: ['bob@example.com'],
+        cc: ['team@example.com', 'audit@example.com'],
+        subject: 'Hello',
+        body: 'Body',
+      },
+    }, new Date('2026-09-17T12:00:00Z'));
+    expect(request?.resourceSummary).toContain('bob@example.com');
+    expect(request?.resourceSummary).toContain('Cc: team@example.com, audit@example.com');
+  });
+
   it('exposes the entire send/reply body through reviewText before approval', () => {
     const body = 'First line\nSecond line\nThird line';
     expect(confirmationRequestForCall({ tool: 'gmail.sendMessage', arguments: { to: ['bob@example.com'], subject: 'Hello', body } }, new Date('2026-09-17T12:00:00Z'))).toMatchObject({ risk: 'send', reviewText: body });

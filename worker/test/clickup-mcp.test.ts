@@ -401,6 +401,9 @@ describe('ClickUp MCP Worker boundary', () => {
           headers: providerHeaders,
         });
       }
+      if (url.pathname === '/api/v2/webhook/cursor-webhook' && providerRequest.method === 'DELETE') {
+        return new Response(JSON.stringify({}), { status: 200, headers: providerHeaders });
+      }
       if (url.pathname === '/api/v2/task/task-a' && providerRequest.method === 'GET') {
         return new Response(JSON.stringify({
           id: 'task-a',
@@ -468,6 +471,24 @@ describe('ClickUp MCP Worker boundary', () => {
     }));
     expect(commentCalls).toBe(1);
     expect(otherTaskReads).toBe(0);
+
+    const replacementRevision = await connectClickUp();
+    expect(replacementRevision).toBeGreaterThan(revision);
+    const staleGrantCursor = await request('tools/call', {
+      name: 'clickup.getTaskComments',
+      arguments: { workspaceId: '999', taskId: 'task-a', cursor, limit: 25 },
+    }, 'clickup.getTaskComments', {
+      [CLICKUP_GRANT_REVISION_HEADER]: String(replacementRevision),
+    });
+    expect(staleGrantCursor.status).toBe(200);
+    const staleBody = await jsonRecord(staleGrantCursor);
+    const staleResult = record(staleBody.result);
+    expect(staleResult.isError).toBe(true);
+    expect(record(record(staleResult.structuredContent).error)).toEqual(expect.objectContaining({
+      code: 'validation',
+      status: 400,
+    }));
+    expect(commentCalls).toBe(1);
   });
 
   it('rejects subtask creation when the approved parent belongs to a different List', async () => {

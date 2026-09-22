@@ -129,14 +129,14 @@ if (!roleplayWorldSource.includes('crypto.subtle.digest')) throw new Error('Reli
 const roleplayBrokerSource = readFileSync(join(root, 'src/google/confirmation/roleplay-broker.ts'), 'utf8');
 if (!roleplayBrokerSource.includes('requestGoogleToolConfirmation')) throw new Error('Reliability gate: Roleplay mutations must use the shared Google confirmation broker.');
 const googleExecutorSource = readFileSync(join(root, 'src/google/tools/executor.ts'), 'utf8');
-if (!googleExecutorSource.includes('JSON.stringify(args, null, 2)')) throw new Error('Reliability gate: mutation confirmations must retain exact validated argument review text.');
+if (!googleExecutorSource.includes('friendlyArgumentReview') || googleExecutorSource.includes('JSON.stringify(args, null, 2)')) throw new Error('Reliability gate: mutation confirmations must retain full validated review detail without raw JSON presentation.');
 const googleBrokerSource = readFileSync(join(root, 'src/google/confirmation/broker.ts'), 'utf8');
 if (!googleBrokerSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google mutations must support grouped confirmation requests.');
 if (!googleBrokerSource.includes("decline.dataset.decision = 'decline';") || !googleBrokerSource.includes("selected.dataset.decision = 'selected';")) throw new Error('Reliability gate: Google mutations must expose explicit decline and selected-approval controls through DOM-safe decision assignments.');
 if (googleBrokerSource.includes("all.dataset.decision = 'all';") || googleBrokerSource.includes('✓ Approve all')) throw new Error('Reliability gate: grouped mutations must not regain one-click approve-all authority.');
 if (!googleBrokerSource.includes('checkbox.checked = requests.length === 1 && request.untrustedContext !== true;')) throw new Error('Reliability gate: grouped and tainted mutation confirmations must default unselected.');
 if (googleBrokerSource.includes('innerHTML')) throw new Error('Reliability gate: Google confirmation UI must not regain raw HTML parsing authority.');
-if (!googleBrokerSource.includes('aria-label')) throw new Error('Reliability gate: Google confirmation controls must be accessible.');
+if (!googleBrokerSource.includes('aria-label') || !googleBrokerSource.includes('confirmationToolPresentation')) throw new Error('Reliability gate: confirmation controls must remain accessible and provider actions human-readable.');
 if (!googleBrokerSource.includes("warning.dataset.untrustedContext = 'true';") || !googleBrokerSource.includes('refreshApproveState')) throw new Error('Reliability gate: tainted confirmations must expose warning state and require explicit selection.');
 const toolLoopSource = readFileSync(join(root, 'src/gemini/google-tool-loop.ts'), 'utf8');
 if (!toolLoopSource.includes('requestGoogleToolConfirmations')) throw new Error('Reliability gate: Google tool loop must route mutation batches through the shared confirmation broker.');

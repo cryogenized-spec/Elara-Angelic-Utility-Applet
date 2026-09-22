@@ -298,6 +298,92 @@ async function captureGlyphSettings(page) {
 }
 
 
+async function captureGoogleSettings(page) {
+  await page.goto(appUrl, { waitUntil: 'load' });
+  await page.getByRole('dialog', { name: 'Welcome.' }).waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined);
+  await page.getByRole('button', { name: 'Open sidebar' }).click();
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('button', { name: 'Google' }).click();
+
+  await page.evaluate(() => {
+    const host = globalThis.document.querySelector('.google-oauth-settings');
+    if (!host) throw new Error('Google settings host is unavailable.');
+    const existing = host.querySelector('[data-visual-google-fixture]');
+    existing?.remove();
+
+    const grid = globalThis.document.createElement('div');
+    grid.className = 'google-oauth-settings__grid';
+    grid.setAttribute('data-visual-google-fixture', 'true');
+    for (const [name, badges] of [
+      ['Google Calendar', ['Read', 'Write', 'Calendar list', 'Settings', 'Availability']],
+      ['Google Tasks', ['Read', 'Write']],
+      ['Gmail', ['Read', 'Write', 'Labels', 'Send']],
+      ['Google Drive', ['Read', 'Write', 'Library search']],
+    ]) {
+      const card = globalThis.document.createElement('article');
+      card.className = 'google-oauth-service setting-card';
+      const copy = globalThis.document.createElement('div');
+      copy.className = 'google-oauth-service__copy';
+      const heading = globalThis.document.createElement('strong');
+      heading.textContent = name;
+      copy.appendChild(heading);
+      const status = globalThis.document.createElement('div');
+      status.className = 'google-oauth-service__status';
+      for (const label of badges) {
+        const badge = globalThis.document.createElement('span');
+        badge.className = 'google-oauth-service__badge is-ready';
+        badge.textContent = label;
+        status.appendChild(badge);
+      }
+      card.append(copy, status);
+      grid.appendChild(card);
+    }
+    host.prepend(grid);
+  });
+
+  const grid = page.locator('[data-visual-google-fixture]');
+  await grid.waitFor({ state: 'visible', timeout: 10_000 });
+  await grid.scrollIntoViewIfNeeded();
+
+  const metrics = await grid.locator('.google-oauth-service__badge').evaluateAll((badges) => badges.slice(0, 12).map((badge) => {
+    const box = badge.getBoundingClientRect();
+    const style = globalThis.getComputedStyle(badge);
+    const marker = globalThis.getComputedStyle(badge, '::before');
+    return {
+      text: badge.textContent?.trim() ?? '',
+      width: Number(box.width.toFixed(2)),
+      height: Number(box.height.toFixed(2)),
+      borderRadius: style.borderRadius,
+      alignItems: style.alignItems,
+      lineHeight: style.lineHeight,
+      markerWidth: marker.width,
+      markerHeight: marker.height,
+      markerLineHeight: marker.lineHeight,
+    };
+  }));
+
+  const pagePath = join(outputDir, 'settings-google-page.png');
+  const panelPath = join(outputDir, 'settings-google-permissions.png');
+  await page.screenshot({ path: pagePath, fullPage: false });
+  await grid.screenshot({ path: panelPath });
+
+  const evidence = {
+    schemaVersion: 1,
+    label,
+    scenario: 'settings-google-permission-badges',
+    sourceSha,
+    baseSha,
+    headSha,
+    viewport: VIEWPORT,
+    metrics,
+    files: {
+      page: `${label}/settings-google-page.png`,
+      panel: `${label}/settings-google-permissions.png`,
+    },
+  };
+  await writeFile(join(outputDir, 'settings-google.evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+}
+
 async function captureSettingsMemory(page) {
   // Deterministic Memory settings scenario: one canonical memory (present on
   // both revisions) plus one grounded semantic summary file (only when the
@@ -507,6 +593,12 @@ async function main() {
 
   try {
     await captureGenerationActivity(page);
+    const googlePage = await context.newPage();
+    try {
+      await captureGoogleSettings(googlePage);
+    } finally {
+      await googlePage.close();
+    }
     const memoryPage = await context.newPage();
     try {
       await captureSettingsMemory(memoryPage);

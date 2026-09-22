@@ -194,6 +194,52 @@ describe('ClickUp browser artifact upload', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects an oversized chunked Worker response even without Content-Length', async () => {
+    const artifact = {
+      id: 'artifact-oversized-response',
+      artifactType: 'attachment' as const,
+      kind: 'text' as const,
+      provenance: 'user_upload' as const,
+      status: 'ready' as const,
+      name: 'repair.txt',
+      mimeType: 'text/plain',
+      size: 8,
+      createdAt: 1,
+      data: new Blob(['approved'], { type: 'text/plain' }),
+    };
+    artifactGet.mockResolvedValue(artifact);
+
+    const args = {
+      workspaceId: '999',
+      taskId: '86task',
+      artifactId: 'artifact-oversized-response',
+    };
+    const approvedArtifact = await captureClickUpArtifactApprovalSnapshot(args);
+
+    const encoder = new TextEncoder();
+    globalThis.fetch = vi.fn(async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) {
+        for (let index = 0; index < 6; index += 1) {
+          controller.enqueue(encoder.encode('x'.repeat(50_000)));
+        }
+        controller.close();
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    })) as unknown as typeof fetch;
+
+    await expect(uploadClickUpArtifact(
+      args,
+      undefined,
+      { revision: 123, authorityBinding: 'https://worker.example#test-installation' },
+      approvedArtifact,
+    )).rejects.toMatchObject({
+      code: 'response-too-large',
+      status: 200,
+    });
+  });
+
   it('uploads the immutable approved Blob rather than a second mutable repository read', async () => {
     const approvedArtifactRecord = {
       id: 'artifact-1',

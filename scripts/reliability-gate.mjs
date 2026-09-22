@@ -101,9 +101,14 @@ const characterSource = readFileSync(join(root, 'src/character/system-instructio
 if (!characterSource.includes("export const ELARA_SYSTEM_INSTRUCTION = '';")) throw new Error('Reliability gate: no built-in Elara Character Master prompt may be shipped.');
 
 const appSource = readFileSync(join(root, 'src/app/App.tsx'), 'utf8');
+const clickUpToolElectionSource = readFileSync(join(root, 'src/clickup/tool-election.ts'), 'utf8');
+for (const marker of ['loadStoredClickUpStatus', 'clickupToolNameSchema', 'defaultGeminiToolsForClickUpConnection', 'defaultGeminiToolsForCurrentSession']) {
+  if (!clickUpToolElectionSource.includes(marker)) throw new Error(`Reliability gate: ClickUp provider-aware tool election is missing ${marker}.`);
+}
 if (appSource.includes('buildCharacterInstruction')) throw new Error('Reliability gate: legacy character instruction resolver must not be used.');
-if (!appSource.includes('googleGeminiFunctionNames')) throw new Error('Reliability gate: normal character turns must receive the registered capability surface.');
-if (!appSource.includes('tools: DEFAULT_GEMINI_TOOLS')) throw new Error('Reliability gate: normal and regenerated turns must expose the canonical executable tool surface.');
+if (!appSource.includes('defaultGeminiToolsForCurrentSession')) throw new Error('Reliability gate: normal character turns must elect the registered capability surface through provider-aware tool election.');
+if (!appSource.includes('tools: defaultGeminiToolsForCurrentSession()')) throw new Error('Reliability gate: normal and regenerated turns must elect the canonical executable tool surface at dispatch time.');
+if (appSource.includes('const DEFAULT_GEMINI_TOOLS = googleGeminiFunctionNames()')) throw new Error('Reliability gate: provider-gated tool schemas must not be frozen into every chat turn.');
 if (!appSource.includes('readOnly: false')) throw new Error('Reliability gate: character tool loop must not force normal turns into read-only mode.');
 if (appSource.includes('Configure it before sending a message')) throw new Error('Reliability gate: an empty Character Master must not block normal chat.');
 if (appSource.includes('Configure it before regenerating')) throw new Error('Reliability gate: an empty Character Master must not block regeneration.');

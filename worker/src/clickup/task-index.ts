@@ -651,10 +651,10 @@ export function commitClickUpFullReconcileStage(
         parent_id, list_id, folder_id, space_id, status, assignee_ids_json, indexed_at
       )
       SELECT workspace_id, task_id, task_json, search_text, updated_at, closed, archived,
-             parent_id, list_id, folder_id, space_id, status, assignee_ids_json, indexed_at
+             parent_id, list_id, folder_id, space_id, status, assignee_ids_json, ?
         FROM clickup_task_index_reconcile_stage
        WHERE workspace_id = ?
-    `, workspaceId);
+    `, completedAt, workspaceId);
     sql.exec(`
       UPDATE clickup_task_index_state
          SET full_sync_complete = 1,

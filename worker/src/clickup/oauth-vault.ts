@@ -540,6 +540,11 @@ export class ClickUpOAuthVault extends DurableObject {
 
       if (currentReset !== null && currentReset <= nowSeconds) return;
 
+      // A response from an older provider window may arrive after a newer
+      // response has already established the current budget. Never let that
+      // stale snapshot consume quota from the newer window.
+      if (currentReset !== null && incomingReset !== null && incomingReset < currentReset) return;
+
       const providerWindowAdvanced = currentReset !== null
         && incomingReset !== null
         && incomingReset > nowSeconds
@@ -1945,29 +1950,43 @@ export class ClickUpOAuthVault extends DurableObject {
     if (this.connectionEpoch() !== exchangeEpoch) {
       return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
     }
-    const previous = this.credentialRow();
-    const revision = Math.max(now, (previous?.updated_at ?? 0) + 1);
-    this.ctx.storage.sql.exec(`
-      INSERT INTO clickup_oauth_credential (
-        slot, access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at
-      ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(slot) DO UPDATE SET
-        access_cipher = excluded.access_cipher,
-        access_iv = excluded.access_iv,
-        user_id = excluded.user_id,
-        username = excluded.username,
-        email = excluded.email,
-        workspaces_json = excluded.workspaces_json,
-        updated_at = excluded.updated_at
-    `, encrypted.cipher, encrypted.iv, account.data.id, account.data.username ?? null, account.data.email ?? null, JSON.stringify(workspaces.data), revision);
+    // Credential replacement and all grant-scoped local state move as one
+    // SQLite transaction. A crash must never expose a new account alongside
+    // task/index/webhook/rate state that was populated by the previous grant.
+    const replacement = this.ctx.storage.transactionSync(() => {
+      if (this.connectionEpoch() !== exchangeEpoch) return null;
+      const previous = this.credentialRow();
+      const revision = Math.max(now, (previous?.updated_at ?? 0) + 1);
+      const previousWebhookRows = this.webhookRows();
 
-    // The replacement grant is now authoritative. Remove old local webhook
-    // secrets synchronously before any provider cleanup await so stale
-    // callbacks are ignored immediately, then clean their provider rows
-    // best-effort using the previous token.
-    const previousWebhookRows = this.detachStoredWebhooks();
-    this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
-    clearClickUpTaskIndex(this.ctx.storage.sql);
+      this.ctx.storage.sql.exec(`
+        INSERT INTO clickup_oauth_credential (
+          slot, access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at
+        ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(slot) DO UPDATE SET
+          access_cipher = excluded.access_cipher,
+          access_iv = excluded.access_iv,
+          user_id = excluded.user_id,
+          username = excluded.username,
+          email = excluded.email,
+          workspaces_json = excluded.workspaces_json,
+          updated_at = excluded.updated_at
+      `, encrypted.cipher, encrypted.iv, account.data.id, account.data.username ?? null, account.data.email ?? null, JSON.stringify(workspaces.data), revision);
+      this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');
+      this.ctx.storage.sql.exec('DELETE FROM clickup_webhook_deliveries');
+      this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+      clearClickUpTaskIndex(this.ctx.storage.sql);
+
+      return { revision, previousWebhookRows };
+    });
+    if (!replacement) {
+      return json({ code: 'oauth_superseded', message: 'This ClickUp authorization was superseded by a newer connect or disconnect action.' }, 409);
+    }
+    const { revision, previousWebhookRows } = replacement;
+
+    // Fresh rate metadata belongs to the replacement grant. It is safe to
+    // repopulate after the atomic swap: a crash here loses only a local budget
+    // hint, never account-scoped provider data.
     this.recordRateLimit(mergeRateLimits(account.rateLimit, workspaces.rateLimit));
 
     if (previousAccessToken && previousWebhookRows.length) {
@@ -1996,16 +2015,23 @@ export class ClickUpOAuthVault extends DurableObject {
       return json({ code: 'validation', message: 'ClickUp disconnect payload was invalid.' }, 400);
     }
 
-    // Local disconnect is final before the first await. A reconnect may begin
-    // while provider webhook cleanup is in flight, and the old disconnect must
-    // never resume later and delete the replacement grant.
-    this.advanceConnectionEpoch();
-    const previous = this.credentialRow();
-    const webhookRows = this.detachStoredWebhooks();
-    this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
-    this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
-    this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
-    clearClickUpTaskIndex(this.ctx.storage.sql);
+    // Local disconnect is atomic before the first await. A crash or reconnect
+    // cannot leave a usable credential paired with partially-cleared grant
+    // state, and provider cleanup can safely remain best-effort afterward.
+    const detached = this.ctx.storage.transactionSync(() => {
+      const nextEpoch = this.connectionEpoch() + 1;
+      this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = ? WHERE slot = 1', nextEpoch);
+      const previous = this.credentialRow();
+      const webhookRows = this.webhookRows();
+      this.ctx.storage.sql.exec('DELETE FROM clickup_webhooks');
+      this.ctx.storage.sql.exec('DELETE FROM clickup_webhook_deliveries');
+      this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_credential WHERE slot = 1');
+      this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
+      this.ctx.storage.sql.exec('DELETE FROM clickup_rate_limit WHERE slot = 1');
+      clearClickUpTaskIndex(this.ctx.storage.sql);
+      return { previous, webhookRows };
+    });
+    const { previous, webhookRows } = detached;
 
     let token: string | null = null;
     if (previous) {

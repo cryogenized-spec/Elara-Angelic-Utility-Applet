@@ -6,7 +6,7 @@ vi.mock('../../autonomy/cloud/pairing', () => ({
 }));
 
 import { loadPairing, resolvePairingToken } from '../../autonomy/cloud/pairing';
-import { clickUpOAuthAuthority, loadStoredClickUpStatus } from './authority';
+import { CLICKUP_CONNECTION_SETTLE_MS, clickUpOAuthAuthority, loadStoredClickUpStatus } from './authority';
 
 const pairingMock = vi.mocked(loadPairing);
 const pairingTokenMock = vi.mocked(resolvePairingToken);
@@ -92,6 +92,54 @@ describe('ClickUp OAuth browser authority', () => {
       status: 409,
     });
     expect(localStorage.getItem('elara.clickup.authorization.v1')).toBeNull();
+  });
+
+  it('does not let a superseded pairing read erase newer pairing cached status', async () => {
+    const replacementPairing = {
+      ...TEST_PAIRING,
+      workerUrl: 'https://replacement.example',
+      installationId: 'replacement-installation',
+    };
+    const replacementStatus = {
+      ...STATUS,
+      account: { id: '456', username: 'Replacement', email: 'replacement@example.com' },
+      workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
+      updatedAt: 234567,
+    };
+
+    let releaseOld: ((response: Response) => void) | undefined;
+    const oldResponse = new Promise<Response>((resolve) => { releaseOld = resolve; });
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.startsWith('https://worker.example/')) return oldResponse;
+      if (url.startsWith('https://replacement.example/')) {
+        return new Response(JSON.stringify(replacementStatus), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const staleRead = clickUpOAuthAuthority.getStatus();
+    await Promise.resolve();
+    pairingMock.mockReturnValue(replacementPairing);
+
+    await expect(clickUpOAuthAuthority.getStatus()).resolves.toEqual(replacementStatus);
+    expect(loadStoredClickUpStatus()).toEqual(replacementStatus);
+
+    releaseOld?.(new Response(JSON.stringify(STATUS), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }));
+    await expect(staleRead).rejects.toMatchObject({ code: 'grant_changed', status: 409 });
+
+    expect(loadStoredClickUpStatus()).toEqual(replacementStatus);
+  });
+
+  it('ignores legacy unowned cached ClickUp status until the current pairing refreshes it', () => {
+    localStorage.setItem('elara.clickup.authorization.v1', JSON.stringify(STATUS));
+    expect(loadStoredClickUpStatus()).toBeNull();
   });
 
   it('starts authorization with a signed Worker write and never stores credentials', async () => {
@@ -191,39 +239,103 @@ describe('ClickUp OAuth browser authority', () => {
     expect(raw).not.toContain('pk_');
   });
 
-  it('reconciles authoritative status after an ambiguous personal-token response failure', async () => {
-    const replacement = {
-      ...STATUS,
-      account: { id: '456', username: 'Replacement', email: 'replacement@example.com' },
-      workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
-      updatedAt: 234567,
-    };
+  it('keeps an ambiguous personal-token activation unknown until its settle barrier expires', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-22T18:00:00.000Z'));
+      const replacement = {
+        ...STATUS,
+        account: { id: '456', username: 'Replacement', email: 'replacement@example.com' },
+        workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
+        updatedAt: 234567,
+      };
+      let statusReads = 0;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith('/clickup/oauth/personal-token')) {
+          throw new TypeError('response lost after request send');
+        }
+        if (url.endsWith('/clickup/oauth/status')) {
+          statusReads += 1;
+          return new Response(JSON.stringify(replacement), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`Unexpected URL ${url}`);
+      }) as unknown as typeof fetch;
 
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
-      const url = input instanceof Request ? input.url : String(input);
-      if (url.endsWith('/clickup/oauth/personal-token')) {
-        throw new TypeError('response lost after request send');
-      }
-      if (url.endsWith('/clickup/oauth/status')) {
-        return new Response(JSON.stringify(replacement), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
-      }
-      throw new Error(`Unexpected URL ${url}`);
-    }) as unknown as typeof fetch;
+      await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toMatchObject({ code: 'network' });
+      expect(loadStoredClickUpStatus()).toBeNull();
 
-    await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toBeInstanceOf(Error);
-    expect(loadStoredClickUpStatus()).toEqual(replacement);
+      await expect(clickUpOAuthAuthority.getStatus()).rejects.toMatchObject({
+        code: 'connection_pending',
+        status: 409,
+      });
+      expect(statusReads).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(CLICKUP_CONNECTION_SETTLE_MS + 1);
+      await expect(clickUpOAuthAuthority.getStatus()).resolves.toEqual(replacement);
+      expect(statusReads).toBe(1);
+      expect(loadStoredClickUpStatus()).toEqual(replacement);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it('clears stale cached ClickUp identity when token activation and reconciliation both fail', async () => {
-    localStorage.setItem('elara.clickup.authorization.v1', JSON.stringify(STATUS));
+  it('keeps an ambiguous OAuth exchange unknown until its settle barrier expires', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-22T18:00:00.000Z'));
+      let statusReads = 0;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith('/clickup/oauth/exchange')) {
+          throw new TypeError('response lost after request send');
+        }
+        if (url.endsWith('/clickup/oauth/status')) {
+          statusReads += 1;
+          return new Response(JSON.stringify(STATUS), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          });
+        }
+        throw new Error(`Unexpected URL ${url}`);
+      }) as unknown as typeof fetch;
+
+      await expect(clickUpOAuthAuthority.completeConnect({
+        code: 'authorization-code',
+        state: 'opaque-state-value',
+        redirectUri: 'https://cryogenized-spec.github.io/clickup/oauth/callback',
+      })).rejects.toMatchObject({ code: 'network' });
+
+      await expect(clickUpOAuthAuthority.getExecutionGrant()).rejects.toMatchObject({
+        code: 'connection_pending',
+        status: 409,
+      });
+      expect(statusReads).toBe(0);
+
+      await vi.advanceTimersByTimeAsync(CLICKUP_CONNECTION_SETTLE_MS + 1);
+      await expect(clickUpOAuthAuthority.getExecutionGrant()).resolves.toEqual(expect.objectContaining({
+        status: STATUS,
+        revision: STATUS.updatedAt,
+      }));
+      expect(statusReads).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('clears only the current pairing cache when an ambiguous token activation fails', async () => {
+    localStorage.setItem('elara.clickup.authorization.v1', JSON.stringify({
+      authorityBinding: 'https://worker.example#test-installation',
+      status: STATUS,
+    }));
     globalThis.fetch = vi.fn(async () => {
       throw new TypeError('Worker unreachable');
     }) as unknown as typeof fetch;
 
-    await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toBeInstanceOf(Error);
+    await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toMatchObject({ code: 'network' });
     expect(loadStoredClickUpStatus()).toBeNull();
   });
 
@@ -266,7 +378,10 @@ describe('ClickUp OAuth browser authority', () => {
   });
 
   it('clears stale cached identity when authoritative Worker status cannot be verified', async () => {
-    localStorage.setItem('elara.clickup.authorization.v1', JSON.stringify(STATUS));
+    localStorage.setItem('elara.clickup.authorization.v1', JSON.stringify({
+      authorityBinding: 'https://worker.example#test-installation',
+      status: STATUS,
+    }));
     globalThis.fetch = vi.fn(async () => {
       throw new TypeError('Worker unreachable');
     }) as unknown as typeof fetch;

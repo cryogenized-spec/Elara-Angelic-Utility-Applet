@@ -43,6 +43,7 @@ export type GoogleSheetInputMode = 'literal' | 'userEntered';
 export interface GoogleSheetsMutationOptions {
   readonly signal?: AbortSignal;
   readonly isGenerationActive?: () => boolean;
+  readonly beforeProviderFetch?: () => void | Promise<void>;
 }
 
 export type GoogleSheetsExportFormat = 'pdf' | 'xlsx';
@@ -91,6 +92,14 @@ function requireMutationCurrent(options: GoogleSheetsMutationOptions, operation:
   if (options.signal?.aborted || options.isGenerationActive?.() === false) {
     throw new DOMException(`${operation} lost turn authority.`, 'AbortError');
   }
+}
+
+function providerMutationGuard(options: GoogleSheetsMutationOptions, operation: string): () => Promise<void> {
+  return async () => {
+    requireMutationCurrent(options, operation);
+    await options.beforeProviderFetch?.();
+    requireMutationCurrent(options, operation);
+  };
 }
 
 function inputOption(mode: GoogleSheetInputMode): 'RAW' | 'USER_ENTERED' {
@@ -310,7 +319,7 @@ export class GoogleSheetsService {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ range: rangeText, majorDimension: 'ROWS', values: safeValues }),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Sheets write'));
+    }, providerMutationGuard(options, 'Google Sheets write'));
     const payload = await this.readJson<{ updatedData?: { range?: unknown; majorDimension?: unknown; values?: unknown } }>(response);
     const updatedValues = Array.isArray(payload.updatedData?.values)
       ? normalizeValues(payload.updatedData.values.filter(Array.isArray) as readonly (readonly unknown[])[])
@@ -345,7 +354,7 @@ export class GoogleSheetsService {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ majorDimension: 'ROWS', values: safeValues }),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Sheets append'));
+    }, providerMutationGuard(options, 'Google Sheets append'));
     const payload = await this.readJson<{ updates?: { updatedRange?: unknown; updatedData?: { values?: unknown } } }>(response);
     const updatedValues = Array.isArray(payload.updates?.updatedData?.values)
       ? normalizeValues(payload.updates.updatedData.values.filter(Array.isArray) as readonly (readonly unknown[])[])
@@ -386,7 +395,7 @@ export class GoogleSheetsService {
     const response = await access.fetch(
       `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(idValue)}/export?mimeType=${encodeURIComponent(target.mimeType)}`,
       options.signal ? { signal: options.signal } : undefined,
-      () => requireMutationCurrent(options, 'Google Sheets export'),
+      providerMutationGuard(options, 'Google Sheets export'),
     );
     const content = await readBoundedGoogleContent(response, 'Google Sheets export', boundedGoogleTransferLimit(options.maxBytes), options.signal);
     return { format, mimeType: target.mimeType, extension: target.extension, bytes: content.bytes };
@@ -407,7 +416,7 @@ export class GoogleSheetsService {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Sheets create spreadsheet'));
+    }, providerMutationGuard(options, 'Google Sheets create spreadsheet'));
     const payload = await this.readJson<SpreadsheetResponse>(response);
     return spreadsheetSummary(payload, undefined, safeTitle);
   }
@@ -433,7 +442,7 @@ export class GoogleSheetsService {
         requests: [{ addSheet: { properties: { title: safeTitle, gridProperties: { rowCount, columnCount } } } }],
       }),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Sheets add sheet'));
+    }, providerMutationGuard(options, 'Google Sheets add sheet'));
     const payload = await this.readJson<{ replies?: unknown }>(response);
     const replies = Array.isArray(payload.replies) ? payload.replies : [];
     const first = replies[0] && typeof replies[0] === 'object' && !Array.isArray(replies[0]) ? replies[0] as Record<string, unknown> : {};
@@ -476,7 +485,7 @@ export class GoogleSheetsService {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ requests: safeRequests }),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Sheets structural update'));
+    }, providerMutationGuard(options, 'Google Sheets structural update'));
     return this.readJson(response);
   }
 

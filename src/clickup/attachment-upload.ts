@@ -92,6 +92,14 @@ export async function uploadClickUpArtifact(
     throw error;
   }
 
+  // Artifact revalidation is asynchronous. Re-read pairing authority after it
+  // completes so a re-pair during hashing/materialization cannot send the
+  // approved bytes to a previously paired Worker.
+  const currentPairing = loadPairing();
+  if (!currentPairing || clickUpPairingAuthorityBinding(currentPairing) !== admittedGrant.authorityBinding) {
+    throw new ClickUpAttachmentUploadError('grant_changed', 'The paired Worker changed before ClickUp attachment egress.', 409);
+  }
+
   const form = new FormData();
   form.set('workspaceId', args.workspaceId);
   form.set('taskId', args.taskId);

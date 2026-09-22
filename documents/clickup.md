@@ -176,6 +176,8 @@ ClickUp mutations use the shared Elara watchdog rather than a ClickUp-specific c
 
 The same validated mutation remains authoritative underneath. The watchdog projects it into human-readable provider/action labels and readable field/value review text. Examples include **ClickUp · Post comment**, **ClickUp · Update task**, and **ClickUp · Attach file**. Comment/reply bodies are shown directly. Attachment review shows the approved filename/type/size and destination while the SHA-256 binding remains internal to the immutable artifact authority.
 
+Review sizing is adaptive. Short actions retain a compact watchdog. Substantial text expands into a viewport-aware review sheet; heading and decision controls remain outside the scrolling content surface so the user can inspect much more of an essay, long comment or document edit without losing Approve/Decline. On narrow mobile viewports expanded mode respects safe-area insets.
+
 External provider content still elevates confirmation. The warning is phrased for the human rather than as security/debug terminology, and the action remains unselected until the user explicitly selects it. Grouped mutations likewise remain individually selectable with no approve-all shortcut.
 
 
@@ -258,9 +260,12 @@ Before confirmation Elara resolves the local ready artifact and captures an immu
 - MIME type;
 - metadata size and Blob size;
 - SHA-256 digest;
-- exact Blob object.
+- exact Blob object;
+- when the MIME type is explicitly text-readable, a bounded preview derived from the beginning of that exact Blob.
 
-The confirmation describes that approved payload. Immediately before transport, Elara re-reads and hashes the mutable repository entry. If bytes or relevant metadata changed under the same artifact ID, upload fails with `artifact-changed` and sends nothing.
+The human confirmation receives only safe attachment presentation fields: filename, upload name, MIME type, size and the optional bounded text preview. Binary formats such as PDF are not opportunistically decoded, OCRed or rendered as fake text previews. A truncated preview is labelled as such and never changes what is approved: approval remains bound to the complete immutable Blob and SHA-256 digest.
+
+Immediately before transport, Elara re-reads and hashes the mutable repository entry. If bytes or relevant metadata changed under the same artifact ID, upload fails with `artifact-changed` and sends nothing.
 
 The uploaded multipart file is the original approved Blob, not the second repository read.
 

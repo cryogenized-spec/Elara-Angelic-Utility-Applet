@@ -74,7 +74,7 @@ async function connect() {
   expect(grantRevision).toBeGreaterThan(0);
 }
 
-async function search(argumentsValue: Record<string, unknown>) {
+async function internalCommand(command: unknown) {
   return doFetch(new Request('https://clickup-oauth-vault/internal/clickup/command', {
     method: 'POST',
     headers: {
@@ -82,8 +82,12 @@ async function search(argumentsValue: Record<string, unknown>) {
       'X-Elara-Internal': await internalWakeMarker(TOKEN),
       [CLICKUP_GRANT_REVISION_HEADER]: String(grantRevision),
     },
-    body: JSON.stringify({ operation: 'searchTaskIndex', arguments: argumentsValue }),
+    body: JSON.stringify(command),
   }));
+}
+
+async function search(argumentsValue: Record<string, unknown>) {
+  return internalCommand({ operation: 'searchTaskIndex', arguments: argumentsValue });
 }
 
 async function materializedSearch(argumentsValue: Record<string, unknown>): Promise<{
@@ -826,6 +830,90 @@ describe('ClickUp durable task index', () => {
       fullSyncComplete: true,
       indexedTasks: 101,
     }));
+  });
+
+  it('invalidates cached task evidence before a Custom Field write reaches ClickUp', async () => {
+    let fieldWriteStarted = false;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'token-prewrite-invalidation' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/task' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          tasks: [{
+            id: 'task-field',
+            name: 'Cached custom field task',
+            date_updated: '1790000000000',
+            status: { status: 'open' },
+            list: { id: '123', name: 'Repairs' },
+            space: { id: '789' },
+            custom_fields: [{ id: 'field-1', name: 'State', type: 'short_text', value: 'old' }],
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/task/task-field' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: 'task-field',
+          name: 'Cached custom field task',
+          team_id: '999',
+          list: { id: '123', name: 'Repairs' },
+          space: { id: '789' },
+          custom_fields: [{ id: 'field-1', name: 'State', type: 'short_text', value: 'old' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/list/123/field' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          fields: [{ id: 'field-1', name: 'State', type: 'short_text' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/task/task-field/field/field-1' && request.method === 'POST') {
+        fieldWriteStarted = true;
+        await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        return new Response(JSON.stringify({}), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+
+      throw new Error(`Unexpected provider request: ${request.method} ${request.url}`);
+    });
+
+    await connect();
+    expect((await search({ workspaceId: '999', query: 'cached custom field' })).status).toBe(200);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      indexedTasks: 1,
+      fullSyncComplete: true,
+    }));
+
+    const pendingWrite = internalCommand({
+      operation: 'setCustomField',
+      workspaceId: '999',
+      taskId: 'task-field',
+      fieldId: 'field-1',
+      value: 'new',
+    });
+
+    for (let attempt = 0; attempt < 100 && !fieldWriteStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(fieldWriteStarted).toBe(true);
+
+    // The provider write is still in flight, but the pre-write snapshot must
+    // already be unavailable and marked stale. A crash at this point therefore
+    // cannot resurrect the old Custom Field value as "current" evidence.
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      indexedTasks: 0,
+      lastRefreshAt: 0,
+    }));
+
+    expect((await pendingWrite).status).toBe(200);
   });
 
   it('rejects search for a Workspace outside the OAuth grant before provider egress', async () => {

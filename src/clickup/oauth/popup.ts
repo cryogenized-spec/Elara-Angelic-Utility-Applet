@@ -42,7 +42,7 @@ export function forwardClickUpOAuthCallbackFromPopup(): boolean {
   return true;
 }
 
-async function authorizeClickUpWithPopup(beforeStart?: () => Promise<void>): Promise<ClickUpOAuthStatus> {
+async function authorizeClickUpWithPopup(): Promise<ClickUpOAuthStatus> {
   if (typeof window === 'undefined') throw new Error('ClickUp authorization is available only in the browser.');
 
   // Create the window under the initiating user gesture before any asynchronous
@@ -54,7 +54,6 @@ async function authorizeClickUpWithPopup(beforeStart?: () => Promise<void>): Pro
 
   const targetRedirect = redirectUri();
   try {
-    if (beforeStart) await beforeStart();
     const started = await clickUpOAuthAuthority.beginConnect(targetRedirect);
     popup.location.replace(started.authorizationUrl);
 
@@ -112,5 +111,8 @@ export function connectClickUpWithPopup(): Promise<ClickUpOAuthStatus> {
 }
 
 export function switchClickUpAccountWithPopup(): Promise<ClickUpOAuthStatus> {
-  return authorizeClickUpWithPopup(() => clickUpOAuthAuthority.disconnect());
+  // The Worker keeps the existing grant live until a replacement exchange is
+  // fully validated and atomically committed. Do not tear down a working
+  // connection merely because the user opened/cancelled a replacement flow.
+  return authorizeClickUpWithPopup();
 }

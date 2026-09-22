@@ -18,6 +18,7 @@ const MAX_OAUTH_BODY_BYTES = 16 * 1024;
 const CLICKUP_OAUTH_PATHS = new Set([
   '/clickup/oauth/status',
   '/clickup/oauth/methods',
+  '/clickup/oauth/connection-state',
   '/clickup/oauth/start',
   '/clickup/oauth/exchange',
   '/clickup/oauth/personal-token',
@@ -132,7 +133,11 @@ export async function handleClickUpOAuthRoute(
 
   if (
     request.method === 'GET'
-    && (pathname === '/clickup/oauth/status' || pathname === '/clickup/oauth/methods')
+    && (
+      pathname === '/clickup/oauth/status'
+      || pathname === '/clickup/oauth/methods'
+      || pathname === '/clickup/oauth/connection-state'
+    )
   ) {
     if (!(await verifyBearerToken(bearer(request), token))) return json({ code: 'auth', message: 'A valid installation credential is required.' }, 401, corsOrigin);
     return forward(env, request, undefined, corsOrigin);
@@ -142,6 +147,7 @@ export async function handleClickUpOAuthRoute(
     request.method !== 'POST'
     || pathname === '/clickup/oauth/status'
     || pathname === '/clickup/oauth/methods'
+    || pathname === '/clickup/oauth/connection-state'
   ) {
     return json({ code: 'method', message: 'Method not allowed.' }, 405, corsOrigin);
   }

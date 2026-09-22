@@ -233,6 +233,12 @@ try {
       '',
     ));
   });
+  addMutation('ClickUp browser OAuth response bound bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp browser OAuth deadline must remain active through bounded Worker response-body consumption', (cwd) => {
+    mutateRelative(cwd, 'src/clickup/oauth/authority.ts', (source) => source.replace(
+      'const body = await readBoundedWorkerJson(response);',
+      'const body = null;',
+    ));
+  });
   addMutation('ClickUp live catalog comparison bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp live catalog admission disappeared', (cwd) => {
     mutateRelative(cwd, 'worker/src/clickup/mcp-route.ts', (source) => source.replace(
       'if (!presentedCatalog || presentedCatalog !== liveCatalog)',

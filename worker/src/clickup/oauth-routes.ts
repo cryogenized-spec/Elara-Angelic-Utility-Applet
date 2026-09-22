@@ -130,12 +130,19 @@ export async function handleClickUpOAuthRoute(
   const token = env.ELARA_INSTALLATION_TOKEN?.trim() ?? '';
   if (!token || !env.CLICKUP_OAUTH) return json({ code: 'configuration', message: 'Durable ClickUp OAuth is not configured on this Worker.' }, 503, corsOrigin);
 
-  if (request.method === 'GET' && pathname === '/clickup/oauth/status') {
+  if (
+    request.method === 'GET'
+    && (pathname === '/clickup/oauth/status' || pathname === '/clickup/oauth/methods')
+  ) {
     if (!(await verifyBearerToken(bearer(request), token))) return json({ code: 'auth', message: 'A valid installation credential is required.' }, 401, corsOrigin);
     return forward(env, request, undefined, corsOrigin);
   }
 
-  if (request.method !== 'POST' || pathname === '/clickup/oauth/status') {
+  if (
+    request.method !== 'POST'
+    || pathname === '/clickup/oauth/status'
+    || pathname === '/clickup/oauth/methods'
+  ) {
     return json({ code: 'method', message: 'Method not allowed.' }, 405, corsOrigin);
   }
 

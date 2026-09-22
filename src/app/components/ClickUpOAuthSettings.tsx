@@ -30,6 +30,7 @@ export function ClickUpOAuthSettings() {
     try {
       setStatus(await clickUpOAuthAuthority.getStatus());
       setStatusUnknown(false);
+      await refreshConnectionMethods();
       return true;
     } catch {
       setStatusUnknown(true);

@@ -660,6 +660,7 @@ for (const marker of [
   "crypto.subtle.sign('HMAC'",
   'parsed.workspaceId !== workspaceId',
   'parsed.taskId !== taskId',
+  'parsed.grantRevision !== grantRevision',
   'equalBytes(presentedMac, expectedMac)',
 ]) {
   if (!clickUpToolService.includes(marker)) fail(`ClickUp comment cursor authority is missing: ${marker}`);

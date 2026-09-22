@@ -2277,7 +2277,15 @@ export class ClickUpOAuthVault extends DurableObject {
     }
 
     const now = Date.now();
-    const connectionEpoch = this.advanceConnectionEpoch();
+    const connectionEpoch = this.ctx.storage.transactionSync(() => {
+      // A configured-token connection is an explicit replacement gesture.
+      // Supersede every pending OAuth popup/state so a late callback cannot
+      // overwrite the credential the user just chose.
+      const next = this.connectionEpoch() + 1;
+      this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = ? WHERE slot = 1', next);
+      this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
+      return next;
+    });
     const previousAccessToken = await this.accessToken().catch(() => null);
     return this.installCredential(request, accessToken, connectionEpoch, previousAccessToken, now);
   }

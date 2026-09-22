@@ -101,6 +101,7 @@ export interface GoogleDriveTransferOptions {
 export interface GoogleDriveMutationOptions {
   signal?: AbortSignal;
   isGenerationActive?: () => boolean;
+  beforeProviderFetch?: () => void | Promise<void>;
 }
 
 function requireText(value: string, field: string, maxLength: number = DRIVE_LIMITS.maxNameLength): string {
@@ -280,6 +281,14 @@ function requireMutationCurrent(options: GoogleDriveMutationOptions, operation: 
   }
 }
 
+function providerMutationGuard(options: GoogleDriveMutationOptions, operation: string): () => Promise<void> {
+  return async () => {
+    requireMutationCurrent(options, operation);
+    await options.beforeProviderFetch?.();
+    requireMutationCurrent(options, operation);
+  };
+}
+
 /**
  * Optional free-form Drive parameters are bounded at the service boundary, not
  * only in the model schema, so a direct caller cannot widen the contract the
@@ -418,7 +427,7 @@ export class GoogleDriveService {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Drive create'));
+    }, providerMutationGuard(options, 'Google Drive create'));
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
 
@@ -444,7 +453,7 @@ export class GoogleDriveService {
       headers,
       body: JSON.stringify(body),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Drive update'));
+    }, providerMutationGuard(options, 'Google Drive update'));
     if (!response.ok) throwMutationFailure(response, 'update');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
@@ -474,7 +483,7 @@ export class GoogleDriveService {
       method: 'PATCH',
       headers,
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Drive move'));
+    }, providerMutationGuard(options, 'Google Drive move'));
     if (!response.ok) throwMutationFailure(response, 'move');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }
@@ -496,7 +505,7 @@ export class GoogleDriveService {
       headers,
       body: JSON.stringify({ trashed: true }),
       ...(options.signal ? { signal: options.signal } : {}),
-    }, () => requireMutationCurrent(options, 'Google Drive trash'));
+    }, providerMutationGuard(options, 'Google Drive trash'));
     if (!response.ok) throwMutationFailure(response, 'trash');
     return asFileSummary(await this.readJson<DriveFileResponse>(response));
   }

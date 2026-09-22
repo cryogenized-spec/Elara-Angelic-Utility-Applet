@@ -474,6 +474,10 @@ for (const marker of [
   'invalidation_generation',
   'taskIndexInvalidationGeneration',
   'invalidation_generation = invalidation_generation + 1',
+  'clickup_task_index_tombstones',
+  'tombstoneClickUpTask',
+  'clearClickUpTaskTombstone',
+  'clickUpTaskTombstoned',
 ]) {
   if (!clickUpTaskIndex.includes(marker)) fail(`ClickUp task-index boundary is missing: ${marker}`);
 }
@@ -481,6 +485,10 @@ for (const marker of [
   'restartIfInvalidated',
   'taskIndexInvalidationGeneration',
   'retryOnInvalidation',
+  "payload.event === 'taskDeleted'",
+  "payload.event === 'taskCreated'",
+  'tombstoneClickUpTask',
+  'clearClickUpTaskTombstone',
   'padDeniedHierarchicalScope',
   "...(args.assignees?.remove ?? [])",
 ]) {

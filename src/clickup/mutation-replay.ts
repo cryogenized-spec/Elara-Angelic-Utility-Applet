@@ -70,13 +70,13 @@ function electedTurnKey(context: ClickUpMutationReplayContext): string | undefin
   const messageId = context.messageId?.trim();
   const generationId = context.generationId?.trim();
   if (!conversationId || !messageId || !generationId) return undefined;
-  return `${conversationId}\u0000${messageId}\u0000${generationId}`;
+  return JSON.stringify([conversationId, messageId, generationId]);
 }
 
 function replayKey(context: ClickUpMutationReplayContext): string | undefined {
   const callId = context.callId?.trim();
   if (!callId) return undefined;
-  return `${context.tool}\u0000${callId}`;
+  return JSON.stringify([context.tool, callId]);
 }
 
 function contextIsActive(

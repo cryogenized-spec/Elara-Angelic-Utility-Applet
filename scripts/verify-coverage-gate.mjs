@@ -179,10 +179,16 @@ try {
       `// ${verifier}\n        const scoped = { ok: true, task: {} as Record<string, unknown> };`,
     ));
   });
-  addMutation('ClickUp Workspace assignee validation bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp resource-scope enforcement call count changed', (cwd) => {
+  addMutation('ClickUp live Workspace assignee validation bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp resource-scope enforcement call count changed', (cwd) => {
     mutateRelative(cwd, 'worker/src/clickup/oauth-vault.ts', (source) => source.replace(
-      'const invalidAssignees = this.validateWorkspaceUsers(args.workspaceId, args.assigneeIds);',
+      'const invalidAssignees = await this.validateFreshWorkspaceUsers(args.workspaceId, args.assigneeIds, expectedRevision);',
       'const invalidAssignees = null;',
+    ));
+  });
+  addMutation('ClickUp assignee resolution regresses to stale OAuth-time membership', 'scripts/security-architecture-gate.mjs', 'ClickUp assignee resolution must use live Workspace membership', (cwd) => {
+    mutateRelative(cwd, 'worker/src/clickup/tool-service.ts', (source) => source.replace(
+      "operation: 'getWorkspaceAuthorizationContext'",
+      "operation: 'getAuthorizationContext'",
     ));
   });
   addMutation('ClickUp tainted mutation intent bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp untrusted mutation admission lost fresh-user intent check', (cwd) => {

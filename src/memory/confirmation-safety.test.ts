@@ -53,10 +53,21 @@ describe('durable memory write confirmation safety', () => {
     const body = `Persist this durable project note. ${'x'.repeat(600)}`;
     const request = confirmationRequestForCall({
       tool: 'memory.save',
-      arguments: { title: 'Project note', body },
+      arguments: {
+        title: 'Project note',
+        body,
+        kind: 'EPISODIC',
+        confidence: 0.9,
+        importance: 0.8,
+        tags: ['Project', ' Priority '],
+      },
     }, new Date('2026-09-17T08:00:00Z'));
 
     expect(request?.resourceSummary).toContain('Project note');
+    expect(request?.resourceSummary).toContain('Kind: EPISODIC');
+    expect(request?.resourceSummary).toContain('confidence: 0.9');
+    expect(request?.resourceSummary).toContain('importance: 0.8');
+    expect(request?.resourceSummary).toContain('tags: project, priority');
     expect(request?.resourceSummary).toMatch(/full proposed body/i);
     expect(request?.reviewText).toBe(body);
     expect(request?.reviewText).toContain('x'.repeat(600));
@@ -78,6 +89,7 @@ describe('durable memory write confirmation safety', () => {
         relation: 'supersede',
         title: 'Corrected layout preference',
         body: proposedBody,
+        tags: ['Layout', 'Correction'],
       },
     }, new Date('2026-09-17T08:00:00Z'), confirmationContext);
 
@@ -87,10 +99,22 @@ describe('durable memory write confirmation safety', () => {
     expect(request?.resourceSummary).toContain('spacious editor layout');
     expect(request?.resourceSummary).toMatch(/supersede/i);
     expect(request?.resourceSummary).toContain('Corrected layout preference');
+    expect(request?.resourceSummary).toContain('Tags on the new evidence: layout, correction');
     expect(request?.resourceSummary).not.toContain(target.id);
     expect(request?.resourceSummary).not.toContain(targetRef);
     expect(request?.reviewText).toBe(proposedBody);
     expect(request?.reviewText).toContain('y'.repeat(500));
+  });
+
+  it('shows effective default durable-memory metadata even when optional fields are omitted', () => {
+    const request = confirmationRequestForCall({
+      tool: 'memory.save',
+      arguments: { title: 'Defaults', body: 'Remember this.' },
+    });
+    expect(request?.resourceSummary).toContain('Kind: CONTEXTUAL');
+    expect(request?.resourceSummary).toContain('confidence: 0.7');
+    expect(request?.resourceSummary).toContain('importance: 0.5');
+    expect(request?.resourceSummary).toContain('tags: none');
   });
 
   it('refuses to display a reconciliation target outside the lookup grant turn', async () => {

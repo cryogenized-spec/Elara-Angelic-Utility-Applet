@@ -254,6 +254,59 @@ describe('ClickUpOAuthVault', () => {
     expect(provider.token).toBe(1);
   });
 
+  it('supersedes an older OAuth exchange already waiting on ClickUp when a new Connect starts', async () => {
+    let tokenCalls = 0;
+    let firstTokenStarted = false;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+      const auth = request.headers.get('Authorization') ?? '';
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        tokenCalls += 1;
+        const sequence = tokenCalls;
+        if (sequence === 1) {
+          firstTokenStarted = true;
+          await new Promise<void>((resolve) => setTimeout(resolve, 200));
+        }
+        return new Response(JSON.stringify({
+          access_token: sequence === 1 ? 'older-token' : 'newest-token',
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/user') {
+        const newest = auth.endsWith('newest-token');
+        return new Response(JSON.stringify({
+          user: { id: newest ? 456 : 183, username: newest ? 'Newest' : 'Older' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({
+          teams: [{ id: '999', name: 'Workspace', members: [] }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected provider request: ${request.method} ${request.url}`);
+    });
+
+    const older = await start();
+    const pendingOlderExchange = exchange(older.state, 'older-code');
+    for (let attempt = 0; attempt < 100 && !firstTokenStarted; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 2));
+    }
+    expect(firstTokenStarted).toBe(true);
+
+    const newest = await start();
+    const newestExchange = await exchange(newest.state, 'newest-code');
+    expect(newestExchange.status).toBe(200);
+    expect((await credentialSnapshot())?.userId).toBe('456');
+
+    const staleResult = await pendingOlderExchange;
+    expect(staleResult.status).toBe(409);
+    expect(await staleResult.json()).toEqual(expect.objectContaining({ code: 'oauth_superseded' }));
+    expect((await credentialSnapshot())?.userId).toBe('456');
+    expect(tokenCalls).toBe(2);
+  });
+
   it('rejects OAuth state replay before another token exchange', async () => {
     const provider = mockProvider();
     const begun = await start();

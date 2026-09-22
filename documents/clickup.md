@@ -139,7 +139,7 @@ user gesture
 -> browser receives bounded account / Workspace metadata only
 ```
 
-The personal token is never accepted from browser input, returned to the browser, placed in model-visible schemas or persisted in browser storage. Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The encrypted credential plaintext is a discriminated `{ kind: 'oauth' | 'personal', token }` envelope, so provider Authorization syntax is selected from structural credential kind rather than inferred from token characters. Legacy pre-personal-token vault rows containing only raw token text are interpreted as OAuth only. The credential is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
+The personal token is never accepted from browser input, returned to the browser, placed in model-visible schemas or persisted in browser storage. Durable state contains ciphertext/IV, a separate non-secret `credential_kind` discriminator, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. Provider Authorization syntax is selected from that durable discriminator rather than inferred from token characters. Existing pre-personal-token rows migrate with `credential_kind = 'oauth'` without decrypting or inspecting their token bytes. The credential is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
 
 ### 5.1 Account identity and Settings surface
 

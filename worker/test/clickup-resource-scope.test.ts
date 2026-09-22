@@ -173,6 +173,15 @@ function providerFixture(): ProviderCounters {
         name: 'Provider task without Workspace ancestry',
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
+    if (url.pathname === '/api/v2/task/task-b-space-only' && request.method === 'GET') {
+      counters.resourceReads += 1;
+      return new Response(JSON.stringify({
+        id: 'task-b-space-only',
+        name: 'SECRET_B_SPACE_ONLY_TASK',
+        list: { id: '2221', name: 'SECRET_B_LIST' },
+        space: { id: '2222' },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }
 
     if (url.pathname === '/api/v2/folder/2223' && request.method === 'GET') {
       counters.resourceReads += 1;
@@ -304,6 +313,31 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     expect(JSON.stringify(await responseBody(
       await internalCommand({ operation: 'getTask', arguments: { workspaceId: '111', taskId: 'task-b' } }),
     ))).not.toContain('SECRET_B');
+  });
+
+  it('equalizes denied task probe cost when provider-visible ancestry is ambiguous', async () => {
+    const counters = providerFixture();
+    await connect();
+
+    const beforeKnown = counters.resourceReads;
+    const knownB = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '111', taskId: 'task-b-space-only' },
+    });
+    const knownProbeCost = counters.resourceReads - beforeKnown;
+
+    const beforeMissing = counters.resourceReads;
+    const missing = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '111', taskId: 'missing-task' },
+    });
+    const missingProbeCost = counters.resourceReads - beforeMissing;
+
+    expect(knownB.status).toBe(403);
+    expect(missing.status).toBe(403);
+    expect(await responseBody(knownB)).toEqual(await responseBody(missing));
+    expect(knownProbeCost).toBe(missingProbeCost);
+    expect(knownProbeCost).toBe(3);
   });
 
   it('blocks provider-visible B Folder and List IDs under A with the same generic scope denial as missing IDs', async () => {

@@ -123,6 +123,31 @@ async function forceIndexedAt(value: number) {
   expect(response.status).toBe(200);
 }
 
+async function seedTombstone(workspaceId: string, taskId: string) {
+  const response = await harnessFetch('/__test/clickup/task-index/tombstone', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId, taskId }),
+  });
+  expect(response.status).toBe(200);
+}
+
+async function tombstoneCount(workspaceId: string): Promise<number> {
+  const response = await harnessFetch(`/__test/clickup/task-index/tombstones?workspaceId=${encodeURIComponent(workspaceId)}`);
+  expect(response.status).toBe(200);
+  const body = await response.json() as { count: number };
+  return body.count;
+}
+
+async function clearWorkspaceIndex(workspaceId: string) {
+  const response = await harnessFetch('/__test/clickup/task-index/clear-workspace', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ workspaceId }),
+  });
+  expect(response.status).toBe(200);
+}
+
 async function taskJsonLength(taskId: string): Promise<number | null> {
   const response = await harnessFetch(
     `/__test/clickup/task-json-length?workspaceId=999&taskId=${encodeURIComponent(taskId)}`,
@@ -157,6 +182,19 @@ async function indexSnapshot(): Promise<{
 }
 
 describe('ClickUp durable task index', () => {
+  it('purges Workspace-scoped deletion tombstones when that Workspace index authority is cleared', async () => {
+    await seedTombstone('999', 'task-old-grant');
+    await seedTombstone('998', 'task-other-workspace');
+    expect(await tombstoneCount('999')).toBe(1);
+    expect(await tombstoneCount('998')).toBe(1);
+
+    await clearWorkspaceIndex('999');
+
+    expect(await tombstoneCount('999')).toBe(0);
+    expect(await tombstoneCount('998')).toBe(1);
+  });
+
+
   it('warms once, serves repeated searches locally, and incrementally refreshes stale indexes', async () => {
     let workspaceTaskCalls = 0;
     const providerRequests: URL[] = [];

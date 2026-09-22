@@ -918,6 +918,23 @@ export class ClickUpOAuthVault extends DurableObject {
 
     let state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
     const now = Date.now();
+
+    // Ensure a generation-bearing state row exists before the first provider
+    // await. Otherwise a webhook racing a brand-new/cold refresh would have no
+    // row to invalidate and an older page could commit afterward.
+    setTaskIndexState(this.ctx.storage.sql, {
+      workspaceId: state.workspaceId,
+      fullSyncComplete: state.fullSyncComplete,
+      nextPage: state.nextPage,
+      lastRefreshAt: state.lastRefreshAt,
+      lastProviderUpdatedAt: state.lastProviderUpdatedAt,
+      oldestIndexedAt: state.oldestIndexedAt,
+      incrementalSince: state.incrementalSince,
+      incrementalNextPage: state.incrementalNextPage,
+      incrementalMaxUpdatedAt: state.incrementalMaxUpdatedAt,
+      invalidationGeneration: state.invalidationGeneration,
+    });
+    state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
     const refreshGeneration = state.invalidationGeneration;
 
     const restartIfInvalidated = async (): Promise<Response | null> => {
@@ -939,6 +956,19 @@ export class ClickUpOAuthVault extends DurableObject {
       && now - fullSnapshotAgeOrigin >= TASK_INDEX_FULL_RECONCILE_MS
     ) {
       clearClickUpWorkspaceTaskIndex(this.ctx.storage.sql, args.workspaceId);
+      state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
+      setTaskIndexState(this.ctx.storage.sql, {
+        workspaceId: state.workspaceId,
+        fullSyncComplete: state.fullSyncComplete,
+        nextPage: state.nextPage,
+        lastRefreshAt: state.lastRefreshAt,
+        lastProviderUpdatedAt: state.lastProviderUpdatedAt,
+        oldestIndexedAt: state.oldestIndexedAt,
+        incrementalSince: state.incrementalSince,
+        incrementalNextPage: state.incrementalNextPage,
+        incrementalMaxUpdatedAt: state.incrementalMaxUpdatedAt,
+        invalidationGeneration: refreshGeneration,
+      });
       state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
     }
 

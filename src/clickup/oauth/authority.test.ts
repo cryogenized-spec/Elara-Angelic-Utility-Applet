@@ -139,6 +139,43 @@ describe('ClickUp OAuth browser authority', () => {
     expect(raw).not.toContain('pk_');
   });
 
+  it('reconciles authoritative status after an ambiguous personal-token response failure', async () => {
+    const replacement = {
+      ...STATUS,
+      account: { id: '456', username: 'Replacement', email: 'replacement@example.com' },
+      workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
+      updatedAt: 234567,
+      connectionMethods: { oauth: false, personalToken: true },
+    };
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/personal-token')) {
+        throw new TypeError('response lost after request send');
+      }
+      if (url.endsWith('/clickup/oauth/status')) {
+        return new Response(JSON.stringify(replacement), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toBeInstanceOf(Error);
+    expect(loadStoredClickUpStatus()).toEqual(replacement);
+  });
+
+  it('clears stale cached ClickUp identity when token activation and reconciliation both fail', async () => {
+    localStorage.setItem('elara.clickup.authorization.v1', JSON.stringify(STATUS));
+    globalThis.fetch = vi.fn(async () => {
+      throw new TypeError('Worker unreachable');
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.connectPersonalToken()).rejects.toBeInstanceOf(Error);
+    expect(loadStoredClickUpStatus()).toBeNull();
+  });
+
   it('rejects oversized paired-Worker OAuth responses before schema parsing', async () => {
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: `https://app.clickup.com/api?${'x'.repeat(70_000)}`,

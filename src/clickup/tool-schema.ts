@@ -59,13 +59,26 @@ const boundedJsonLevelOneSchema = z.union([
     if (Object.keys(value).length > 100) context.addIssue({ code: 'custom', message: 'Custom field objects are limited to 100 keys.' });
   }),
 ]);
+const MAX_CUSTOM_FIELD_VALUE_BYTES = 48 * 1024;
 const boundedCustomFieldValueSchema = z.union([
   boundedJsonLeafSchema,
   z.array(boundedJsonLevelOneSchema).max(100),
   z.record(z.string().min(1).max(128), boundedJsonLevelOneSchema).superRefine((value, context) => {
     if (Object.keys(value).length > 100) context.addIssue({ code: 'custom', message: 'Custom field objects are limited to 100 keys.' });
   }),
-]);
+]).superRefine((value, context) => {
+  // Per-leaf limits alone still permit a combinatorial payload large enough to
+  // waste browser/MCP/Worker memory before the transport byte ceilings reject
+  // it. Keep semantic Custom Field values comfortably below the 64 KiB
+  // internal command boundary, including multibyte Unicode.
+  const serialized = JSON.stringify(value);
+  if (new TextEncoder().encode(serialized).byteLength > MAX_CUSTOM_FIELD_VALUE_BYTES) {
+    context.addIssue({
+      code: 'custom',
+      message: `Custom Field values are limited to ${MAX_CUSTOM_FIELD_VALUE_BYTES} serialized bytes.`,
+    });
+  }
+});
 
 const searchTasksSchema = z.object({
   workspaceId: decimalIdSchema,

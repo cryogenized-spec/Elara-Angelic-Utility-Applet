@@ -58,21 +58,16 @@ async function readBoundedWorkerJson(response: Response): Promise<unknown> {
   if (!reader) return null;
   const chunks: Uint8Array[] = [];
   let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value?.byteLength) continue;
-      total += value.byteLength;
-      if (total > MAX_WORKER_RESPONSE_BYTES) {
-        await reader.cancel().catch(() => undefined);
-        throw new ClickUpOAuthError('response_too_large', 'The paired Worker returned an oversized ClickUp response.', response.status);
-      }
-      chunks.push(value);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value?.byteLength) continue;
+    total += value.byteLength;
+    if (total > MAX_WORKER_RESPONSE_BYTES) {
+      await reader.cancel().catch(() => undefined);
+      throw new ClickUpOAuthError('response_too_large', 'The paired Worker returned an oversized ClickUp response.', response.status);
     }
-  } catch (error) {
-    if (error instanceof ClickUpOAuthError) throw error;
-    throw error;
+    chunks.push(value);
   }
 
   const bytes = new Uint8Array(total);

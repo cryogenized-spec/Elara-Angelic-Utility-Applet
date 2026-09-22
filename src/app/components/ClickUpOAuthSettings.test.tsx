@@ -3,28 +3,36 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+const oauthMocks = vi.hoisted(() => ({
+  getStatus: vi.fn(),
+  disconnect: vi.fn(),
+}));
+
+const popupMocks = vi.hoisted(() => ({
+  connect: vi.fn(),
+  switchAccount: vi.fn(),
+}));
+
 vi.mock('../../clickup/oauth/authority', () => ({
   clickUpOAuthAuthority: {
-    getStatus: vi.fn(),
-    disconnect: vi.fn(),
+    getStatus: oauthMocks.getStatus,
+    disconnect: oauthMocks.disconnect,
   },
 }));
 
 vi.mock('../../clickup/oauth/popup', () => ({
-  connectClickUpWithPopup: vi.fn(),
-  switchClickUpAccountWithPopup: vi.fn(),
+  connectClickUpWithPopup: popupMocks.connect,
+  switchClickUpAccountWithPopup: popupMocks.switchAccount,
 }));
 
-import { clickUpOAuthAuthority } from '../../clickup/oauth/authority';
-import { connectClickUpWithPopup, switchClickUpAccountWithPopup } from '../../clickup/oauth/popup';
 import type { ClickUpOAuthStatus } from '../../clickup/oauth/contracts';
 import { ClickUpOAuthSettings } from './ClickUpOAuthSettings';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const getStatusMock = vi.mocked(clickUpOAuthAuthority.getStatus);
-const connectMock = vi.mocked(connectClickUpWithPopup);
-const switchMock = vi.mocked(switchClickUpAccountWithPopup);
+const getStatusMock = oauthMocks.getStatus;
+const connectMock = popupMocks.connect;
+const switchMock = popupMocks.switchAccount;
 
 const CONNECTED: ClickUpOAuthStatus = {
   connected: true,

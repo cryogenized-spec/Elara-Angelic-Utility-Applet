@@ -59,11 +59,11 @@ Google authorization semantics are canonical in `SYS-GAUTH / google-auth.md`; Cl
 
 ## 4. Data and contracts
 
-The Worker owns deployment-supplied secrets. Existing cloud Gemini execution uses `GEMINI_API_KEY`, but public provider routes never expose that credential as anonymous compute. `/api/gemini` and `/api/transcribe` require `Authorization: Bearer <ELARA_INSTALLATION_TOKEN>` on every request; an allowed browser Origin is additional CORS policy, not admission. The Worker-side Gemini request contract also caps `maxOutputTokens` at 65,536. Durable Google OAuth uses `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and `GOOGLE_OAUTH_VAULT_KEY`. ClickUp uses deployment-owned `CLICKUP_OAUTH_CLIENT_ID`, `CLICKUP_OAUTH_CLIENT_SECRET` and `CLICKUP_OAUTH_VAULT_KEY`. Browser admission to both protected OAuth route families uses the deployment's `ELARA_INSTALLATION_TOKEN`.
+The Worker owns deployment-supplied secrets. Existing cloud Gemini execution uses `GEMINI_API_KEY`, but public provider routes never expose that credential as anonymous compute. `/api/gemini` and `/api/transcribe` require `Authorization: Bearer <ELARA_INSTALLATION_TOKEN>` on every request; an allowed browser Origin is additional CORS policy, not admission. The Worker-side Gemini request contract also caps `maxOutputTokens` at 65,536. Durable Google OAuth uses `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and `GOOGLE_OAUTH_VAULT_KEY`. ClickUp always uses deployment-owned `CLICKUP_OAUTH_VAULT_KEY`. It may authenticate with `CLICKUP_OAUTH_CLIENT_ID` + `CLICKUP_OAUTH_CLIENT_SECRET` for OAuth, or with a deployment-owned `CLICKUP_PERSONAL_TOKEN` for a single-user self-hosted installation. Browser admission to protected ClickUp credential routes uses the deployment's `ELARA_INSTALLATION_TOKEN`; the personal token itself never traverses the browser request.
 
 `GOOGLE_OAUTH_CLIENT_ID` must match the browser `VITE_GOOGLE_CLIENT_ID` for the same Google Web OAuth client. `ALLOWED_ORIGINS` identifies the deployment owner's exact PWA origin. Forks must replace the repository owner's default origin rather than inheriting it.
 
-The `GoogleOAuthVault` and `ClickUpOAuthVault` are separate SQLite-backed Durable Objects, each separate from autonomy state. Google stores one encrypted refresh grant; ClickUp stores one encrypted access token plus authorized account/Workspace metadata. Both keep durable nonce replay ledgers. ClickUp additionally owns one-time OAuth-state records and provider rate-limit state. Provider secrets never return to the browser.
+The `GoogleOAuthVault` and `ClickUpOAuthVault` are separate SQLite-backed Durable Objects, each separate from autonomy state. Google stores one encrypted refresh grant; ClickUp stores one encrypted provider credential (OAuth access token or personal API token) plus authorized account/Workspace metadata. Both keep durable nonce replay ledgers. ClickUp additionally owns one-time OAuth-state records and provider rate-limit state. Provider secrets never return to the browser.
 
 Autonomy uses its own installation-scoped state, configuration generation and bounded context/outcome envelopes. Presence of a Google refresh grant does not automatically add Google tools to a cloud routine.
 
@@ -73,7 +73,7 @@ Autonomy uses its own installation-scoped state, configuration generation and bo
 - Every deployment owns its Worker configuration and provider credentials; there is no shared Elara OAuth backend.
 - Worker secrets never enter browser bundles, model-visible tool schemas or ordinary client persistence.
 - Google refresh tokens never leave the `GoogleOAuthVault` credential boundary.
-- ClickUp access tokens never leave the `ClickUpOAuthVault` credential boundary.
+- ClickUp OAuth access tokens and personal API tokens never leave the `ClickUpOAuthVault` credential boundary after activation; `CLICKUP_PERSONAL_TOKEN` is read only from the Worker secret environment.
 - The OAuth vault and autonomy state are separate durable authorities.
 - Google OAuth writes require signed installation admission and durable nonce replay protection.
 - ClickUp OAuth writes use the same installation signing authority; ClickUp OAuth state is durable, redirect-bound, expiring and single-use.
@@ -100,4 +100,4 @@ CI is the release authority; production Cloudflare secrets themselves are necess
 
 ## 8. Current boundary
 
-The Worker now provides durable provider authorization infrastructure for Google and ClickUp. Google cloud/orchestration execution still requires explicit tool authority. ClickUp REST execution is present only behind the binding-internal closed provider-command boundary; the model-visible MCP/tool path is not connected yet. No stored provider grant is autonomous permission.
+The Worker now provides durable provider authorization infrastructure for Google and ClickUp. Google cloud/orchestration execution still requires explicit tool authority. ClickUp REST execution is exposed to the browser only through Elara's authenticated first-party MCP/tool path and the binding-internal provider-command boundary. No stored provider grant is autonomous permission.

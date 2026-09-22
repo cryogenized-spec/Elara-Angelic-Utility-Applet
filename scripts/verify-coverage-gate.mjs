@@ -233,6 +233,18 @@ try {
       '',
     ));
   });
+  addMutation('ClickUp attachment response bound removed', 'scripts/security-architecture-gate.mjs', 'ClickUp browser attachment transport boundary is missing: MAX_ATTACHMENT_RESPONSE_BYTES', (cwd) => {
+    mutateRelative(cwd, 'src/clickup/attachment-upload.ts', (source) => source.replace(
+      'const MAX_ATTACHMENT_RESPONSE_BYTES = 256 * 1024;',
+      'const UNSAFE_ATTACHMENT_RESPONSE_BYTES = 256 * 1024;',
+    ));
+  });
+  addMutation('ClickUp replay turn key regresses to delimiter concatenation', 'scripts/security-architecture-gate.mjs', 'ClickUp mutation replay authority is missing: JSON.stringify([conversationId, messageId, generationId])', (cwd) => {
+    mutateRelative(cwd, 'src/clickup/mutation-replay.ts', (source) => source.replace(
+      'return JSON.stringify([conversationId, messageId, generationId]);',
+      'return `${conversationId}\\u0000${messageId}\\u0000${generationId}`;',
+    ));
+  });
   addMutation('ClickUp browser OAuth response bound bypassed', 'scripts/security-architecture-gate.mjs', 'ClickUp browser OAuth deadline must remain active through bounded Worker response-body consumption', (cwd) => {
     mutateRelative(cwd, 'src/clickup/oauth/authority.ts', (source) => source.replace(
       'const body = await readBoundedWorkerJson(response);',

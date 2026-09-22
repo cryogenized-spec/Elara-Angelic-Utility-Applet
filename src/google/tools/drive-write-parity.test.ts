@@ -132,13 +132,13 @@ describe('Drive conditional-write parity', () => {
     expect(driveMocks.trashFile).toHaveBeenCalledWith('file-1', STRONG_ETAG, {});
   });
 
-  it('states the ETag precondition, the parent consequence and the recoverable trash outcome before approval', () => {
+  it('states the version precondition, the parent consequence and the recoverable trash outcome before approval', () => {
     const update = confirmationRequestForCall({ tool: 'drive.updateFile', arguments: { fileId: 'file-1', etag: STRONG_ETAG, patch: { name: 'Renamed' } } });
     const move = confirmationRequestForCall({ tool: 'drive.moveFile', arguments: { fileId: 'file-1', etag: STRONG_ETAG, parentId: 'folder-2', previousParentId: 'folder-1' } });
     const addOnly = confirmationRequestForCall({ tool: 'drive.moveFile', arguments: { fileId: 'file-1', etag: STRONG_ETAG, parentId: 'folder-2' } });
     const trash = confirmationRequestForCall({ tool: 'drive.trashFile', arguments: { fileId: 'file-1', etag: STRONG_ETAG } });
 
-    expect(update?.resourceSummary).toContain('ETag');
+    expect(update?.resourceSummary).toContain('has not changed since Elara read it');
     expect(move?.resourceSummary).toContain('folder-1');
     expect(move?.resourceSummary).toContain('folder-2');
     // Without a previous parent this is an add: Drive files can have several.

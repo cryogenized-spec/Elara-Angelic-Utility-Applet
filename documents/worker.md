@@ -63,7 +63,7 @@ The Worker owns deployment-supplied secrets. Existing cloud Gemini execution use
 
 `GOOGLE_OAUTH_CLIENT_ID` must match the browser `VITE_GOOGLE_CLIENT_ID` for the same Google Web OAuth client. `ALLOWED_ORIGINS` identifies the deployment owner's exact PWA origin. Forks must replace the repository owner's default origin rather than inheriting it.
 
-The `GoogleOAuthVault` and `ClickUpOAuthVault` are separate SQLite-backed Durable Objects, each separate from autonomy state. Google stores one encrypted refresh grant; ClickUp stores one encrypted provider credential envelope with separate `kind` and `token` fields plus authorized account/Workspace metadata. Existing raw-token ClickUp vault plaintext from older releases is interpreted as OAuth only. Both keep durable nonce replay ledgers. ClickUp additionally owns one-time OAuth-state records and provider rate-limit state. Provider secrets never return to the browser.
+The `GoogleOAuthVault` and `ClickUpOAuthVault` are separate SQLite-backed Durable Objects, each separate from autonomy state. Google stores one encrypted refresh grant; ClickUp stores encrypted provider-token bytes plus a separate non-secret `credential_kind` column and authorized account/Workspace metadata. Existing ClickUp rows created before personal-token support migrate to `credential_kind = 'oauth'` by schema default without decrypting the stored token. Both keep durable nonce replay ledgers. ClickUp additionally owns one-time OAuth-state records and provider rate-limit state. Provider secrets never return to the browser.
 
 Autonomy uses its own installation-scoped state, configuration generation and bounded context/outcome envelopes. Presence of a Google refresh grant does not automatically add Google tools to a cloud routine.
 

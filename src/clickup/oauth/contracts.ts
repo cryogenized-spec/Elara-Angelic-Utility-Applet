@@ -25,6 +25,14 @@ export const clickUpConnectionMethodsSchema = z.object({
 
 export type ClickUpConnectionMethods = z.infer<typeof clickUpConnectionMethodsSchema>;
 
+export const clickUpConnectionStateSchema = z.object({
+  epoch: z.number().int().nonnegative(),
+  settledEpoch: z.number().int().nonnegative(),
+  pending: z.boolean(),
+}).strict();
+
+export type ClickUpConnectionState = z.infer<typeof clickUpConnectionStateSchema>;
+
 export interface ClickUpExecutionGrant {
   readonly status: ClickUpOAuthStatus;
   readonly authorityBinding: string;

@@ -460,7 +460,8 @@ for (const marker of [
   'constantTimeEqual',
   'WEBHOOK_DELIVERY_RETENTION_MS',
   'markClickUpWorkspaceTaskIndexStale',
-  'removeClickUpTaskFromIndex',
+  'tombstoneClickUpTask',
+  'clearClickUpTaskTombstone',
 ]) {
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp webhook vault boundary is missing: ${marker}`);
 }

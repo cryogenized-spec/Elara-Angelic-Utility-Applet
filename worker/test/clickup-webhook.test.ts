@@ -61,8 +61,8 @@ async function internalSearch() {
   }));
 }
 
-async function harnessFetch(path: string): Promise<Response> {
-  return doFetch(new Request(`https://clickup-oauth-vault${path}`));
+async function harnessFetch(path: string, init?: RequestInit): Promise<Response> {
+  return doFetch(new Request(`https://clickup-oauth-vault${path}`, init));
 }
 
 async function webhookSnapshot(): Promise<Array<{ webhookId: string; workspaceId: string; updatedAt: number }>> {

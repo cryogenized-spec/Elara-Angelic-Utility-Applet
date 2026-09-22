@@ -108,6 +108,132 @@ function answerStep(index, text) {
   ].join('');
 }
 
+async function mountSyntheticConfirmation(page, request) {
+  await page.evaluate(async ({ moduleUrl, requestValue }) => {
+    const broker = await import(moduleUrl);
+    void broker.requestGoogleToolConfirmations([requestValue]);
+  }, {
+    moduleUrl: `${APP_BASE_PATH}src/google/confirmation/broker.ts`,
+    requestValue: request,
+  });
+  const dialog = page.locator('#elara-google-confirmation');
+  await dialog.waitFor({ state: 'visible', timeout: 10_000 });
+  return dialog;
+}
+
+async function confirmationGeometry(dialog) {
+  return dialog.evaluate((host) => {
+    const box = host.getBoundingClientRect();
+    const actions = host.querySelector('.roleplay-confirmation__actions');
+    const review = host.querySelector('.google-confirmation-item__review-text');
+    const actionBox = actions?.getBoundingClientRect();
+    return {
+      expanded: host.classList.contains('roleplay-confirmation--expanded'),
+      dialog: {
+        top: Number(box.top.toFixed(2)),
+        bottom: Number(box.bottom.toFixed(2)),
+        width: Number(box.width.toFixed(2)),
+        height: Number(box.height.toFixed(2)),
+      },
+      actions: actionBox ? {
+        top: Number(actionBox.top.toFixed(2)),
+        bottom: Number(actionBox.bottom.toFixed(2)),
+        height: Number(actionBox.height.toFixed(2)),
+      } : null,
+      review: review ? {
+        clientHeight: review.clientHeight,
+        scrollHeight: review.scrollHeight,
+        overflowY: globalThis.getComputedStyle(review).overflowY,
+      } : null,
+      viewport: {
+        width: globalThis.innerWidth,
+        height: globalThis.innerHeight,
+      },
+    };
+  });
+}
+
+async function captureConfirmationWatchdog(page) {
+  await page.goto(appUrl, { waitUntil: 'load' });
+  await page.getByRole('dialog', { name: 'Welcome.' }).waitFor({ state: 'detached', timeout: 10_000 }).catch(() => undefined);
+
+  const longBody = [
+    'Release review — verify the full content before approving.',
+    ...Array.from({ length: 72 }, (_, index) => `Line ${String(index + 1).padStart(2, '0')}: deterministic long-form review content for the confirmation watchdog.`),
+  ].join('\n');
+  const longDialog = await mountSyntheticConfirmation(page, {
+    tool: 'memory.save',
+    risk: 'write',
+    resourceSummary: 'Save durable memory “Release review”. Review the full proposed body below before approving.',
+    reviewText: longBody,
+    requestedAt: new Date().toISOString(),
+  });
+  const longGeometry = await confirmationGeometry(longDialog);
+  const longPagePath = join(outputDir, 'confirmation-long-page.png');
+  const longDialogPath = join(outputDir, 'confirmation-long-dialog.png');
+  await page.screenshot({ path: longPagePath, fullPage: false });
+  await longDialog.screenshot({ path: longDialogPath });
+  await longDialog.locator('[data-decision="decline"]').click();
+  await longDialog.waitFor({ state: 'detached', timeout: 10_000 });
+
+  const hostilePreview = [
+    'Repair complete. Pressure holding.',
+    '<img src=x onerror="globalThis.__elaraVisualProbe = true">',
+    '<script>globalThis.__elaraVisualProbe = true</script>',
+    ...Array.from({ length: 32 }, (_, index) => `Inspection line ${index + 1}: approved attachment preview text.`),
+  ].join('\n');
+  const attachmentDialog = await mountSyntheticConfirmation(page, {
+    tool: 'clickup.attachArtifact',
+    risk: 'write',
+    resourceSummary: 'Attach the approved file below to ClickUp task 86task.',
+    attachmentReview: {
+      name: 'repair-notes.txt',
+      uploadName: 'repair-notes-final.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 2_048,
+      previewText: hostilePreview,
+      previewTruncated: true,
+    },
+    requestedAt: new Date().toISOString(),
+  });
+  const attachmentGeometry = await confirmationGeometry(attachmentDialog);
+  const attachmentSafety = await attachmentDialog.evaluate((host) => ({
+    scriptElements: host.querySelectorAll('script').length,
+    imageElements: host.querySelectorAll('img').length,
+    rawToolIdVisible: host.textContent?.includes('clickup.attachArtifact') ?? false,
+    securityHashVisible: host.textContent?.includes('SHA-256') ?? false,
+    hostileMarkupShownAsText: host.textContent?.includes('<img src=x onerror=') ?? false,
+    probeExecuted: globalThis.__elaraVisualProbe === true,
+  }));
+  const attachmentPagePath = join(outputDir, 'confirmation-attachment-page.png');
+  const attachmentDialogPath = join(outputDir, 'confirmation-attachment-dialog.png');
+  await page.screenshot({ path: attachmentPagePath, fullPage: false });
+  await attachmentDialog.screenshot({ path: attachmentDialogPath });
+  await attachmentDialog.locator('[data-decision="decline"]').click();
+
+  const evidence = {
+    schemaVersion: 1,
+    label,
+    scenario: 'confirmation-watchdog',
+    sourceSha,
+    baseSha,
+    headSha,
+    viewport: VIEWPORT,
+    metrics: {
+      longReview: longGeometry,
+      attachmentReview: attachmentGeometry,
+      attachmentSafety,
+    },
+    files: {
+      longPage: `${label}/confirmation-long-page.png`,
+      longDialog: `${label}/confirmation-long-dialog.png`,
+      attachmentPage: `${label}/confirmation-attachment-page.png`,
+      attachmentDialog: `${label}/confirmation-attachment-dialog.png`,
+    },
+  };
+  await writeFile(join(outputDir, 'confirmation-watchdog.evidence.json'), `${JSON.stringify(evidence, null, 2)}\n`, 'utf8');
+}
+
 function completedTurn() {
   const thoughts = [
     'Reviewing the request.',
@@ -814,6 +940,12 @@ async function main() {
 
   try {
     await captureGenerationActivity(page);
+    const confirmationPage = await context.newPage();
+    try {
+      await captureConfirmationWatchdog(confirmationPage);
+    } finally {
+      await confirmationPage.close();
+    }
     const googlePage = await context.newPage();
     try {
       await captureGoogleSettings(googlePage);

@@ -1,85 +1,63 @@
 ---
 id: SYS-CLICKUP
 status: active
-verified_commit: cf33c88b6924e666cb6e186f95e04953e48e5ddd
-scope: first-party ClickUp REST, OAuth and MCP contracts
+verified_commit: f2ef848522f04fc277fb8423b194178746c64dc6
+scope: first-party ClickUp REST, OAuth, MCP, indexed search and artifact contracts
 paths: [src/clickup, worker/src/clickup]
-keywords: [clickup, mcp, oauth, task, comment, assignee, custom-field, attachment]
+keywords: [clickup, mcp, oauth, task, comment, assignee, custom-field, attachment, webhook]
 ---
 
 # First-party ClickUp integration
 
-## 1. Purpose and boundary
+## 1. Authority and runtime boundary
 
-Elara owns its ClickUp integration. Normal ClickUp work is designed to execute through Elara's own Worker and ClickUp's REST API rather than depending on ClickUp's vendor-hosted MCP.
+Elara owns its normal ClickUp integration. ClickUp work does not depend on ClickUp's vendor-hosted MCP.
 
-The intended runtime chain is:
+The interactive execution chain is:
 
 ```text
 Gemini
 -> existing Elara model-tool registry/executor
--> existing mutation confirmation authority
+-> existing confirmation authority for mutations
 -> browser ClickUp MCP client
 -> authenticated Elara Worker MCP endpoint
--> ClickUpOAuthVault internal provider command boundary
+-> semantic ClickUp service
+-> installation-scoped ClickUpOAuthVault Durable Object
 -> typed ClickUp REST adapter
 -> ClickUp Public API
 ```
 
-The first-party ClickUp subsystem does not create a second model registry, confirmation broker, chat provider or arbitrary HTTP tool. `src/google/tools/*` remains the generic executable model-tool authority despite its historical name.
+This subsystem extends existing Elara authorities. It does not create a second model registry, confirmation broker, chat provider or arbitrary HTTP authority. The historically Google-named registry/executor remains Elara's shared executable model-tool authority.
 
-Current implementation covers canonical semantic schemas, the typed REST adapter, paired-Worker OAuth, encrypted access-token persistence, provider error normalization, pagination primitives and durable adaptive rate-limit state. MCP transport and Gemini registration are not active yet.
+ClickUp-derived content is untrusted external data. Provider authorization permits access to ClickUp; it does not authorize Elara to perform a model-initiated mutation.
 
 ## 2. Source map
 
 | Concern | Authority |
 | --- | --- |
-| Semantic tool names/runtime schemas | `src/clickup/tool-schema.ts` |
-| Browser OAuth client/status metadata | `src/clickup/oauth/authority.ts`, `src/clickup/oauth/contracts.ts` |
+| Semantic tool schemas / risk | `src/clickup/tool-schema.ts` |
+| Gemini registration | `src/google/tools/registry.ts`, `src/google/tools/gemini-declarations.ts` |
+| Existing execution / confirmation | `src/google/tools/executor.ts`, `src/gemini/google-tool-loop.ts` |
+| Browser MCP client | `src/clickup/mcp-client.ts` |
+| Browser OAuth authority | `src/clickup/oauth/*` |
+| Immutable artifact approval | `src/clickup/attachment-authority.ts` |
+| Browser artifact transport | `src/clickup/attachment-upload.ts` |
 | Reviewed REST operation map | `src/clickup/rest-contract.ts` |
-| Worker ClickUp REST serialization | `worker/src/clickup/provider.ts` |
-| Encrypted ClickUp credential/rate authority | `worker/src/clickup/oauth-vault.ts` |
-| Public OAuth route admission/CORS | `worker/src/clickup/oauth-routes.ts` |
-| Worker composition and binding | `worker/src/entry.ts`, `worker/wrangler.toml` |
-| Worker/provider tests | `worker/test/clickup-*.test.ts` |
-| Browser OAuth tests | `src/clickup/oauth/authority.test.ts` |
+| Worker MCP server | `worker/src/clickup/mcp-route.ts` |
+| Semantic Worker service | `worker/src/clickup/tool-service.ts` |
+| Provider serialization / egress | `worker/src/clickup/provider.ts` |
+| Encrypted credential / grant / rate / webhook authority | `worker/src/clickup/oauth-vault.ts` |
+| Public OAuth admission | `worker/src/clickup/oauth-routes.ts` |
+| Artifact ingress | `worker/src/clickup/attachment-route.ts` |
+| Webhook ingress | `worker/src/clickup/webhook-route.ts` |
+| Durable task index | `worker/src/clickup/task-index.ts` |
+| Worker composition | `worker/src/entry.ts`, `worker/wrangler.toml` |
 
-The provider contract is based on the current ClickUp Public API v2/v3 OpenAPI and official REST/OAuth/rate-limit documentation. ClickUp remains mixed-version: core task/hierarchy/comment/Custom Field operations are currently v2 while some newer APIs, including general entity attachments, are v3.
+## 3. Canonical semantic tools
 
-## 3. OAuth and credential authority
+`src/clickup/tool-schema.ts` is the single model-facing schema authority. Zod performs runtime validation and generates the JSON Schema consumed by both Gemini declarations and MCP `tools/list`.
 
-ClickUp uses OAuth 2.0 Authorization Code. The official authorization endpoint is `https://app.clickup.com/api`; token exchange is `POST https://api.clickup.com/api/v2/oauth/token` with `client_id`, `client_secret` and `code`. OAuth API traffic uses `Authorization: Bearer {access_token}`.
-
-Elara requires a paired self-hosted Worker for ClickUp. The browser never receives the ClickUp client secret or access token.
-
-```text
-user gesture
--> signed POST /clickup/oauth/start with exact HTTPS redirect URI
--> ClickUpOAuthVault creates durable one-time state (10-minute TTL)
--> browser opens official ClickUp authorization URL
--> ClickUp redirects to the registered Elara URI with code + state
--> browser signed POST /clickup/oauth/exchange
--> Worker + vault independently verify installation admission/replay state
--> vault consumes one-time OAuth state
--> vault exchanges code with Worker-only client secret
--> GET /api/v2/user + GET /api/v2/team verify identity and authorized Workspaces
--> access token AES-GCM encrypted in ClickUpOAuthVault
--> browser receives only bounded account/Workspace metadata
-```
-
-The access token is encrypted using a key derived from deployment-owned `CLICKUP_OAUTH_VAULT_KEY` with provider-specific domain separation. Ciphertext, IV, authorized account identity, Workspace metadata and a monotonic grant revision are stored in the installation-scoped SQLite Durable Object.
-
-ClickUp currently documents OAuth access tokens as non-expiring but reserves the right to change this. Elara therefore treats them as revocable/provider-invalidatable credentials. Provider 401 responses and documented token-not-found codes (`OAUTH_019`, `OAUTH_021`, `OAUTH_025`, `OAUTH_077`) delete the durable local grant.
-
-Disconnect immediately deletes Elara's encrypted token, pending OAuth states and rate-limit state. ClickUp does not currently document a general OAuth-token revocation endpoint, so the disconnect response explicitly reports `providerRevoked: false` rather than claiming a provider-side revocation that did not happen.
-
-Browser localStorage may hold only schema-validated non-secret connection metadata. It never contains the ClickUp access token, client secret, Worker installation token or OAuth authorization code.
-
-## 4. Canonical tool and provider contracts
-
-`src/clickup/tool-schema.ts` is the single semantic schema authority. Zod owns runtime validation and generates the JSON Schema projections used by both the planned MCP `tools/list` surface and Gemini function declarations.
-
-Initial semantic surface:
+Current surface:
 
 ```text
 clickup.searchTasks
@@ -96,103 +74,238 @@ clickup.setCustomField
 clickup.attachArtifact
 ```
 
-No raw URL/method/header/request tool exists. Permanent task deletion is not exposed. `clickup.updateTask` may use ClickUp's reversible `archived` field.
+The surface is intentionally semantic and compact. There is no `rawRequest`, URL fetcher, arbitrary endpoint/method/header authority or permanent-delete tool.
 
-ClickUp numeric identifiers are decimal strings at semantic/MCP boundaries to avoid JavaScript precision loss. The provider serializer converts only documented integer body fields, such as assignee and mention IDs, and rejects values outside JavaScript's safe integer range rather than silently corrupting them.
+Numeric ClickUp identifiers are semantic decimal strings where the provider documents numeric IDs. Opaque task/List/Folder/field identifiers remain bounded strings. The REST adapter performs only documented representation changes and rejects unsafe integer conversion rather than silently losing precision.
 
-`worker/src/clickup/provider.ts` is the REST serialization boundary. It owns provider field spellings and representations including:
+## 4. MCP contract
+
+The browser owns the MCP client but not ClickUp credentials.
+
+Normal execution performs:
+
+```text
+resolve exact paired Worker + installation identity
+-> server/discover
+-> fresh tools/list validation against canonical Elara schemas
+-> tools/call with admitted ClickUp grant revision + tool-catalog fingerprint
+```
+
+Every actual tool execution revalidates `tools/list`; the advertised TTL is used for browsing/listing but is not trusted for execution. This prevents a same-URL Worker rollback from reusing a previously validated catalog.
+
+The Worker verifies:
+
+- installation bearer;
+- allowed browser origin;
+- MCP protocol header and metadata revision;
+- `Mcp-Method` / JSON-RPC method agreement;
+- `Mcp-Name` / requested tool agreement;
+- admitted ClickUp grant revision;
+- browser catalog fingerprint against the live Worker catalog;
+- bounded request bytes.
+
+Structured MCP results have an aggregate Worker-side byte ceiling in addition to bounded semantic projections. The browser independently caps MCP response bytes and cancels oversized streams.
+
+## 5. OAuth and credential authority
+
+ClickUp uses OAuth 2.0 Authorization Code. Elara requires a paired self-hosted Worker for ClickUp because the client secret and durable access token are Worker-only.
+
+```text
+user gesture
+-> signed POST /clickup/oauth/start
+-> durable one-time OAuth state
+-> official ClickUp authorization page
+-> callback code + state
+-> signed POST /clickup/oauth/exchange
+-> state consumed exactly once
+-> Worker exchanges code using deployment-owned client secret
+-> GET /user + GET /team establish account and admitted Workspaces
+-> token AES-GCM encrypted in installation-scoped Durable Object
+-> browser receives bounded account / Workspace metadata only
+```
+
+Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The access token is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
+
+Public OAuth bodies are streamed under a byte ceiling before signature verification/forwarding. Signed writes use timestamp + nonce + body and have durable replay protection. OAuth state is random, redirect-bound, short-lived and single-use.
+
+Connect/disconnect/reconnect use a connection epoch. A late exchange cannot resurrect a grant after disconnect. Provider requests retain the credential revision that issued them; a late response or 401 from an obsolete token cannot mutate the replacement grant or replacement rate budget.
+
+ClickUp currently documents OAuth access tokens as non-expiring, but Elara treats them as revocable. Provider authorization failure removes only the credential revision that actually produced that failure.
+
+Disconnect deletes the local encrypted grant. ClickUp does not document a general OAuth token revocation endpoint, so Elara does not claim provider-side revocation.
+
+## 6. Confirmation and exact-grant binding
+
+Every ClickUp mutation reuses Elara's existing confirmation authority.
+
+For a model mutation Elara captures the ClickUp execution grant before confirmation:
+
+```text
+account identity
++ admitted Workspace set
++ Worker installation / authority binding
++ grant revision
+```
+
+After approval the executor verifies the same grant again. The admitted revision and Worker binding then travel through the browser handler, MCP/attachment transport and Durable Object. The vault checks the revision again immediately before REST egress.
+
+If the account, Workspace grant, credential revision or paired Worker changes while confirmation is open, the mutation fails closed instead of executing as the replacement identity.
+
+## 7. Workspace-scoped resource authority
+
+Model-supplied provider IDs are not accepted as ownership proof.
+
+Direct-ID task, Folder, List, comment, Custom Field and attachment paths are bound back to the locally admitted Workspace before content is returned or a mutation leaves the vault.
+
+The vault verifies, as applicable:
+
+- Workspace is present in the durable grant;
+- task `team_id` or Space ancestry belongs to that Workspace;
+- Folder/List ancestry resolves through an admitted Space;
+- comments belong to the admitted task;
+- Custom Fields belong to the admitted task's List;
+- assignee and mention user IDs belong to the admitted Workspace.
+
+Cross-Workspace, missing and otherwise-unverifiable direct resources return a generic scope denial. Task/Folder/List denial paths use fixed ancestry probes where necessary so existence is not exposed through response body, status, timing or rate-budget shape.
+
+A provider 403 on the admitted Workspace task feed removes that Workspace from durable grant metadata and purges its cached tasks before results can be served.
+
+## 8. Search and task context
+
+ClickUp's filtered Workspace task endpoint is filter-oriented; it is not treated as equivalent to vendor-MCP broad text search.
+
+`clickup.searchTasks` therefore uses an installation-scoped SQLite task index inside the ClickUp Durable Object.
+
+Behavior:
+
+- a cold search progressively warms bounded provider pages;
+- repeated searches use the local index and consume no additional ClickUp request while fresh;
+- incremental refresh uses `date_updated_gt` with a small overlap;
+- multi-page incremental refresh persists its original low-water mark and next page until all pages are consumed;
+- the durable provider watermark advances only after the incremental result set completes;
+- periodic full reconciliation removes tasks missed by webhook delivery or incremental deletion semantics;
+- reconnect/revocation clears affected index state.
+
+Each persisted task is normalized into a bounded projection. Nested provider objects are reduced to reviewed fields and `task_json` has a hard per-task ceiling with a minimal identity/location fallback.
+
+`clickup.getTaskContext` is composite: it returns bounded task data plus requested comment/metadata context so routine inspection does not require many model tool calls.
+
+## 9. Webhook freshness
+
+ClickUp webhooks are an optimization/freshness signal, not a second task-data ingestion authority.
+
+On successful OAuth exchange Elara may register task-related webhooks for admitted Workspaces. Each returned webhook secret is encrypted in the same installation-scoped Durable Object.
+
+Ingress:
+
+```text
+POST /clickup/webhook
+-> bounded JSON body
+-> webhook_id lookup
+-> HMAC-SHA256 X-Signature verification
+-> delivery dedupe
+-> cache invalidation / task deletion signal only
+```
+
+Webhook content never directly becomes trusted indexed task state or Gemini context. The next task read/search still uses the reviewed REST/index path.
+
+The documented `webhook_id:history_item_id` identity is used for replay dedupe when history items are present; body hash is the fallback dedupe identity.
+
+Reconnect/disconnect lifecycle is epoch/revision guarded. A failed reconnect leaves the previous valid webhook state intact. A webhook created by a superseded exchange is not persisted and is best-effort deleted at ClickUp. Locally unknown/orphaned webhook IDs are acknowledged and ignored so stale provider registrations cannot create a retry storm.
+
+## 10. Artifact attachment authority
+
+The model sees only an Elara `artifactId`; it never supplies arbitrary bytes, filesystem paths or URLs.
+
+Before confirmation Elara resolves the local ready artifact and captures an immutable approval snapshot:
+
+- artifact ID/name;
+- requested upload filename;
+- MIME type;
+- metadata size and Blob size;
+- SHA-256 digest;
+- exact Blob object.
+
+The confirmation describes that approved payload. Immediately before transport, Elara re-reads and hashes the mutable repository entry. If bytes or relevant metadata changed under the same artifact ID, upload fails with `artifact-changed` and sends nothing.
+
+The uploaded multipart file is the original approved Blob, not the second repository read.
+
+The browser attachment route requires installation bearer + admitted grant revision. Multipart bytes are counted under a hard request ceiling without trusting `Content-Length` before the Durable Object performs `formData()`. The vault rechecks task Workspace ownership before provider attachment upload.
+
+## 11. Provider serialization, errors and rate limits
+
+`worker/src/clickup/provider.ts` is the only ClickUp Public API egress authority. Requests are HTTPS to the fixed ClickUp API origin and use `Authorization: Bearer <server-side token>`.
+
+Reviewed representations include:
 
 - `markdownContent -> markdown_content`;
-- ISO date/date-time -> millisecond `start_date`/`due_date` plus `*_time`;
-- semantic assignee removal -> provider `assignees.rem`;
-- genuine comment mentions -> structured `{type:"tag", user:{id}}` segments;
-- Custom Field set -> `{value: ...}`;
-- task attachment -> multipart `attachment[0]`.
+- ISO date/time -> documented millisecond fields;
+- assignee add/remove structures;
+- structured comment user mentions;
+- Custom Field `{value: ...}`;
+- task attachment multipart `attachment[0]`.
 
-Provider responses are capped before JSON parsing and provider error messages/codes are normalized. External ClickUp content remains untrusted data.
+Provider response streams are byte-counted and canceled above the ceiling before JSON parsing. Arbitrary provider error prose is never projected into MCP/Gemini-visible error messages.
 
-## 5. Provider execution and rate limiting
+Current documented rate limits are per token:
 
-The browser does not receive a generic ClickUp REST proxy. Provider execution is reachable only through the ClickUp Durable Object's binding-internal `POST /internal/clickup/command` path.
-
-That path requires the installation-derived internal marker and accepts only a closed command union covering reviewed hierarchy/task/comment/Custom Field primitives. It does not accept arbitrary URLs, HTTP methods, headers or hosts. Semantic mutation payloads are revalidated with the canonical ClickUp Zod schemas before provider serialization.
-
-The access token is decrypted only inside `ClickUpOAuthVault`, immediately before the reviewed provider request.
-
-ClickUp rate limits are per token and Workspace plan. Current documented limits are:
-
-| Plan | Requests/minute/token |
+| Workspace plan | Requests / minute |
 | --- | ---: |
 | Free Forever / Unlimited / Business | 100 |
 | Business Plus | 1,000 |
 | Enterprise / Enterprise Plus | 10,000 |
 
-The adapter reads `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`. The Durable Object stores that snapshot. When the current window is known exhausted it rejects the next internal provider command locally with `429 rate_limited` and the provider reset time instead of dispatching another ClickUp request.
+Elara learns `X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset` instead of hard-coding 100.
 
-A new OAuth grant, disconnect or provider-revoked credential clears the previous token's rate state. The limiter does not hard-code 100.
+Within one provider window, concurrent/late responses may only merge remaining downward. A small reset-horizon change is treated as same-window jitter and cannot replenish the local budget. A genuine minute-scale reset advance can establish the new provider budget. When the known current window is exhausted, the vault rejects the next provider call locally with 429 and the reset time.
 
-Provider read retries may later honor the reset boundary conservatively. Mutations must never be blindly replayed after an ambiguous network outcome because the reviewed task/comment write endpoints do not provide a general idempotency key.
+Writes are not blindly replayed after ambiguous network failure because the reviewed ClickUp write endpoints do not expose a general idempotency key.
 
-## 6. Pagination, hierarchy and operational primitives
+## 12. Pagination and bounded results
 
-ClickUp uses several pagination mechanisms:
+Provider pagination is normalized behind semantic tools:
 
-- filtered Workspace tasks: zero-based `page`, maximum 100 tasks per page;
-- task comments: both `start` (last comment date in milliseconds) and `start_id` are required for the next older page;
-- newer v3 APIs may use opaque cursors.
+- filtered Workspace tasks: zero-based provider page, up to 100/provider page;
+- task comments: `start` + `start_id`;
+- newer cursor APIs remain provider-specific until exposed semantically.
 
-The typed provider adapter implements the Workspace-task and comment pagination primitives directly. The future MCP layer will normalize provider-specific continuations into bounded opaque Elara cursors so Gemini never assembles provider query strings.
+Model-facing results are bounded. The model never assembles provider query strings or chooses arbitrary continuation URLs.
 
-Current reviewed provider primitives cover:
+## 13. Deployment contract
 
-- authorized user and authorized Workspaces/members;
-- Spaces, Folders, nested Folder retrieval, Folder Lists and folderless Lists;
-- Workspace-wide filtered task enumeration;
-- single task reads with Markdown description/subtask options;
-- task create/update/archive;
-- task comments and threaded replies;
-- List Custom Field definitions;
-- Custom Field set/clear;
-- task attachment multipart upload.
+A ClickUp-enabled self-hosted Worker requires deployment-owned configuration for:
 
-The filtered Workspace task endpoint is filter-oriented rather than a broad semantic text-search API. `clickup.searchTasks` therefore must use a bounded Elara-side task index/cache in the later operational-parity phase instead of pretending REST offers the vendor MCP's global text search.
+- `CLICKUP_OAUTH_CLIENT_ID`;
+- `CLICKUP_OAUTH_CLIENT_SECRET`;
+- `CLICKUP_OAUTH_VAULT_KEY`;
+- the `CLICKUP_OAUTH` Durable Object binding/migration;
+- the existing Elara installation credential used by the paired browser/Worker authority.
 
-`clickup.getTaskContext` is intentionally composite and will use these primitives server-side to return one bounded task + comment + metadata result rather than forcing the model to orchestrate many calls.
+Secrets are never browser build variables.
 
-## 7. Security and confirmation invariants
+The ClickUp OAuth callback/redirect URI must be registered in the ClickUp app and must match the HTTPS Pages/deployment origin used by that installation.
 
-- ClickUp client secret and access token are Worker-only.
-- The token never appears in browser persistence, MCP arguments, Gemini context, URLs, diagnostics or conversation state.
-- Public OAuth reads require the installation bearer credential; OAuth writes are HMAC-signed with timestamp + nonce + body.
-- The Durable Object independently verifies signed writes and keeps a durable replay ledger.
-- OAuth `state` is cryptographically random, stored durably, bound to the exact redirect URI, expires after 10 minutes and is consumed exactly once.
-- Redirect URIs must be HTTPS and match the allowed calling origin.
-- Binding-internal provider execution requires the installation-derived internal marker.
-- ClickUp-derived task/comment/field/file content is untrusted external data.
-- Provider authorization is not model mutation permission.
-- Every future model-initiated ClickUp write must pass Elara's existing confirmation broker and untrusted-context rules.
-- No model-visible permanent-delete or arbitrary REST authority is permitted.
+## 14. Verification contract
 
-Attachment bytes are intentionally not accepted by the model schema. `clickup.attachArtifact` carries only an Elara artifact reference. The authenticated bounded artifact-staging path that transfers those bytes into the Worker is still deferred and must not create arbitrary URL-fetch/upload authority.
+Focused tests cover:
 
-## 8. Verification and current gap
+- one Zod authority feeding Gemini + MCP schemas;
+- stale/rolled-back Worker catalog rejection before `tools/call`;
+- MCP header/body routing agreement;
+- exact grant/pairing confirmation binding;
+- OAuth state + signed-write replay protection;
+- disconnect/exchange and old-token/new-token races;
+- encrypted token storage and revision-guarded revocation;
+- adaptive/monotonic rate state and genuine-window rollover;
+- provider response byte cancellation;
+- cross-Workspace task/Folder/List/comment/field/attachment denial;
+- assignee/mention Workspace membership;
+- denial side-channel equalization;
+- durable indexed-search continuation and periodic reconciliation;
+- signed webhook replay/lifecycle races;
+- immutable artifact TOCTOU/substitution rejection;
+- chunked multipart byte ceilings;
+- aggregate MCP result ceilings;
+- hostile/malformed provider payload handling.
 
-Current focused tests pin:
-
-- MCP/Gemini schema parity from one Zod authority;
-- absence of raw HTTP and permanent-delete semantic tools;
-- documented REST path/content-type contracts;
-- task create/update provider wire conversion;
-- genuine structured ClickUp mentions;
-- browser signed OAuth requests and non-secret persistence;
-- OAuth state replay rejection;
-- signed-write replay rejection;
-- encrypted access-token storage;
-- binding-internal provider admission;
-- adaptive local rate-limit blocking;
-- revoked-token durable cleanup;
-- truthful local-only disconnect semantics.
-
-The complete repository gate remains `AGENTS.md` authority. CI has not yet been run for this feature branch because repository CI is pull-request/main triggered and the project plan reserves the integration PR for final certification.
-
-The remaining runtime gap is deliberate: the first-party MCP HTTP server/client, Gemini registration, bounded normalized model outputs, shared confirmation integration and artifact staging are not connected yet. Those changes belong to the next implementation phase and must consume the authorities defined here rather than creating parallel ones.
+The complete release gate remains `AGENTS.md` authority. Because this subsystem changes authentication, authorization, confirmation and credential boundaries, final PR certification also requires the repository PR-review skill, current-main synchronization, exact-head CI and human sign-off.

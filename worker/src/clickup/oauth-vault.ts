@@ -998,7 +998,7 @@ export class ClickUpOAuthVault extends DurableObject {
       fullReconcileHandled = true;
       if (!reconcileStage) {
         reconcileStage = beginClickUpFullReconcileStage(
-          this.ctx.storage.sql,
+          this.ctx.storage,
           args.workspaceId,
           refreshGeneration,
           now,
@@ -1023,7 +1023,6 @@ export class ClickUpOAuthVault extends DurableObject {
             code: typeof body?.code === 'string' ? body.code : `http-${pageResult.response.status}`,
             message: typeof body?.message === 'string' ? body.message : 'ClickUp full task-index reconciliation was interrupted.',
           };
-          refreshIncomplete = true;
           break;
         }
 

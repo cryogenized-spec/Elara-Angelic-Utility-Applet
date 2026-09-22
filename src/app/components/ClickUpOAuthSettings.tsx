@@ -1,12 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { clickUpOAuthAuthority } from '../../clickup/oauth/authority';
 import { connectClickUpWithPopup, switchClickUpAccountWithPopup } from '../../clickup/oauth/popup';
-import type { ClickUpOAuthStatus } from '../../clickup/oauth/contracts';
+import type { ClickUpConnectionMethods, ClickUpOAuthStatus } from '../../clickup/oauth/contracts';
 import './google-oauth-settings.css';
 
 const emptyStatus = (): ClickUpOAuthStatus => ({
   connected: false,
   workspaces: [],
+});
+
+const legacyConnectionMethods = (): ClickUpConnectionMethods => ({
+  oauth: true,
+  personalToken: false,
 });
 
 type ClickUpBusyAction = 'connect' | 'personal-token' | 'switch' | 'disconnect' | null;
@@ -15,7 +20,9 @@ export function ClickUpOAuthSettings() {
   const [status, setStatus] = useState<ClickUpOAuthStatus>(emptyStatus());
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<ClickUpBusyAction>(null);
+  const [connectionMethods, setConnectionMethods] = useState<ClickUpConnectionMethods>(legacyConnectionMethods());
   const [statusUnknown, setStatusUnknown] = useState(false);
+  const [methodsUnknown, setMethodsUnknown] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = busyAction !== null;
 
@@ -30,12 +37,24 @@ export function ClickUpOAuthSettings() {
     }
   }
 
+  async function refreshConnectionMethods(): Promise<boolean> {
+    try {
+      setConnectionMethods(await clickUpOAuthAuthority.getConnectionMethods());
+      setMethodsUnknown(false);
+      return true;
+    } catch {
+      setMethodsUnknown(true);
+      return false;
+    }
+  }
+
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
       setStatus(await clickUpOAuthAuthority.getStatus());
       setStatusUnknown(false);
+      await refreshConnectionMethods();
     } catch (cause) {
       setStatusUnknown(true);
       setError(cause instanceof Error ? cause.message : 'The ClickUp authorization state could not be read.');
@@ -46,17 +65,28 @@ export function ClickUpOAuthSettings() {
 
   useEffect(() => {
     let active = true;
-    void clickUpOAuthAuthority.getStatus().then((next) => {
-      if (!active) return;
-      setStatus(next);
-      setStatusUnknown(false);
-    }).catch((cause: unknown) => {
-      if (!active) return;
-      setStatusUnknown(true);
-      setError(cause instanceof Error ? cause.message : 'The ClickUp authorization state could not be read.');
-    }).finally(() => {
-      if (active) setLoading(false);
-    });
+    void (async () => {
+      try {
+        const next = await clickUpOAuthAuthority.getStatus();
+        if (!active) return;
+        setStatus(next);
+        setStatusUnknown(false);
+        try {
+          const methods = await clickUpOAuthAuthority.getConnectionMethods();
+          if (!active) return;
+          setConnectionMethods(methods);
+          setMethodsUnknown(false);
+        } catch {
+          if (active) setMethodsUnknown(true);
+        }
+      } catch (cause) {
+        if (!active) return;
+        setStatusUnknown(true);
+        setError(cause instanceof Error ? cause.message : 'The ClickUp authorization state could not be read.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
     return () => { active = false; };
   }, []);
 
@@ -128,10 +158,9 @@ export function ClickUpOAuthSettings() {
 
   const confirmedConnected = status.connected && !statusUnknown;
   const identityLabel = status.account?.email || status.account?.username || 'Connected ClickUp account';
-  const personalTokenAvailable = status.connectionMethods?.personalToken === true;
-  // Older paired Workers predate capability advertisement and supported OAuth
-  // only, so preserve that path until they are upgraded.
-  const oauthAvailable = status.connectionMethods ? status.connectionMethods.oauth : true;
+  const personalTokenAvailable = connectionMethods.personalToken;
+  const oauthAvailable = connectionMethods.oauth;
+  const connectionOptionsUnknown = methodsUnknown && !confirmedConnected;
 
   return (
     <div className="google-oauth-settings clickup-oauth-settings">
@@ -147,7 +176,9 @@ export function ClickUpOAuthSettings() {
               ? 'Elara could not verify the current ClickUp authority. Refresh status before connecting, switching, disconnecting, or using ClickUp.'
               : confirmedConnected
                 ? 'This ClickUp identity is separate from the Google Workspace account connected to Elara. Elara can use only the ClickUp Workspaces authorized for this identity.'
-                : personalTokenAvailable
+                : methodsUnknown
+                  ? 'Elara verified that ClickUp is disconnected but could not read the Worker’s available connection methods. Refresh status before connecting.'
+                  : personalTokenAvailable
                 ? 'Your paired Worker has a personal ClickUp API token configured. Elara can validate it server-side and seal it in the encrypted ClickUp vault without exposing the token to this browser.'
                 : oauthAvailable
                   ? 'Connect through ClickUp’s official authorization screen. Your ClickUp identity is independent from the Google Workspace account connected to Elara.'
@@ -160,7 +191,7 @@ export function ClickUpOAuthSettings() {
           <strong>{workspaceSummary}</strong>
         </div>
 
-        {statusUnknown ? (
+        {statusUnknown || connectionOptionsUnknown ? (
           <div className="google-oauth-account__ready" role="status">Refresh status before continuing</div>
         ) : confirmedConnected ? (
           <div className="google-oauth-account__ready" role="status">First-party ClickUp MCP is active</div>
@@ -190,19 +221,19 @@ export function ClickUpOAuthSettings() {
           <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void refresh()} disabled={loading || busy}>
             {loading ? 'Checking…' : 'Refresh status'}
           </button>
-          {!statusUnknown && !confirmedConnected && personalTokenAvailable && oauthAvailable && (
+          {!statusUnknown && !methodsUnknown && !confirmedConnected && personalTokenAvailable && oauthAvailable && (
             <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void connect()} disabled={loading || busy}>
               {busyAction === 'connect' ? 'Opening ClickUp…' : 'Use OAuth instead'}
             </button>
           )}
           {confirmedConnected && (
             <>
-              {personalTokenAvailable && (
+              {!methodsUnknown && personalTokenAvailable && (
                 <button className="google-oauth-settings__button" type="button" onClick={() => void connectPersonalToken()} disabled={loading || busy}>
                   {busyAction === 'personal-token' ? 'Connecting…' : 'Reload configured API token'}
                 </button>
               )}
-              {oauthAvailable && (
+              {!methodsUnknown && oauthAvailable && (
                 <button className="google-oauth-settings__button" type="button" onClick={() => void switchAccount()} disabled={loading || busy}>
                   {busyAction === 'switch' ? 'Opening ClickUp…' : 'Switch ClickUp account'}
                 </button>

@@ -9,7 +9,7 @@ const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
 const TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token';
 const USER_ENDPOINT = 'https://api.clickup.com/api/v2/user';
 const WORKSPACES_ENDPOINT = 'https://api.clickup.com/api/v2/team';
-const PERSONAL_TOKEN = 'pk_unit_test_clickup_personal_token_please_ignore';
+const PERSONAL_TOKEN = 'pk_dummy';
 
 beforeEach(async () => {
   vi.restoreAllMocks();

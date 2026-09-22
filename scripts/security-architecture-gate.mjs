@@ -571,6 +571,13 @@ for (const [marker, expected] of [
     `ClickUp resource-scope enforcement call count changed: ${marker}`,
   );
 }
+for (const forbidden of [
+  "operation: z.literal('getAuthorizationContext')",
+  "case 'getAuthorizationContext'",
+]) {
+  if (clickUpOAuthVault.includes(forbidden)) fail(`ClickUp broad internal authorization context must not be executable: ${forbidden}`);
+}
+
 for (const marker of [
   "operation: z.literal('getWorkspaceAuthorizationContext')",
   'fetchAuthorizedClickUpWorkspaces(token)',

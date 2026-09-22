@@ -436,6 +436,77 @@ describe('ClickUp MCP Worker boundary', () => {
     expect(createCalls).toBe(0);
   });
 
+  it('rejects a List-visible Custom Field that is not applicable to the task custom type', async () => {
+    let customFieldMutations = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const providerRequest = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(providerRequest.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'clickup-token' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Workspace A', members: [] }] }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team/999/webhook' && providerRequest.method === 'POST') {
+        return new Response(JSON.stringify({ webhook: { id: 'webhook-1', secret: 'webhook-secret' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/task/86task' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          id: '86task',
+          name: 'Repair S56',
+          team_id: '999',
+          custom_item_id: 7,
+          list: { id: '123' },
+          space: { id: '789' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/list/123/field' && providerRequest.method === 'GET') {
+        return new Response(JSON.stringify({
+          fields: [{
+            id: 'field_1',
+            name: 'Different task type only',
+            type: 'short_text',
+            applied_objects: [{ object_type: 19, object_id: 8 }],
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/task/86task/field/field_1') {
+        customFieldMutations += 1;
+        return new Response(JSON.stringify({ id: 'must-not-write' }), { status: 200 });
+      }
+
+      throw new Error(`Unexpected provider request: ${providerRequest.method} ${providerRequest.url}`);
+    });
+
+    const revision = await connectClickUp();
+    const response = await request('tools/call', {
+      name: 'clickup.setCustomField',
+      arguments: {
+        workspaceId: '999',
+        taskId: '86task',
+        fieldId: 'field_1',
+        mode: 'set',
+        value: 'Ready',
+      },
+    }, 'clickup.setCustomField', {
+      [CLICKUP_GRANT_REVISION_HEADER]: String(revision),
+    });
+
+    expect(response.status).toBe(200);
+    const body = await jsonRecord(response);
+    const result = record(body.result);
+    expect(result.isError).toBe(true);
+    expect(record(record(result.structuredContent).error)).toEqual(expect.objectContaining({
+      code: 'custom_field_not_applicable',
+      status: 400,
+    }));
+    expect(customFieldMutations).toBe(0);
+  });
+
   it.each([
     ['set', { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'set' as const, value: 'Ready' }, 'POST'],
     ['clear', { workspaceId: '999', taskId: '86task', fieldId: 'field_1', mode: 'clear' as const }, 'DELETE'],

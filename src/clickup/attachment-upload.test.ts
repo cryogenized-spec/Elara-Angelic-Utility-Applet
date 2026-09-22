@@ -151,6 +151,31 @@ describe('ClickUp browser artifact upload', () => {
     expect(approvedArtifact.previewTruncated).toBeUndefined();
   });
 
+  it('bounds long text previews and marks them as shortened', async () => {
+    const longText = 'x'.repeat(70_000);
+    artifactGet.mockResolvedValue({
+      id: 'artifact-long-text',
+      artifactType: 'attachment',
+      kind: 'text',
+      provenance: 'user_upload',
+      status: 'ready',
+      name: 'essay.txt',
+      mimeType: 'text/plain',
+      size: longText.length,
+      createdAt: 1,
+      data: new Blob([longText], { type: 'text/plain' }),
+    });
+
+    const approvedArtifact = await captureClickUpArtifactApprovalSnapshot({
+      workspaceId: '999',
+      taskId: '86task',
+      artifactId: 'artifact-long-text',
+    });
+
+    expect(approvedArtifact.previewText).toHaveLength(20_000);
+    expect(approvedArtifact.previewTruncated).toBe(true);
+  });
+
   it('fails before network egress when the artifact is not ready', async () => {
     artifactGet.mockResolvedValue({
       id: 'artifact-1',

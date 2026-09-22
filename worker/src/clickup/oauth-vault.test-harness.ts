@@ -1,4 +1,5 @@
 import { ClickUpOAuthVault } from './oauth-vault';
+import { clearClickUpWorkspaceTaskIndex, tombstoneClickUpTask } from './task-index';
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -143,6 +144,32 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
           incrementalMaxUpdatedAt: row?.incremental_max_updated_at ?? 0,
           invalidationGeneration: row?.invalidation_generation ?? 0,
         });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/__test/clickup/task-index/tombstone') {
+        const body = await bodyRecord(request);
+        const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+        const taskId = typeof body.taskId === 'string' ? body.taskId : '';
+        if (!workspaceId || !taskId) return json({ code: 'validation' }, 400);
+        tombstoneClickUpTask(this.ctx.storage.sql, workspaceId, taskId, Date.now());
+        return json({ ok: true });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/__test/clickup/task-index/clear-workspace') {
+        const body = await bodyRecord(request);
+        const workspaceId = typeof body.workspaceId === 'string' ? body.workspaceId : '';
+        if (!workspaceId) return json({ code: 'validation' }, 400);
+        clearClickUpWorkspaceTaskIndex(this.ctx.storage.sql, workspaceId);
+        return json({ ok: true });
+      }
+
+      if (request.method === 'GET' && url.pathname === '/__test/clickup/task-index/tombstones') {
+        const workspaceId = requiredSearchParam(url, 'workspaceId');
+        const count = this.ctx.storage.sql.exec<{ count: number }>(
+          'SELECT COUNT(*) AS count FROM clickup_task_index_tombstones WHERE workspace_id = ?',
+          workspaceId,
+        ).toArray()[0]?.count ?? 0;
+        return json({ count });
       }
 
       if (request.method === 'GET' && url.pathname === '/__test/clickup/webhooks') {

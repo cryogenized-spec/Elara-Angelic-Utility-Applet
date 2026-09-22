@@ -10,6 +10,8 @@ const TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token';
 const USER_ENDPOINT = 'https://api.clickup.com/api/v2/user';
 const WORKSPACES_ENDPOINT = 'https://api.clickup.com/api/v2/team';
 const PERSONAL_TOKEN = 'pk_dummy';
+const TEST_VAULT_KEY = 'unit-test-clickup-oauth-vault-key-material-please-ignore';
+const VAULT_KEY_CONTEXT = 'elara-clickup-oauth-vault-v1';
 
 beforeEach(async () => {
   vi.restoreAllMocks();
@@ -33,6 +35,51 @@ async function doFetch(request: Request): Promise<Response> {
     statusText: remote.statusText,
     headers: remote.headers,
   });
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function sealLegacyRawOAuthToken(token: string): Promise<{ accessCipher: string; accessIv: string }> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${VAULT_KEY_CONTEXT}\n${TEST_VAULT_KEY}`),
+  );
+  const key = await crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    new TextEncoder().encode(token),
+  );
+  return {
+    accessCipher: bytesToBase64Url(new Uint8Array(ciphertext)),
+    accessIv: bytesToBase64Url(iv),
+  };
+}
+
+async function seedLegacyCredential(token: string, revision = Date.now()): Promise<void> {
+  const sealed = await sealLegacyRawOAuthToken(token);
+  const response = await doFetch(new Request('https://clickup-oauth-vault/__test/clickup/credential', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...sealed,
+      userId: '183',
+      username: 'Gareth',
+      email: 'gareth@example.com',
+      workspacesJson: JSON.stringify([{
+        id: '999',
+        name: 'Neon Sales',
+        members: [{ id: '183', username: 'Gareth', email: 'gareth@example.com' }],
+      }]),
+      updatedAt: revision,
+    }),
+  }));
+  expect(response.status).toBe(200);
 }
 
 type Counters = { token: number; user: number; teams: number; task: number };
@@ -257,6 +304,47 @@ describe('ClickUpOAuthVault', () => {
 
     const status = await doFetch(await bearerRead('/clickup/oauth/status'));
     expect(await status.json()).toEqual(expect.objectContaining({ connected: true }));
+  });
+
+  it('loads legacy raw encrypted OAuth credentials as OAuth without changing Authorization semantics', async () => {
+    const legacyToken = 'legacy-oauth-token-without-envelope';
+    let teamCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        teamCalls += 1;
+        expect(request.headers.get('Authorization')).toBe(`Bearer ${legacyToken}`);
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '999',
+            name: 'Neon Sales',
+            members: [{ user: { id: 183, username: 'Gareth', email: 'gareth@example.com' } }],
+          }],
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 600),
+          },
+        });
+      }
+      throw new Error(`Unexpected legacy credential provider request: ${request.method} ${request.url}`);
+    });
+
+    await seedLegacyCredential(legacyToken);
+
+    const context = await internalCommand({
+      operation: 'getWorkspaceAuthorizationContext',
+      workspaceId: '999',
+    });
+    expect(context.status).toBe(200);
+    expect(teamCalls).toBe(1);
+    expect(await context.json()).toEqual(expect.objectContaining({
+      ok: true,
+      result: expect.objectContaining({ id: '999', name: 'Neon Sales' }),
+    }));
   });
 
   it('preserves OAuth credential kind across vault encryption when token text collides with the former marker', async () => {

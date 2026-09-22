@@ -397,6 +397,7 @@ for (const marker of [
   "'/clickup/oauth/start'",
   "'/clickup/oauth/exchange'",
   "'/clickup/oauth/methods'",
+  "'/clickup/oauth/connection-state'",
   "'/clickup/oauth/personal-token'",
   "'/clickup/oauth/disconnect'",
   'MAX_WORKER_RESPONSE_BYTES',
@@ -418,7 +419,9 @@ for (const marker of [
   'PENDING_CONNECTION_KEY',
   'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
   "new ClickUpOAuthError(\n    'connection_pending'",
-  'assertConnectionSettled(pairing)',
+  'ensureConnectionSettled(pairing',
+  'bearerConnectionState',
+  "'/clickup/oauth/connection-state'",
   'markConnectionPending(pairing, operation)',
 ]) {
   if (!clickUpOAuthAuthority.includes(marker)) fail(`ClickUp pairing-owned cache/settle authority is missing: ${marker}`);
@@ -435,6 +438,16 @@ for (const marker of [
 }
 if (!clickUpOAuthVault.includes("url.pathname === '/clickup/oauth/methods'")) {
   fail('ClickUp Worker connection-method discovery route is missing');
+}
+for (const marker of [
+  "settled_epoch INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE clickup_connection_epoch ADD COLUMN settled_epoch INTEGER NOT NULL DEFAULT 0",
+  'UPDATE clickup_connection_epoch SET settled_epoch = epoch',
+  'settleConnectionEpochIfCurrent',
+  "url.pathname === '/clickup/oauth/connection-state'",
+  'return json(this.connectionState())',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable connection-settlement authority is missing: ${marker}`);
 }
 const clickUpStatusStart = clickUpOAuthVault.indexOf('private status()');
 const clickUpStatusEnd = clickUpStatusStart >= 0

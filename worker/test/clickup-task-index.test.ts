@@ -870,8 +870,9 @@ describe('ClickUp durable task index', () => {
     }));
   });
 
-  it('invalidates cached task evidence before a Custom Field write reaches ClickUp', async () => {
+  it('invalidates cached task evidence before and after a Custom Field write', async () => {
     let fieldWriteStarted = false;
+    const resetAt = Math.floor(Date.now() / 1000) + 600;
 
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const request = input instanceof Request ? input : new Request(input, init);
@@ -881,10 +882,24 @@ describe('ClickUp durable task index', () => {
         return new Response(JSON.stringify({ access_token: 'token-prewrite-invalidation' }), { status: 200 });
       }
       if (url.pathname === '/api/v2/user') {
-        return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
+        return new Response(JSON.stringify({ user: { id: 183 } }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(resetAt),
+          },
+        });
       }
       if (url.pathname === '/api/v2/team') {
-        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), {
+          status: 200,
+          headers: {
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '98',
+            'X-RateLimit-Reset': String(resetAt),
+          },
+        });
       }
       if (url.pathname === '/api/v2/team/999/task' && request.method === 'GET') {
         return new Response(JSON.stringify({
@@ -951,7 +966,24 @@ describe('ClickUp durable task index', () => {
       lastRefreshAt: 0,
     }));
 
+    // Simulate the exact race from the adversarial review: while ClickUp is
+    // still processing the write, another search refreshes the old provider
+    // representation and marks it fresh under the post-prewrite generation.
+    const staleRefresh = await search({ workspaceId: '999', query: 'cached custom field' });
+    expect(staleRefresh.status).toBe(200);
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      indexedTasks: 1,
+      fullSyncComplete: true,
+    }));
+
     expect((await pendingWrite).status).toBe(200);
+
+    // The mutation outcome performs a second invalidation, so the snapshot
+    // fetched during the write cannot survive as fresh evidence afterward.
+    expect(await indexSnapshot()).toEqual(expect.objectContaining({
+      indexedTasks: 0,
+      lastRefreshAt: 0,
+    }));
   });
 
   it('re-invalidates a stale refresh that completes while a Custom Field mutation is in flight', async () => {

@@ -31,6 +31,7 @@
 .google-oauth-settings__state[data-state='reauthorization-required'] .google-oauth-settings__dot { background: #f6c85f; box-shadow: 0 0 0 3px rgba(246,200,95,.12); }
 .google-oauth-settings__state[data-state='revoked'] .google-oauth-settings__dot { background: #f07bdc; box-shadow: 0 0 0 3px rgba(240,123,220,.12); }
 .google-oauth-settings__error { padding: 10px 12px; border: 1px solid rgba(240,123,220,.2); border-radius: 13px; background: rgba(82,24,48,.4); color: #ffdfe9; font-size: 11px; line-height: 1.45; }
+.google-oauth-settings__notice { padding: 10px 12px; border: 1px solid rgba(99,216,255,.18); border-radius: 13px; background: rgba(99,216,255,.05); color: rgba(219,248,255,.9); font-size: 11px; line-height: 1.45; }
 .google-oauth-settings__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .google-oauth-settings__button { min-height: 38px; border: 1px solid rgba(110,168,255,.24); border-radius: 12px; padding: 0 12px; background: rgba(110,168,255,.08); color: var(--text); font-size: 11px; font-weight: 600; }
 .google-oauth-settings__button:hover { background: rgba(110,168,255,.13); border-color: rgba(110,168,255,.42); }

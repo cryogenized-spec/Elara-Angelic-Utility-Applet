@@ -178,6 +178,8 @@ async function setRateLimitSnapshot(value: {
   limit: number | null;
   remaining: number | null;
   resetAt: number | null;
+  unknownProbeInFlight?: boolean;
+  updatedAt?: number;
 }): Promise<void> {
   const response = await doFetch(new Request('https://clickup-oauth-vault/__test/clickup/rate-limit', {
     method: 'POST',
@@ -444,6 +446,33 @@ describe('ClickUpOAuthVault', () => {
     const third = await internalCommand({ operation: 'listSpaces', workspaceId: '999' }, revision);
     expect(third.status).toBe(200);
     expect(spaceCalls).toBe(2);
+  });
+
+  it('recovers an abandoned unknown-rate probe after one full provider window', async () => {
+    const provider = mockProvider();
+    const begun = await start();
+    expect((await exchange(begun.state)).status).toBe(200);
+    const revision = (await credentialSnapshot())?.updatedAt ?? 0;
+
+    await setRateLimitSnapshot({
+      limit: null,
+      remaining: null,
+      resetAt: null,
+      unknownProbeInFlight: true,
+      updatedAt: Date.now() - 61_000,
+    });
+
+    const recovered = await internalCommand({
+      operation: 'getTask',
+      arguments: { workspaceId: '999', taskId: '86task' },
+    }, revision);
+
+    expect(recovered.status).toBe(200);
+    expect(provider.task).toBe(1);
+    expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
+      limit: 100,
+      remaining: 99,
+    }));
   });
 
   it('learns the provider rate window and blocks the next call locally when remaining reaches zero', async () => {

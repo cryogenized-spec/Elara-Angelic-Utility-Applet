@@ -210,26 +210,88 @@ function normalizeComment(value: unknown) {
   };
 }
 
-function encodeCursor(start: number, startId: string): string {
-  const raw = JSON.stringify({ v: 1, start, startId });
-  const bytes = new TextEncoder().encode(raw);
+function cursorSecret(env: ClickUpToolServiceEnv): string {
+  const token = env.ELARA_INSTALLATION_TOKEN?.trim() ?? '';
+  if (!token) throw new ClickUpToolServiceError('configuration', 'ClickUp is not configured on this Worker.', 503);
+  return token;
+}
+
+function base64Url(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
-function decodeCursor(value: string | undefined): { start: number; startId: string } | undefined {
+function fromBase64Url(value: string): Uint8Array {
+  const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
+  const binary = atob(base64);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function cursorMac(secret: string, payload: Uint8Array): Promise<Uint8Array> {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(`elara-clickup-comments-cursor-v2\n${secret}`),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  return new Uint8Array(await crypto.subtle.sign('HMAC', key, payload));
+}
+
+function equalBytes(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) return false;
+  let mismatch = 0;
+  for (let index = 0; index < left.byteLength; index += 1) mismatch |= left[index]! ^ right[index]!;
+  return mismatch === 0;
+}
+
+async function encodeCursor(
+  env: ClickUpToolServiceEnv,
+  workspaceId: string,
+  taskId: string,
+  start: number,
+  startId: string,
+): Promise<string> {
+  const payload = new TextEncoder().encode(JSON.stringify({
+    v: 2,
+    workspaceId,
+    taskId,
+    start,
+    startId,
+  }));
+  const mac = await cursorMac(cursorSecret(env), payload);
+  return `${base64Url(payload)}.${base64Url(mac)}`;
+}
+
+async function decodeCursor(
+  env: ClickUpToolServiceEnv,
+  workspaceId: string,
+  taskId: string,
+  value: string | undefined,
+): Promise<{ start: number; startId: string } | undefined> {
   if (!value) return undefined;
   try {
-    const base64 = value.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(value.length / 4) * 4, '=');
-    const binary = atob(base64);
-    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-    const parsed = JSON.parse(new TextDecoder().decode(bytes)) as Record<string, unknown>;
+    const [payloadPart, macPart, extra] = value.split('.');
+    if (!payloadPart || !macPart || extra !== undefined) throw new Error('invalid');
+    const payload = fromBase64Url(payloadPart);
+    const presentedMac = fromBase64Url(macPart);
+    const expectedMac = await cursorMac(cursorSecret(env), payload);
+    if (!equalBytes(presentedMac, expectedMac)) throw new Error('invalid');
+
+    const parsed = JSON.parse(new TextDecoder().decode(payload)) as Record<string, unknown>;
     const start = providerMillis(parsed.start);
     const startId = providerId(parsed.startId);
-    if (parsed.v !== 1 || start === undefined || !startId) throw new Error('invalid');
+    if (
+      parsed.v !== 2
+      || parsed.workspaceId !== workspaceId
+      || parsed.taskId !== taskId
+      || start === undefined
+      || !startId
+    ) throw new Error('invalid');
     return { start, startId };
-  } catch {
+  } catch (error) {
+    if (error instanceof ClickUpToolServiceError) throw error;
     throw new ClickUpToolServiceError('validation', 'The ClickUp comments cursor is invalid.', 400);
   }
 }
@@ -279,7 +341,7 @@ async function comments(
   limit: number,
   expectedRevision?: number,
 ) {
-  let cursor = decodeCursor(cursorValue);
+  let cursor = await decodeCursor(env, workspaceId, taskId, cursorValue);
   const output: ReturnType<typeof normalizeComment>[] = [];
   let lastRaw: Record<string, unknown> | undefined;
   let providerHasMore = false;
@@ -313,7 +375,7 @@ async function comments(
   if (providerHasMore && lastRaw) {
     const start = providerMillis(lastRaw.date);
     const startId = providerId(lastRaw.id);
-    if (start !== undefined && startId) nextCursor = encodeCursor(start, startId);
+    if (start !== undefined && startId) nextCursor = await encodeCursor(env, workspaceId, taskId, start, startId);
   }
 
   return {

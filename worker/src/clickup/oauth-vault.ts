@@ -341,7 +341,7 @@ export class ClickUpOAuthVault extends DurableObject {
       // therefore assign the explicit OAuth discriminator without inspecting
       // or decrypting any legacy token bytes.
       this.ctx.storage.sql.exec(
-        "ALTER TABLE clickup_oauth_credential ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth'",
+        "ALTER TABLE clickup_oauth_credential ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth' CHECK (credential_kind IN ('oauth', 'personal'))",
       );
     }
 

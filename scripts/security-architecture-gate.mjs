@@ -572,6 +572,7 @@ for (const marker of [
   'normalizeTaskScopeFailure',
   'padDeniedTaskScope',
   'RATE_WINDOW_ROLLOVER_MIN_SECONDS',
+  'incomingReset < currentReset',
 ]) {
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth/REST credential boundary is missing: ${marker}`);
 }
@@ -653,20 +654,53 @@ if (!/async function providerJsonRequest[\s\S]*const response = await fetcher\([
   fail('ClickUp provider deadline must remain active through bounded response-body consumption');
 }
 
+const exchangeStart = clickUpOAuthVault.indexOf('private async exchange(request: Request, body: string)');
+const exchangeEnd = exchangeStart >= 0 ? clickUpOAuthVault.indexOf('private async disconnect(body: string)', exchangeStart) : -1;
+if (exchangeStart < 0 || exchangeEnd < 0) fail('ClickUp OAuth exchange authority disappeared');
+const exchangeBody = clickUpOAuthVault.slice(exchangeStart, exchangeEnd);
+const replacementTransactionStart = exchangeBody.indexOf('const replacement = this.ctx.storage.transactionSync(() => {');
+const replacementTransactionEnd = replacementTransactionStart >= 0
+  ? exchangeBody.indexOf('if (!replacement)', replacementTransactionStart)
+  : -1;
+if (replacementTransactionStart < 0 || replacementTransactionEnd < 0) {
+  fail('ClickUp grant replacement transaction boundary disappeared');
+}
+for (const marker of [
+  'INSERT INTO clickup_oauth_credential',
+  "DELETE FROM clickup_webhooks",
+  "DELETE FROM clickup_webhook_deliveries",
+  "DELETE FROM clickup_rate_limit",
+  'clearClickUpTaskIndex',
+]) {
+  const position = exchangeBody.indexOf(marker, replacementTransactionStart);
+  if (position < replacementTransactionStart || position >= replacementTransactionEnd) {
+    fail(`ClickUp replacement grant and grant-scoped local state must remain atomic: ${marker}`);
+  }
+}
+
 const disconnectStart = clickUpOAuthVault.indexOf('private async disconnect(body: string)');
 const disconnectEnd = disconnectStart >= 0 ? clickUpOAuthVault.indexOf('/** Provider execution consumes credential material', disconnectStart) : -1;
 if (disconnectStart < 0 || disconnectEnd < 0) fail('ClickUp disconnect authority disappeared');
 const disconnectBody = clickUpOAuthVault.slice(disconnectStart, disconnectEnd);
-const disconnectFirstAwait = disconnectBody.indexOf('await ');
+const disconnectTransactionStart = disconnectBody.indexOf('const detached = this.ctx.storage.transactionSync(() => {');
+const disconnectTransactionEnd = disconnectTransactionStart >= 0
+  ? disconnectBody.indexOf('const { previous, webhookRows } = detached;', disconnectTransactionStart)
+  : -1;
+if (disconnectTransactionStart < 0 || disconnectTransactionEnd < 0) {
+  fail('ClickUp local disconnect transaction boundary disappeared');
+}
 for (const marker of [
+  "UPDATE clickup_connection_epoch SET epoch = ?",
+  "DELETE FROM clickup_webhooks",
+  "DELETE FROM clickup_webhook_deliveries",
   "DELETE FROM clickup_oauth_credential",
   "DELETE FROM clickup_oauth_states",
   "DELETE FROM clickup_rate_limit",
   'clearClickUpTaskIndex',
 ]) {
-  const position = disconnectBody.indexOf(marker);
-  if (position < 0 || disconnectFirstAwait < 0 || position > disconnectFirstAwait) {
-    fail(`ClickUp local disconnect must finalize ${marker} before provider cleanup awaits`);
+  const position = disconnectBody.indexOf(marker, disconnectTransactionStart);
+  if (position < disconnectTransactionStart || position >= disconnectTransactionEnd) {
+    fail(`ClickUp local disconnect must atomically finalize grant-scoped state: ${marker}`);
   }
 }
 
@@ -765,6 +799,7 @@ if (!toolLoop.includes("results.push(errorToolResult(call, UNTRUSTED_CONTEXT_REA
 if (!toolLoop.includes('&& !freshUserExplicitlyRequestedClickUpMutation(request, call.name)')) fail('ClickUp untrusted mutation admission lost fresh-user intent check');
 if (!toolLoop.includes("'clickup.'") || !toolLoop.includes('clickUpToolHandlers') || !toolLoop.includes('clickUpOAuthAuthority')) fail('ClickUp tools must remain inside the existing model-tool and untrusted-provider authority');
 if (!toolLoop.includes('containsUntrustedExternal') || !toolLoop.includes('isExternalEvidenceReadTool') || !toolLoop.includes('EXTERNAL_EVIDENCE_READ_PREFIXES') || !toolLoop.includes('PRIVATE_EXTERNAL_READ_PREFIXES') || !toolLoop.includes('taintedReadContinuationAllowed') || !toolLoop.includes('driveSearchCandidateIds') || !toolLoop.includes('batchStartedTainted') || !toolLoop.includes('untrustedContext: true as const')) fail('Gemini tool loop must taint external evidence, block post-taint private reads, and limit Drive transfer continuation to same-turn search provenance');
+if (!/completedMutationOutcomes\.push[\s\S]{0,800}containsUntrustedExternal\(result\.result\)[\s\S]{0,400}untrustedExternalSeen = true[\s\S]{0,200}untrustedContextSeen = true/.test(toolLoop)) fail('Successful provider mutation results must taint the next Gemini continuation before it can request another private read or mutation');
 if (!toolLoop.includes("call.name === 'memory.lookup' || call.name === 'memory.recall'") || !toolLoop.includes('untrustedExternalSeen = true')) fail('Durable-memory recall must taint later private Workspace reads as well as mutations');
 const geminiContracts = read('src/gemini/contracts.ts');
 const appSource = read('src/app/App.tsx');

@@ -29,6 +29,7 @@ export class ClickUpToolServiceError extends Error {
 const MAX_TASK_TEXT_CHARS = 12_000;
 const MAX_COMMENT_TEXT_CHARS = 8_000;
 const MAX_PROVIDER_ARRAY = 100;
+const MAX_COMMENT_PROVIDER_PAGES = 4;
 
 function boundedText(value: unknown, maxChars: number): string | undefined {
   if (typeof value !== 'string') return undefined;
@@ -355,8 +356,10 @@ async function comments(
   const output: ReturnType<typeof normalizeComment>[] = [];
   let lastRaw: Record<string, unknown> | undefined;
   let providerHasMore = false;
+  let providerPages = 0;
 
-  while (output.length < limit) {
+  while (output.length < limit && providerPages < MAX_COMMENT_PROVIDER_PAGES) {
+    providerPages += 1;
     const raw = await command<Record<string, unknown>>(env, {
       operation: 'getTaskComments',
       workspaceId,

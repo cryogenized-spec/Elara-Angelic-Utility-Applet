@@ -201,6 +201,7 @@ async function credentialSnapshot(): Promise<{
   return await response.json() as {
     accessCipher: string;
     accessIv: string;
+    credentialKind: 'oauth' | 'personal';
     userId: string;
     username: string | null;
     email: string | null;

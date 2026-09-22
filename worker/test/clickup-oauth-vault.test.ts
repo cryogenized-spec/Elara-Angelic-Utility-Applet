@@ -979,13 +979,16 @@ describe('ClickUpOAuthVault', () => {
     }, revision);
     expect((await newWindowRequest).status).toBe(200);
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
-      remaining: 99,
+      // Two provider calls were already reserved locally from the current
+      // budget (98 -> 97 -> 96). A newer provider window may advance the reset
+      // horizon, but it must not replenish those in-flight reservations.
+      remaining: 96,
       resetAt: secondResetAt,
     }));
 
     expect((await oldWindowRequest).status).toBe(200);
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({
-      remaining: 99,
+      remaining: 96,
       resetAt: secondResetAt,
     }));
   });

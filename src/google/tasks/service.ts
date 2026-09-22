@@ -334,9 +334,7 @@ export class GoogleTasksService {
   async deleteTaskList(taskListId: string, etag?: string, options: GoogleTasksMutationOptions = {}): Promise<void> {
     boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH);
     requireTaskMutationCurrent(options, 'Google Tasks delete list');
-    requireTaskMutationCurrent(options, 'Google Tasks delete task');
     const access = await this.oauth.authorize('tasks.write');
-    requireTaskMutationCurrent(options, 'Google Tasks delete task');
     requireTaskMutationCurrent(options, 'Google Tasks delete list');
     const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {}, ...(options.signal ? { signal: options.signal } : {}) }, taskProviderMutationGuard(options, 'Google Tasks delete list'));
     await this.assertOk(response);
@@ -414,7 +412,9 @@ export class GoogleTasksService {
   }
 
   async deleteTask(taskListId: string, taskId: string, etag?: string, options: GoogleTasksMutationOptions = {}): Promise<void> {
+    requireTaskMutationCurrent(options, 'Google Tasks delete task');
     const access = await this.oauth.authorize('tasks.write');
+    requireTaskMutationCurrent(options, 'Google Tasks delete task');
     const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {}, ...(options.signal ? { signal: options.signal } : {}) }, taskProviderMutationGuard(options, 'Google Tasks delete task'));
     await this.assertOk(response);
     this.changed();

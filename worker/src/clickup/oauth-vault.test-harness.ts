@@ -54,7 +54,9 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
           ]) {
             this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
           }
-          this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = 0 WHERE slot = 1');
+          this.ctx.storage.sql.exec(
+            'UPDATE clickup_connection_epoch SET epoch = 0, settled_epoch = 0 WHERE slot = 1',
+          );
         });
         return json({ ok: true });
       }

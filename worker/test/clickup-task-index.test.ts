@@ -745,13 +745,19 @@ describe('ClickUp durable task index', () => {
       const request = input instanceof Request ? input : new Request(input, init);
       const url = new URL(request.url);
       if (url.pathname === '/api/v2/oauth/token') return new Response(JSON.stringify({ access_token: 'token' }), { status: 200 });
-      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200 });
-      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      const rateHeaders = {
+        'content-type': 'application/json',
+        'X-RateLimit-Limit': '100',
+        'X-RateLimit-Remaining': '90',
+        'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 600),
+      };
+      if (url.pathname === '/api/v2/user') return new Response(JSON.stringify({ user: { id: 183 } }), { status: 200, headers: rateHeaders });
+      if (url.pathname === '/api/v2/team') return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200, headers: rateHeaders });
       if (url.pathname === '/api/v2/team/999/task') {
         if (!reconcile) {
           return new Response(JSON.stringify({
             tasks: [{ id: 'old-task', name: 'Old needle', date_updated: '1790000000000', status: { status: 'open' } }],
-          }), { status: 200, headers: { 'content-type': 'application/json' } });
+          }), { status: 200, headers: rateHeaders });
         }
 
         reconcileCalls += 1;
@@ -760,7 +766,7 @@ describe('ClickUp durable task index', () => {
         await (ordinal === 1 ? firstGate : secondGate);
         return new Response(JSON.stringify({
           tasks: [{ id: 'new-task', name: 'New needle', date_updated: '1790000100000', status: { status: 'open' } }],
-        }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }), { status: 200, headers: rateHeaders });
       }
       throw new Error(`Unexpected provider request: ${request.url}`);
     });

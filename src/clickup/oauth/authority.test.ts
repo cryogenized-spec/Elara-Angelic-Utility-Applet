@@ -71,6 +71,29 @@ describe('ClickUp OAuth browser authority', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('rejects a response if the paired Worker changes while the request is in flight', async () => {
+    globalThis.fetch = vi.fn(async () => {
+      pairingMock.mockReturnValue({
+        ...TEST_PAIRING,
+        workerUrl: 'https://replacement.example',
+        installationId: 'replacement-installation',
+      });
+      return new Response(JSON.stringify({
+        authorizationUrl: 'https://app.clickup.com/api?client_id=abc&state=stale-state-value',
+        state: 'stale-state-value',
+        expiresAt: Date.now() + 600_000,
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.beginConnect(
+      'https://cryogenized-spec.github.io/clickup/oauth/callback',
+    )).rejects.toMatchObject({
+      code: 'grant_changed',
+      status: 409,
+    });
+    expect(localStorage.getItem('elara.clickup.authorization.v1')).toBeNull();
+  });
+
   it('starts authorization with a signed Worker write and never stores credentials', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);

@@ -160,6 +160,7 @@ async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatu
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
     });
+    assertPairingStillCurrent(pairing);
     if (response.status !== 200) throw workerError(response);
     const parsed = clickUpOAuthStatusSchema.parse(response.body);
     persistStatus(parsed);
@@ -180,6 +181,7 @@ async function bearerConnectionMethods(pairing: AutonomyPairing): Promise<ClickU
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
   });
+  assertPairingStillCurrent(pairing);
   // Older Workers do not expose this endpoint and support OAuth only.
   if (response.status === 404) return { oauth: true, personalToken: false };
   if (response.status !== 200) throw workerError(response);
@@ -209,6 +211,7 @@ async function signedPost<T>(
     },
     body,
   });
+  assertPairingStillCurrent(pairing);
   if (response.status !== 200) throw workerError(response);
   return parse(response.body);
 }

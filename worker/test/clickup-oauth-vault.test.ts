@@ -482,6 +482,13 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.accessIv).toBeTruthy();
     expect(snapshot?.credentialKind).toBe('personal');
     expect(snapshot?.userId).toBe('183');
+
+    const context = await internalCommand({
+      operation: 'getWorkspaceAuthorizationContext',
+      workspaceId: '999',
+    });
+    expect(context.status).toBe(200);
+    expect(workspaceCalls).toBe(2);
   });
 
   it('invalidates a pending OAuth popup when the user chooses the configured personal token', async () => {

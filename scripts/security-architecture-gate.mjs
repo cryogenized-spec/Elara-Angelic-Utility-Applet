@@ -662,6 +662,8 @@ for (const marker of [
   'parsed.taskId !== taskId',
   'parsed.grantRevision !== grantRevision',
   'equalBytes(presentedMac, expectedMac)',
+  'MAX_COMMENT_PROVIDER_PAGES',
+  'providerPages < MAX_COMMENT_PROVIDER_PAGES',
 ]) {
   if (!clickUpToolService.includes(marker)) fail(`ClickUp comment cursor authority is missing: ${marker}`);
 }

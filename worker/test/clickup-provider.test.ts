@@ -90,14 +90,14 @@ describe('ClickUp provider wire mapping', () => {
 
     // Even if an OAuth token happened to begin with pk_, an untagged provider
     // credential remains OAuth and therefore keeps the Bearer scheme.
-    await fetchAuthorizedClickUpUser('pk_oauth-shaped-but-oauth', fetcher);
+    await fetchAuthorizedClickUpUser('pk_dummy-oauth-shaped-but-oauth', fetcher);
     await fetchAuthorizedClickUpUser(
       personalClickUpCredential('pk_personal-token-for-test'),
       fetcher,
     );
 
     expect(seen).toEqual([
-      'Bearer pk_oauth-shaped-but-oauth',
+      'Bearer pk_dummy-oauth-shaped-but-oauth',
       'pk_personal-token-for-test',
     ]);
   });

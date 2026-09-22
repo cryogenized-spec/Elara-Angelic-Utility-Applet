@@ -17,6 +17,7 @@ vi.mock('../../clickup/oauth/popup', () => ({
 
 import { clickUpOAuthAuthority } from '../../clickup/oauth/authority';
 import { connectClickUpWithPopup, switchClickUpAccountWithPopup } from '../../clickup/oauth/popup';
+import type { ClickUpOAuthStatus } from '../../clickup/oauth/contracts';
 import { ClickUpOAuthSettings } from './ClickUpOAuthSettings';
 
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -25,12 +26,12 @@ const getStatusMock = vi.mocked(clickUpOAuthAuthority.getStatus);
 const connectMock = vi.mocked(connectClickUpWithPopup);
 const switchMock = vi.mocked(switchClickUpAccountWithPopup);
 
-const CONNECTED = {
+const CONNECTED: ClickUpOAuthStatus = {
   connected: true,
   account: { id: '183', username: 'Gareth', email: 'company@example.com' },
   workspaces: [{ id: '999', name: 'Neon Sales' }],
   updatedAt: 123456,
-} as const;
+};
 
 let container: HTMLDivElement;
 let root: Root;
@@ -78,12 +79,12 @@ describe('ClickUpOAuthSettings', () => {
   });
 
   it('switches ClickUp identity through the dedicated replacement flow', async () => {
-    const replacement = {
+    const replacement: ClickUpOAuthStatus = {
       connected: true,
       account: { id: '200', username: 'Company User', email: 'other-company@example.com' },
       workspaces: [{ id: '1000', name: 'Company Workspace' }],
       updatedAt: 234567,
-    } as const;
+    };
     switchMock.mockResolvedValueOnce(replacement);
 
     await renderSettings();

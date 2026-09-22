@@ -179,7 +179,7 @@ for (const marker of ['stable-subject continuity removal', 'revoked-grant recove
 }
 
 const secretScan = read('scripts/secret-scan.mjs');
-for (const marker of ['Google API key', 'GitHub token', 'AWS access key', 'Private key material', 'tracked environment file is forbidden', 'dummyMarker', 'fixturePath']) {
+for (const marker of ['Google API key', 'GitHub token', 'ClickUp personal token', 'AWS access key', 'Private key material', 'tracked environment file is forbidden', 'dummyMarker', 'fixturePath']) {
   if (!secretScan.includes(marker)) fail(`secret scanner lost required detector or fixture policy: ${marker}`);
 }
 

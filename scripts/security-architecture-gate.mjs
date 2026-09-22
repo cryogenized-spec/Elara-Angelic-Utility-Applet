@@ -396,8 +396,15 @@ for (const marker of [
   "'/clickup/oauth/start'",
   "'/clickup/oauth/exchange'",
   "'/clickup/oauth/disconnect'",
+  'MAX_WORKER_RESPONSE_BYTES',
+  'readBoundedWorkerJson',
+  'const body = await readBoundedWorkerJson(response)',
+  "code: 'timeout'",
 ]) {
   if (!clickUpOAuthAuthority.includes(marker)) fail(`durable ClickUp OAuth browser authority is missing: ${marker}`);
+}
+if (!/async function workerRequest[\s\S]*const response = await fetch\([\s\S]*const body = await readBoundedWorkerJson\(response\);[\s\S]*finally\s*\{\s*clearTimeout\(timeout\);/.test(clickUpOAuthAuthority)) {
+  fail('ClickUp browser OAuth deadline must remain active through bounded Worker response-body consumption');
 }
 for (const marker of [
   "CLICKUP_MCP_PROTOCOL_VERSION",

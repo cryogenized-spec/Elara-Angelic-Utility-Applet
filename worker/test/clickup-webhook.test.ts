@@ -114,6 +114,79 @@ async function signWebhook(body: string, secret = WEBHOOK_SECRET): Promise<strin
 }
 
 describe('ClickUp signed webhook cache invalidation', () => {
+  it('reserves the shared provider budget before each OAuth-time webhook registration', async () => {
+    let webhookCreateCalls = 0;
+    const resetAt = Math.floor(Date.now() / 1000) + 60;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'provider-token-budgeted-webhooks' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '3',
+            'X-RateLimit-Remaining': '2',
+            'X-RateLimit-Reset': String(resetAt),
+          },
+        });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({
+          teams: [
+            { id: '999', name: 'Workspace A', members: [] },
+            { id: '998', name: 'Workspace B', members: [] },
+          ],
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '3',
+            'X-RateLimit-Remaining': '1',
+            'X-RateLimit-Reset': String(resetAt),
+          },
+        });
+      }
+      if (/\/api\/v2\/team\/(999|998)\/webhook$/.test(url.pathname) && request.method === 'POST') {
+        webhookCreateCalls += 1;
+        return new Response(JSON.stringify({
+          webhook: {
+            id: `webhook-${webhookCreateCalls}`,
+            endpoint: 'https://worker.example/clickup/webhook',
+            secret: `secret-${webhookCreateCalls}`,
+          },
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '3',
+            'X-RateLimit-Remaining': '0',
+            'X-RateLimit-Reset': String(resetAt),
+          },
+        });
+      }
+
+      throw new Error(`Unexpected provider request: ${request.method} ${request.url}`);
+    });
+
+    const exchanged = await connectThroughPublicWorker('budgeted-webhook-code');
+    expect(exchanged.status).toBe(200);
+
+    // /user + /team leave one request in the known provider window. The first
+    // webhook registration reserves it before egress; the second Workspace is
+    // stopped locally instead of becoming an unreserved fourth provider call.
+    expect(webhookCreateCalls).toBe(1);
+    expect(await webhookSnapshot()).toHaveLength(1);
+  });
+
   it('registers a Worker-derived callback and uses signed task events only as cache invalidation signals', async () => {
     let webhookCreateCalls = 0;
     let taskListCalls = 0;

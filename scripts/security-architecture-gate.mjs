@@ -656,6 +656,16 @@ if (!/function normalizeMutationResult[\s\S]*trust: 'untrusted-external' as cons
 }
 
 for (const marker of [
+  'elara-clickup-comments-cursor-v2',
+  "crypto.subtle.sign('HMAC'",
+  'parsed.workspaceId !== workspaceId',
+  'parsed.taskId !== taskId',
+  'equalBytes(presentedMac, expectedMac)',
+]) {
+  if (!clickUpToolService.includes(marker)) fail(`ClickUp comment cursor authority is missing: ${marker}`);
+}
+
+for (const marker of [
   "form.set('workspaceId', args.workspaceId)",
   'assertClickUpArtifactSnapshotCurrent',
 ]) {

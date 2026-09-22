@@ -42,16 +42,19 @@ export function forwardClickUpOAuthCallbackFromPopup(): boolean {
   return true;
 }
 
-export async function connectClickUpWithPopup(): Promise<ClickUpOAuthStatus> {
+async function authorizeClickUpWithPopup(beforeStart?: () => Promise<void>): Promise<ClickUpOAuthStatus> {
   if (typeof window === 'undefined') throw new Error('ClickUp authorization is available only in the browser.');
 
-  // Create the window under the user gesture before awaiting Worker state, so
-  // popup blockers cannot turn a valid connect click into a silent failure.
+  // Create the window under the initiating user gesture before any asynchronous
+  // Worker work. Account switching deliberately disconnects first, but only
+  // after this popup exists, so browsers cannot turn a valid Switch click into
+  // a blocked replacement authorization.
   const popup = window.open('', POPUP_NAME, 'popup,width=560,height=760,resizable=yes,scrollbars=yes');
   if (!popup) throw new Error('The ClickUp authorization popup was blocked.');
 
   const targetRedirect = redirectUri();
   try {
+    if (beforeStart) await beforeStart();
     const started = await clickUpOAuthAuthority.beginConnect(targetRedirect);
     popup.location.replace(started.authorizationUrl);
 
@@ -102,4 +105,12 @@ export async function connectClickUpWithPopup(): Promise<ClickUpOAuthStatus> {
     try { popup.close(); } catch { /* ignore */ }
     throw error;
   }
+}
+
+export function connectClickUpWithPopup(): Promise<ClickUpOAuthStatus> {
+  return authorizeClickUpWithPopup();
+}
+
+export function switchClickUpAccountWithPopup(): Promise<ClickUpOAuthStatus> {
+  return authorizeClickUpWithPopup(() => clickUpOAuthAuthority.disconnect());
 }

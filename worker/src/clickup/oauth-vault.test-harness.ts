@@ -46,6 +46,7 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
             'clickup_webhooks',
             'clickup_webhook_deliveries',
             'clickup_task_index',
+            'clickup_task_index_tombstones',
             'clickup_task_index_state',
           ]) {
             this.ctx.storage.sql.exec(`DELETE FROM ${table}`);

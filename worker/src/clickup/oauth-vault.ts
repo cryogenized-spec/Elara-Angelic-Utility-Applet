@@ -395,10 +395,26 @@ export class ClickUpOAuthVault extends DurableObject {
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS clickup_connection_epoch (
         slot INTEGER PRIMARY KEY CHECK (slot = 1),
-        epoch INTEGER NOT NULL
+        epoch INTEGER NOT NULL,
+        settled_epoch INTEGER NOT NULL DEFAULT 0
       )
     `);
-    this.ctx.storage.sql.exec('INSERT OR IGNORE INTO clickup_connection_epoch (slot, epoch) VALUES (1, 0)');
+    const connectionEpochColumns = this.ctx.storage.sql.exec<{ name: string }>(
+      'PRAGMA table_info(clickup_connection_epoch)',
+    ).toArray();
+    if (!connectionEpochColumns.some((column) => column.name === 'settled_epoch')) {
+      this.ctx.storage.sql.exec(
+        'ALTER TABLE clickup_connection_epoch ADD COLUMN settled_epoch INTEGER NOT NULL DEFAULT 0',
+      );
+      // Before operation-state tracking existed every persisted epoch was, by
+      // definition, already settled. Preserve that truth during migration.
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_connection_epoch SET settled_epoch = epoch',
+      );
+    }
+    this.ctx.storage.sql.exec(
+      'INSERT OR IGNORE INTO clickup_connection_epoch (slot, epoch, settled_epoch) VALUES (1, 0, 0)',
+    );
     initializeClickUpTaskIndex(this.ctx.storage.sql);
   }
 
@@ -408,10 +424,19 @@ export class ClickUpOAuthVault extends DurableObject {
     ).toArray()[0] ?? null;
   }
 
+  private connectionState(): { epoch: number; settledEpoch: number; pending: boolean } {
+    const row = this.ctx.storage.sql.exec<{ epoch: number; settled_epoch: number }>(
+      'SELECT epoch, settled_epoch FROM clickup_connection_epoch WHERE slot = 1',
+    ).toArray()[0] ?? { epoch: 0, settled_epoch: 0 };
+    return {
+      epoch: row.epoch,
+      settledEpoch: row.settled_epoch,
+      pending: row.epoch !== row.settled_epoch,
+    };
+  }
+
   private connectionEpoch(): number {
-    return this.ctx.storage.sql.exec<{ epoch: number }>(
-      'SELECT epoch FROM clickup_connection_epoch WHERE slot = 1',
-    ).toArray()[0]?.epoch ?? 0;
+    return this.connectionState().epoch;
   }
 
   private advanceConnectionEpoch(): number {
@@ -419,6 +444,16 @@ export class ClickUpOAuthVault extends DurableObject {
       const next = this.connectionEpoch() + 1;
       this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = ? WHERE slot = 1', next);
       return next;
+    });
+  }
+
+  private settleConnectionEpochIfCurrent(epoch: number): void {
+    this.ctx.storage.transactionSync(() => {
+      if (this.connectionEpoch() !== epoch) return;
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_connection_epoch SET settled_epoch = ? WHERE slot = 1',
+        epoch,
+      );
     });
   }
 
@@ -464,6 +499,10 @@ export class ClickUpOAuthVault extends DurableObject {
       if (request.method === 'GET' && url.pathname === '/clickup/oauth/methods') {
         if (!(await this.verifyRead(request))) return json({ code: 'auth', message: 'A valid installation credential is required.' }, 401);
         return json(this.connectionMethods());
+      }
+      if (request.method === 'GET' && url.pathname === '/clickup/oauth/connection-state') {
+        if (!(await this.verifyRead(request))) return json({ code: 'auth', message: 'A valid installation credential is required.' }, 401);
+        return json(this.connectionState());
       }
 
       if (request.method !== 'POST') return json({ code: 'not_found', message: 'Not found.' }, 404);
@@ -2239,7 +2278,11 @@ export class ClickUpOAuthVault extends DurableObject {
       // exchange already awaiting ClickUp cannot resume later and overwrite
       // the account chosen by this newer Connect flow.
       const nextEpoch = this.connectionEpoch() + 1;
-      this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = ? WHERE slot = 1', nextEpoch);
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_connection_epoch SET epoch = ?, settled_epoch = ? WHERE slot = 1',
+        nextEpoch,
+        nextEpoch,
+      );
       this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
       this.ctx.storage.sql.exec('INSERT INTO clickup_oauth_states (state, redirect_uri, created_at) VALUES (?, ?, ?)', state, parsed.data.redirectUri, now);
     });
@@ -2277,8 +2320,12 @@ export class ClickUpOAuthVault extends DurableObject {
     // Do not tear down the currently-valid grant's webhook state until the
     // replacement authorization is fully validated. A failed reconnect must
     // leave the old credential + auxiliary webhook state intact.
-    const credential = await exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code);
-    return this.installCredential(request, credential, exchangeEpoch, previousAccessToken, now);
+    try {
+      const credential = await exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code);
+      return await this.installCredential(request, credential, exchangeEpoch, previousAccessToken, now);
+    } finally {
+      this.settleConnectionEpochIfCurrent(exchangeEpoch);
+    }
   }
 
   private async connectPersonalToken(request: Request, body: string): Promise<Response> {
@@ -2311,7 +2358,11 @@ export class ClickUpOAuthVault extends DurableObject {
       return next;
     });
     const previousAccessToken = await this.accessCredential().catch(() => null);
-    return this.installCredential(request, credential, connectionEpoch, previousAccessToken, now);
+    try {
+      return await this.installCredential(request, credential, connectionEpoch, previousAccessToken, now);
+    } finally {
+      this.settleConnectionEpochIfCurrent(connectionEpoch);
+    }
   }
 
   private async installCredential(
@@ -2376,6 +2427,10 @@ export class ClickUpOAuthVault extends DurableObject {
         );
       }
       clearClickUpTaskIndex(this.ctx.storage.sql);
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_connection_epoch SET settled_epoch = ? WHERE slot = 1',
+        connectionEpoch,
+      );
 
       return { revision, previousWebhookRows };
     });

@@ -1419,12 +1419,39 @@ export class ClickUpOAuthVault extends DurableObject {
         if (!fieldsResult.ok) return fieldsResult.response;
         const fieldsRoot = fieldsResult.data && typeof fieldsResult.data === 'object' ? fieldsResult.data as Record<string, unknown> : {};
         const fields = Array.isArray(fieldsRoot.fields) ? fieldsRoot.fields : [];
-        const fieldAllowed = fields.some((entry) => safeProviderId(
+        const field = fields.find((entry) => safeProviderId(
           entry && typeof entry === 'object' && !Array.isArray(entry)
             ? (entry as Record<string, unknown>).id
             : undefined,
         ) === command.fieldId);
-        if (!fieldAllowed) return this.scopeDenied('The requested ClickUp Custom Field is not available on the admitted task.');
+        if (!field || typeof field !== 'object' || Array.isArray(field)) {
+          return this.scopeDenied('The requested ClickUp Custom Field is not available on the admitted task.');
+        }
+
+        // ClickUp can expose a List field that is restricted to specific
+        // custom task types. The provider returns 400 when a field's
+        // applied_objects does not include this task's custom_item_id, so
+        // reject that predictable mismatch before an approved mutation.
+        const fieldRecord = field as Record<string, unknown>;
+        const appliedObjects = Array.isArray(fieldRecord.applied_objects)
+          ? fieldRecord.applied_objects
+          : [];
+        if (appliedObjects.length) {
+          const taskCustomItemId = safeProviderId(taskScope.task.custom_item_id) ?? '0';
+          const applicable = appliedObjects.some((entry) => {
+            if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return false;
+            const applied = entry as Record<string, unknown>;
+            return safeProviderId(applied.object_type) === '19'
+              && safeProviderId(applied.object_id) === taskCustomItemId;
+          });
+          if (!applicable) {
+            return json({
+              code: 'custom_field_not_applicable',
+              message: 'The requested ClickUp Custom Field is not applicable to this task type.',
+            }, 400);
+          }
+        }
+
         const mutation = command.operation === 'setCustomField'
           ? await this.providerData((token) => setClickUpTaskCustomField(token, command.taskId, command.fieldId, command.value), expectedRevision)
           : await this.providerData((token) => clearClickUpTaskCustomField(token, command.taskId, command.fieldId), expectedRevision);

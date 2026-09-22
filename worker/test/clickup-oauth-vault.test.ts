@@ -239,6 +239,21 @@ describe('ClickUpOAuthVault', () => {
     expect(await status.json()).toEqual(expect.objectContaining({ connected: true }));
   });
 
+  it('rejects an older OAuth popup state after a newer Connect flow starts', async () => {
+    const provider = mockProvider();
+    const first = await start();
+    const second = await start();
+
+    const stale = await exchange(first.state, 'older-popup-code');
+    expect(stale.status).toBe(409);
+    expect(await stale.json()).toEqual(expect.objectContaining({ code: 'oauth_state' }));
+    expect(provider.token).toBe(0);
+
+    const current = await exchange(second.state, 'newest-popup-code');
+    expect(current.status).toBe(200);
+    expect(provider.token).toBe(1);
+  });
+
   it('rejects OAuth state replay before another token exchange', async () => {
     const provider = mockProvider();
     const begun = await start();

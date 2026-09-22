@@ -285,6 +285,29 @@ describe('ClickUp MCP browser client', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it('fails closed if pairing changes after tools/list but before tools/call egress', async () => {
+    const methods: string[] = [];
+    globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = requestBody(init);
+      methods.push(body.method);
+      if (body.method === 'server/discover') return discover(body.id);
+      if (body.method === 'tools/list') {
+        pairingMock.mockReturnValue({ ...PAIRING, workerUrl: 'https://replacement.example' });
+        return toolsList(body.id);
+      }
+      throw new Error('tools/call must not reach the stale paired Worker.');
+    }) as unknown as typeof fetch;
+
+    await expect(callClickUpMcpTool(
+      'clickup.getTask',
+      { workspaceId: '999', taskId: '86task' },
+      undefined,
+      ADMITTED,
+    )).rejects.toMatchObject({ code: 'grant_changed', status: 409 });
+
+    expect(methods).toEqual(['server/discover', 'tools/list']);
+  });
+
   it('surfaces complete MCP tool errors without losing provider error identity', async () => {
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = requestBody(init);

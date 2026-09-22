@@ -42,6 +42,22 @@ export function clickUpPairingAuthorityBinding(pairing: AutonomyPairing): string
   return `${normalizeWorkerBaseUrl(pairing.workerUrl)}#${pairing.installationId}`;
 }
 
+function assertPairingStillCurrent(pairing: AutonomyPairing): void {
+  const expected = clickUpPairingAuthorityBinding(pairing);
+  const current = loadPairing();
+  if (!current) {
+    throw new ClickUpOAuthError('grant_changed', 'The paired Worker changed before ClickUp OAuth egress.', 409);
+  }
+  try {
+    if (clickUpPairingAuthorityBinding(current) !== expected) {
+      throw new ClickUpOAuthError('grant_changed', 'The paired Worker changed before ClickUp OAuth egress.', 409);
+    }
+  } catch (error) {
+    if (error instanceof ClickUpOAuthError && error.code === 'grant_changed') throw error;
+    throw new ClickUpOAuthError('grant_changed', 'The paired Worker changed before ClickUp OAuth egress.', 409);
+  }
+}
+
 async function workerToken(pairing: AutonomyPairing): Promise<string> {
   const token = (await resolvePairingToken(pairing)).trim();
   if (!token) throw new ClickUpOAuthError('credential', 'The self-hosted Worker installation credential is unavailable. Pair this device again.', 0);
@@ -136,6 +152,7 @@ export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
 
 async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
   const token = await workerToken(pairing);
+  assertPairingStillCurrent(pairing);
   const response = await workerRequest(pairing, '/clickup/oauth/status', {
     method: 'GET',
     headers: { Authorization: `Bearer ${token}` },
@@ -157,6 +174,7 @@ async function signedPost<T>(
   const timestamp = Date.now();
   const nonce = newNonce();
   const signature = await signWrite(token, 'POST', path, timestamp, nonce, body);
+  assertPairingStillCurrent(pairing);
   const response = await workerRequest(pairing, path, {
     method: 'POST',
     headers: {

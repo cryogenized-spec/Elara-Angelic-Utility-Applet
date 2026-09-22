@@ -330,6 +330,98 @@ describe('ClickUp durable task index', () => {
     expect(providerRequests[2]?.searchParams.has('date_updated_gt')).toBe(false);
   });
 
+  it('invalidates the cached task projection after a Custom Field write', async () => {
+    let customFieldValue = 'Before';
+    let taskUpdatedAt = 1_790_000_000_000;
+    let workspaceTaskCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const url = new URL(request.url);
+
+      if (url.pathname === '/api/v2/oauth/token') {
+        return new Response(JSON.stringify({ access_token: 'secret-clickup-token' }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/user') {
+        return new Response(JSON.stringify({ user: { id: 183, username: 'Gareth' } }), { status: 200 });
+      }
+      if (url.pathname === '/api/v2/team') {
+        return new Response(JSON.stringify({ teams: [{ id: '999', name: 'Neon Sales', members: [] }] }), { status: 200 });
+      }
+      const task = () => ({
+        id: 'task-repair',
+        name: 'Repair S56',
+        date_updated: String(taskUpdatedAt),
+        archived: false,
+        parent: null,
+        status: { status: 'open', type: 'custom' },
+        list: { id: '123', name: 'Repairs' },
+        folder: { id: '456', name: 'Workshop' },
+        space: { id: '789' },
+        custom_fields: [{ id: 'field_1', name: 'Repair state', type: 'short_text', value: customFieldValue }],
+      });
+      if (url.pathname === '/api/v2/team/999/task' && request.method === 'GET') {
+        workspaceTaskCalls += 1;
+        return new Response(JSON.stringify({ tasks: [task()] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/task/task-repair' && request.method === 'GET') {
+        return new Response(JSON.stringify({ ...task(), team_id: '999' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (url.pathname === '/api/v2/list/123/field' && request.method === 'GET') {
+        return new Response(JSON.stringify({
+          fields: [{ id: 'field_1', name: 'Repair state', type: 'short_text' }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (url.pathname === '/api/v2/task/task-repair/field/field_1' && request.method === 'POST') {
+        customFieldValue = 'Ready';
+        taskUpdatedAt += 1_000;
+        return new Response(JSON.stringify({ id: 'hist-1' }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+
+      throw new Error(`Unexpected ClickUp provider request: ${request.method} ${request.url}`);
+    });
+
+    await connect();
+
+    const first = await materializedSearch({ workspaceId: '999', query: 'Repair', limit: 20 });
+    expect(first.status).toBe(200);
+    const firstFields = first.payload.result.tasks[0]?.custom_fields as Array<Record<string, unknown>>;
+    expect(firstFields[0]?.value).toBe('Before');
+    expect(workspaceTaskCalls).toBe(1);
+
+    const mutation = await doFetch(new Request('https://clickup-oauth-vault/internal/clickup/command', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'X-Elara-Internal': await internalWakeMarker(TOKEN),
+        [CLICKUP_GRANT_REVISION_HEADER]: String(grantRevision),
+      },
+      body: JSON.stringify({
+        operation: 'setCustomField',
+        workspaceId: '999',
+        taskId: 'task-repair',
+        fieldId: 'field_1',
+        value: 'Ready',
+      }),
+    }));
+    expect(mutation.status).toBe(200);
+
+    const second = await materializedSearch({ workspaceId: '999', query: 'Repair', limit: 20 });
+    expect(second.status).toBe(200);
+    const secondFields = second.payload.result.tasks[0]?.custom_fields as Array<Record<string, unknown>>;
+    expect(secondFields[0]?.value).toBe('Ready');
+    expect(workspaceTaskCalls).toBeGreaterThan(1);
+  });
+
   it('persists hostile provider tasks below the hard 64k projection ceiling', async () => {
     const hostile = 'x'.repeat(20_000);
     vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {

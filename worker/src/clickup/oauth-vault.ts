@@ -669,6 +669,18 @@ export class ClickUpOAuthVault extends DurableObject {
     });
   }
 
+  private releaseUnknownRateProbe(): void {
+    const now = Date.now();
+    this.ctx.storage.transactionSync(() => {
+      const current = this.rateLimitRow();
+      if (!current || current.remaining !== null || current.unknown_probe_in_flight !== 1) return;
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_rate_limit SET unknown_probe_in_flight = 0, updated_at = ? WHERE slot = 1',
+        now,
+      );
+    });
+  }
+
   private providerCredentialRevoked(error: ClickUpProviderError): boolean {
     return error.status === 401
       || new Set(['OAUTH_019', 'OAUTH_021', 'OAUTH_025', 'OAUTH_077']).has(error.providerCode ?? '');
@@ -728,7 +740,13 @@ export class ClickUpOAuthVault extends DurableObject {
       this.recordRateLimit(result.rateLimit);
       return { ok: true, data: result.data, grantRevision: grant.revision };
     } catch (error) {
-      if (!(error instanceof ClickUpProviderError)) throw error;
+      if (!(error instanceof ClickUpProviderError)) {
+        // Local serialization/programming failures happen before a trustworthy
+        // provider rate snapshot exists. Release only the unknown-budget
+        // single-flight latch; do not refund known quota.
+        this.releaseUnknownRateProbe();
+        throw error;
+      }
       if (this.credentialRow()?.updated_at !== grant.revision) {
         return {
           ok: false,
@@ -1867,6 +1885,8 @@ export class ClickUpOAuthVault extends DurableObject {
             this.recordRateLimit(error.rateLimit);
           }
           if (this.providerCredentialRevoked(error)) break;
+        } else if (this.grantLifecycleCurrent(expectedEpoch, expectedRevision)) {
+          this.releaseUnknownRateProbe();
         }
         // Webhooks optimize freshness only. OAuth remains usable without them.
       }

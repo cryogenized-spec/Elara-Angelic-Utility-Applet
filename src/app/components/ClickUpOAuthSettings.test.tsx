@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const oauthMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
+  getConnectionMethods: vi.fn(),
   connectPersonalToken: vi.fn(),
   disconnect: vi.fn(),
 }));
@@ -17,6 +18,7 @@ const popupMocks = vi.hoisted(() => ({
 vi.mock('../../clickup/oauth/authority', () => ({
   clickUpOAuthAuthority: {
     getStatus: oauthMocks.getStatus,
+    getConnectionMethods: oauthMocks.getConnectionMethods,
     connectPersonalToken: oauthMocks.connectPersonalToken,
     disconnect: oauthMocks.disconnect,
   },
@@ -33,6 +35,7 @@ import { ClickUpOAuthSettings } from './ClickUpOAuthSettings';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const getStatusMock = oauthMocks.getStatus;
+const getConnectionMethodsMock = oauthMocks.getConnectionMethods;
 const connectMock = popupMocks.connect;
 const personalTokenMock = oauthMocks.connectPersonalToken;
 const switchMock = popupMocks.switchAccount;
@@ -52,6 +55,7 @@ async function renderSettings(): Promise<void> {
     root.render(<ClickUpOAuthSettings />);
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
   });
 }
 
@@ -67,6 +71,7 @@ describe('ClickUpOAuthSettings', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     getStatusMock.mockResolvedValue(CONNECTED);
+    getConnectionMethodsMock.mockResolvedValue({ oauth: true, personalToken: false });
     connectMock.mockResolvedValue(CONNECTED);
     personalTokenMock.mockResolvedValue(CONNECTED);
     switchMock.mockResolvedValue(CONNECTED);
@@ -130,13 +135,12 @@ describe('ClickUpOAuthSettings', () => {
     const tokenReady: ClickUpOAuthStatus = {
       connected: false,
       workspaces: [],
-      connectionMethods: { oauth: false, personalToken: true },
     };
     const connected: ClickUpOAuthStatus = {
       ...CONNECTED,
-      connectionMethods: { oauth: false, personalToken: true },
     };
     getStatusMock.mockResolvedValueOnce(tokenReady);
+    getConnectionMethodsMock.mockResolvedValueOnce({ oauth: false, personalToken: true });
     personalTokenMock.mockResolvedValueOnce(connected);
 
     await renderSettings();
@@ -163,17 +167,16 @@ describe('ClickUpOAuthSettings', () => {
     const tokenReady: ClickUpOAuthStatus = {
       connected: false,
       workspaces: [],
-      connectionMethods: { oauth: false, personalToken: true },
     };
     const replacement: ClickUpOAuthStatus = {
       connected: true,
       account: { id: '200', username: 'Replacement', email: 'replacement@example.com' },
       workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
       updatedAt: 234567,
-      connectionMethods: { oauth: false, personalToken: true },
     };
     getStatusMock.mockReset();
     getStatusMock.mockResolvedValueOnce(tokenReady).mockResolvedValueOnce(replacement);
+    getConnectionMethodsMock.mockResolvedValueOnce({ oauth: false, personalToken: true });
     personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out after Worker commit.'));
 
     await renderSettings();
@@ -194,10 +197,10 @@ describe('ClickUpOAuthSettings', () => {
     const tokenReady: ClickUpOAuthStatus = {
       connected: false,
       workspaces: [],
-      connectionMethods: { oauth: false, personalToken: true },
     };
     getStatusMock.mockReset();
     getStatusMock.mockResolvedValueOnce(tokenReady).mockRejectedValueOnce(new Error('Worker unreachable.'));
+    getConnectionMethodsMock.mockResolvedValueOnce({ oauth: false, personalToken: true });
     personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out.'));
 
     await renderSettings();

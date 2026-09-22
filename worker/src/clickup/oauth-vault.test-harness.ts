@@ -91,17 +91,19 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
         const row = this.ctx.storage.sql.exec<{
           access_cipher: string;
           access_iv: string;
+          credential_kind: string;
           user_id: string;
           username: string | null;
           email: string | null;
           workspaces_json: string;
           updated_at: number;
         }>(
-          'SELECT access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
+          'SELECT access_cipher, access_iv, credential_kind, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
         ).toArray()[0];
         return json(row ? {
           accessCipher: row.access_cipher,
           accessIv: row.access_iv,
+          credentialKind: row.credential_kind,
           userId: row.user_id,
           username: row.username,
           email: row.email,

@@ -183,7 +183,7 @@ describe('Drive and Sheets executable parity', () => {
       tool: 'sheets.updateCell',
       arguments: { spreadsheetId: 'sheet-1', range: 'Sheet1!A1', value: '=1+2', inputMode: 'userEntered' },
     });
-    expect(confirmation?.resourceSummary).toContain('USER_ENTERED');
+    expect(confirmation?.resourceSummary).toContain('interpreted input');
     expect(confirmation?.resourceSummary).toContain('formulas');
   });
 

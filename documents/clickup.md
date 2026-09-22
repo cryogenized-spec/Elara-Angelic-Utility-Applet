@@ -139,7 +139,7 @@ user gesture
 -> browser receives bounded account / Workspace metadata only
 ```
 
-The personal token is never accepted from browser input, returned to the browser, placed in model-visible schemas or persisted in browser storage. Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The credential is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
+The personal token is never accepted from browser input, returned to the browser, placed in model-visible schemas or persisted in browser storage. Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The encrypted credential plaintext is a discriminated `{ kind: 'oauth' | 'personal', token }` envelope, so provider Authorization syntax is selected from structural credential kind rather than inferred from token characters. Legacy pre-personal-token vault rows containing only raw token text are interpreted as OAuth only. The credential is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
 
 ### 5.1 Account identity and Settings surface
 
@@ -156,6 +156,8 @@ The ClickUp Settings surface is intentionally connection-oriented rather than a 
 - refresh, disconnect and explicit **Switch ClickUp account** actions.
 
 Switching accounts is an explicit replacement operation. The browser creates the OAuth popup synchronously under the user's Switch gesture before awaiting disconnect or Worker state, then disconnects the old local ClickUp grant and begins a new official ClickUp OAuth flow. If replacement authorization fails, Settings re-reads the current authority instead of continuing to display stale account metadata.
+
+Personal-token activation is also treated as an ambiguous network mutation: if its response is lost after the Worker may have committed the replacement grant, the browser re-reads authoritative Worker status before reporting the failure. If reconciliation is unavailable, cached ClickUp identity metadata is cleared and Settings enters an explicit **connection state unknown** mode that suppresses connect/switch/disconnect and active-MCP presentation until Refresh status succeeds.
 
 
 Public OAuth bodies are streamed under a byte ceiling before signature verification/forwarding. Signed writes use timestamp + nonce + body and have durable replay protection. OAuth state is random, redirect-bound, short-lived and single-use. A new Connect gesture replaces older pending states and advances the connection epoch, so an older popup or already-in-flight exchange cannot later overwrite the newer authorization.

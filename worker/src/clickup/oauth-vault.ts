@@ -43,9 +43,13 @@ import { validateClickUpToolArguments } from '../../../src/clickup/tool-schema';
 import { CLICKUP_GRANT_REVISION_HEADER } from '../../../src/clickup/mcp-protocol';
 import { ARTIFACT_LIMITS } from '../../../src/artifacts/limits';
 import {
+  abortClickUpFullReconcileStage,
+  beginClickUpFullReconcileStage,
   clearClickUpTaskIndex,
   clearClickUpTaskTombstone,
   clearClickUpWorkspaceTaskIndex,
+  commitClickUpFullReconcileStage,
+  fullReconcileStageState,
   initializeClickUpTaskIndex,
   markAllClickUpTaskIndexesStale,
   markClickUpWorkspaceTaskIndexStale,
@@ -55,6 +59,7 @@ import {
   taskIndexInvalidationGeneration,
   taskIndexState,
   tombstoneClickUpTask,
+  upsertClickUpFullReconcilePage,
   upsertClickUpTaskIndexPage,
 } from './task-index';
 import { CLICKUP_WEBHOOK_ENDPOINT_HEADER } from './oauth-routes';
@@ -962,31 +967,17 @@ export class ClickUpOAuthVault extends DurableObject {
     };
 
     const fullSnapshotAgeOrigin = state.indexedTasks > 0 ? state.oldestIndexedAt : state.lastRefreshAt;
-    if (
+    let reconcileStage = fullReconcileStageState(this.ctx.storage.sql, args.workspaceId);
+    const fullReconcileDue = Boolean(reconcileStage) || (
       state.incrementalSince === 0
       && state.fullSyncComplete
       && fullSnapshotAgeOrigin > 0
       && now - fullSnapshotAgeOrigin >= TASK_INDEX_FULL_RECONCILE_MS
-    ) {
-      clearClickUpWorkspaceTaskIndex(this.ctx.storage.sql, args.workspaceId);
-      state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
-      setTaskIndexState(this.ctx.storage.sql, {
-        workspaceId: state.workspaceId,
-        fullSyncComplete: state.fullSyncComplete,
-        nextPage: state.nextPage,
-        lastRefreshAt: state.lastRefreshAt,
-        lastProviderUpdatedAt: state.lastProviderUpdatedAt,
-        oldestIndexedAt: state.oldestIndexedAt,
-        incrementalSince: state.incrementalSince,
-        incrementalNextPage: state.incrementalNextPage,
-        incrementalMaxUpdatedAt: state.incrementalMaxUpdatedAt,
-        invalidationGeneration: refreshGeneration,
-      });
-      state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
-    }
+    );
 
     let refreshIncomplete = state.incrementalSince > 0;
     let refreshError: { code: string; message: string } | undefined;
+    let fullReconcileHandled = false;
 
     const providerPage = async (page: number, dateUpdatedGt?: number) => {
       return this.providerData((token) => listClickUpWorkspaceTasks(token, args.workspaceId, {
@@ -1003,10 +994,99 @@ export class ClickUpOAuthVault extends DurableObject {
       return true;
     };
 
+    if (fullReconcileDue) {
+      fullReconcileHandled = true;
+      if (!reconcileStage) {
+        reconcileStage = beginClickUpFullReconcileStage(
+          this.ctx.storage.sql,
+          args.workspaceId,
+          refreshGeneration,
+          now,
+        );
+      } else if (reconcileStage.invalidationGeneration !== refreshGeneration) {
+        abortClickUpFullReconcileStage(this.ctx.storage.sql, args.workspaceId);
+        reconcileStage = beginClickUpFullReconcileStage(
+          this.ctx.storage.sql,
+          args.workspaceId,
+          refreshGeneration,
+          now,
+        );
+      }
+
+      let completed = false;
+      for (let offset = 0; offset < TASK_INDEX_COLD_PAGES_PER_SEARCH; offset += 1) {
+        const pageResult = await providerPage(reconcileStage.nextPage);
+        if (!pageResult.ok) {
+          if (handleWorkspaceDenial(pageResult.response.status, pageResult.grantRevision)) return pageResult.response;
+          const body = await pageResult.response.json().catch(() => null) as Record<string, unknown> | null;
+          refreshError = {
+            code: typeof body?.code === 'string' ? body.code : `http-${pageResult.response.status}`,
+            message: typeof body?.message === 'string' ? body.message : 'ClickUp full task-index reconciliation was interrupted.',
+          };
+          refreshIncomplete = true;
+          break;
+        }
+
+        const invalidated = await restartIfInvalidated();
+        if (invalidated) return invalidated;
+
+        const source = pageResult.data && typeof pageResult.data === 'object' ? pageResult.data as Record<string, unknown> : {};
+        const tasks = Array.isArray(source.tasks) ? source.tasks : [];
+        const nextStage = upsertClickUpFullReconcilePage(
+          this.ctx.storage.sql,
+          args.workspaceId,
+          tasks,
+          reconcileStage.nextPage + 1,
+          reconcileStage.maxProviderUpdatedAt,
+          refreshGeneration,
+          now,
+        );
+        if (!nextStage) {
+          const invalidatedStage = await restartIfInvalidated();
+          if (invalidatedStage) return invalidatedStage;
+          return json({
+            code: 'index_reconcile_lost',
+            message: 'ClickUp full task-index reconciliation lost its staging authority. Retry the search.',
+          }, 409);
+        }
+        reconcileStage = nextStage;
+
+        if (tasks.length < TASK_INDEX_PROVIDER_PAGE_SIZE) {
+          completed = true;
+          break;
+        }
+      }
+
+      if (completed) {
+        const invalidatedBeforeCommit = await restartIfInvalidated();
+        if (invalidatedBeforeCommit) return invalidatedBeforeCommit;
+        if (!commitClickUpFullReconcileStage(
+          this.ctx.storage.sql,
+          args.workspaceId,
+          refreshGeneration,
+          now,
+        )) {
+          const invalidatedCommit = await restartIfInvalidated();
+          if (invalidatedCommit) return invalidatedCommit;
+          return json({
+            code: 'index_reconcile_lost',
+            message: 'ClickUp full task-index reconciliation could not commit safely. Retry the search.',
+          }, 409);
+        }
+        refreshIncomplete = false;
+        state = taskIndexState(this.ctx.storage.sql, args.workspaceId);
+      } else {
+        refreshIncomplete = true;
+      }
+    }
+
     if (
+      !fullReconcileHandled
+      && (
       state.incrementalSince > 0
       || state.indexedTasks === 0
       || now - state.lastRefreshAt >= TASK_INDEX_STALE_MS
+      )
     ) {
       if (!state.fullSyncComplete) {
         let nextPage = state.nextPage;

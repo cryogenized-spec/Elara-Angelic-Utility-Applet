@@ -471,8 +471,20 @@ for (const marker of [
   'searchClickUpTaskIndex',
   'upsertClickUpTaskIndexPage',
   'MAX_SEARCH_CANDIDATES',
+  'invalidation_generation',
+  'taskIndexInvalidationGeneration',
+  'invalidation_generation = invalidation_generation + 1',
 ]) {
   if (!clickUpTaskIndex.includes(marker)) fail(`ClickUp task-index boundary is missing: ${marker}`);
+}
+for (const marker of [
+  'restartIfInvalidated',
+  'taskIndexInvalidationGeneration',
+  'retryOnInvalidation',
+  'padDeniedHierarchicalScope',
+  "...(args.assignees?.remove ?? [])",
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp concurrency/scope hardening disappeared: ${marker}`);
 }
 
 for (const marker of [
@@ -562,8 +574,29 @@ for (const marker of [
   'response.body?.getReader()',
   'total > MAX_PROVIDER_BODY_BYTES',
   'reader.cancel()',
+  'providerJsonRequest',
 ]) {
   if (!clickUpProvider.includes(marker)) fail(`ClickUp provider egress boundary is missing: ${marker}`);
+}
+if (!/async function providerJsonRequest[\s\S]*const response = await fetcher\([\s\S]*const payload = await readJsonResponse\(response\);[\s\S]*finally\s*\{\s*clearTimeout\(timeout\);/.test(clickUpProvider)) {
+  fail('ClickUp provider deadline must remain active through bounded response-body consumption');
+}
+
+const disconnectStart = clickUpOAuthVault.indexOf('private async disconnect(body: string)');
+const disconnectEnd = disconnectStart >= 0 ? clickUpOAuthVault.indexOf('/** Provider execution consumes credential material', disconnectStart) : -1;
+if (disconnectStart < 0 || disconnectEnd < 0) fail('ClickUp disconnect authority disappeared');
+const disconnectBody = clickUpOAuthVault.slice(disconnectStart, disconnectEnd);
+const disconnectFirstAwait = disconnectBody.indexOf('await ');
+for (const marker of [
+  "DELETE FROM clickup_oauth_credential",
+  "DELETE FROM clickup_oauth_states",
+  "DELETE FROM clickup_rate_limit",
+  'clearClickUpTaskIndex',
+]) {
+  const position = disconnectBody.indexOf(marker);
+  if (position < 0 || disconnectFirstAwait < 0 || position > disconnectFirstAwait) {
+    fail(`ClickUp local disconnect must finalize ${marker} before provider cleanup awaits`);
+  }
 }
 
 for (const marker of [

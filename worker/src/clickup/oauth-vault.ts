@@ -114,6 +114,7 @@ const webhookPayloadSchema = z.object({
 
 const providerCommandSchema = z.discriminatedUnion('operation', [
   z.object({ operation: z.literal('getAuthorizationContext') }).strict(),
+  z.object({ operation: z.literal('getWorkspaceAuthorizationContext'), workspaceId: z.string().trim().min(1).max(100) }).strict(),
   z.object({ operation: z.literal('listSpaces'), workspaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
   z.object({ operation: z.literal('listFolders'), workspaceId: z.string().trim().min(1).max(100), spaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
   z.object({ operation: z.literal('getFolder'), workspaceId: z.string().trim().min(1).max(100), folderId: z.string().trim().min(1).max(100), includeSubfolders: z.boolean().optional() }).strict(),
@@ -1159,6 +1160,10 @@ export class ClickUpOAuthVault extends DurableObject {
           ? json({ ok: true, result: context })
           : json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401);
       }
+      case 'getWorkspaceAuthorizationContext': {
+        const refreshed = await this.refreshWorkspaceAuthorization(command.workspaceId, expectedRevision);
+        return refreshed.ok ? json({ ok: true, result: refreshed.workspace }) : refreshed.response;
+      }
       case 'listSpaces':
         if (!this.workspaceAuthorized(command.workspaceId)) {
           return json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403);
@@ -1633,6 +1638,87 @@ export class ClickUpOAuthVault extends DurableObject {
   private workspaceAuthorized(workspaceId: string): boolean {
     const context = this.authorizationContext();
     return Boolean(context?.workspaces.some((workspace) => String(workspace.id ?? '') === workspaceId));
+  }
+
+  private async refreshWorkspaceAuthorization(
+    workspaceId: string,
+    expectedRevision: number,
+  ): Promise<{ ok: true; workspace: Record<string, unknown> } | { ok: false; response: Response }> {
+    if (!this.workspaceAuthorized(workspaceId)) {
+      return {
+        ok: false,
+        response: json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is not part of the authorized grant.' }, 403),
+      };
+    }
+
+    const result = await this.providerData(
+      (token) => fetchAuthorizedClickUpWorkspaces(token),
+      expectedRevision,
+    );
+    if (!result.ok) return { ok: false, response: result.response };
+
+    const fresh = result.data.find((workspace) => workspace.id === workspaceId);
+    if (!fresh) {
+      this.revokeWorkspaceIfRevision(workspaceId, result.grantRevision);
+      return {
+        ok: false,
+        response: json({ code: 'workspace_forbidden', message: 'The requested ClickUp Workspace is no longer available to this grant.' }, 403),
+      };
+    }
+
+    const committed = this.ctx.storage.transactionSync(() => {
+      const row = this.credentialRow();
+      if (!row || row.updated_at !== result.grantRevision) return false;
+
+      let current: Array<Record<string, unknown>>;
+      try {
+        const parsed = JSON.parse(row.workspaces_json) as unknown;
+        current = Array.isArray(parsed)
+          ? parsed.filter((value): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value))
+          : [];
+      } catch {
+        current = [];
+      }
+
+      const index = current.findIndex((workspace) => String(workspace.id ?? '') === workspaceId);
+      if (index < 0) return false;
+
+      // Refresh only an already-admitted Workspace. Provider-visible Workspaces
+      // that were not in the original Elara grant are intentionally ignored.
+      current[index] = {
+        id: fresh.id,
+        name: fresh.name,
+        members: fresh.members.map((member) => ({
+          id: member.id,
+          ...(member.username ? { username: member.username } : {}),
+          ...(member.email ? { email: member.email } : {}),
+          ...(member.profilePicture ? { profilePicture: member.profilePicture } : {}),
+        })),
+      };
+
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_oauth_credential SET workspaces_json = ? WHERE slot = 1 AND updated_at = ?',
+        JSON.stringify(current),
+        result.grantRevision,
+      );
+      return true;
+    });
+
+    if (!committed) {
+      return {
+        ok: false,
+        response: json({ code: 'grant_changed', message: 'ClickUp authorization changed while Workspace membership was refreshing.' }, 409),
+      };
+    }
+
+    return {
+      ok: true,
+      workspace: {
+        id: fresh.id,
+        name: fresh.name,
+        members: fresh.members,
+      },
+    };
   }
 
   private revokeWorkspaceIfRevision(workspaceId: string, revision: number): boolean {

@@ -103,8 +103,9 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
           incremental_since: number;
           incremental_next_page: number;
           incremental_max_updated_at: number;
+          invalidation_generation: number;
         }>(
-          'SELECT full_sync_complete, next_page, last_refresh_at, last_provider_updated_at, incremental_since, incremental_next_page, incremental_max_updated_at FROM clickup_task_index_state WHERE workspace_id = ?',
+          'SELECT full_sync_complete, next_page, last_refresh_at, last_provider_updated_at, incremental_since, incremental_next_page, incremental_max_updated_at, invalidation_generation FROM clickup_task_index_state WHERE workspace_id = ?',
           workspaceId,
         ).toArray()[0];
         const indexedTasks = this.ctx.storage.sql.exec<{ count: number }>(
@@ -120,6 +121,7 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
           incrementalSince: row?.incremental_since ?? 0,
           incrementalNextPage: row?.incremental_next_page ?? 0,
           incrementalMaxUpdatedAt: row?.incremental_max_updated_at ?? 0,
+          invalidationGeneration: row?.invalidation_generation ?? 0,
         });
       }
 

@@ -1,6 +1,7 @@
 import type { ClickUpToolArguments } from '../../../src/clickup/tool-schema';
 
-type TaskIndexSql = DurableObjectState['storage']['sql'];
+type TaskIndexStorage = DurableObjectState['storage'];
+type TaskIndexSql = TaskIndexStorage['sql'];
 
 export interface ClickUpTaskIndexState {
   readonly workspaceId: string;
@@ -634,15 +635,17 @@ export function abortClickUpFullReconcileStage(sql: TaskIndexSql, workspaceId: s
 }
 
 export function commitClickUpFullReconcileStage(
-  sql: TaskIndexSql,
+  storage: TaskIndexStorage,
   workspaceId: string,
   invalidationGeneration: number,
   completedAt = Date.now(),
 ): boolean {
-  return sql.transactionSync(() => {
-    if (taskIndexInvalidationGeneration(sql, workspaceId) !== invalidationGeneration) return false;
+  let committed = false;
+  storage.transactionSync(() => {
+    const sql = storage.sql;
+    if (taskIndexInvalidationGeneration(sql, workspaceId) !== invalidationGeneration) return;
     const stage = fullReconcileStageState(sql, workspaceId);
-    if (!stage || stage.invalidationGeneration !== invalidationGeneration) return false;
+    if (!stage || stage.invalidationGeneration !== invalidationGeneration) return;
 
     sql.exec('DELETE FROM clickup_task_index WHERE workspace_id = ?', workspaceId);
     sql.exec(`
@@ -668,8 +671,9 @@ export function commitClickUpFullReconcileStage(
     `, completedAt, stage.maxProviderUpdatedAt, workspaceId, invalidationGeneration);
     sql.exec('DELETE FROM clickup_task_index_reconcile_stage WHERE workspace_id = ?', workspaceId);
     sql.exec('DELETE FROM clickup_task_index_reconcile_state WHERE workspace_id = ?', workspaceId);
-    return true;
+    committed = true;
   });
+  return committed;
 }
 
 export function taskIndexState(sql: TaskIndexSql, workspaceId: string): ClickUpTaskIndexState {

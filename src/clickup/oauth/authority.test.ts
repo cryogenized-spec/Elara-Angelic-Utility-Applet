@@ -116,6 +116,29 @@ describe('ClickUp OAuth browser authority', () => {
     expect(loadStoredClickUpStatus()).toEqual(STATUS);
   });
 
+  it('activates a Worker-configured personal token without sending token material from the browser', async () => {
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      expect(url).toBe('https://worker.example/clickup/oauth/personal-token');
+      expect(init?.method).toBe('POST');
+      expect(JSON.parse(String(init?.body))).toEqual({});
+      expect(String(init?.body)).not.toContain('pk_');
+      const headers = new Headers(init?.headers);
+      expect(headers.get('Authorization')).toBe('Bearer installation-token-for-test');
+      expect(headers.get('X-Elara-Signature')).toBeTruthy();
+      return new Response(JSON.stringify({
+        ...STATUS,
+        connectionMethods: { oauth: false, personalToken: true },
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as unknown as typeof fetch;
+
+    const status = await clickUpOAuthAuthority.connectPersonalToken();
+    expect(status.connectionMethods).toEqual({ oauth: false, personalToken: true });
+    const raw = localStorage.getItem('elara.clickup.authorization.v1') ?? '';
+    expect(raw).toContain('Neon Sales');
+    expect(raw).not.toContain('pk_');
+  });
+
   it('rejects oversized paired-Worker OAuth responses before schema parsing', async () => {
     globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({
       authorizationUrl: `https://app.clickup.com/api?${'x'.repeat(70_000)}`,

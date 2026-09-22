@@ -4,7 +4,7 @@ import {
   estimateGeminiTurnRequestInputTokens,
   geminiTurnPort,
 } from './provider';
-import { executeGoogleTool, confirmationRequestForCall, toolAuthorizationRequirement, type GoogleToolHandlers, type GoogleToolExecutorOptions } from '../google/tools/executor';
+import { captureGoogleExecutionGrantForCall, executeGoogleTool, confirmationRequestForCall, toolAuthorizationRequirement, type GoogleToolHandlers, type GoogleToolExecutorOptions } from '../google/tools/executor';
 import type { GoogleToolCall, GoogleToolName } from '../google/tools/contracts';
 import { googleToolRegistry } from '../google/tools/registry';
 import { googleServiceToolHandlers } from '../google/tools/service-handlers';
@@ -26,7 +26,7 @@ import { requestGoogleToolConfirmations } from '../google/confirmation/broker';
 import { isConfirmationFresh } from '../google/confirmation/policy';
 import { requestGoogleCapabilityGrant } from '../google/oauth/request-broker';
 import { googleOAuthAuthority } from '../google/oauth/authority';
-import type { GoogleCapabilityKey } from '../google/oauth/contracts';
+import type { GoogleCapabilityKey, GoogleExecutionGrant } from '../google/oauth/contracts';
 import { withRuntimeContext } from './runtime-context';
 import { consumeRuntimeContextRefresh } from './runtime-context-freshness';
 import { documentToolHandlers } from '../documents/tool-handler';
@@ -545,11 +545,13 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
     const mutationEntries: Array<{
       call: PendingToolCall;
       confirmation: NonNullable<ReturnType<typeof confirmationRequestForCall>>;
+      googleGrant?: GoogleExecutionGrant;
       clickupGrant?: ClickUpExecutionGrant;
       clickupArtifactSnapshot?: ClickUpArtifactApprovalSnapshot;
     }> = [];
     const confirmationNow = executeOptions.now?.() ?? new Date();
     for (const call of admittedMutationCalls) {
+      let googleGrant: GoogleExecutionGrant | undefined;
       let clickupGrant: ClickUpExecutionGrant | undefined;
       let clickupArtifactSnapshot: ClickUpArtifactApprovalSnapshot | undefined;
       if (clickupToolNameSchema.safeParse(call.name).success) {
@@ -570,6 +572,13 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
             continue;
           }
         }
+      } else {
+        try {
+          googleGrant = await captureGoogleExecutionGrantForCall(call, executeOptions.oauth);
+        } catch {
+          results.push(errorToolResult(call, 'AUTHORIZATION_REQUIRED'));
+          continue;
+        }
       }
       const baseConfirmation = confirmationRequestForCall(call, confirmationNow, {
         conversationId: executeOptions.conversationId,
@@ -583,6 +592,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       if (confirmation) mutationEntries.push({
         call,
         confirmation,
+        ...(googleGrant ? { googleGrant } : {}),
         ...(clickupGrant ? { clickupGrant } : {}),
         ...(clickupArtifactSnapshot ? { clickupArtifactSnapshot } : {}),
       });
@@ -691,6 +701,7 @@ export async function* streamGoogleToolLoop(request: GeminiTurnRequest, options:
       }
       const result = await executeGoogleTool(entry.call, {
         ...executeOptions,
+        ...(entry.googleGrant ? { expectedGoogleGrant: entry.googleGrant } : {}),
         ...(entry.clickupGrant ? { expectedClickUpGrant: entry.clickupGrant } : {}),
         ...(entry.clickupArtifactSnapshot ? { expectedClickUpArtifactSnapshot: entry.clickupArtifactSnapshot } : {}),
         confirm: async () => true,

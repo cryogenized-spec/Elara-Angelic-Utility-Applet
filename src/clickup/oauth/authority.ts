@@ -14,6 +14,19 @@ import {
 const WORKER_TIMEOUT_MS = 20_000;
 const MAX_WORKER_RESPONSE_BYTES = 64 * 1024;
 const STORAGE_KEY = 'elara.clickup.authorization.v1';
+const PENDING_CONNECTION_KEY = 'elara.clickup.connection.pending.v1';
+export const CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000;
+
+type StoredClickUpStatus = {
+  readonly authorityBinding: string;
+  readonly status: ClickUpOAuthStatus;
+};
+
+type PendingConnectionChange = {
+  readonly authorityBinding: string;
+  readonly operation: 'oauth-exchange' | 'personal-token' | 'disconnect';
+  readonly until: number;
+};
 
 export class ClickUpOAuthError extends Error {
   constructor(readonly code: string, message: string, readonly status: number) {
@@ -131,28 +144,137 @@ function workerError(response: WorkerJsonResponse): ClickUpOAuthError {
   return new ClickUpOAuthError(code, message, response.status);
 }
 
-function persistStatus(status: ClickUpOAuthStatus): void {
-  if (typeof localStorage === 'undefined') return;
-  if (!status.connected) {
-    localStorage.removeItem(STORAGE_KEY);
-    return;
+function samePairing(pairing: AutonomyPairing): boolean {
+  const current = loadPairing();
+  if (!current) return false;
+  try {
+    return clickUpPairingAuthorityBinding(current) === clickUpPairingAuthorityBinding(pairing);
+  } catch {
+    return false;
   }
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(status));
 }
 
-export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
-  if (typeof localStorage === 'undefined') return null;
+function parseStoredStatus(raw: string | null): StoredClickUpStatus | null {
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    const parsed = clickUpOAuthStatusSchema.safeParse(JSON.parse(raw));
-    return parsed.success ? parsed.data : null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.authorityBinding !== 'string') return null;
+    const status = clickUpOAuthStatusSchema.safeParse(record.status);
+    return status.success ? { authorityBinding: record.authorityBinding, status: status.data } : null;
   } catch {
     return null;
   }
 }
 
+function clearCachedStatusForPairing(pairing: AutonomyPairing): void {
+  if (typeof localStorage === 'undefined') return;
+  const stored = parseStoredStatus(localStorage.getItem(STORAGE_KEY));
+  if (stored?.authorityBinding === clickUpPairingAuthorityBinding(pairing)) {
+    localStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+function persistStatus(pairing: AutonomyPairing, status: ClickUpOAuthStatus): void {
+  if (typeof localStorage === 'undefined' || !samePairing(pairing)) return;
+  if (!status.connected) {
+    clearCachedStatusForPairing(pairing);
+    return;
+  }
+  const stored: StoredClickUpStatus = {
+    authorityBinding: clickUpPairingAuthorityBinding(pairing),
+    status,
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+}
+
+function parsePendingConnection(raw: string | null): PendingConnectionChange | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    const operation = record.operation;
+    if (
+      typeof record.authorityBinding !== 'string'
+      || (operation !== 'oauth-exchange' && operation !== 'personal-token' && operation !== 'disconnect')
+      || typeof record.until !== 'number'
+      || !Number.isFinite(record.until)
+    ) return null;
+    return {
+      authorityBinding: record.authorityBinding,
+      operation,
+      until: record.until,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function pendingConnectionForPairing(pairing: AutonomyPairing): PendingConnectionChange | null {
+  if (typeof localStorage === 'undefined') return null;
+  const pending = parsePendingConnection(localStorage.getItem(PENDING_CONNECTION_KEY));
+  if (!pending || pending.authorityBinding !== clickUpPairingAuthorityBinding(pairing)) return null;
+  if (pending.until <= Date.now()) {
+    localStorage.removeItem(PENDING_CONNECTION_KEY);
+    return null;
+  }
+  return pending;
+}
+
+function markConnectionPending(
+  pairing: AutonomyPairing,
+  operation: PendingConnectionChange['operation'],
+): void {
+  if (typeof localStorage === 'undefined' || !samePairing(pairing)) return;
+  const pending: PendingConnectionChange = {
+    authorityBinding: clickUpPairingAuthorityBinding(pairing),
+    operation,
+    until: Date.now() + CLICKUP_CONNECTION_SETTLE_MS,
+  };
+  localStorage.setItem(PENDING_CONNECTION_KEY, JSON.stringify(pending));
+  clearCachedStatusForPairing(pairing);
+}
+
+function clearPendingConnectionForPairing(pairing: AutonomyPairing): void {
+  if (typeof localStorage === 'undefined') return;
+  const pending = parsePendingConnection(localStorage.getItem(PENDING_CONNECTION_KEY));
+  if (pending?.authorityBinding === clickUpPairingAuthorityBinding(pairing)) {
+    localStorage.removeItem(PENDING_CONNECTION_KEY);
+  }
+}
+
+function assertConnectionSettled(pairing: AutonomyPairing): void {
+  if (!pendingConnectionForPairing(pairing)) return;
+  throw new ClickUpOAuthError(
+    'connection_pending',
+    'A ClickUp connection change may still be settling. Refresh status again shortly.',
+    409,
+  );
+}
+
+function ambiguousConnectionWriteFailure(cause: unknown): boolean {
+  if (!(cause instanceof ClickUpOAuthError)) return true;
+  if (cause.code === 'configuration' || cause.code === 'oauth_superseded' || cause.code === 'grant_changed') return false;
+  return cause.code === 'timeout'
+    || cause.code === 'network'
+    || cause.code === 'response_too_large'
+    || cause.code === 'protocol'
+    || cause.status >= 500;
+}
+
+export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
+  if (typeof localStorage === 'undefined') return null;
+  const pairing = loadPairing();
+  if (!pairing || pendingConnectionForPairing(pairing)) return null;
+  const stored = parseStoredStatus(localStorage.getItem(STORAGE_KEY));
+  if (!stored) return null;
+  return stored.authorityBinding === clickUpPairingAuthorityBinding(pairing) ? stored.status : null;
+}
+
 async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
+  assertConnectionSettled(pairing);
   try {
     const token = await workerToken(pairing);
     assertPairingStillCurrent(pairing);
@@ -163,13 +285,12 @@ async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatu
     assertPairingStillCurrent(pairing);
     if (response.status !== 200) throw workerError(response);
     const parsed = clickUpOAuthStatusSchema.parse(response.body);
-    persistStatus(parsed);
+    persistStatus(pairing, parsed);
     return parsed;
   } catch (cause) {
-    // Cached ClickUp metadata is only a convenience for tool election. If the
-    // Worker cannot authoritatively confirm the grant, fail closed rather than
-    // allowing a stale account/workspace snapshot to keep advertising tools.
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+    // Clear only metadata owned by this exact pairing. A superseded in-flight
+    // request must never erase a newer pairing's successfully refreshed cache.
+    clearCachedStatusForPairing(pairing);
     throw cause;
   }
 }
@@ -216,6 +337,26 @@ async function signedPost<T>(
   return parse(response.body);
 }
 
+async function connectionWrite<T>(
+  pairing: AutonomyPairing,
+  operation: PendingConnectionChange['operation'],
+  path: string,
+  payload: unknown,
+  parse: (value: unknown) => T,
+): Promise<T> {
+  assertConnectionSettled(pairing);
+  try {
+    const result = await signedPost(pairing, path, payload, parse);
+    clearPendingConnectionForPairing(pairing);
+    return result;
+  } catch (cause) {
+    if (ambiguousConnectionWriteFailure(cause)) {
+      markConnectionPending(pairing, operation);
+    }
+    throw cause;
+  }
+}
+
 export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
   async getStatus(): Promise<ClickUpOAuthStatus> {
     return bearerStatus(activePairing());
@@ -236,53 +377,45 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
   },
 
   async beginConnect(redirectUri: string): Promise<ClickUpOAuthStart> {
-    return signedPost(activePairing(), '/clickup/oauth/start', { redirectUri }, (value) => clickUpOAuthStartSchema.parse(value));
+    const pairing = activePairing();
+    assertConnectionSettled(pairing);
+    return signedPost(pairing, '/clickup/oauth/start', { redirectUri }, (value) => clickUpOAuthStartSchema.parse(value));
   },
 
   async completeConnect(input): Promise<ClickUpOAuthStatus> {
-    const status = await signedPost(
-      activePairing(),
+    const pairing = activePairing();
+    const status = await connectionWrite(
+      pairing,
+      'oauth-exchange',
       '/clickup/oauth/exchange',
       input,
       (value) => clickUpOAuthStatusSchema.parse(value),
     );
-    const normalized = status;
-    persistStatus(normalized);
-    return normalized;
+    persistStatus(pairing, status);
+    return status;
   },
 
   async connectPersonalToken(): Promise<ClickUpOAuthStatus> {
     const pairing = activePairing();
-    try {
-      const status = await signedPost(
-        pairing,
-        '/clickup/oauth/personal-token',
-        {},
-        (value) => clickUpOAuthStatusSchema.parse(value),
-      );
-      persistStatus(status);
-      return status;
-    } catch (cause) {
-      // A timeout/network failure is ambiguous: the Worker may already have
-      // committed the replacement grant. Reconcile authoritative status before
-      // surfacing the error. If reconciliation is also unavailable, clear the
-      // cached status so stale identity metadata cannot continue tool election.
-      try {
-        await bearerStatus(pairing);
-      } catch {
-        if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
-      }
-      throw cause;
-    }
+    const status = await connectionWrite(
+      pairing,
+      'personal-token',
+      '/clickup/oauth/personal-token',
+      {},
+      (value) => clickUpOAuthStatusSchema.parse(value),
+    );
+    persistStatus(pairing, status);
+    return status;
   },
 
   async disconnect(): Promise<void> {
-    await signedPost(activePairing(), '/clickup/oauth/disconnect', {}, (value) => {
+    const pairing = activePairing();
+    await connectionWrite(pairing, 'disconnect', '/clickup/oauth/disconnect', {}, (value) => {
       if (!value || typeof value !== 'object' || (value as Record<string, unknown>).disconnected !== true) {
         throw new ClickUpOAuthError('protocol', 'The Worker did not confirm ClickUp disconnect.', 0);
       }
       return true;
     });
-    if (typeof localStorage !== 'undefined') localStorage.removeItem(STORAGE_KEY);
+    clearCachedStatusForPairing(pairing);
   },
 };

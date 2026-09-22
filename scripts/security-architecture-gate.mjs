@@ -714,6 +714,16 @@ if (!/async function providerJsonRequest[\s\S]*const response = await fetcher\([
   fail('ClickUp provider deadline must remain active through bounded response-body consumption');
 }
 
+for (const marker of [
+  'unknown_probe_in_flight',
+  'const staleAt = row.updated_at + (RATE_WINDOW_SECONDS * 1000)',
+  'releaseUnknownRateProbe()',
+  'this.credentialRow()?.updated_at !== grant.revision',
+  'const reservation = this.reserveProviderCall()',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable rate/grant authority is missing: ${marker}`);
+}
+
 const exchangeStart = clickUpOAuthVault.indexOf('private async exchange(request: Request, body: string)');
 const exchangeEnd = exchangeStart >= 0 ? clickUpOAuthVault.indexOf('private async disconnect(body: string)', exchangeStart) : -1;
 if (exchangeStart < 0 || exchangeEnd < 0) fail('ClickUp OAuth exchange authority disappeared');

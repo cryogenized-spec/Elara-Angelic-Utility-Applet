@@ -191,6 +191,13 @@ function providerFixture(): ProviderCounters {
         space: { id: '2222' },
       }), { status: 200, headers: { 'content-type': 'application/json' } });
     }
+    if (url.pathname === '/api/v2/folder/no-ancestry-folder' && request.method === 'GET') {
+      counters.resourceReads += 1;
+      return new Response(JSON.stringify({ id: 'no-ancestry-folder', name: 'Existing folder without space ancestry' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
     if (url.pathname === '/api/v2/folder/missing-folder' && request.method === 'GET') {
       counters.resourceReads += 1;
       return new Response(JSON.stringify({ ECODE: 'FOLDER_404', err: 'Not found' }), {
@@ -209,6 +216,13 @@ function providerFixture(): ProviderCounters {
     if (url.pathname === '/api/v2/list/2221' && request.method === 'GET') {
       counters.resourceReads += 1;
       return new Response(JSON.stringify({ id: '2221', name: 'SECRET_B_LIST', space: { id: '2222' } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    if (url.pathname === '/api/v2/list/no-ancestry-list' && request.method === 'GET') {
+      counters.resourceReads += 1;
+      return new Response(JSON.stringify({ id: 'no-ancestry-list', name: 'Existing list without space ancestry' }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
       });
@@ -362,6 +376,36 @@ describe('ClickUp Workspace-scoped resource authority', () => {
     }
   });
 
+  it('pads ancestry-free Folder and List denials to the same provider cost as missing ids', async () => {
+    const counters = providerFixture();
+    await connect();
+
+    for (const [unverifiableCommand, missingCommand] of [
+      [
+        { operation: 'getFolder', workspaceId: '111', folderId: 'no-ancestry-folder', includeSubfolders: true },
+        { operation: 'getFolder', workspaceId: '111', folderId: 'missing-folder', includeSubfolders: true },
+      ],
+      [
+        { operation: 'getList', workspaceId: '111', listId: 'no-ancestry-list' },
+        { operation: 'getList', workspaceId: '111', listId: 'missing-list' },
+      ],
+    ] as const) {
+      const beforeUnverifiable = counters.resourceReads;
+      const unverifiable = await internalCommand(unverifiableCommand);
+      const unverifiableCost = counters.resourceReads - beforeUnverifiable;
+
+      const beforeMissing = counters.resourceReads;
+      const missing = await internalCommand(missingCommand);
+      const missingCost = counters.resourceReads - beforeMissing;
+
+      expect(unverifiable.status).toBe(403);
+      expect(missing.status).toBe(403);
+      expect(await responseBody(unverifiable)).toEqual(await responseBody(missing));
+      expect(unverifiableCost).toBe(missingCost);
+      expect(unverifiableCost).toBe(3);
+    }
+  });
+
   it('blocks B task comments and writes before the provider mutation/comment endpoints are reached', async () => {
     const counters = providerFixture();
     await connect();
@@ -453,7 +497,7 @@ describe('ClickUp Workspace-scoped resource authority', () => {
       arguments: {
         workspaceId: '111',
         taskId: 'task-a',
-        assignees: { add: ['9999'] },
+        assignees: { remove: ['9999'] },
       },
     });
     const comment = await internalCommand({

@@ -113,7 +113,6 @@ const webhookPayloadSchema = z.object({
 }).passthrough();
 
 const providerCommandSchema = z.discriminatedUnion('operation', [
-  z.object({ operation: z.literal('getAuthorizationContext') }).strict(),
   z.object({ operation: z.literal('getWorkspaceAuthorizationContext'), workspaceId: z.string().trim().min(1).max(100) }).strict(),
   z.object({ operation: z.literal('listSpaces'), workspaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
   z.object({ operation: z.literal('listFolders'), workspaceId: z.string().trim().min(1).max(100), spaceId: z.string().trim().min(1).max(100), archived: z.boolean().optional() }).strict(),
@@ -1166,12 +1165,6 @@ export class ClickUpOAuthVault extends DurableObject {
     const command = parsed.data;
     try {
       switch (command.operation) {
-      case 'getAuthorizationContext': {
-        const context = this.authorizationContext();
-        return context
-          ? json({ ok: true, result: context })
-          : json({ code: 'authorization_required', message: 'Connect ClickUp before using ClickUp tools.' }, 401);
-      }
       case 'getWorkspaceAuthorizationContext': {
         const refreshed = await this.refreshWorkspaceAuthorization(command.workspaceId, expectedRevision);
         return refreshed.ok ? json({ ok: true, result: refreshed.workspace }) : refreshed.response;

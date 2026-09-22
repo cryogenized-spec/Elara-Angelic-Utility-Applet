@@ -66,7 +66,7 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     list.className = 'google-confirmation-list';
     requests.forEach((request, index) => {
       const presentation = confirmationToolPresentation(request.tool);
-      const card = document.createElement('label');
+      const card = document.createElement('div');
       card.className = 'google-confirmation-item';
 
       const checkbox = document.createElement('input');
@@ -160,6 +160,16 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
     refreshApproveState();
 
     host.append(heading, list, actions);
+    document.body.appendChild(host);
+
+    const inertSiblings = Array.from(document.body.children)
+      .filter((element): element is HTMLElement => element instanceof HTMLElement && element !== host)
+      .map((element) => ({ element, inert: element.inert }));
+    inertSiblings.forEach(({ element }) => { element.inert = true; });
+
+    const focusable = () => Array.from(host.querySelectorAll<HTMLElement>(
+      'button:not([disabled]), input:not([disabled]):not(.google-confirmation-item__check--passive)',
+    )).filter((element) => element.getClientRects().length > 0 || typeof element.focus === 'function');
 
     let settled = false;
     const finish = (decisions: boolean[]) => {
@@ -167,6 +177,7 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
       settled = true;
       if (pendingFinish === finish) pendingFinish = null;
       signal?.removeEventListener('abort', onAbort);
+      inertSiblings.forEach(({ element, inert }) => { element.inert = inert; });
       host.remove();
       resolve(decisions);
     };
@@ -181,9 +192,32 @@ export function requestGoogleToolConfirmations(requests: readonly WriteConfirmat
         finish(decisions);
       }
     }, { once: true }));
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(requests.map(() => false));
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const elements = focusable();
+      if (!elements.length) {
+        event.preventDefault();
+        selected.focus();
+        return;
+      }
+      const first = elements[0]!;
+      const last = elements[elements.length - 1]!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    host.addEventListener('keydown', onKeyDown);
     signal?.addEventListener('abort', onAbort, { once: true });
     if (signal?.aborted) { finish(requests.map(() => false)); return; }
-    document.body.appendChild(host);
     selected.focus();
   });
 }

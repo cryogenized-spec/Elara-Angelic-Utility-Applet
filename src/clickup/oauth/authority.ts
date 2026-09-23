@@ -515,6 +515,9 @@ async function connectionWrite<T>(
   const pending = markConnectionPending(pairing, operation);
   try {
     const result = await signedPost(pairing, path, payload, parse);
+    if (connectionGenerationForPairing(pairing) !== pending.operationId) {
+      throw connectionPendingError();
+    }
     onSuccess?.(result, pending.operationId);
     clearPendingConnectionForPairing(pairing, pending.operationId);
     return result;

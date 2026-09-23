@@ -481,7 +481,7 @@ for (const marker of [
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp signed browser-write ordering authority is missing: ${marker}`);
 }
 if (!/private async verifyWrite[\s\S]*timestampMs = Number\(request\.headers\.get\(ELARA_AUTH_TIMESTAMP_HEADER\)[\s\S]*\{ ok: true, timestampMs \}/.test(clickUpOAuthVault)) {
-  fail('ClickUp durable write ordering must derive its generation from the already HMAC-verified timestamp header');
+  fail('ClickUp signed-write freshness timestamp must remain independently HMAC-verified before the nonce-encoded intent generation is admitted');
 }
 const clickUpStatusStart = clickUpOAuthVault.indexOf('private status()');
 const clickUpStatusEnd = clickUpStatusStart >= 0

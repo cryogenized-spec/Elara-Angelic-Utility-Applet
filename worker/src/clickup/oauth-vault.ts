@@ -396,7 +396,8 @@ export class ClickUpOAuthVault extends DurableObject {
       CREATE TABLE IF NOT EXISTS clickup_connection_epoch (
         slot INTEGER PRIMARY KEY CHECK (slot = 1),
         epoch INTEGER NOT NULL,
-        settled_epoch INTEGER NOT NULL DEFAULT 0
+        settled_epoch INTEGER NOT NULL DEFAULT 0,
+        browser_write_timestamp INTEGER NOT NULL DEFAULT 0
       )
     `);
     const connectionEpochColumns = this.ctx.storage.sql.exec<{ name: string }>(
@@ -412,8 +413,13 @@ export class ClickUpOAuthVault extends DurableObject {
         'UPDATE clickup_connection_epoch SET settled_epoch = epoch',
       );
     }
+    if (!connectionEpochColumns.some((column) => column.name === 'browser_write_timestamp')) {
+      this.ctx.storage.sql.exec(
+        'ALTER TABLE clickup_connection_epoch ADD COLUMN browser_write_timestamp INTEGER NOT NULL DEFAULT 0',
+      );
+    }
     this.ctx.storage.sql.exec(
-      'INSERT OR IGNORE INTO clickup_connection_epoch (slot, epoch, settled_epoch) VALUES (1, 0, 0)',
+      'INSERT OR IGNORE INTO clickup_connection_epoch (slot, epoch, settled_epoch, browser_write_timestamp) VALUES (1, 0, 0, 0)',
     );
     initializeClickUpTaskIndex(this.ctx.storage.sql);
   }
@@ -455,6 +461,32 @@ export class ClickUpOAuthVault extends DurableObject {
         epoch,
       );
     });
+  }
+
+  private reserveBrowserWriteTimestamp(timestampMs: number): boolean {
+    if (!Number.isSafeInteger(timestampMs) || timestampMs <= 0) return false;
+    return this.ctx.storage.transactionSync(() => {
+      const row = this.ctx.storage.sql.exec<{ browser_write_timestamp: number }>(
+        'SELECT browser_write_timestamp FROM clickup_connection_epoch WHERE slot = 1',
+      ).toArray()[0] ?? { browser_write_timestamp: 0 };
+      // Signed timestamps provide an orderable browser generation without
+      // changing the legacy request body. Equal timestamps fail closed: two
+      // same-millisecond gestures may require a retry, but can never reorder.
+      if (timestampMs <= row.browser_write_timestamp) return false;
+      this.ctx.storage.sql.exec(
+        'UPDATE clickup_connection_epoch SET browser_write_timestamp = ? WHERE slot = 1',
+        timestampMs,
+      );
+      return true;
+    });
+  }
+
+  private rejectSupersededBrowserWrite(timestampMs: number): Response | null {
+    if (this.reserveBrowserWriteTimestamp(timestampMs)) return null;
+    return json({
+      code: 'connection_superseded',
+      message: 'This ClickUp connection action was superseded by a newer signed browser action.',
+    }, 409);
   }
 
   private deleteCredentialIfRevision(revision: number): boolean {
@@ -514,10 +546,12 @@ export class ClickUpOAuthVault extends DurableObject {
         return json({ code: writeAuth.code, message: `ClickUp OAuth write rejected: ${writeAuth.code}.` }, status);
       }
 
-      if (url.pathname === '/clickup/oauth/start') return await this.start(request, body);
-      if (url.pathname === '/clickup/oauth/exchange') return await this.exchange(request, body);
-      if (url.pathname === '/clickup/oauth/personal-token') return await this.connectPersonalToken(request, body);
-      if (url.pathname === '/clickup/oauth/disconnect') return await this.disconnect(body);
+      const browserWriteTimestamp = writeAuth.timestampMs;
+      if (!browserWriteTimestamp) return json({ code: 'stale-timestamp', message: 'ClickUp OAuth write timestamp was invalid.' }, 409);
+      if (url.pathname === '/clickup/oauth/start') return await this.start(request, body, browserWriteTimestamp);
+      if (url.pathname === '/clickup/oauth/exchange') return await this.exchange(request, body, browserWriteTimestamp);
+      if (url.pathname === '/clickup/oauth/personal-token') return await this.connectPersonalToken(request, body, browserWriteTimestamp);
+      if (url.pathname === '/clickup/oauth/disconnect') return await this.disconnect(body, browserWriteTimestamp);
       return json({ code: 'not_found', message: 'Not found.' }, 404);
     } catch (error) {
       if (error instanceof ClickUpProviderError) {
@@ -2066,7 +2100,7 @@ export class ClickUpOAuthVault extends DurableObject {
     return verifyBearerToken(presented, this.installationToken());
   }
 
-  private async verifyWrite(request: Request, body: string): Promise<{ ok: boolean; code?: string }> {
+  private async verifyWrite(request: Request, body: string): Promise<{ ok: boolean; code?: string; timestampMs?: number }> {
     const verified = await verifySignedWrite({
       method: request.method,
       path: new URL(request.url).pathname,
@@ -2086,7 +2120,11 @@ export class ClickUpOAuthVault extends DurableObject {
       this.ctx.storage.sql.exec('INSERT INTO clickup_oauth_nonces (nonce, used_at) VALUES (?, ?)', nonce, now);
       return true;
     });
-    return accepted ? { ok: true } : { ok: false, code: 'replayed-nonce' };
+    if (!accepted) return { ok: false, code: 'replayed-nonce' };
+    const timestampMs = Number(request.headers.get(ELARA_AUTH_TIMESTAMP_HEADER) ?? '');
+    return Number.isSafeInteger(timestampMs)
+      ? { ok: true, timestampMs }
+      : { ok: false, code: 'stale-timestamp' };
   }
 
   private authorizationContext() {
@@ -2262,13 +2300,15 @@ export class ClickUpOAuthVault extends DurableObject {
     });
   }
 
-  private async start(request: Request, body: string): Promise<Response> {
+  private async start(request: Request, body: string, browserWriteTimestamp: number): Promise<Response> {
     const parsed = startSchema.safeParse(parseJson(body));
     if (!parsed.success) return json({ code: 'validation', message: 'ClickUp OAuth start payload was invalid.' }, 400);
     const origin = normalizeOrigin(request.headers.get('Origin'));
     if (!origin || !validRedirectUri(parsed.data.redirectUri, origin)) {
       return json({ code: 'redirect_uri', message: 'ClickUp OAuth redirect URI must use HTTPS and match the calling origin.' }, 400);
     }
+    const superseded = this.rejectSupersededBrowserWrite(browserWriteTimestamp);
+    if (superseded) return superseded;
 
     const state = randomState();
     const now = Date.now();
@@ -2293,7 +2333,7 @@ export class ClickUpOAuthVault extends DurableObject {
     return json({ authorizationUrl: authorize.toString(), state, expiresAt: now + STATE_TTL_MS });
   }
 
-  private async exchange(request: Request, body: string): Promise<Response> {
+  private async exchange(request: Request, body: string, browserWriteTimestamp: number): Promise<Response> {
     const parsed = exchangeSchema.safeParse(parseJson(body));
     if (!parsed.success) return json({ code: 'validation', message: 'ClickUp OAuth exchange payload was invalid.' }, 400);
     const origin = normalizeOrigin(request.headers.get('Origin'));
@@ -2313,6 +2353,8 @@ export class ClickUpOAuthVault extends DurableObject {
       return true;
     });
     if (!acceptedState) return json({ code: 'oauth_state', message: 'ClickUp OAuth state is missing, expired, replayed, or does not match this redirect.' }, 409);
+    const superseded = this.rejectSupersededBrowserWrite(browserWriteTimestamp);
+    if (superseded) return superseded;
 
     const exchangeEpoch = this.advanceConnectionEpoch();
     const previousAccessToken = await this.accessCredential().catch(() => null);
@@ -2328,7 +2370,7 @@ export class ClickUpOAuthVault extends DurableObject {
     }
   }
 
-  private async connectPersonalToken(request: Request, body: string): Promise<Response> {
+  private async connectPersonalToken(request: Request, body: string, browserWriteTimestamp: number): Promise<Response> {
     if (!emptySchema.safeParse(parseJson(body)).success) {
       return json({ code: 'validation', message: 'ClickUp personal-token connection payload was invalid.' }, 400);
     }
@@ -2346,6 +2388,8 @@ export class ClickUpOAuthVault extends DurableObject {
     } catch {
       return json({ code: 'configuration', message: 'CLICKUP_PERSONAL_TOKEN is not a valid ClickUp personal API token.' }, 503);
     }
+    const superseded = this.rejectSupersededBrowserWrite(browserWriteTimestamp);
+    if (superseded) return superseded;
 
     const now = Date.now();
     const connectionEpoch = this.ctx.storage.transactionSync(() => {
@@ -2460,10 +2504,12 @@ export class ClickUpOAuthVault extends DurableObject {
     return json(this.status());
   }
 
-  private async disconnect(body: string): Promise<Response> {
+  private async disconnect(body: string, browserWriteTimestamp: number): Promise<Response> {
     if (!emptySchema.safeParse(parseJson(body)).success) {
       return json({ code: 'validation', message: 'ClickUp disconnect payload was invalid.' }, 400);
     }
+    const superseded = this.rejectSupersededBrowserWrite(browserWriteTimestamp);
+    if (superseded) return superseded;
 
     // Local disconnect is atomic before the first await. A crash or reconnect
     // cannot leave a usable credential paired with partially-cleared grant

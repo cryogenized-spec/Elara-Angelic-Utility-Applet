@@ -575,6 +575,36 @@ describe('ClickUp OAuth browser authority', () => {
     expect(statusReads).toBe(1);
   });
 
+  it('keeps a legacy pending marker fail-closed even when a new Worker is currently settled', async () => {
+    const legacyMarker = {
+      authorityBinding: 'https://worker.example#test-installation',
+      operationId: 'legacy-operation-id',
+      operation: 'personal-token',
+      until: Date.now() + CLICKUP_CONNECTION_SETTLE_MS,
+    };
+    localStorage.setItem('elara.clickup.connection.pending.v1', JSON.stringify(legacyMarker));
+
+    let statusReads = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        return jsonResponse(connectionState(9, false, Date.now()));
+      }
+      if (url.endsWith('/clickup/oauth/status')) {
+        statusReads += 1;
+        return jsonResponse(STATUS);
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.getStatus()).rejects.toMatchObject({
+      code: 'connection_pending',
+      status: 409,
+    });
+    expect(statusReads).toBe(0);
+    expect(localStorage.getItem('elara.clickup.connection.pending.v1')).toBe(JSON.stringify(legacyMarker));
+  });
+
   it('uses the bounded settle timer when an older Worker lacks operation-state reporting', async () => {
     vi.useFakeTimers();
     try {

@@ -426,6 +426,8 @@ for (const marker of [
   'connectionGenerationForPairing(pairing) !== generationSnapshot',
   'connectionGenerationForPairing(pairing) !== pending.operationId',
   'const browserIntentTimestamp = Date.now()',
+  'clickUpConnectionNonce(browserIntentTimestamp)',
+  'const timestamp = Date.now()',
   'signedPost(pairing, path, payload, parse, browserIntentTimestamp)',
   'expectedOperationId && pending.operationId !== expectedOperationId',
   'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
@@ -464,12 +466,17 @@ for (const marker of [
 }
 for (const marker of [
   'browser_write_timestamp INTEGER NOT NULL DEFAULT 0',
+  'CLICKUP_CONNECTION_NONCE_PATTERN',
+  'browserConnectionIntentTimestamp',
+  "code: 'connection_client_upgrade_required'",
+  "code: 'connection_intent_stale'",
+  'signedTimestampMs - timestampMs > ELARA_AUTH_TIMESTAMP_WINDOW_MS',
   'ALTER TABLE clickup_connection_epoch ADD COLUMN browser_write_timestamp INTEGER NOT NULL DEFAULT 0',
   'reserveBrowserWriteTimestamp',
   'timestampMs <= row.browser_write_timestamp',
   "code: 'connection_superseded'",
-  'const browserWriteTimestamp = writeAuth.timestampMs',
-  'this.rejectSupersededBrowserWrite(browserWriteTimestamp)',
+  'const signedTimestampMs = writeAuth.timestampMs',
+  'this.rejectSupersededBrowserWrite(browserIntentTimestamp)',
 ]) {
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp signed browser-write ordering authority is missing: ${marker}`);
 }

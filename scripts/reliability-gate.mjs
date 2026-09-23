@@ -307,6 +307,8 @@ for (const marker of [
   "'connection_pending'",
   'ensureConnectionSettled(pairing',
   'workerState.intentTimestamp >= localBefore.value.intentTimestamp',
+  "intentTimestamp: typeof record.intentTimestamp === 'number' ? record.intentTimestamp : null",
+  'localBefore.value.intentTimestamp !== null',
   'bearerConnectionState',
   "'/clickup/oauth/connection-state'",
   'stateAfter.epoch !== stateBefore.epoch',

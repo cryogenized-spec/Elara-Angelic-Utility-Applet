@@ -309,6 +309,64 @@ describe('ClickUp OAuth browser authority', () => {
     expect(raw).not.toContain('pk_');
   });
 
+  it('keeps browser intent ordering when an older tab stalls before network egress', async () => {
+    const newerStatus = {
+      ...STATUS,
+      account: { id: '456', username: 'Newer', email: 'newer@example.com' },
+      workspaces: [{ id: '1000', name: 'Newer Workspace' }],
+      updatedAt: 234567,
+    };
+
+    let releaseOlderToken: ((token: string) => void) | undefined;
+    pairingTokenMock
+      .mockImplementationOnce(() => new Promise<string>((resolve) => { releaseOlderToken = resolve; }))
+      .mockResolvedValue('installation-token-for-test');
+
+    let highestAcceptedTimestamp = 0;
+    const personalTimestamps: number[] = [];
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        return jsonResponse(connectionState());
+      }
+      if (url.endsWith('/clickup/oauth/personal-token')) {
+        const timestamp = Number(new Headers(init?.headers).get('X-Elara-Timestamp'));
+        personalTimestamps.push(timestamp);
+        if (timestamp <= highestAcceptedTimestamp) {
+          return jsonResponse({
+            code: 'connection_superseded',
+            message: 'This ClickUp connection action was superseded by a newer signed browser action.',
+          }, 409);
+        }
+        highestAcceptedTimestamp = timestamp;
+        return jsonResponse(newerStatus);
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const older = clickUpOAuthAuthority.connectPersonalToken();
+    for (let attempt = 0; attempt < 100 && !localStorage.getItem('elara.clickup.connection.pending.v1'); attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    expect(localStorage.getItem('elara.clickup.connection.pending.v1')).toContain('"operationId"');
+
+    const newer = clickUpOAuthAuthority.connectPersonalToken();
+    await expect(newer).resolves.toEqual(newerStatus);
+    expect(personalTimestamps).toHaveLength(1);
+
+    releaseOlderToken?.('installation-token-for-test');
+    await expect(older).rejects.toMatchObject({
+      code: 'connection_superseded',
+      status: 409,
+    });
+
+    expect(personalTimestamps).toHaveLength(2);
+    // Network arrival is newer first, older second. The signed intent
+    // generation must therefore decrease on the delayed second arrival.
+    expect(personalTimestamps[0]).toBeGreaterThan(personalTimestamps[1]);
+    expect(loadStoredClickUpStatus()).toEqual(newerStatus);
+  });
+
   it('does not let an older tab clear a newer tab pending marker on late success', async () => {
     const secondStatus = {
       ...STATUS,

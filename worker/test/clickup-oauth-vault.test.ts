@@ -249,7 +249,12 @@ describe('ClickUp OAuth public boundary', () => {
   it('serves ClickUp connection operation state on a separate authenticated read endpoint', async () => {
     const response = await SELF.fetch(await bearerRead('/clickup/oauth/connection-state'));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ epoch: 0, settledEpoch: 0, pending: false });
+    expect(await response.json()).toEqual({
+      epoch: 0,
+      settledEpoch: 0,
+      pending: false,
+      intentTimestamp: 0,
+    });
   });
 
 
@@ -531,6 +536,11 @@ describe('ClickUpOAuthVault', () => {
     expect(userCalls).toBe(1);
     expect(workspaceCalls).toBe(1);
     expect((await credentialSnapshot())?.userId).toBe('456');
+    const stateAfterNewer = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(await stateAfterNewer.json()).toEqual(expect.objectContaining({
+      intentTimestamp: baseTimestamp + 1_000,
+      pending: false,
+    }));
 
     // This request represents an older browser gesture whose network delivery
     // was delayed until after the newer replacement reached the Worker.

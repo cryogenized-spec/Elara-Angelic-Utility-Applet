@@ -49,6 +49,10 @@ export class ClickUpOAuthError extends Error {
   }
 }
 
+function clickUpConnectionNonce(browserIntentTimestamp: number): string {
+  return `clickup-v1:${browserIntentTimestamp}:${newNonce()}`;
+}
+
 function activePairing(): AutonomyPairing {
   if (typeof window === 'undefined') throw new ClickUpOAuthError('pairing', 'ClickUp requires a paired self-hosted Worker.', 0);
   const pairing = loadPairing();
@@ -483,12 +487,16 @@ async function signedPost<T>(
   path: string,
   payload: unknown,
   parse: (value: unknown) => T,
-  browserIntentTimestamp = Date.now(),
+  browserIntentTimestamp: number,
 ): Promise<T> {
   const token = await workerToken(pairing);
   const body = JSON.stringify(payload);
-  const timestamp = browserIntentTimestamp;
-  const nonce = newNonce();
+  // The ordinary signed-write timestamp remains a freshness timestamp taken
+  // immediately before egress. Gesture ordering travels inside the nonce,
+  // which is itself covered by the HMAC, so a delayed older gesture cannot
+  // masquerade as newer merely because it signs later.
+  const timestamp = Date.now();
+  const nonce = clickUpConnectionNonce(browserIntentTimestamp);
   const signature = await signWrite(token, 'POST', path, timestamp, nonce, body);
   assertPairingStillCurrent(pairing);
   const response = await workerRequest(pairing, path, {

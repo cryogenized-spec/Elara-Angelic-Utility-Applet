@@ -17,11 +17,18 @@ const WORKER_TIMEOUT_MS = 20_000;
 const MAX_WORKER_RESPONSE_BYTES = 64 * 1024;
 const STORAGE_KEY = 'elara.clickup.authorization.v1';
 const PENDING_CONNECTION_KEY = 'elara.clickup.connection.pending.v1';
+const CONNECTION_GENERATION_KEY = 'elara.clickup.connection.generation.v1';
 export const CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000;
 
 type StoredClickUpStatus = {
   readonly authorityBinding: string;
+  readonly generationId: string | null;
   readonly status: ClickUpOAuthStatus;
+};
+
+type ConnectionGeneration = {
+  readonly authorityBinding: string;
+  readonly generationId: string;
 };
 
 type PendingConnectionChange = {
@@ -169,11 +176,46 @@ function parseStoredStatus(raw: string | null): StoredClickUpStatus | null {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
     const record = parsed as Record<string, unknown>;
     if (typeof record.authorityBinding !== 'string') return null;
+    if (record.generationId !== undefined && record.generationId !== null && typeof record.generationId !== 'string') return null;
     const status = clickUpOAuthStatusSchema.safeParse(record.status);
-    return status.success ? { authorityBinding: record.authorityBinding, status: status.data } : null;
+    return status.success ? {
+      authorityBinding: record.authorityBinding,
+      generationId: typeof record.generationId === 'string' ? record.generationId : null,
+      status: status.data,
+    } : null;
   } catch {
     return null;
   }
+}
+
+function parseConnectionGeneration(raw: string | null): ConnectionGeneration | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    const record = parsed as Record<string, unknown>;
+    if (typeof record.authorityBinding !== 'string' || typeof record.generationId !== 'string' || !record.generationId) return null;
+    return { authorityBinding: record.authorityBinding, generationId: record.generationId };
+  } catch {
+    return null;
+  }
+}
+
+function connectionGenerationForPairing(pairing: AutonomyPairing): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  const generation = parseConnectionGeneration(localStorage.getItem(CONNECTION_GENERATION_KEY));
+  return generation?.authorityBinding === clickUpPairingAuthorityBinding(pairing)
+    ? generation.generationId
+    : null;
+}
+
+function writeConnectionGeneration(pairing: AutonomyPairing, generationId: string): void {
+  if (typeof localStorage === 'undefined' || !samePairing(pairing)) return;
+  const generation: ConnectionGeneration = {
+    authorityBinding: clickUpPairingAuthorityBinding(pairing),
+    generationId,
+  };
+  localStorage.setItem(CONNECTION_GENERATION_KEY, JSON.stringify(generation));
 }
 
 function cachedStatusRawForPairing(pairing: AutonomyPairing): string | null {
@@ -199,8 +241,10 @@ function persistStatus(
   pairing: AutonomyPairing,
   status: ClickUpOAuthStatus,
   allowedPendingOperationId?: string,
+  expectedGenerationId: string | null = connectionGenerationForPairing(pairing),
 ): void {
   if (typeof localStorage === 'undefined' || !samePairing(pairing)) return;
+  if (connectionGenerationForPairing(pairing) !== expectedGenerationId) return;
   const pending = pendingConnectionSnapshotForPairing(pairing);
   if (pending && pending.value.operationId !== allowedPendingOperationId) return;
   if (!status.connected) {
@@ -217,6 +261,7 @@ function persistStatus(
 
   const stored: StoredClickUpStatus = {
     authorityBinding: clickUpPairingAuthorityBinding(pairing),
+    generationId: expectedGenerationId,
     status,
   };
   localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
@@ -278,6 +323,7 @@ function markConnectionPending(
     until: Date.now() + CLICKUP_CONNECTION_SETTLE_MS,
   };
   if (typeof localStorage !== 'undefined' && samePairing(pairing)) {
+    writeConnectionGeneration(pairing, pending.operationId);
     localStorage.setItem(PENDING_CONNECTION_KEY, JSON.stringify(pending));
     clearCachedStatusForPairing(pairing);
   }
@@ -365,11 +411,13 @@ export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
   if (!pairing || pendingConnectionSnapshotForPairing(pairing)) return null;
   const stored = parseStoredStatus(localStorage.getItem(STORAGE_KEY));
   if (!stored) return null;
-  return stored.authorityBinding === clickUpPairingAuthorityBinding(pairing) ? stored.status : null;
+  if (stored.authorityBinding !== clickUpPairingAuthorityBinding(pairing)) return null;
+  return stored.generationId === connectionGenerationForPairing(pairing) ? stored.status : null;
 }
 
 async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
   const cacheSnapshot = cachedStatusRawForPairing(pairing);
+  const generationSnapshot = connectionGenerationForPairing(pairing);
   try {
     const localPending = pendingConnectionSnapshotForPairing(pairing);
     const stateBefore = localPending
@@ -399,8 +447,9 @@ async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatu
       }
     }
     if (pendingConnectionSnapshotForPairing(pairing)) throw connectionPendingError();
+    if (connectionGenerationForPairing(pairing) !== generationSnapshot) throw connectionPendingError();
 
-    persistStatus(pairing, parsed);
+    persistStatus(pairing, parsed, undefined, generationSnapshot);
     return parsed;
   } catch (cause) {
     // Remove only the cache snapshot that this read started with. A newer
@@ -510,7 +559,7 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
       '/clickup/oauth/exchange',
       input,
       (value) => clickUpOAuthStatusSchema.parse(value),
-      (status, operationId) => persistStatus(pairing, status, operationId),
+      (status, operationId) => persistStatus(pairing, status, operationId, operationId),
     );
   },
 
@@ -539,7 +588,9 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
         }
         return true;
       },
-      () => clearCachedStatusForPairing(pairing),
+      (_value, operationId) => {
+        if (connectionGenerationForPairing(pairing) === operationId) clearCachedStatusForPairing(pairing);
+      },
     );
   },
 };

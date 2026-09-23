@@ -36,11 +36,12 @@ const STATUS = {
   updatedAt: 123456,
 };
 
-function connectionState(epoch = 0, pending = false) {
+function connectionState(epoch = 0, pending = false, intentTimestamp = Date.now()) {
   return {
     epoch,
     settledEpoch: pending ? Math.max(0, epoch - 1) : epoch,
     pending,
+    intentTimestamp,
   };
 }
 
@@ -309,6 +310,54 @@ describe('ClickUp OAuth browser authority', () => {
     expect(raw).not.toContain('pk_');
   });
 
+  it('does not clear a pre-egress pending marker when the Worker has not admitted that intent yet', async () => {
+    let releaseToken: ((token: string) => void) | undefined;
+    pairingTokenMock
+      .mockImplementationOnce(() => new Promise<string>((resolve) => { releaseToken = resolve; }))
+      .mockResolvedValue('installation-token-for-test');
+
+    let statusReads = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        // Settled Worker state, but watermark 0 proves the browser operation
+        // has not actually reached this Worker yet.
+        return jsonResponse(connectionState(0, false, 0));
+      }
+      if (url.endsWith('/clickup/oauth/status')) {
+        statusReads += 1;
+        return jsonResponse(STATUS);
+      }
+      if (url.endsWith('/clickup/oauth/personal-token')) {
+        return jsonResponse({
+          code: 'connection_superseded',
+          message: 'Superseded for test cleanup.',
+        }, 409);
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const pendingConnect = clickUpOAuthAuthority.connectPersonalToken();
+    for (let attempt = 0; attempt < 100 && !localStorage.getItem('elara.clickup.connection.pending.v1'); attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    const markerBefore = localStorage.getItem('elara.clickup.connection.pending.v1');
+    expect(markerBefore).toContain('"intentTimestamp"');
+
+    await expect(clickUpOAuthAuthority.getStatus()).rejects.toMatchObject({
+      code: 'connection_pending',
+      status: 409,
+    });
+    expect(statusReads).toBe(0);
+    expect(localStorage.getItem('elara.clickup.connection.pending.v1')).toBe(markerBefore);
+
+    releaseToken?.('installation-token-for-test');
+    await expect(pendingConnect).rejects.toMatchObject({
+      code: 'connection_superseded',
+      status: 409,
+    });
+  });
+
   it('keeps browser intent ordering when an older tab stalls before network egress', async () => {
     const newerStatus = {
       ...STATUS,
@@ -452,6 +501,7 @@ describe('ClickUp OAuth browser authority', () => {
           epoch: 1,
           settledEpoch: operationPending ? 0 : 1,
           pending: operationPending,
+          intentTimestamp: Date.now(),
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (url.endsWith('/clickup/oauth/status')) {
@@ -492,6 +542,7 @@ describe('ClickUp OAuth browser authority', () => {
           epoch: 1,
           settledEpoch: operationPending ? 0 : 1,
           pending: operationPending,
+          intentTimestamp: Date.now(),
         }), { status: 200, headers: { 'content-type': 'application/json' } });
       }
       if (url.endsWith('/clickup/oauth/status')) {

@@ -457,6 +457,101 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.credentialKind).toBe('oauth');
   });
 
+  it('rejects an older signed connection write that arrives after a newer replacement committed', async () => {
+    let userCalls = 0;
+    let workspaceCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        userCalls += 1;
+        return new Response(JSON.stringify({
+          user: { id: 456, username: 'Newer', email: 'newer@example.com' },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        workspaceCalls += 1;
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '1000',
+            name: 'Newer Workspace',
+            members: [{ user: { id: 456, username: 'Newer', email: 'newer@example.com' } }],
+          }],
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected ordered ClickUp request: ${request.method} ${request.url}`);
+    });
+
+    const baseTimestamp = Date.now();
+    const newer = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: baseTimestamp + 1_000,
+    }));
+    expect(newer.status).toBe(200);
+    expect(userCalls).toBe(1);
+    expect(workspaceCalls).toBe(1);
+    expect((await credentialSnapshot())?.userId).toBe('456');
+
+    // This request represents an older browser gesture whose network delivery
+    // was delayed until after the newer replacement reached the Worker.
+    const delayedOlder = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: baseTimestamp,
+    }));
+    expect(delayedOlder.status).toBe(409);
+    expect(await delayedOlder.json()).toEqual(expect.objectContaining({
+      code: 'connection_superseded',
+    }));
+    expect(userCalls).toBe(1);
+    expect(workspaceCalls).toBe(1);
+    expect((await credentialSnapshot())?.userId).toBe('456');
+
+    // Older OAuth-start gestures are ordered by the same signed watermark and
+    // therefore cannot recreate a stale popup authority after replacement.
+    const staleStartBody = JSON.stringify({ redirectUri: REDIRECT_URI });
+    const staleStart = await doFetch(await signedWrite('/clickup/oauth/start', staleStartBody, {
+      timestamp: baseTimestamp + 500,
+    }));
+    expect(staleStart.status).toBe(409);
+    expect(await staleStart.json()).toEqual(expect.objectContaining({
+      code: 'connection_superseded',
+    }));
+  });
+
+  it('fails closed when two signed connection writes carry the same millisecond timestamp', async () => {
+    let userCalls = 0;
+    let workspaceCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        userCalls += 1;
+        return new Response(JSON.stringify({
+          user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        workspaceCalls += 1;
+        return new Response(JSON.stringify({
+          teams: [{ id: '999', name: 'Neon Sales', members: [] }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected same-timestamp ClickUp request: ${request.method} ${request.url}`);
+    });
+
+    const timestamp = Date.now();
+    const first = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', { timestamp }));
+    expect(first.status).toBe(200);
+
+    const second = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', { timestamp }));
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual(expect.objectContaining({ code: 'connection_superseded' }));
+    expect(userCalls).toBe(1);
+    expect(workspaceCalls).toBe(1);
+  });
+
   it('activates a configured personal API token entirely inside the Worker and stores only encrypted material', async () => {
     let userCalls = 0;
     let workspaceCalls = 0;

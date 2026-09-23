@@ -325,8 +325,9 @@ async function ensureConnectionSettled(
   pairing: AutonomyPairing,
 ): Promise<ClickUpConnectionState | null> {
   const localBefore = pendingConnectionSnapshotForPairing(pairing);
-  const workerState = await bearerConnectionState(pairing);
+  if (!localBefore) return null;
 
+  const workerState = await bearerConnectionState(pairing);
   if (workerState?.pending) {
     clearCachedStatusForPairing(pairing, cachedStatusRawForPairing(pairing));
     throw connectionPendingError();
@@ -335,18 +336,17 @@ async function ensureConnectionSettled(
   const localAfter = pendingConnectionSnapshotForPairing(pairing);
   if (
     localAfter
-    && (!localBefore || localAfter.value.operationId !== localBefore.value.operationId)
+    && localAfter.value.operationId !== localBefore.value.operationId
   ) {
     throw connectionPendingError();
   }
 
   if (workerState) {
-    if (localBefore) clearPendingConnectionForPairing(pairing, localBefore.value.operationId);
+    clearPendingConnectionForPairing(pairing, localBefore.value.operationId);
     return workerState;
   }
 
-  if (localBefore) throw connectionPendingError();
-  return null;
+  throw connectionPendingError();
 }
 
 function ambiguousConnectionWriteFailure(cause: unknown): boolean {
@@ -370,7 +370,14 @@ export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
 
 async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
   const cacheSnapshot = cachedStatusRawForPairing(pairing);
-  const stateBefore = await ensureConnectionSettled(pairing);
+  const localPending = pendingConnectionSnapshotForPairing(pairing);
+  const stateBefore = localPending
+    ? await ensureConnectionSettled(pairing)
+    : await bearerConnectionState(pairing);
+  if (stateBefore?.pending) {
+    if (cacheSnapshot) clearCachedStatusForPairing(pairing, cacheSnapshot);
+    throw connectionPendingError();
+  }
   try {
     const token = await workerToken(pairing);
     assertPairingStillCurrent(pairing);

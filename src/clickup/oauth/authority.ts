@@ -20,13 +20,6 @@ const PENDING_CONNECTION_KEY = 'elara.clickup.connection.pending.v1';
 const CONNECTION_GENERATION_KEY = 'elara.clickup.connection.generation.v1';
 export const CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000;
 
-let lastSignedWriteTimestamp = 0;
-
-function nextSignedWriteTimestamp(): number {
-  lastSignedWriteTimestamp = Math.max(Date.now(), lastSignedWriteTimestamp + 1);
-  return lastSignedWriteTimestamp;
-}
-
 type StoredClickUpStatus = {
   readonly authorityBinding: string;
   readonly generationId: string | null;
@@ -490,7 +483,7 @@ async function signedPost<T>(
   path: string,
   payload: unknown,
   parse: (value: unknown) => T,
-  browserIntentTimestamp = nextSignedWriteTimestamp(),
+  browserIntentTimestamp = Date.now(),
 ): Promise<T> {
   const token = await workerToken(pairing);
   const body = JSON.stringify(payload);
@@ -522,7 +515,7 @@ async function connectionWrite<T>(
   parse: (value: unknown) => T,
   onSuccess?: (value: T, operationId: string) => void,
 ): Promise<T> {
-  const browserIntentTimestamp = nextSignedWriteTimestamp();
+  const browserIntentTimestamp = Date.now();
   await ensureConnectionSettled(pairing);
   // Mark before egress so every same-origin tab immediately stops advertising
   // the old identity while an account-changing request is in flight.
@@ -564,7 +557,7 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
 
   async beginConnect(redirectUri: string): Promise<ClickUpOAuthStart> {
     const pairing = activePairing();
-    const browserIntentTimestamp = nextSignedWriteTimestamp();
+    const browserIntentTimestamp = Date.now();
     await ensureConnectionSettled(pairing);
     return signedPost(
       pairing,

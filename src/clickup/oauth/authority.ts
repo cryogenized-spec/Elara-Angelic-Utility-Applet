@@ -26,8 +26,14 @@ type StoredClickUpStatus = {
 
 type PendingConnectionChange = {
   readonly authorityBinding: string;
-  readonly operation: 'oauth-exchange' | 'personal-token' | 'disconnect' | 'worker-pending';
+  readonly operationId: string;
+  readonly operation: 'oauth-exchange' | 'personal-token' | 'disconnect';
   readonly until: number;
+};
+
+type PendingConnectionSnapshot = {
+  readonly raw: string;
+  readonly value: PendingConnectionChange;
 };
 
 export class ClickUpOAuthError extends Error {
@@ -170,20 +176,45 @@ function parseStoredStatus(raw: string | null): StoredClickUpStatus | null {
   }
 }
 
-function clearCachedStatusForPairing(pairing: AutonomyPairing): void {
-  if (typeof localStorage === 'undefined') return;
-  const stored = parseStoredStatus(localStorage.getItem(STORAGE_KEY));
-  if (stored?.authorityBinding === clickUpPairingAuthorityBinding(pairing)) {
-    localStorage.removeItem(STORAGE_KEY);
-  }
+function cachedStatusRawForPairing(pairing: AutonomyPairing): string | null {
+  if (typeof localStorage === 'undefined') return null;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  const stored = parseStoredStatus(raw);
+  return stored?.authorityBinding === clickUpPairingAuthorityBinding(pairing) ? raw : null;
 }
 
-function persistStatus(pairing: AutonomyPairing, status: ClickUpOAuthStatus): void {
+function clearCachedStatusForPairing(
+  pairing: AutonomyPairing,
+  expectedRaw?: string | null,
+): void {
+  if (typeof localStorage === 'undefined') return;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (expectedRaw !== undefined && raw !== expectedRaw) return;
+  const stored = parseStoredStatus(raw);
+  if (stored?.authorityBinding !== clickUpPairingAuthorityBinding(pairing)) return;
+  if (localStorage.getItem(STORAGE_KEY) === raw) localStorage.removeItem(STORAGE_KEY);
+}
+
+function persistStatus(
+  pairing: AutonomyPairing,
+  status: ClickUpOAuthStatus,
+  allowedPendingOperationId?: string,
+): void {
   if (typeof localStorage === 'undefined' || !samePairing(pairing)) return;
+  const pending = pendingConnectionSnapshotForPairing(pairing);
+  if (pending && pending.value.operationId !== allowedPendingOperationId) return;
   if (!status.connected) {
     clearCachedStatusForPairing(pairing);
     return;
   }
+
+  const current = parseStoredStatus(localStorage.getItem(STORAGE_KEY));
+  const incomingRevision = status.updatedAt ?? 0;
+  const currentRevision = current?.authorityBinding === clickUpPairingAuthorityBinding(pairing)
+    ? current.status.updatedAt ?? 0
+    : 0;
+  if (currentRevision > incomingRevision) return;
+
   const stored: StoredClickUpStatus = {
     authorityBinding: clickUpPairingAuthorityBinding(pairing),
     status,
@@ -200,17 +231,19 @@ function parsePendingConnection(raw: string | null): PendingConnectionChange | n
     const operation = record.operation;
     if (
       typeof record.authorityBinding !== 'string'
+      || typeof record.operationId !== 'string'
+      || !record.operationId
       || (
         operation !== 'oauth-exchange'
         && operation !== 'personal-token'
         && operation !== 'disconnect'
-        && operation !== 'worker-pending'
       )
       || typeof record.until !== 'number'
       || !Number.isFinite(record.until)
     ) return null;
     return {
       authorityBinding: record.authorityBinding,
+      operationId: record.operationId,
       operation,
       until: record.until,
     };
@@ -219,35 +252,48 @@ function parsePendingConnection(raw: string | null): PendingConnectionChange | n
   }
 }
 
-function pendingConnectionForPairing(pairing: AutonomyPairing): PendingConnectionChange | null {
+function pendingConnectionSnapshotForPairing(pairing: AutonomyPairing): PendingConnectionSnapshot | null {
   if (typeof localStorage === 'undefined') return null;
-  const pending = parsePendingConnection(localStorage.getItem(PENDING_CONNECTION_KEY));
+  const raw = localStorage.getItem(PENDING_CONNECTION_KEY);
+  if (!raw) return null;
+  const pending = parsePendingConnection(raw);
   if (!pending || pending.authorityBinding !== clickUpPairingAuthorityBinding(pairing)) return null;
   if (pending.until <= Date.now()) {
-    localStorage.removeItem(PENDING_CONNECTION_KEY);
+    if (localStorage.getItem(PENDING_CONNECTION_KEY) === raw) {
+      localStorage.removeItem(PENDING_CONNECTION_KEY);
+    }
     return null;
   }
-  return pending;
+  return { raw, value: pending };
 }
 
 function markConnectionPending(
   pairing: AutonomyPairing,
   operation: PendingConnectionChange['operation'],
-): void {
-  if (typeof localStorage === 'undefined' || !samePairing(pairing)) return;
+): PendingConnectionChange {
   const pending: PendingConnectionChange = {
     authorityBinding: clickUpPairingAuthorityBinding(pairing),
+    operationId: newNonce(),
     operation,
     until: Date.now() + CLICKUP_CONNECTION_SETTLE_MS,
   };
-  localStorage.setItem(PENDING_CONNECTION_KEY, JSON.stringify(pending));
-  clearCachedStatusForPairing(pairing);
+  if (typeof localStorage !== 'undefined' && samePairing(pairing)) {
+    localStorage.setItem(PENDING_CONNECTION_KEY, JSON.stringify(pending));
+    clearCachedStatusForPairing(pairing);
+  }
+  return pending;
 }
 
-function clearPendingConnectionForPairing(pairing: AutonomyPairing): void {
+function clearPendingConnectionForPairing(
+  pairing: AutonomyPairing,
+  expectedOperationId?: string,
+): void {
   if (typeof localStorage === 'undefined') return;
-  const pending = parsePendingConnection(localStorage.getItem(PENDING_CONNECTION_KEY));
-  if (pending?.authorityBinding === clickUpPairingAuthorityBinding(pairing)) {
+  const raw = localStorage.getItem(PENDING_CONNECTION_KEY);
+  const pending = parsePendingConnection(raw);
+  if (pending?.authorityBinding !== clickUpPairingAuthorityBinding(pairing)) return;
+  if (expectedOperationId && pending.operationId !== expectedOperationId) return;
+  if (localStorage.getItem(PENDING_CONNECTION_KEY) === raw) {
     localStorage.removeItem(PENDING_CONNECTION_KEY);
   }
 }
@@ -277,21 +323,30 @@ async function bearerConnectionState(pairing: AutonomyPairing): Promise<ClickUpC
 
 async function ensureConnectionSettled(
   pairing: AutonomyPairing,
-  verifyWorkerState = false,
-): Promise<void> {
-  const localPending = pendingConnectionForPairing(pairing);
-  if (!localPending && !verifyWorkerState) return;
+): Promise<ClickUpConnectionState | null> {
+  const localBefore = pendingConnectionSnapshotForPairing(pairing);
   const workerState = await bearerConnectionState(pairing);
-  if (workerState) {
-    if (workerState.pending) {
-      if (!localPending) markConnectionPending(pairing, 'worker-pending');
-      else clearCachedStatusForPairing(pairing);
-      throw connectionPendingError();
-    }
-    clearPendingConnectionForPairing(pairing);
-    return;
+
+  if (workerState?.pending) {
+    clearCachedStatusForPairing(pairing, cachedStatusRawForPairing(pairing));
+    throw connectionPendingError();
   }
-  if (localPending) throw connectionPendingError();
+
+  const localAfter = pendingConnectionSnapshotForPairing(pairing);
+  if (
+    localAfter
+    && (!localBefore || localAfter.value.operationId !== localBefore.value.operationId)
+  ) {
+    throw connectionPendingError();
+  }
+
+  if (workerState) {
+    if (localBefore) clearPendingConnectionForPairing(pairing, localBefore.value.operationId);
+    return workerState;
+  }
+
+  if (localBefore) throw connectionPendingError();
+  return null;
 }
 
 function ambiguousConnectionWriteFailure(cause: unknown): boolean {
@@ -307,17 +362,15 @@ function ambiguousConnectionWriteFailure(cause: unknown): boolean {
 export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
   if (typeof localStorage === 'undefined') return null;
   const pairing = loadPairing();
-  if (!pairing || pendingConnectionForPairing(pairing)) return null;
+  if (!pairing || pendingConnectionSnapshotForPairing(pairing)) return null;
   const stored = parseStoredStatus(localStorage.getItem(STORAGE_KEY));
   if (!stored) return null;
   return stored.authorityBinding === clickUpPairingAuthorityBinding(pairing) ? stored.status : null;
 }
 
-async function bearerStatus(
-  pairing: AutonomyPairing,
-  verifyWorkerState = false,
-): Promise<ClickUpOAuthStatus> {
-  await ensureConnectionSettled(pairing, verifyWorkerState);
+async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
+  const cacheSnapshot = cachedStatusRawForPairing(pairing);
+  const stateBefore = await ensureConnectionSettled(pairing);
   try {
     const token = await workerToken(pairing);
     assertPairingStillCurrent(pairing);
@@ -328,12 +381,26 @@ async function bearerStatus(
     assertPairingStillCurrent(pairing);
     if (response.status !== 200) throw workerError(response);
     const parsed = clickUpOAuthStatusSchema.parse(response.body);
+
+    if (stateBefore) {
+      const stateAfter = await bearerConnectionState(pairing);
+      if (
+        !stateAfter
+        || stateAfter.pending
+        || stateAfter.epoch !== stateBefore.epoch
+        || stateAfter.settledEpoch !== stateBefore.settledEpoch
+      ) {
+        throw connectionPendingError();
+      }
+    }
+    if (pendingConnectionSnapshotForPairing(pairing)) throw connectionPendingError();
+
     persistStatus(pairing, parsed);
     return parsed;
   } catch (cause) {
-    // Clear only metadata owned by this exact pairing. A superseded in-flight
-    // request must never erase a newer pairing's successfully refreshed cache.
-    clearCachedStatusForPairing(pairing);
+    // Remove only the cache snapshot that this read started with. A newer
+    // same-pairing or replacement-pairing refresh must survive this failure.
+    if (cacheSnapshot) clearCachedStatusForPairing(pairing, cacheSnapshot);
     throw cause;
   }
 }
@@ -382,22 +449,24 @@ async function signedPost<T>(
 
 async function connectionWrite<T>(
   pairing: AutonomyPairing,
-  operation: Exclude<PendingConnectionChange['operation'], 'worker-pending'>,
+  operation: PendingConnectionChange['operation'],
   path: string,
   payload: unknown,
   parse: (value: unknown) => T,
+  onSuccess?: (value: T, operationId: string) => void,
 ): Promise<T> {
   await ensureConnectionSettled(pairing);
   // Mark before egress so every same-origin tab immediately stops advertising
   // the old identity while an account-changing request is in flight.
-  markConnectionPending(pairing, operation);
+  const pending = markConnectionPending(pairing, operation);
   try {
     const result = await signedPost(pairing, path, payload, parse);
-    clearPendingConnectionForPairing(pairing);
+    onSuccess?.(result, pending.operationId);
+    clearPendingConnectionForPairing(pairing, pending.operationId);
     return result;
   } catch (cause) {
     if (!ambiguousConnectionWriteFailure(cause)) {
-      clearPendingConnectionForPairing(pairing);
+      clearPendingConnectionForPairing(pairing, pending.operationId);
     }
     throw cause;
   }
@@ -414,7 +483,7 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
 
   async getExecutionGrant(): Promise<ClickUpExecutionGrant> {
     const pairing = activePairing();
-    const status = await bearerStatus(pairing, true);
+    const status = await bearerStatus(pairing);
     return {
       status,
       authorityBinding: clickUpPairingAuthorityBinding(pairing),
@@ -430,38 +499,42 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
 
   async completeConnect(input): Promise<ClickUpOAuthStatus> {
     const pairing = activePairing();
-    const status = await connectionWrite(
+    return connectionWrite(
       pairing,
       'oauth-exchange',
       '/clickup/oauth/exchange',
       input,
       (value) => clickUpOAuthStatusSchema.parse(value),
+      (status, operationId) => persistStatus(pairing, status, operationId),
     );
-    persistStatus(pairing, status);
-    return status;
   },
 
   async connectPersonalToken(): Promise<ClickUpOAuthStatus> {
     const pairing = activePairing();
-    const status = await connectionWrite(
+    return connectionWrite(
       pairing,
       'personal-token',
       '/clickup/oauth/personal-token',
       {},
       (value) => clickUpOAuthStatusSchema.parse(value),
+      (status, operationId) => persistStatus(pairing, status, operationId),
     );
-    persistStatus(pairing, status);
-    return status;
   },
 
   async disconnect(): Promise<void> {
     const pairing = activePairing();
-    await connectionWrite(pairing, 'disconnect', '/clickup/oauth/disconnect', {}, (value) => {
-      if (!value || typeof value !== 'object' || (value as Record<string, unknown>).disconnected !== true) {
-        throw new ClickUpOAuthError('protocol', 'The Worker did not confirm ClickUp disconnect.', 0);
-      }
-      return true;
-    });
-    clearCachedStatusForPairing(pairing);
+    await connectionWrite(
+      pairing,
+      'disconnect',
+      '/clickup/oauth/disconnect',
+      {},
+      (value) => {
+        if (!value || typeof value !== 'object' || (value as Record<string, unknown>).disconnected !== true) {
+          throw new ClickUpOAuthError('protocol', 'The Worker did not confirm ClickUp disconnect.', 0);
+        }
+        return true;
+      },
+      () => clearCachedStatusForPairing(pairing),
+    );
   },
 };

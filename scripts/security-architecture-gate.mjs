@@ -460,6 +460,20 @@ for (const marker of [
 ]) {
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable connection-settlement authority is missing: ${marker}`);
 }
+for (const marker of [
+  'browser_write_timestamp INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE clickup_connection_epoch ADD COLUMN browser_write_timestamp INTEGER NOT NULL DEFAULT 0',
+  'reserveBrowserWriteTimestamp',
+  'timestampMs <= row.browser_write_timestamp',
+  "code: 'connection_superseded'",
+  'const browserWriteTimestamp = writeAuth.timestampMs',
+  'this.rejectSupersededBrowserWrite(browserWriteTimestamp)',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp signed browser-write ordering authority is missing: ${marker}`);
+}
+if (!/private async verifyWrite[\s\S]*timestampMs = Number\(request\.headers\.get\(ELARA_AUTH_TIMESTAMP_HEADER\)[\s\S]*\{ ok: true, timestampMs \}/.test(clickUpOAuthVault)) {
+  fail('ClickUp durable write ordering must derive its generation from the already HMAC-verified timestamp header');
+}
 const clickUpStatusStart = clickUpOAuthVault.indexOf('private status()');
 const clickUpStatusEnd = clickUpStatusStart >= 0
   ? clickUpOAuthVault.indexOf('private async start(', clickUpStatusStart)

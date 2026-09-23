@@ -358,6 +358,66 @@ describe('ClickUp OAuth browser authority', () => {
     });
   });
 
+  it('keeps the pending barrier through the full admissible pre-egress intent window', async () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date('2026-09-23T03:00:00.000Z'));
+      let releaseToken: ((token: string) => void) | undefined;
+      pairingTokenMock
+        .mockImplementationOnce(() => new Promise<string>((resolve) => { releaseToken = resolve; }))
+        .mockResolvedValue('installation-token-for-test');
+
+      let statusReads = 0;
+      globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+        const url = input instanceof Request ? input.url : String(input);
+        if (url.endsWith('/clickup/oauth/connection-state')) {
+          return jsonResponse(connectionState(0, false, 0));
+        }
+        if (url.endsWith('/clickup/oauth/status')) {
+          statusReads += 1;
+          return jsonResponse(STATUS);
+        }
+        if (url.endsWith('/clickup/oauth/personal-token')) {
+          return jsonResponse({
+            code: 'connection_superseded',
+            message: 'Superseded for test cleanup.',
+          }, 409);
+        }
+        throw new Error(`Unexpected URL ${url}`);
+      }) as unknown as typeof fetch;
+
+      const pendingConnect = clickUpOAuthAuthority.connectPersonalToken();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+
+      const raw = localStorage.getItem('elara.clickup.connection.pending.v1');
+      expect(raw).toBeTruthy();
+      const marker = JSON.parse(raw ?? '{}') as { intentTimestamp?: number; until?: number };
+      expect(marker.intentTimestamp).toBeTypeOf('number');
+      expect(marker.until).toBeTypeOf('number');
+      expect((marker.until ?? 0) - (marker.intentTimestamp ?? 0)).toBeGreaterThan(5 * 60_000);
+
+      // The Worker can still accept the HMAC-covered intent just under five
+      // minutes after the gesture, so another tab must still be blocked here.
+      await vi.advanceTimersByTimeAsync((5 * 60_000) - 1);
+      expect(localStorage.getItem('elara.clickup.connection.pending.v1')).toBe(raw);
+      await expect(clickUpOAuthAuthority.getStatus()).rejects.toMatchObject({
+        code: 'connection_pending',
+        status: 409,
+      });
+      expect(statusReads).toBe(0);
+
+      releaseToken?.('installation-token-for-test');
+      await expect(pendingConnect).rejects.toMatchObject({
+        code: 'connection_superseded',
+        status: 409,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('keeps browser intent ordering when an older tab stalls before network egress', async () => {
     const newerStatus = {
       ...STATUS,

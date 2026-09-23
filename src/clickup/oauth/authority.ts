@@ -370,15 +370,13 @@ export function loadStoredClickUpStatus(): ClickUpOAuthStatus | null {
 
 async function bearerStatus(pairing: AutonomyPairing): Promise<ClickUpOAuthStatus> {
   const cacheSnapshot = cachedStatusRawForPairing(pairing);
-  const localPending = pendingConnectionSnapshotForPairing(pairing);
-  const stateBefore = localPending
-    ? await ensureConnectionSettled(pairing)
-    : await bearerConnectionState(pairing);
-  if (stateBefore?.pending) {
-    if (cacheSnapshot) clearCachedStatusForPairing(pairing, cacheSnapshot);
-    throw connectionPendingError();
-  }
   try {
+    const localPending = pendingConnectionSnapshotForPairing(pairing);
+    const stateBefore = localPending
+      ? await ensureConnectionSettled(pairing)
+      : await bearerConnectionState(pairing);
+    if (stateBefore?.pending) throw connectionPendingError();
+
     const token = await workerToken(pairing);
     assertPairingStillCurrent(pairing);
     const response = await workerRequest(pairing, '/clickup/oauth/status', {

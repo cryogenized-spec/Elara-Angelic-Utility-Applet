@@ -313,7 +313,7 @@ for (const marker of [
   "'/clickup/oauth/connection-state'",
   'stateAfter.epoch !== stateBefore.epoch',
   'stateAfter.settledEpoch !== stateBefore.settledEpoch',
-  'markConnectionPending(pairing, operation)',
+  'markConnectionPending(pairing, operation, browserIntentTimestamp)',
 ]) {
   if (!clickUpBrowserAuthoritySource.includes(marker)) throw new Error(`Reliability gate: ClickUp browser connection race authority is missing ${marker}.`);
 }

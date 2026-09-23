@@ -803,15 +803,15 @@ for (const marker of [
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable rate/grant authority is missing: ${marker}`);
 }
 
-const exchangeStart = clickUpOAuthVault.indexOf('private async exchange(request: Request, body: string)');
+const exchangeStart = clickUpOAuthVault.indexOf('private async exchange(');
 const personalTokenStart = exchangeStart >= 0
-  ? clickUpOAuthVault.indexOf('private async connectPersonalToken(request: Request, body: string)', exchangeStart)
+  ? clickUpOAuthVault.indexOf('private async connectPersonalToken(', exchangeStart)
   : -1;
 const installCredentialStart = personalTokenStart >= 0
   ? clickUpOAuthVault.indexOf('private async installCredential(', personalTokenStart)
   : -1;
 const disconnectStartForInstall = installCredentialStart >= 0
-  ? clickUpOAuthVault.indexOf('private async disconnect(body: string)', installCredentialStart)
+  ? clickUpOAuthVault.indexOf('private async disconnect(', installCredentialStart)
   : -1;
 if (exchangeStart < 0 || personalTokenStart < 0 || installCredentialStart < 0 || disconnectStartForInstall < 0) {
   fail('ClickUp credential connection authorities disappeared');
@@ -870,7 +870,7 @@ for (const marker of [
   }
 }
 
-const disconnectStart = clickUpOAuthVault.indexOf('private async disconnect(body: string)');
+const disconnectStart = clickUpOAuthVault.indexOf('private async disconnect(');
 const disconnectEnd = disconnectStart >= 0 ? clickUpOAuthVault.indexOf('/** Provider execution consumes credential material', disconnectStart) : -1;
 if (disconnectStart < 0 || disconnectEnd < 0) fail('ClickUp disconnect authority disappeared');
 const disconnectBody = clickUpOAuthVault.slice(disconnectStart, disconnectEnd);

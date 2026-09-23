@@ -433,14 +433,21 @@ export class ClickUpOAuthVault extends DurableObject {
     ).toArray()[0] ?? null;
   }
 
-  private connectionState(): { epoch: number; settledEpoch: number; pending: boolean } {
-    const row = this.ctx.storage.sql.exec<{ epoch: number; settled_epoch: number }>(
-      'SELECT epoch, settled_epoch FROM clickup_connection_epoch WHERE slot = 1',
-    ).toArray()[0] ?? { epoch: 0, settled_epoch: 0 };
+  private connectionState(): { epoch: number; settledEpoch: number; pending: boolean; intentTimestamp: number } {
+    const row = this.ctx.storage.sql.exec<{
+      epoch: number;
+      settled_epoch: number;
+      browser_write_timestamp: number;
+    }>(
+      'SELECT epoch, settled_epoch, browser_write_timestamp FROM clickup_connection_epoch WHERE slot = 1',
+    ).toArray()[0] ?? { epoch: 0, settled_epoch: 0, browser_write_timestamp: 0 };
     return {
       epoch: row.epoch,
       settledEpoch: row.settled_epoch,
       pending: row.epoch !== row.settled_epoch,
+      // The column name is legacy to this branch; its value is the highest
+      // admitted HMAC-covered browser *intent* timestamp, not send time.
+      intentTimestamp: row.browser_write_timestamp,
     };
   }
 

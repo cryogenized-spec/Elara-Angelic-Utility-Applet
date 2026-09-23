@@ -270,7 +270,7 @@ if (!clickUpOauthVaultSource.includes('CLICKUP_PERSONAL_TOKEN') || !clickUpOauth
 if (!clickUpOauthVaultSource.includes('clickup_oauth_nonces') || !clickUpOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: ClickUp credential-vault writes must remain signed and replay-protected durably.');
 if (!clickUpOauthRoutesSource.includes('verifySignedWrite') || !clickUpOauthRoutesSource.includes("'/clickup/oauth/personal-token'") || !clickUpOauthRoutesSource.includes("'/clickup/oauth/methods'") || !clickUpOauthRoutesSource.includes("'/clickup/oauth/connection-state'") || !workerCompositionSource.includes('handleClickUpOAuthRoute')) throw new Error('Reliability gate: public ClickUp credential writes and method discovery must retain the reviewed route boundary.');
 if (!clickUpOauthVaultSource.includes("url.pathname === '/clickup/oauth/methods'") || !clickUpOauthVaultSource.includes('return json(this.connectionMethods())')) throw new Error('Reliability gate: ClickUp connection methods must remain on their backward-compatible separate read endpoint.');
-if (!clickUpOauthVaultSource.includes("settled_epoch INTEGER NOT NULL DEFAULT 0") || !clickUpOauthVaultSource.includes('settleConnectionEpochIfCurrent') || !clickUpOauthVaultSource.includes("url.pathname === '/clickup/oauth/connection-state'") || !clickUpOauthVaultSource.includes('return json(this.connectionState())')) throw new Error('Reliability gate: ClickUp connection operations must expose durable pending/settled authority.');
+if (!clickUpOauthVaultSource.includes("settled_epoch INTEGER NOT NULL DEFAULT 0") || !clickUpOauthVaultSource.includes('settleConnectionEpochIfCurrent') || !clickUpOauthVaultSource.includes("url.pathname === '/clickup/oauth/connection-state'") || !clickUpOauthVaultSource.includes('return json(this.connectionState())') || !clickUpOauthVaultSource.includes('intentTimestamp: row.browser_write_timestamp')) throw new Error('Reliability gate: ClickUp connection operations must expose durable pending/settled authority plus the admitted browser-intent watermark.');
 if (
   !clickUpOauthVaultSource.includes('browser_write_timestamp INTEGER NOT NULL DEFAULT 0')
   || !clickUpOauthVaultSource.includes('CLICKUP_CONNECTION_NONCE_PATTERN')
@@ -293,6 +293,7 @@ for (const marker of [
   'PENDING_CONNECTION_KEY',
   'CONNECTION_GENERATION_KEY',
   'operationId: newNonce()',
+  'intentTimestamp,',
   'writeConnectionGeneration(pairing, pending.operationId)',
   'generationSnapshot = connectionGenerationForPairing(pairing)',
   'connectionGenerationForPairing(pairing) !== generationSnapshot',
@@ -305,6 +306,7 @@ for (const marker of [
   'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
   "'connection_pending'",
   'ensureConnectionSettled(pairing',
+  'workerState.intentTimestamp >= localBefore.value.intentTimestamp',
   'bearerConnectionState',
   "'/clickup/oauth/connection-state'",
   'stateAfter.epoch !== stateBefore.epoch',

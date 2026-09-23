@@ -336,13 +336,16 @@ describe('ClickUp OAuth browser authority', () => {
     }) as unknown as typeof fetch;
 
     const first = clickUpOAuthAuthority.connectPersonalToken();
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let attempt = 0; attempt < 100 && personalCalls < 1; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    expect(personalCalls).toBe(1);
 
     const second = clickUpOAuthAuthority.connectPersonalToken();
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let attempt = 0; attempt < 100 && personalCalls < 2; attempt += 1) {
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    }
+    expect(personalCalls).toBe(2);
 
     releaseFirst?.(jsonResponse(STATUS));
     await expect(first).rejects.toMatchObject({

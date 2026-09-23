@@ -181,6 +181,32 @@ describe('ClickUp OAuth browser authority', () => {
     expect(stateReads).toBe(2);
   });
 
+  it('rejects a status snapshot if the browser connection generation changes before persistence', async () => {
+    let stateReads = 0;
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        stateReads += 1;
+        if (stateReads === 2) {
+          localStorage.setItem('elara.clickup.connection.generation.v1', JSON.stringify({
+            authorityBinding: 'https://worker.example#test-installation',
+            generationId: 'newer-tab-operation',
+          }));
+        }
+        return jsonResponse(connectionState(11));
+      }
+      if (url.endsWith('/clickup/oauth/status')) return jsonResponse(STATUS);
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    await expect(clickUpOAuthAuthority.getStatus()).rejects.toMatchObject({
+      code: 'connection_pending',
+      status: 409,
+    });
+    expect(loadStoredClickUpStatus()).toBeNull();
+    expect(stateReads).toBe(2);
+  });
+
   it('ignores legacy unowned cached ClickUp status until the current pairing refreshes it', () => {
     localStorage.setItem('elara.clickup.authorization.v1', JSON.stringify(STATUS));
     expect(loadStoredClickUpStatus()).toBeNull();
@@ -281,6 +307,54 @@ describe('ClickUp OAuth browser authority', () => {
     const raw = localStorage.getItem('elara.clickup.authorization.v1') ?? '';
     expect(raw).toContain('Neon Sales');
     expect(raw).not.toContain('pk_');
+  });
+
+  it('does not let an older tab clear a newer tab pending marker on late success', async () => {
+    const secondStatus = {
+      ...STATUS,
+      account: { id: '456', username: 'Second', email: 'second@example.com' },
+      workspaces: [{ id: '1000', name: 'Second Workspace' }],
+      updatedAt: 234567,
+    };
+
+    let personalCalls = 0;
+    let releaseFirst: ((response: Response) => void) | undefined;
+    let releaseSecond: ((response: Response) => void) | undefined;
+    const firstResponse = new Promise<Response>((resolve) => { releaseFirst = resolve; });
+    const secondResponse = new Promise<Response>((resolve) => { releaseSecond = resolve; });
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        return jsonResponse(connectionState(0));
+      }
+      if (url.endsWith('/clickup/oauth/personal-token')) {
+        personalCalls += 1;
+        return personalCalls === 1 ? firstResponse : secondResponse;
+      }
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const first = clickUpOAuthAuthority.connectPersonalToken();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const second = clickUpOAuthAuthority.connectPersonalToken();
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    releaseFirst?.(jsonResponse(STATUS));
+    await expect(first).resolves.toEqual(STATUS);
+
+    const pendingRaw = localStorage.getItem('elara.clickup.connection.pending.v1');
+    expect(pendingRaw).toContain('"operationId"');
+    expect(loadStoredClickUpStatus()).toBeNull();
+
+    releaseSecond?.(jsonResponse(secondStatus));
+    await expect(second).resolves.toEqual(secondStatus);
+    expect(localStorage.getItem('elara.clickup.connection.pending.v1')).toBeNull();
+    expect(loadStoredClickUpStatus()).toEqual(secondStatus);
   });
 
   it('keeps an ambiguous personal-token activation unknown until the Worker reports the operation settled', async () => {

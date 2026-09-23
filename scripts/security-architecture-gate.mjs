@@ -414,14 +414,20 @@ if (!/async function workerRequest[\s\S]*const response = await fetch\([\s\S]*co
 }
 for (const marker of [
   'authorityBinding: clickUpPairingAuthorityBinding(pairing)',
-  'clearCachedStatusForPairing(pairing)',
-  'stored?.authorityBinding === clickUpPairingAuthorityBinding(pairing)',
+  'cachedStatusRawForPairing',
+  'clearCachedStatusForPairing(pairing',
+  'expectedRaw !== undefined && raw !== expectedRaw',
+  'currentRevision > incomingRevision',
   'PENDING_CONNECTION_KEY',
+  'operationId: newNonce()',
+  'expectedOperationId && pending.operationId !== expectedOperationId',
   'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
   "new ClickUpOAuthError(\n    'connection_pending'",
   'ensureConnectionSettled(pairing',
   'bearerConnectionState',
   "'/clickup/oauth/connection-state'",
+  'stateAfter.epoch !== stateBefore.epoch',
+  'stateAfter.settledEpoch !== stateBefore.settledEpoch',
   'markConnectionPending(pairing, operation)',
 ]) {
   if (!clickUpOAuthAuthority.includes(marker)) fail(`ClickUp pairing-owned cache/settle authority is missing: ${marker}`);

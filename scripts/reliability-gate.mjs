@@ -274,13 +274,20 @@ if (!clickUpOauthVaultSource.includes("settled_epoch INTEGER NOT NULL DEFAULT 0"
 const clickUpBrowserAuthoritySource = readFileSync(join(root, 'src', 'clickup', 'oauth', 'authority.ts'), 'utf8');
 for (const marker of [
   'authorityBinding: clickUpPairingAuthorityBinding(pairing)',
-  'clearCachedStatusForPairing(pairing)',
+  'cachedStatusRawForPairing',
+  'clearCachedStatusForPairing(pairing',
+  'expectedRaw !== undefined && raw !== expectedRaw',
+  'currentRevision > incomingRevision',
   'PENDING_CONNECTION_KEY',
+  'operationId: newNonce()',
+  'expectedOperationId && pending.operationId !== expectedOperationId',
   'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
   "'connection_pending'",
   'ensureConnectionSettled(pairing',
   'bearerConnectionState',
   "'/clickup/oauth/connection-state'",
+  'stateAfter.epoch !== stateBefore.epoch',
+  'stateAfter.settledEpoch !== stateBefore.settledEpoch',
   'markConnectionPending(pairing, operation)',
 ]) {
   if (!clickUpBrowserAuthoritySource.includes(marker)) throw new Error(`Reliability gate: ClickUp browser connection race authority is missing ${marker}.`);

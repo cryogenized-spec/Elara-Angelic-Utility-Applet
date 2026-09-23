@@ -29,6 +29,9 @@ export const clickUpConnectionStateSchema = z.object({
   epoch: z.number().int().nonnegative(),
   settledEpoch: z.number().int().nonnegative(),
   pending: z.boolean(),
+  // Optional for rolling compatibility with Workers that introduced
+  // connection-state before durable browser-intent ordering.
+  intentTimestamp: z.number().int().nonnegative().optional(),
 }).strict();
 
 export type ClickUpConnectionState = z.infer<typeof clickUpConnectionStateSchema>;

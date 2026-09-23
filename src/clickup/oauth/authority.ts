@@ -490,10 +490,11 @@ async function signedPost<T>(
   path: string,
   payload: unknown,
   parse: (value: unknown) => T,
+  browserIntentTimestamp = nextSignedWriteTimestamp(),
 ): Promise<T> {
   const token = await workerToken(pairing);
   const body = JSON.stringify(payload);
-  const timestamp = nextSignedWriteTimestamp();
+  const timestamp = browserIntentTimestamp;
   const nonce = newNonce();
   const signature = await signWrite(token, 'POST', path, timestamp, nonce, body);
   assertPairingStillCurrent(pairing);
@@ -521,12 +522,13 @@ async function connectionWrite<T>(
   parse: (value: unknown) => T,
   onSuccess?: (value: T, operationId: string) => void,
 ): Promise<T> {
+  const browserIntentTimestamp = nextSignedWriteTimestamp();
   await ensureConnectionSettled(pairing);
   // Mark before egress so every same-origin tab immediately stops advertising
   // the old identity while an account-changing request is in flight.
   const pending = markConnectionPending(pairing, operation);
   try {
-    const result = await signedPost(pairing, path, payload, parse);
+    const result = await signedPost(pairing, path, payload, parse, browserIntentTimestamp);
     if (connectionGenerationForPairing(pairing) !== pending.operationId) {
       throw connectionPendingError();
     }
@@ -562,8 +564,15 @@ export const clickUpOAuthAuthority: ClickUpOAuthAuthority = {
 
   async beginConnect(redirectUri: string): Promise<ClickUpOAuthStart> {
     const pairing = activePairing();
+    const browserIntentTimestamp = nextSignedWriteTimestamp();
     await ensureConnectionSettled(pairing);
-    return signedPost(pairing, '/clickup/oauth/start', { redirectUri }, (value) => clickUpOAuthStartSchema.parse(value));
+    return signedPost(
+      pairing,
+      '/clickup/oauth/start',
+      { redirectUri },
+      (value) => clickUpOAuthStartSchema.parse(value),
+      browserIntentTimestamp,
+    );
   },
 
   async completeConnect(input): Promise<ClickUpOAuthStatus> {

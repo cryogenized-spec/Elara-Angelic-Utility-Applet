@@ -288,6 +288,29 @@ describe('ClickUp OAuth public boundary', () => {
     expect(response.status).toBe(401);
   });
 
+  it('fails closed for stale browser connection writes that lack the signed intent generation', async () => {
+    const timestamp = Date.now();
+    const nonce = newNonce();
+    const body = '{}';
+    const signature = await signWrite(TOKEN, 'POST', '/clickup/oauth/personal-token', timestamp, nonce, body);
+    const response = await SELF.fetch(new Request('https://worker.example/clickup/oauth/personal-token', {
+      method: 'POST',
+      headers: {
+        Origin: ORIGIN,
+        Authorization: `Bearer ${TOKEN}`,
+        'Content-Type': 'application/json',
+        'X-Elara-Timestamp': String(timestamp),
+        'X-Elara-Nonce': nonce,
+        'X-Elara-Signature': signature,
+      },
+      body,
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      code: 'connection_client_upgrade_required',
+    }));
+  });
+
   it('rejects personal-token bytes in the browser payload even when the write is correctly signed', async () => {
     const body = JSON.stringify({ token: 'pk_dummy' });
     const response = await SELF.fetch(await signedWrite('/clickup/oauth/personal-token', body));
@@ -489,7 +512,8 @@ describe('ClickUpOAuthVault', () => {
 
     const baseTimestamp = Date.now();
     const newer = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
-      timestamp: baseTimestamp + 1_000,
+      timestamp: baseTimestamp + 2_000,
+      intentTimestamp: baseTimestamp + 1_000,
     }));
     expect(newer.status).toBe(200);
     expect(userCalls).toBe(1);
@@ -499,7 +523,9 @@ describe('ClickUpOAuthVault', () => {
     // This request represents an older browser gesture whose network delivery
     // was delayed until after the newer replacement reached the Worker.
     const delayedOlder = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
-      timestamp: baseTimestamp,
+      // It signs/sends later, but its HMAC-covered intent generation is older.
+      timestamp: baseTimestamp + 3_000,
+      intentTimestamp: baseTimestamp,
     }));
     expect(delayedOlder.status).toBe(409);
     expect(await delayedOlder.json()).toEqual(expect.objectContaining({
@@ -513,7 +539,8 @@ describe('ClickUpOAuthVault', () => {
     // therefore cannot recreate a stale popup authority after replacement.
     const staleStartBody = JSON.stringify({ redirectUri: REDIRECT_URI });
     const staleStart = await doFetch(await signedWrite('/clickup/oauth/start', staleStartBody, {
-      timestamp: baseTimestamp + 500,
+      timestamp: baseTimestamp + 4_000,
+      intentTimestamp: baseTimestamp + 500,
     }));
     expect(staleStart.status).toBe(409);
     expect(await staleStart.json()).toEqual(expect.objectContaining({
@@ -541,11 +568,17 @@ describe('ClickUpOAuthVault', () => {
       throw new Error(`Unexpected same-timestamp ClickUp request: ${request.method} ${request.url}`);
     });
 
-    const timestamp = Date.now();
-    const first = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', { timestamp }));
+    const intentTimestamp = Date.now();
+    const first = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: intentTimestamp + 1_000,
+      intentTimestamp,
+    }));
     expect(first.status).toBe(200);
 
-    const second = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', { timestamp }));
+    const second = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: intentTimestamp + 2_000,
+      intentTimestamp,
+    }));
     expect(second.status).toBe(409);
     expect(await second.json()).toEqual(expect.objectContaining({ code: 'connection_superseded' }));
     expect(userCalls).toBe(1);

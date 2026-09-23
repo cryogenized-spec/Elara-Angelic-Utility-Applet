@@ -35,7 +35,7 @@ type PendingConnectionChange = {
   readonly authorityBinding: string;
   readonly operationId: string;
   readonly operation: 'oauth-exchange' | 'personal-token' | 'disconnect';
-  readonly intentTimestamp: number;
+  readonly intentTimestamp: number | null;
   readonly until: number;
 };
 
@@ -288,9 +288,14 @@ function parsePendingConnection(raw: string | null): PendingConnectionChange | n
         && operation !== 'personal-token'
         && operation !== 'disconnect'
       )
-      || typeof record.intentTimestamp !== 'number'
-      || !Number.isSafeInteger(record.intentTimestamp)
-      || record.intentTimestamp <= 0
+      || (
+        record.intentTimestamp !== undefined
+        && (
+          typeof record.intentTimestamp !== 'number'
+          || !Number.isSafeInteger(record.intentTimestamp)
+          || record.intentTimestamp <= 0
+        )
+      )
       || typeof record.until !== 'number'
       || !Number.isFinite(record.until)
     ) return null;
@@ -298,7 +303,7 @@ function parsePendingConnection(raw: string | null): PendingConnectionChange | n
       authorityBinding: record.authorityBinding,
       operationId: record.operationId,
       operation,
-      intentTimestamp: record.intentTimestamp,
+      intentTimestamp: typeof record.intentTimestamp === 'number' ? record.intentTimestamp : null,
       until: record.until,
     };
   } catch {
@@ -400,6 +405,7 @@ async function ensureConnectionSettled(
 
   if (
     workerState
+    && localBefore.value.intentTimestamp !== null
     && workerState.intentTimestamp !== undefined
     && workerState.intentTimestamp >= localBefore.value.intentTimestamp
   ) {

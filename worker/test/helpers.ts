@@ -15,6 +15,20 @@ function nextTestSignedWriteTimestamp(): number {
   return lastTestSignedWriteTimestamp;
 }
 
+const CLICKUP_CONNECTION_WRITE_PATHS = new Set([
+  '/clickup/oauth/start',
+  '/clickup/oauth/exchange',
+  '/clickup/oauth/personal-token',
+  '/clickup/oauth/disconnect',
+]);
+
+function testNonce(path: string, intentTimestamp: number): string {
+  const random = newNonce();
+  return CLICKUP_CONNECTION_WRITE_PATHS.has(path)
+    ? `clickup-v1:${intentTimestamp}:${random}`
+    : random;
+}
+
 export function makeRoutine(overrides: Partial<ElaraRoutine> = {}): ElaraRoutine {
   return {
     id: 'routine-cloud-1',
@@ -37,9 +51,10 @@ export function configPayload(generation: number, routines: ElaraRoutine[], enab
 }
 
 /** A fully signed write request exactly the way the app client signs it. */
-export async function signedWrite(path: string, body: string, overrides: { timestamp?: number; nonce?: string; signature?: string; token?: string } = {}): Promise<Request> {
+export async function signedWrite(path: string, body: string, overrides: { timestamp?: number; intentTimestamp?: number; nonce?: string; signature?: string; token?: string } = {}): Promise<Request> {
   const timestamp = overrides.timestamp ?? nextTestSignedWriteTimestamp();
-  const nonce = overrides.nonce ?? newNonce();
+  const intentTimestamp = overrides.intentTimestamp ?? timestamp;
+  const nonce = overrides.nonce ?? testNonce(path, intentTimestamp);
   const signature = overrides.signature ?? await signWrite(overrides.token ?? TOKEN, 'POST', path, timestamp, nonce, body);
   return new Request(`https://worker.example${path}`, {
     method: 'POST',

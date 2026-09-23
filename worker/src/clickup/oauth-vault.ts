@@ -352,9 +352,18 @@ export class ClickUpOAuthVault extends DurableObject {
       CREATE TABLE IF NOT EXISTS clickup_oauth_states (
         state TEXT PRIMARY KEY,
         redirect_uri TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+        created_at INTEGER NOT NULL,
+        intent_timestamp INTEGER NOT NULL DEFAULT 0
       )
     `);
+    const oauthStateColumns = this.ctx.storage.sql.exec<{ name: string }>(
+      'PRAGMA table_info(clickup_oauth_states)',
+    ).toArray();
+    if (!oauthStateColumns.some((column) => column.name === 'intent_timestamp')) {
+      this.ctx.storage.sql.exec(
+        'ALTER TABLE clickup_oauth_states ADD COLUMN intent_timestamp INTEGER NOT NULL DEFAULT 0',
+      );
+    }
     this.ctx.storage.sql.exec(`
       CREATE TABLE IF NOT EXISTS clickup_oauth_nonces (
         nonce TEXT PRIMARY KEY,
@@ -496,6 +505,17 @@ export class ClickUpOAuthVault extends DurableObject {
     return json({
       code: 'connection_superseded',
       message: 'This ClickUp connection action was superseded by a newer signed browser action.',
+    }, 409);
+  }
+
+  private rejectOAuthExchangeIfConnectSuperseded(connectIntentTimestamp: number): Response | null {
+    const current = this.ctx.storage.sql.exec<{ browser_write_timestamp: number }>(
+      'SELECT browser_write_timestamp FROM clickup_connection_epoch WHERE slot = 1',
+    ).toArray()[0]?.browser_write_timestamp ?? 0;
+    if (current === connectIntentTimestamp) return null;
+    return json({
+      code: 'connection_superseded',
+      message: 'This ClickUp OAuth connection was superseded by a newer browser action.',
     }, 409);
   }
 
@@ -2370,7 +2390,13 @@ export class ClickUpOAuthVault extends DurableObject {
         nextEpoch,
       );
       this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states');
-      this.ctx.storage.sql.exec('INSERT INTO clickup_oauth_states (state, redirect_uri, created_at) VALUES (?, ?, ?)', state, parsed.data.redirectUri, now);
+      this.ctx.storage.sql.exec(
+        'INSERT INTO clickup_oauth_states (state, redirect_uri, created_at, intent_timestamp) VALUES (?, ?, ?, ?)',
+        state,
+        parsed.data.redirectUri,
+        now,
+        browserIntentTimestamp,
+      );
     });
     const authorize = new URL('https://app.clickup.com/api');
     authorize.searchParams.set('client_id', this.clientId());
@@ -2379,7 +2405,7 @@ export class ClickUpOAuthVault extends DurableObject {
     return json({ authorizationUrl: authorize.toString(), state, expiresAt: now + STATE_TTL_MS });
   }
 
-  private async exchange(request: Request, body: string, browserIntentTimestamp: number): Promise<Response> {
+  private async exchange(request: Request, body: string, _browserIntentTimestamp: number): Promise<Response> {
     const parsed = exchangeSchema.safeParse(parseJson(body));
     if (!parsed.success) return json({ code: 'validation', message: 'ClickUp OAuth exchange payload was invalid.' }, 400);
     const origin = normalizeOrigin(request.headers.get('Origin'));
@@ -2390,16 +2416,26 @@ export class ClickUpOAuthVault extends DurableObject {
     const now = Date.now();
     const acceptedState = this.ctx.storage.transactionSync(() => {
       this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states WHERE created_at < ?', now - STATE_TTL_MS);
-      const row = this.ctx.storage.sql.exec<{ redirect_uri: string; created_at: number }>(
-        'SELECT redirect_uri, created_at FROM clickup_oauth_states WHERE state = ?',
+      const row = this.ctx.storage.sql.exec<{
+        redirect_uri: string;
+        created_at: number;
+        intent_timestamp: number;
+      }>(
+        'SELECT redirect_uri, created_at, intent_timestamp FROM clickup_oauth_states WHERE state = ?',
         parsed.data.state,
       ).toArray()[0];
-      if (!row || row.redirect_uri !== parsed.data.redirectUri || now - row.created_at > STATE_TTL_MS) return false;
+      if (!row || row.redirect_uri !== parsed.data.redirectUri || now - row.created_at > STATE_TTL_MS) return null;
       this.ctx.storage.sql.exec('DELETE FROM clickup_oauth_states WHERE state = ?', parsed.data.state);
-      return true;
+      return { intentTimestamp: row.intent_timestamp };
     });
     if (!acceptedState) return json({ code: 'oauth_state', message: 'ClickUp OAuth state is missing, expired, replayed, or does not match this redirect.' }, 409);
-    const superseded = this.rejectSupersededBrowserWrite(browserIntentTimestamp);
+    if (!Number.isSafeInteger(acceptedState.intentTimestamp) || acceptedState.intentTimestamp <= 0) {
+      return json({
+        code: 'connection_client_upgrade_required',
+        message: 'Restart ClickUp authorization so the OAuth exchange can be bound to its initiating Connect gesture.',
+      }, 409);
+    }
+    const superseded = this.rejectOAuthExchangeIfConnectSuperseded(acceptedState.intentTimestamp);
     if (superseded) return superseded;
 
     const exchangeEpoch = this.advanceConnectionEpoch();

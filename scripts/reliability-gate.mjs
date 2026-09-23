@@ -283,6 +283,25 @@ if (
   || !clickUpOauthVaultSource.includes('const signedTimestampMs = writeAuth.timestampMs')
   || !clickUpOauthVaultSource.includes('this.rejectSupersededBrowserWrite(browserIntentTimestamp)')
 ) throw new Error('Reliability gate: ClickUp connection writes must be durably ordered by an HMAC-covered browser intent generation before provider/account mutation, with stale clients failing closed.');
+if (
+  !clickUpOauthVaultSource.includes('intent_timestamp INTEGER NOT NULL DEFAULT 0')
+  || !clickUpOauthVaultSource.includes('ALTER TABLE clickup_oauth_states ADD COLUMN intent_timestamp INTEGER NOT NULL DEFAULT 0')
+  || !clickUpOauthVaultSource.includes('INSERT INTO clickup_oauth_states (state, redirect_uri, created_at, intent_timestamp)')
+  || !clickUpOauthVaultSource.includes('SELECT redirect_uri, created_at, intent_timestamp FROM clickup_oauth_states WHERE state = ?')
+  || !clickUpOauthVaultSource.includes('rejectOAuthExchangeIfConnectSuperseded')
+  || !clickUpOauthVaultSource.includes('this.rejectOAuthExchangeIfConnectSuperseded(acceptedState.intentTimestamp)')
+) throw new Error('Reliability gate: ClickUp OAuth exchange must remain ordered by the original Connect gesture stored with one-time OAuth state.');
+const clickUpExchangeReliabilityStart = clickUpOauthVaultSource.indexOf('private async exchange(');
+const clickUpExchangeReliabilityEnd = clickUpExchangeReliabilityStart >= 0
+  ? clickUpOauthVaultSource.indexOf('private async connectPersonalToken(', clickUpExchangeReliabilityStart)
+  : -1;
+if (
+  clickUpExchangeReliabilityStart < 0
+  || clickUpExchangeReliabilityEnd < 0
+  || clickUpOauthVaultSource.slice(clickUpExchangeReliabilityStart, clickUpExchangeReliabilityEnd)
+    .includes('this.rejectSupersededBrowserWrite(browserIntentTimestamp)')
+) throw new Error('Reliability gate: ClickUp OAuth callback-local intent must never replace the initiating Connect generation.');
+
 const clickUpBrowserAuthoritySource = readFileSync(join(root, 'src', 'clickup', 'oauth', 'authority.ts'), 'utf8');
 for (const marker of [
   'authorityBinding: clickUpPairingAuthorityBinding(pairing)',

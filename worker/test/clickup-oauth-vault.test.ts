@@ -777,7 +777,7 @@ describe('ClickUpOAuthVault', () => {
   it('rejects replay of a signed OAuth start request', async () => {
     const body = JSON.stringify({ redirectUri: REDIRECT_URI });
     const timestamp = Date.now();
-    const nonce = newNonce();
+    const nonce = `clickup-v1:${timestamp}:${newNonce()}`;
     const signature = await signWrite(TOKEN, 'POST', '/clickup/oauth/start', timestamp, nonce, body);
     expect((await doFetch(await signedWrite('/clickup/oauth/start', body, { timestamp, nonce, signature }))).status).toBe(200);
     const replay = await doFetch(await signedWrite('/clickup/oauth/start', body, { timestamp, nonce, signature }));

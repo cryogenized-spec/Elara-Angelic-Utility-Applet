@@ -322,23 +322,30 @@ describe('ClickUp OAuth browser authority', () => {
       .mockImplementationOnce(() => new Promise<string>((resolve) => { releaseOlderToken = resolve; }))
       .mockResolvedValue('installation-token-for-test');
 
-    let highestAcceptedTimestamp = 0;
-    const personalTimestamps: number[] = [];
+    let highestAcceptedIntent = 0;
+    const personalIntents: number[] = [];
+    const signingTimestamps: number[] = [];
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = input instanceof Request ? input.url : String(input);
       if (url.endsWith('/clickup/oauth/connection-state')) {
         return jsonResponse(connectionState());
       }
       if (url.endsWith('/clickup/oauth/personal-token')) {
-        const timestamp = Number(new Headers(init?.headers).get('X-Elara-Timestamp'));
-        personalTimestamps.push(timestamp);
-        if (timestamp <= highestAcceptedTimestamp) {
+        const headers = new Headers(init?.headers);
+        const signingTimestamp = Number(headers.get('X-Elara-Timestamp'));
+        const nonce = headers.get('X-Elara-Nonce') ?? '';
+        const match = /^clickup-v1:(\d{13}):[0-9a-f]{32}$/.exec(nonce);
+        expect(match).not.toBeNull();
+        const intentTimestamp = Number(match?.[1] ?? '0');
+        signingTimestamps.push(signingTimestamp);
+        personalIntents.push(intentTimestamp);
+        if (intentTimestamp <= highestAcceptedIntent) {
           return jsonResponse({
             code: 'connection_superseded',
             message: 'This ClickUp connection action was superseded by a newer signed browser action.',
           }, 409);
         }
-        highestAcceptedTimestamp = timestamp;
+        highestAcceptedIntent = intentTimestamp;
         return jsonResponse(newerStatus);
       }
       throw new Error(`Unexpected URL ${url}`);
@@ -350,9 +357,12 @@ describe('ClickUp OAuth browser authority', () => {
     }
     expect(localStorage.getItem('elara.clickup.connection.pending.v1')).toContain('"operationId"');
 
+    // Ensure the second gesture has a strictly later wall-clock intent even on
+    // fast CI hosts where both test statements could otherwise share 1 ms.
+    await new Promise<void>((resolve) => setTimeout(resolve, 2));
     const newer = clickUpOAuthAuthority.connectPersonalToken();
     await expect(newer).resolves.toEqual(newerStatus);
-    expect(personalTimestamps).toHaveLength(1);
+    expect(personalIntents).toHaveLength(1);
 
     releaseOlderToken?.('installation-token-for-test');
     await expect(older).rejects.toMatchObject({
@@ -360,10 +370,12 @@ describe('ClickUp OAuth browser authority', () => {
       status: 409,
     });
 
-    expect(personalTimestamps).toHaveLength(2);
-    // Network arrival is newer first, older second. The signed intent
-    // generation must therefore decrease on the delayed second arrival.
-    expect(personalTimestamps[0]).toBeGreaterThan(personalTimestamps[1]);
+    expect(personalIntents).toHaveLength(2);
+    // Network arrival is newer first, older second, but the HMAC-covered nonce
+    // retains gesture order. Signing freshness may be reversed and is not used
+    // as the account-order authority.
+    expect(personalIntents[0]).toBeGreaterThan(personalIntents[1]);
+    expect(signingTimestamps[1]).toBeGreaterThanOrEqual(signingTimestamps[0]);
     expect(loadStoredClickUpStatus()).toEqual(newerStatus);
   });
 

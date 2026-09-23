@@ -76,7 +76,7 @@ Autonomy uses its own installation-scoped state, configuration generation and bo
 - ClickUp OAuth access tokens and personal API tokens never leave the `ClickUpOAuthVault` credential boundary after activation; `CLICKUP_PERSONAL_TOKEN` is read only from the Worker secret environment.
 - The OAuth vault and autonomy state are separate durable authorities.
 - Google OAuth writes require signed installation admission and durable nonce replay protection.
-- ClickUp OAuth writes use the same installation signing authority; ClickUp OAuth state is durable, redirect-bound, expiring and single-use. The ClickUp vault also persists the highest HMAC-verified write timestamp and rejects older/equal connection-authority writes before mutation, so delayed browser requests cannot reverse a newer account choice.
+- ClickUp OAuth writes use the same installation signing authority; ClickUp OAuth state is durable, redirect-bound, expiring and single-use. Connection writes encode the browser gesture generation inside the HMAC-covered nonce while the normal timestamp remains a freshness check. The ClickUp vault persists the highest admitted intent generation and rejects older/equal writes before mutation; stale clients without the intent nonce fail closed and must refresh.
 - ClickUp provider execution is binding-internal only and requires the installation-derived internal marker.
 - The popup code exchange additionally requires the CSRF marker and origin/redirect match.
 - Existing non-OAuth Worker traffic delegates unchanged through the composition root.

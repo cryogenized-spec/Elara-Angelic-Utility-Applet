@@ -421,6 +421,7 @@ for (const marker of [
   'PENDING_CONNECTION_KEY',
   'CONNECTION_GENERATION_KEY',
   'operationId: newNonce()',
+  'intentTimestamp,',
   'writeConnectionGeneration(pairing, pending.operationId)',
   'generationSnapshot = connectionGenerationForPairing(pairing)',
   'connectionGenerationForPairing(pairing) !== generationSnapshot',
@@ -433,6 +434,7 @@ for (const marker of [
   'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
   "new ClickUpOAuthError(\n    'connection_pending'",
   'ensureConnectionSettled(pairing',
+  'workerState.intentTimestamp >= localBefore.value.intentTimestamp',
   'bearerConnectionState',
   "'/clickup/oauth/connection-state'",
   'stateAfter.epoch !== stateBefore.epoch',
@@ -461,6 +463,7 @@ for (const marker of [
   'settleConnectionEpochIfCurrent',
   "url.pathname === '/clickup/oauth/connection-state'",
   'return json(this.connectionState())',
+  'intentTimestamp: row.browser_write_timestamp',
 ]) {
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable connection-settlement authority is missing: ${marker}`);
 }

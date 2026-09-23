@@ -345,7 +345,10 @@ describe('ClickUp OAuth browser authority', () => {
     await Promise.resolve();
 
     releaseFirst?.(jsonResponse(STATUS));
-    await expect(first).resolves.toEqual(STATUS);
+    await expect(first).rejects.toMatchObject({
+      code: 'connection_pending',
+      status: 409,
+    });
 
     const pendingRaw = localStorage.getItem('elara.clickup.connection.pending.v1');
     expect(pendingRaw).toContain('"operationId"');

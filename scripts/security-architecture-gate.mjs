@@ -489,6 +489,27 @@ for (const marker of [
 if (!/private async verifyWrite[\s\S]*timestampMs = Number\(request\.headers\.get\(ELARA_AUTH_TIMESTAMP_HEADER\)[\s\S]*\{ ok: true, timestampMs \}/.test(clickUpOAuthVault)) {
   fail('ClickUp signed-write freshness timestamp must remain independently HMAC-verified before the nonce-encoded intent generation is admitted');
 }
+for (const marker of [
+  'intent_timestamp INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE clickup_oauth_states ADD COLUMN intent_timestamp INTEGER NOT NULL DEFAULT 0',
+  'INSERT INTO clickup_oauth_states (state, redirect_uri, created_at, intent_timestamp)',
+  'SELECT redirect_uri, created_at, intent_timestamp FROM clickup_oauth_states WHERE state = ?',
+  'rejectOAuthExchangeIfConnectSuperseded',
+  'this.rejectOAuthExchangeIfConnectSuperseded(acceptedState.intentTimestamp)',
+  "code: 'connection_client_upgrade_required'",
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth exchange must remain bound to the initiating Connect intent: ${marker}`);
+}
+const clickUpExchangeStart = clickUpOAuthVault.indexOf('private async exchange(');
+const clickUpExchangeEnd = clickUpExchangeStart >= 0
+  ? clickUpOAuthVault.indexOf('private async connectPersonalToken(', clickUpExchangeStart)
+  : -1;
+if (clickUpExchangeStart < 0 || clickUpExchangeEnd < 0) fail('ClickUp OAuth exchange authority disappeared');
+const clickUpExchangeBody = clickUpOAuthVault.slice(clickUpExchangeStart, clickUpExchangeEnd);
+if (clickUpExchangeBody.includes('this.rejectSupersededBrowserWrite(browserIntentTimestamp)')) {
+  fail('ClickUp OAuth exchange must not promote its callback-local browser intent over the initiating Connect intent');
+}
+
 const clickUpStatusStart = clickUpOAuthVault.indexOf('private status()');
 const clickUpStatusEnd = clickUpStatusStart >= 0
   ? clickUpOAuthVault.indexOf('private async start(', clickUpStatusStart)

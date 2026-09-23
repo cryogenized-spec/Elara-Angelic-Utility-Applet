@@ -33,6 +33,7 @@ const connectedStatus = {
 
 const clickupConnected = {
   getStatus: async () => connectedStatus,
+  getConnectionMethods: async () => ({ oauth: true, personalToken: false }),
   getExecutionGrant: async () => ({
     status: connectedStatus,
     authorityBinding: 'https://worker.example#test-installation',
@@ -40,6 +41,7 @@ const clickupConnected = {
   }),
   beginConnect: async () => { throw new Error('not used'); },
   completeConnect: async () => { throw new Error('not used'); },
+  connectPersonalToken: async () => { throw new Error('not used'); },
   disconnect: async () => undefined,
 };
 

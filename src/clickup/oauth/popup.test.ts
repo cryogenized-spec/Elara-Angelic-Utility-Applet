@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const authorityMocks = vi.hoisted(() => ({
   beginConnect: vi.fn(),
   completeConnect: vi.fn(),
+  connectPersonalToken: vi.fn(),
   disconnect: vi.fn(),
 }));
 
@@ -11,6 +12,7 @@ vi.mock('./authority', () => ({
   clickUpOAuthAuthority: {
     beginConnect: authorityMocks.beginConnect,
     completeConnect: authorityMocks.completeConnect,
+    connectPersonalToken: authorityMocks.connectPersonalToken,
     disconnect: authorityMocks.disconnect,
   },
 }));

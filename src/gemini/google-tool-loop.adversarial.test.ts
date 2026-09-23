@@ -498,6 +498,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     };
     const clickupOAuth = {
       getStatus: async () => clickupStatus,
+      getConnectionMethods: async () => ({ oauth: true, personalToken: false }),
       getExecutionGrant: async () => ({
         status: clickupStatus,
         authorityBinding: 'https://worker.example#test-installation',
@@ -505,6 +506,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 
@@ -774,6 +776,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     const clickupStatus = { connected: true as const, workspaces: [{ id: '999', name: 'Workspace' }], account: { id: '183' }, updatedAt: 1 };
     const clickupOAuth = {
       getStatus: async () => clickupStatus,
+      getConnectionMethods: async () => ({ oauth: true, personalToken: false }),
       getExecutionGrant: async () => ({
         status: clickupStatus,
         authorityBinding: 'https://worker.example#test-installation',
@@ -781,6 +784,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 
@@ -837,6 +841,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     };
     const clickupOAuth = {
       getStatus: async () => clickupStatus,
+      getConnectionMethods: async () => ({ oauth: true, personalToken: false }),
       getExecutionGrant: async () => ({
         status: clickupStatus,
         authorityBinding: 'https://worker.example#test-installation',
@@ -844,6 +849,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 
@@ -921,6 +927,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     };
     const clickupOAuth = {
       getStatus: async () => clickupStatus,
+      getConnectionMethods: async () => ({ oauth: true, personalToken: false }),
       getExecutionGrant: async () => ({
         status: clickupStatus,
         authorityBinding: 'https://worker.example#test-installation',
@@ -928,6 +935,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 
@@ -988,6 +996,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     const clickupStatus = { connected: true as const, workspaces: [{ id: '999', name: 'Workspace' }], account: { id: '183' }, updatedAt: 1 };
     const clickupOAuth = {
       getStatus: async () => clickupStatus,
+      getConnectionMethods: async () => ({ oauth: true, personalToken: false }),
       getExecutionGrant: async () => ({
         status: clickupStatus,
         authorityBinding: 'https://worker.example#test-installation',
@@ -995,6 +1004,7 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
       }),
       beginConnect: async () => { throw new Error('not used'); },
       completeConnect: async () => { throw new Error('not used'); },
+      connectPersonalToken: async () => { throw new Error('not used'); },
       disconnect: async () => undefined,
     };
 

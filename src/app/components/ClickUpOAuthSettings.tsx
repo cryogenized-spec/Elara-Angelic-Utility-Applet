@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { clickUpOAuthAuthority } from '../../clickup/oauth/authority';
 import { connectClickUpWithPopup, switchClickUpAccountWithPopup } from '../../clickup/oauth/popup';
-import type { ClickUpOAuthStatus } from '../../clickup/oauth/contracts';
+import type { ClickUpConnectionMethods, ClickUpOAuthStatus } from '../../clickup/oauth/contracts';
 import './google-oauth-settings.css';
 
 const emptyStatus = (): ClickUpOAuthStatus => ({
@@ -9,20 +9,43 @@ const emptyStatus = (): ClickUpOAuthStatus => ({
   workspaces: [],
 });
 
-type ClickUpBusyAction = 'connect' | 'switch' | 'disconnect' | null;
+const legacyConnectionMethods = (): ClickUpConnectionMethods => ({
+  oauth: true,
+  personalToken: false,
+});
+
+type ClickUpBusyAction = 'connect' | 'personal-token' | 'switch' | 'disconnect' | null;
 
 export function ClickUpOAuthSettings() {
   const [status, setStatus] = useState<ClickUpOAuthStatus>(emptyStatus());
   const [loading, setLoading] = useState(true);
   const [busyAction, setBusyAction] = useState<ClickUpBusyAction>(null);
+  const [connectionMethods, setConnectionMethods] = useState<ClickUpConnectionMethods>(legacyConnectionMethods());
+  const [statusUnknown, setStatusUnknown] = useState(false);
+  const [methodsUnknown, setMethodsUnknown] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busy = busyAction !== null;
 
-  async function readCurrentStatus(): Promise<ClickUpOAuthStatus> {
+  async function reconcileStatusAfterFailure(): Promise<boolean> {
     try {
-      return await clickUpOAuthAuthority.getStatus();
+      setStatus(await clickUpOAuthAuthority.getStatus());
+      setStatusUnknown(false);
+      await refreshConnectionMethods();
+      return true;
     } catch {
-      return emptyStatus();
+      setStatusUnknown(true);
+      return false;
+    }
+  }
+
+  async function refreshConnectionMethods(): Promise<boolean> {
+    try {
+      setConnectionMethods(await clickUpOAuthAuthority.getConnectionMethods());
+      setMethodsUnknown(false);
+      return true;
+    } catch {
+      setMethodsUnknown(true);
+      return false;
     }
   }
 
@@ -31,8 +54,10 @@ export function ClickUpOAuthSettings() {
     setError(null);
     try {
       setStatus(await clickUpOAuthAuthority.getStatus());
+      setStatusUnknown(false);
+      await refreshConnectionMethods();
     } catch (cause) {
-      setStatus(emptyStatus());
+      setStatusUnknown(true);
       setError(cause instanceof Error ? cause.message : 'The ClickUp authorization state could not be read.');
     } finally {
       setLoading(false);
@@ -41,15 +66,28 @@ export function ClickUpOAuthSettings() {
 
   useEffect(() => {
     let active = true;
-    void clickUpOAuthAuthority.getStatus().then((next) => {
-      if (active) setStatus(next);
-    }).catch((cause: unknown) => {
-      if (!active) return;
-      setStatus(emptyStatus());
-      setError(cause instanceof Error ? cause.message : 'The ClickUp authorization state could not be read.');
-    }).finally(() => {
-      if (active) setLoading(false);
-    });
+    void (async () => {
+      try {
+        const next = await clickUpOAuthAuthority.getStatus();
+        if (!active) return;
+        setStatus(next);
+        setStatusUnknown(false);
+        try {
+          const methods = await clickUpOAuthAuthority.getConnectionMethods();
+          if (!active) return;
+          setConnectionMethods(methods);
+          setMethodsUnknown(false);
+        } catch {
+          if (active) setMethodsUnknown(true);
+        }
+      } catch (cause) {
+        if (!active) return;
+        setStatusUnknown(true);
+        setError(cause instanceof Error ? cause.message : 'The ClickUp authorization state could not be read.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
     return () => { active = false; };
   }, []);
 
@@ -58,8 +96,24 @@ export function ClickUpOAuthSettings() {
     setError(null);
     try {
       setStatus(await connectClickUpWithPopup());
+      setStatusUnknown(false);
     } catch (cause) {
+      await reconcileStatusAfterFailure();
       setError(cause instanceof Error ? cause.message : 'ClickUp authorization could not be completed.');
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
+  async function connectPersonalToken() {
+    setBusyAction('personal-token');
+    setError(null);
+    try {
+      setStatus(await clickUpOAuthAuthority.connectPersonalToken());
+      setStatusUnknown(false);
+    } catch (cause) {
+      await reconcileStatusAfterFailure();
+      setError(cause instanceof Error ? cause.message : 'The configured ClickUp API token could not be connected.');
     } finally {
       setBusyAction(null);
     }
@@ -70,11 +124,11 @@ export function ClickUpOAuthSettings() {
     setError(null);
     try {
       setStatus(await switchClickUpAccountWithPopup());
+      setStatusUnknown(false);
     } catch (cause) {
-      // The switch flow intentionally disconnects the old ClickUp grant before
-      // starting the replacement authorization. Re-read authority after any
-      // failure so the UI never displays a stale identity.
-      setStatus(await readCurrentStatus());
+      // A failed replacement may be ambiguous. Never fabricate "disconnected":
+      // either reconcile the Worker or mark the visible state explicitly unknown.
+      await reconcileStatusAfterFailure();
       setError(cause instanceof Error ? cause.message : 'The ClickUp account could not be switched.');
     } finally {
       setBusyAction(null);
@@ -86,8 +140,9 @@ export function ClickUpOAuthSettings() {
     setError(null);
     try {
       await clickUpOAuthAuthority.disconnect();
-      setStatus(emptyStatus());
+      await reconcileStatusAfterFailure();
     } catch (cause) {
+      await reconcileStatusAfterFailure();
       setError(cause instanceof Error ? cause.message : 'ClickUp could not be disconnected.');
     } finally {
       setBusyAction(null);
@@ -96,25 +151,39 @@ export function ClickUpOAuthSettings() {
 
   const workspaceSummary = useMemo(() => {
     if (loading) return 'Checking ClickUp connection…';
+    if (statusUnknown) return 'Connection state unknown';
     if (!status.connected) return 'Not connected';
     const workspaceCount = status.workspaces.length;
     return `MCP ready · ${workspaceCount} Workspace${workspaceCount === 1 ? '' : 's'}`;
-  }, [loading, status.connected, status.workspaces.length]);
+  }, [loading, statusUnknown, status.connected, status.workspaces.length]);
 
+  const confirmedConnected = status.connected && !statusUnknown;
   const identityLabel = status.account?.email || status.account?.username || 'Connected ClickUp account';
+  const personalTokenAvailable = connectionMethods.personalToken;
+  const oauthAvailable = connectionMethods.oauth;
+  const connectionOptionsUnknown = methodsUnknown && !confirmedConnected;
 
   return (
     <div className="google-oauth-settings clickup-oauth-settings">
-      <section className={`google-oauth-account setting-card${status.connected ? ' is-ready' : ''}`} aria-labelledby="clickup-account-title">
+      <section className={`google-oauth-account setting-card${confirmedConnected ? ' is-ready' : ''}`} aria-labelledby="clickup-account-title">
         <div className="google-oauth-account__copy">
           <span className="panel-kicker">CLICKUP IDENTITY</span>
-          <strong id="clickup-account-title">{status.connected ? 'ClickUp connected' : 'Connect ClickUp'}</strong>
-          {status.connected && <span className="clickup-oauth-settings__identity">{identityLabel}</span>}
+          <strong id="clickup-account-title">{statusUnknown ? 'ClickUp status unavailable' : confirmedConnected ? 'ClickUp connected' : 'Connect ClickUp'}</strong>
+          {statusUnknown && status.account && <span className="clickup-oauth-settings__identity">Last known: {identityLabel}</span>}
+          {confirmedConnected && <span className="clickup-oauth-settings__identity">{identityLabel}</span>}
           {status.account?.username && status.account.email && <span className="google-oauth-account__email">{status.account.username}</span>}
           <p>
-            {status.connected
-              ? 'This ClickUp identity is separate from the Google Workspace account connected to Elara. Elara can use only the ClickUp Workspaces authorized for this identity.'
-              : 'Connect through ClickUp’s official authorization screen. Your ClickUp identity is independent from the Google Workspace account connected to Elara.'}
+            {statusUnknown
+              ? 'Elara could not verify the current ClickUp authority. Refresh status before connecting, switching, disconnecting, or using ClickUp.'
+              : confirmedConnected
+                ? 'This ClickUp identity is separate from the Google Workspace account connected to Elara. Elara can use only the ClickUp Workspaces authorized for this identity.'
+                : methodsUnknown
+                  ? 'Elara verified that ClickUp is disconnected but could not read the Worker’s available connection methods. Refresh status before connecting.'
+                  : personalTokenAvailable
+                ? 'Your paired Worker has a personal ClickUp API token configured. Elara can validate it server-side and seal it in the encrypted ClickUp vault without exposing the token to this browser.'
+                : oauthAvailable
+                  ? 'Connect through ClickUp’s official authorization screen. Your ClickUp identity is independent from the Google Workspace account connected to Elara.'
+                  : 'Configure a ClickUp personal API token or OAuth app credentials on your paired Worker to connect ClickUp.'}
           </p>
         </div>
 
@@ -123,9 +192,20 @@ export function ClickUpOAuthSettings() {
           <strong>{workspaceSummary}</strong>
         </div>
 
-        {status.connected ? (
+        {statusUnknown || connectionOptionsUnknown ? (
+          <div className="google-oauth-account__ready" role="status">Refresh status before continuing</div>
+        ) : confirmedConnected ? (
           <div className="google-oauth-account__ready" role="status">First-party ClickUp MCP is active</div>
-        ) : (
+        ) : personalTokenAvailable ? (
+          <button
+            className="google-oauth-account__primary"
+            type="button"
+            onClick={() => void connectPersonalToken()}
+            disabled={loading || busy}
+          >
+            {busyAction === 'personal-token' ? 'Connecting…' : 'Use configured API token'}
+          </button>
+        ) : oauthAvailable ? (
           <button
             className="google-oauth-account__primary"
             type="button"
@@ -134,17 +214,31 @@ export function ClickUpOAuthSettings() {
           >
             {busyAction === 'connect' ? 'Opening ClickUp…' : 'Continue to ClickUp'}
           </button>
+        ) : (
+          <div className="google-oauth-account__ready" role="status">Worker credentials required</div>
         )}
 
         <div className="google-oauth-account__utility">
           <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void refresh()} disabled={loading || busy}>
             {loading ? 'Checking…' : 'Refresh status'}
           </button>
-          {status.connected && (
+          {!statusUnknown && !methodsUnknown && !confirmedConnected && personalTokenAvailable && oauthAvailable && (
+            <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void connect()} disabled={loading || busy}>
+              {busyAction === 'connect' ? 'Opening ClickUp…' : 'Use OAuth instead'}
+            </button>
+          )}
+          {confirmedConnected && (
             <>
-              <button className="google-oauth-settings__button" type="button" onClick={() => void switchAccount()} disabled={loading || busy}>
-                {busyAction === 'switch' ? 'Opening ClickUp…' : 'Switch ClickUp account'}
-              </button>
+              {!methodsUnknown && personalTokenAvailable && (
+                <button className="google-oauth-settings__button" type="button" onClick={() => void connectPersonalToken()} disabled={loading || busy}>
+                  {busyAction === 'personal-token' ? 'Connecting…' : 'Reload configured API token'}
+                </button>
+              )}
+              {!methodsUnknown && oauthAvailable && (
+                <button className="google-oauth-settings__button" type="button" onClick={() => void switchAccount()} disabled={loading || busy}>
+                  {busyAction === 'switch' ? 'Opening ClickUp…' : 'Switch ClickUp account'}
+                </button>
+              )}
               <button className="google-oauth-settings__button google-oauth-settings__button--quiet" type="button" onClick={() => void disconnect()} disabled={loading || busy}>
                 {busyAction === 'disconnect' ? 'Disconnecting…' : 'Disconnect ClickUp'}
               </button>
@@ -159,11 +253,13 @@ export function ClickUpOAuthSettings() {
         <span className="panel-kicker">SEPARATE ACCOUNT</span>
         <strong>Your Google accounts do not have to match</strong>
         <span>
-          Elara’s Google Workspace connection and ClickUp authorization are independent. If ClickUp offers “Continue with Google”, choose the Google account associated with the ClickUp account you want Elara to use. Elara never reuses its Google Workspace token for ClickUp.
+          Elara’s Google Workspace connection and ClickUp identity are independent. {personalTokenAvailable
+            ? 'With a configured personal API token, ClickUp itself identifies the account behind that token; your Google Workspace login is not involved.'
+            : 'If ClickUp offers “Continue with Google”, choose the Google account associated with the ClickUp account you want Elara to use.'} Elara never reuses its Google Workspace token for ClickUp.
         </span>
       </div>
 
-      {status.connected && (
+      {confirmedConnected && (
         <section aria-labelledby="clickup-workspaces-title">
           <div className="clickup-oauth-settings__section-heading">
             <div>
@@ -193,9 +289,9 @@ export function ClickUpOAuthSettings() {
             Elara uses its own reviewed ClickUp MCP path through your paired Worker. Chat remains the working interface; a separate ClickUp task-management screen is not required.
           </span>
         </div>
-        <div className={`clickup-oauth-settings__mcp-state${status.connected ? ' is-ready' : ''}`} role="status">
+        <div className={`clickup-oauth-settings__mcp-state${confirmedConnected ? ' is-ready' : ''}`} role="status">
           <span className="google-oauth-settings__dot" aria-hidden="true" />
-          <strong>{status.connected ? 'Active' : 'Connect ClickUp to activate'}</strong>
+          <strong>{statusUnknown ? 'Status unavailable · refresh before use' : confirmedConnected ? 'Active' : 'Connect ClickUp to activate'}</strong>
         </div>
       </div>
     </div>

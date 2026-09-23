@@ -59,7 +59,9 @@ ELARA_INSTALLATION_TOKEN   private installation credential used for pairing/admi
 
 Use Wrangler secret management for secret values; do not commit them to the repository. The browser pairing flow stores the installation credential in its protected device-local credential store rather than pairing JSON/localStorage.
 
-The Pages origin and Worker configuration are per deployment. A fork must not reuse another person's OAuth client secret, installation token, vault key or Worker origin allowlist.
+ClickUp additionally requires `CLICKUP_OAUTH_VAULT_KEY`. A deployment may then use either `CLICKUP_OAUTH_CLIENT_ID` + `CLICKUP_OAUTH_CLIENT_SECRET` for OAuth, or `CLICKUP_PERSONAL_TOKEN` for a single-user self-host whose ClickUp account can generate a personal API token but cannot create an OAuth app. The personal token remains a Worker secret; the browser sends only a signed activation request and never receives or submits the token itself.
+
+The Pages origin and Worker configuration are per deployment. A fork must not reuse another person's OAuth client secret, personal API token, installation token, vault key or Worker origin allowlist.
 
 ## Verification
 

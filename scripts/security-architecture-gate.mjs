@@ -396,6 +396,9 @@ for (const marker of [
   'signWrite',
   "'/clickup/oauth/start'",
   "'/clickup/oauth/exchange'",
+  "'/clickup/oauth/methods'",
+  "'/clickup/oauth/connection-state'",
+  "'/clickup/oauth/personal-token'",
   "'/clickup/oauth/disconnect'",
   'MAX_WORKER_RESPONSE_BYTES',
   'readBoundedWorkerJson',
@@ -408,6 +411,112 @@ for (const marker of [
 }
 if (!/async function workerRequest[\s\S]*const response = await fetch\([\s\S]*const body = await readBoundedWorkerJson\(response\);[\s\S]*finally\s*\{\s*clearTimeout\(timeout\);/.test(clickUpOAuthAuthority)) {
   fail('ClickUp browser OAuth deadline must remain active through bounded Worker response-body consumption');
+}
+for (const marker of [
+  'authorityBinding: clickUpPairingAuthorityBinding(pairing)',
+  'cachedStatusRawForPairing',
+  'clearCachedStatusForPairing(pairing',
+  'expectedRaw !== undefined && raw !== expectedRaw',
+  'currentRevision > incomingRevision',
+  'PENDING_CONNECTION_KEY',
+  'ELARA_AUTH_TIMESTAMP_WINDOW_MS',
+  'CONNECTION_GENERATION_KEY',
+  'operationId: newNonce()',
+  'intentTimestamp,',
+  'writeConnectionGeneration(pairing, pending.operationId)',
+  'generationSnapshot = connectionGenerationForPairing(pairing)',
+  'connectionGenerationForPairing(pairing) !== generationSnapshot',
+  'connectionGenerationForPairing(pairing) !== pending.operationId',
+  'const browserIntentTimestamp = Date.now()',
+  'clickUpConnectionNonce(browserIntentTimestamp)',
+  'const timestamp = Date.now()',
+  'signedPost(pairing, path, payload, parse, browserIntentTimestamp)',
+  'expectedOperationId && pending.operationId !== expectedOperationId',
+  'ELARA_AUTH_TIMESTAMP_WINDOW_MS + WORKER_TIMEOUT_MS + 5_000',
+  "new ClickUpOAuthError(\n    'connection_pending'",
+  'ensureConnectionSettled(pairing',
+  'workerState.intentTimestamp >= localBefore.value.intentTimestamp',
+  "intentTimestamp: typeof record.intentTimestamp === 'number' ? record.intentTimestamp : null",
+  'localBefore.value.intentTimestamp !== null',
+  'bearerConnectionState',
+  "'/clickup/oauth/connection-state'",
+  'stateAfter.epoch !== stateBefore.epoch',
+  'stateAfter.settledEpoch !== stateBefore.settledEpoch',
+  'markConnectionPending(pairing, operation, browserIntentTimestamp)',
+]) {
+  if (!clickUpOAuthAuthority.includes(marker)) fail(`ClickUp pairing-owned cache/settle authority is missing: ${marker}`);
+}
+if (/catch \(cause\)[\s\S]{0,500}localStorage\.removeItem\(STORAGE_KEY\)/.test(clickUpOAuthAuthority)) {
+  fail('ClickUp failed requests must not unconditionally erase a newer pairing cache');
+}
+for (const marker of [
+  'bearerConnectionMethods',
+  "'/clickup/oauth/methods'",
+  "if (response.status === 404) return { oauth: true, personalToken: false }",
+]) {
+  if (!clickUpOAuthAuthority.includes(marker)) fail(`ClickUp backward-compatible connection-method discovery is missing: ${marker}`);
+}
+if (!clickUpOAuthVault.includes("url.pathname === '/clickup/oauth/methods'")) {
+  fail('ClickUp Worker connection-method discovery route is missing');
+}
+for (const marker of [
+  "settled_epoch INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE clickup_connection_epoch ADD COLUMN settled_epoch INTEGER NOT NULL DEFAULT 0",
+  'UPDATE clickup_connection_epoch SET settled_epoch = epoch',
+  'settleConnectionEpochIfCurrent',
+  "url.pathname === '/clickup/oauth/connection-state'",
+  'return json(this.connectionState())',
+  'intentTimestamp: row.browser_write_timestamp',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable connection-settlement authority is missing: ${marker}`);
+}
+for (const marker of [
+  'browser_write_timestamp INTEGER NOT NULL DEFAULT 0',
+  'CLICKUP_CONNECTION_NONCE_PATTERN',
+  'browserConnectionIntentTimestamp',
+  "code: 'connection_client_upgrade_required'",
+  "code: 'connection_intent_stale'",
+  'signedTimestampMs - timestampMs > ELARA_AUTH_TIMESTAMP_WINDOW_MS',
+  'ALTER TABLE clickup_connection_epoch ADD COLUMN browser_write_timestamp INTEGER NOT NULL DEFAULT 0',
+  'reserveBrowserWriteTimestamp',
+  'timestampMs <= row.browser_write_timestamp',
+  "code: 'connection_superseded'",
+  'const signedTimestampMs = writeAuth.timestampMs',
+  'this.rejectSupersededBrowserWrite(browserIntentTimestamp)',
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp signed browser-write ordering authority is missing: ${marker}`);
+}
+if (!/private async verifyWrite[\s\S]*timestampMs = Number\(request\.headers\.get\(ELARA_AUTH_TIMESTAMP_HEADER\)[\s\S]*\{ ok: true, timestampMs \}/.test(clickUpOAuthVault)) {
+  fail('ClickUp signed-write freshness timestamp must remain independently HMAC-verified before the nonce-encoded intent generation is admitted');
+}
+for (const marker of [
+  'intent_timestamp INTEGER NOT NULL DEFAULT 0',
+  'ALTER TABLE clickup_oauth_states ADD COLUMN intent_timestamp INTEGER NOT NULL DEFAULT 0',
+  'INSERT INTO clickup_oauth_states (state, redirect_uri, created_at, intent_timestamp)',
+  'SELECT redirect_uri, created_at, intent_timestamp FROM clickup_oauth_states WHERE state = ?',
+  'rejectOAuthExchangeIfConnectSuperseded',
+  'this.rejectOAuthExchangeIfConnectSuperseded(acceptedState.intentTimestamp)',
+  "code: 'connection_client_upgrade_required'",
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp OAuth exchange must remain bound to the initiating Connect intent: ${marker}`);
+}
+const clickUpExchangeStart = clickUpOAuthVault.indexOf('private async exchange(');
+const clickUpExchangeEnd = clickUpExchangeStart >= 0
+  ? clickUpOAuthVault.indexOf('private async connectPersonalToken(', clickUpExchangeStart)
+  : -1;
+if (clickUpExchangeStart < 0 || clickUpExchangeEnd < 0) fail('ClickUp OAuth exchange authority disappeared');
+const clickUpExchangeBody = clickUpOAuthVault.slice(clickUpExchangeStart, clickUpExchangeEnd);
+if (clickUpExchangeBody.includes('this.rejectSupersededBrowserWrite(browserIntentTimestamp)')) {
+  fail('ClickUp OAuth exchange must not promote its callback-local browser intent over the initiating Connect intent');
+}
+
+const clickUpStatusStart = clickUpOAuthVault.indexOf('private status()');
+const clickUpStatusEnd = clickUpStatusStart >= 0
+  ? clickUpOAuthVault.indexOf('private async start(', clickUpStatusStart)
+  : -1;
+if (clickUpStatusStart < 0 || clickUpStatusEnd < 0) fail('ClickUp status authority disappeared');
+if (clickUpOAuthVault.slice(clickUpStatusStart, clickUpStatusEnd).includes('connectionMethods')) {
+  fail('ClickUp legacy status response must not gain connection-method fields');
 }
 for (const marker of [
   "CLICKUP_MCP_PROTOCOL_VERSION",
@@ -700,6 +809,12 @@ for (const marker of [
   "const CLICKUP_API_BASE = 'https://api.clickup.com/api/v2'",
   "const CLICKUP_TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token'",
   "headers.set('Authorization'",
+  'clickUpAuthorizationValue',
+  "export type ClickUpCredentialKind = 'oauth' | 'personal'",
+  'personalClickUpCredential',
+  'normalizedClickUpCredential',
+  "if (typeof input === 'string') return oauthClickUpCredential(input)",
+  "credential.kind === 'personal' ? credential.token : `Bearer ${credential.token}`",
   'MAX_PROVIDER_BODY_BYTES',
   "const CLICKUP_REQUEST_TIMEOUT_MS = 20_000;",
   'controller.abort()',
@@ -724,13 +839,56 @@ for (const marker of [
   if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable rate/grant authority is missing: ${marker}`);
 }
 
-const exchangeStart = clickUpOAuthVault.indexOf('private async exchange(request: Request, body: string)');
-const exchangeEnd = exchangeStart >= 0 ? clickUpOAuthVault.indexOf('private async disconnect(body: string)', exchangeStart) : -1;
-if (exchangeStart < 0 || exchangeEnd < 0) fail('ClickUp OAuth exchange authority disappeared');
-const exchangeBody = clickUpOAuthVault.slice(exchangeStart, exchangeEnd);
-const replacementTransactionStart = exchangeBody.indexOf('const replacement = this.ctx.storage.transactionSync(() => {');
+const exchangeStart = clickUpOAuthVault.indexOf('private async exchange(');
+const personalTokenStart = exchangeStart >= 0
+  ? clickUpOAuthVault.indexOf('private async connectPersonalToken(', exchangeStart)
+  : -1;
+const installCredentialStart = personalTokenStart >= 0
+  ? clickUpOAuthVault.indexOf('private async installCredential(', personalTokenStart)
+  : -1;
+const disconnectStartForInstall = installCredentialStart >= 0
+  ? clickUpOAuthVault.indexOf('private async disconnect(', installCredentialStart)
+  : -1;
+if (exchangeStart < 0 || personalTokenStart < 0 || installCredentialStart < 0 || disconnectStartForInstall < 0) {
+  fail('ClickUp credential connection authorities disappeared');
+}
+const exchangeBody = clickUpOAuthVault.slice(exchangeStart, personalTokenStart);
+const personalTokenBody = clickUpOAuthVault.slice(personalTokenStart, installCredentialStart);
+const installCredentialBody = clickUpOAuthVault.slice(installCredentialStart, disconnectStartForInstall);
+for (const marker of [
+  'exchangeClickUpAuthorizationCode(this.oauthEnv, parsed.data.code)',
+  'return await this.installCredential(request, credential, exchangeEpoch, previousAccessToken, now)',
+  'this.settleConnectionEpochIfCurrent(exchangeEpoch)',
+]) {
+  if (!exchangeBody.includes(marker)) fail(`ClickUp OAuth exchange path lost shared credential installation: ${marker}`);
+}
+for (const marker of [
+  'this.oauthEnv.CLICKUP_PERSONAL_TOKEN',
+  'personalClickUpCredential(personalToken)',
+  "UPDATE clickup_connection_epoch SET epoch = ?",
+  "DELETE FROM clickup_oauth_states",
+  'return await this.installCredential(request, credential, connectionEpoch, previousAccessToken, now)',
+  'this.settleConnectionEpochIfCurrent(connectionEpoch)',
+]) {
+  if (!personalTokenBody.includes(marker)) fail(`ClickUp personal-token Worker boundary is missing: ${marker}`);
+}
+if (/parsed\.data\.(?:token|apiKey|api_key)/.test(personalTokenBody)) {
+  fail('ClickUp personal token must never be accepted from the browser request body');
+}
+for (const marker of [
+  "credential_kind TEXT NOT NULL DEFAULT 'oauth'",
+  "PRAGMA table_info(clickup_oauth_credential)",
+  "ALTER TABLE clickup_oauth_credential ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth'",
+  'slot, access_cipher, access_iv, credential_kind, user_id',
+  'encrypted.cipher, encrypted.iv, accessToken.kind',
+  "previous.credential_kind === 'personal'",
+  "row.credential_kind === 'personal'",
+]) {
+  if (!clickUpOAuthVault.includes(marker)) fail(`ClickUp durable credential-kind authority is missing: ${marker}`);
+}
+const replacementTransactionStart = installCredentialBody.indexOf('const replacement = this.ctx.storage.transactionSync(() => {');
 const replacementTransactionEnd = replacementTransactionStart >= 0
-  ? exchangeBody.indexOf('if (!replacement)', replacementTransactionStart)
+  ? installCredentialBody.indexOf('if (!replacement)', replacementTransactionStart)
   : -1;
 if (replacementTransactionStart < 0 || replacementTransactionEnd < 0) {
   fail('ClickUp grant replacement transaction boundary disappeared');
@@ -742,13 +900,13 @@ for (const marker of [
   "DELETE FROM clickup_rate_limit",
   'clearClickUpTaskIndex',
 ]) {
-  const position = exchangeBody.indexOf(marker, replacementTransactionStart);
+  const position = installCredentialBody.indexOf(marker, replacementTransactionStart);
   if (position < replacementTransactionStart || position >= replacementTransactionEnd) {
     fail(`ClickUp replacement grant and grant-scoped local state must remain atomic: ${marker}`);
   }
 }
 
-const disconnectStart = clickUpOAuthVault.indexOf('private async disconnect(body: string)');
+const disconnectStart = clickUpOAuthVault.indexOf('private async disconnect(');
 const disconnectEnd = disconnectStart >= 0 ? clickUpOAuthVault.indexOf('/** Provider execution consumes credential material', disconnectStart) : -1;
 if (disconnectStart < 0 || disconnectEnd < 0) fail('ClickUp disconnect authority disappeared');
 const disconnectBody = clickUpOAuthVault.slice(disconnectStart, disconnectEnd);

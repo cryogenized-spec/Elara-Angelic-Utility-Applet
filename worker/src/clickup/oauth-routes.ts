@@ -17,8 +17,11 @@ const MAX_OAUTH_BODY_BYTES = 16 * 1024;
 
 const CLICKUP_OAUTH_PATHS = new Set([
   '/clickup/oauth/status',
+  '/clickup/oauth/methods',
+  '/clickup/oauth/connection-state',
   '/clickup/oauth/start',
   '/clickup/oauth/exchange',
+  '/clickup/oauth/personal-token',
   '/clickup/oauth/disconnect',
 ]);
 
@@ -106,7 +109,7 @@ async function forward(env: ClickUpOAuthRouteEnv, request: Request, body: string
     const value = request.headers.get(name);
     if (value) headers.set(name, value);
   }
-  if (url.pathname === '/clickup/oauth/exchange') {
+  if (url.pathname === '/clickup/oauth/exchange' || url.pathname === '/clickup/oauth/personal-token') {
     headers.set(CLICKUP_WEBHOOK_ENDPOINT_HEADER, `${url.origin}/clickup/webhook`);
   }
   const response = await (await vaultStub(env)).fetch(new Request(`https://clickup-oauth-vault${url.pathname}`, {
@@ -128,12 +131,24 @@ export async function handleClickUpOAuthRoute(
   const token = env.ELARA_INSTALLATION_TOKEN?.trim() ?? '';
   if (!token || !env.CLICKUP_OAUTH) return json({ code: 'configuration', message: 'Durable ClickUp OAuth is not configured on this Worker.' }, 503, corsOrigin);
 
-  if (request.method === 'GET' && pathname === '/clickup/oauth/status') {
+  if (
+    request.method === 'GET'
+    && (
+      pathname === '/clickup/oauth/status'
+      || pathname === '/clickup/oauth/methods'
+      || pathname === '/clickup/oauth/connection-state'
+    )
+  ) {
     if (!(await verifyBearerToken(bearer(request), token))) return json({ code: 'auth', message: 'A valid installation credential is required.' }, 401, corsOrigin);
     return forward(env, request, undefined, corsOrigin);
   }
 
-  if (request.method !== 'POST' || pathname === '/clickup/oauth/status') {
+  if (
+    request.method !== 'POST'
+    || pathname === '/clickup/oauth/status'
+    || pathname === '/clickup/oauth/methods'
+    || pathname === '/clickup/oauth/connection-state'
+  ) {
     return json({ code: 'method', message: 'Method not allowed.' }, 405, corsOrigin);
   }
 

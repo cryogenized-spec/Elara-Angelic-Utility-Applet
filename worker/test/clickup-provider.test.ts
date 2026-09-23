@@ -5,6 +5,7 @@ import {
   buildClickUpCreateTaskBody,
   buildClickUpUpdateTaskBody,
   fetchAuthorizedClickUpUser,
+  personalClickUpCredential,
 } from '../src/clickup/provider';
 
 afterEach(() => {
@@ -74,6 +75,31 @@ describe('ClickUp provider wire mapping', () => {
       ],
       notify_all: true,
     });
+  });
+
+  it('uses explicit credential kind rather than guessing auth syntax from token characters', async () => {
+    const seen: string[] = [];
+    const fetcher = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      seen.push(request.headers.get('Authorization') ?? '');
+      return new Response(JSON.stringify({ user: { id: 183 } }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as unknown as typeof fetch;
+
+    // Even if an opaque OAuth token exactly collides with a former in-band
+    // marker string, a raw/legacy credential is OAuth and keeps Bearer.
+    await fetchAuthorizedClickUpUser('elara-clickup-personal-v1:collision-token', fetcher);
+    await fetchAuthorizedClickUpUser(
+      personalClickUpCredential('pk_personal-token-for-test'),
+      fetcher,
+    );
+
+    expect(seen).toEqual([
+      'Bearer elara-clickup-personal-v1:collision-token',
+      'pk_personal-token-for-test',
+    ]);
   });
 
   it('never exposes untrusted provider error prose through normalized errors', async () => {

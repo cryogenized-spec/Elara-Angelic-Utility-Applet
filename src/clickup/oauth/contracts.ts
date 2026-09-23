@@ -18,6 +18,24 @@ export const clickUpOAuthStatusSchema = z.object({
 
 export type ClickUpOAuthStatus = z.infer<typeof clickUpOAuthStatusSchema>;
 
+export const clickUpConnectionMethodsSchema = z.object({
+  oauth: z.boolean(),
+  personalToken: z.boolean(),
+}).strict();
+
+export type ClickUpConnectionMethods = z.infer<typeof clickUpConnectionMethodsSchema>;
+
+export const clickUpConnectionStateSchema = z.object({
+  epoch: z.number().int().nonnegative(),
+  settledEpoch: z.number().int().nonnegative(),
+  pending: z.boolean(),
+  // Optional for rolling compatibility with Workers that introduced
+  // connection-state before durable browser-intent ordering.
+  intentTimestamp: z.number().int().nonnegative().optional(),
+}).strict();
+
+export type ClickUpConnectionState = z.infer<typeof clickUpConnectionStateSchema>;
+
 export interface ClickUpExecutionGrant {
   readonly status: ClickUpOAuthStatus;
   readonly authorityBinding: string;
@@ -34,8 +52,10 @@ export type ClickUpOAuthStart = z.infer<typeof clickUpOAuthStartSchema>;
 
 export interface ClickUpOAuthAuthority {
   getStatus(): Promise<ClickUpOAuthStatus>;
+  getConnectionMethods(): Promise<ClickUpConnectionMethods>;
   getExecutionGrant(): Promise<ClickUpExecutionGrant>;
   beginConnect(redirectUri: string): Promise<ClickUpOAuthStart>;
   completeConnect(input: { code: string; state: string; redirectUri: string }): Promise<ClickUpOAuthStatus>;
+  connectPersonalToken(): Promise<ClickUpOAuthStatus>;
   disconnect(): Promise<void>;
 }

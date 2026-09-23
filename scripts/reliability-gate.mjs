@@ -263,9 +263,81 @@ const clickUpOauthProviderSource = readFileSync(join(root, 'worker', 'src', 'cli
 const clickUpOauthVaultSource = readFileSync(join(root, 'worker', 'src', 'clickup', 'oauth-vault.ts'), 'utf8');
 const clickUpOauthRoutesSource = readFileSync(join(root, 'worker', 'src', 'clickup', 'oauth-routes.ts'), 'utf8');
 if (!clickUpOauthProviderSource.includes('https://api.clickup.com/api/v2/oauth/token') || !clickUpOauthProviderSource.includes('CLICKUP_OAUTH_CLIENT_SECRET')) throw new Error('Reliability gate: ClickUp OAuth token exchange must remain in the reviewed Worker provider.');
-if (!clickUpOauthVaultSource.includes("name: 'AES-GCM'") || !clickUpOauthVaultSource.includes('CLICKUP_OAUTH_VAULT_KEY')) throw new Error('Reliability gate: ClickUp access tokens must remain AES-GCM encrypted with the dedicated vault key.');
-if (!clickUpOauthVaultSource.includes('clickup_oauth_nonces') || !clickUpOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: ClickUp OAuth vault writes must remain signed and replay-protected durably.');
-if (!clickUpOauthRoutesSource.includes('verifySignedWrite') || !workerCompositionSource.includes('handleClickUpOAuthRoute')) throw new Error('Reliability gate: public ClickUp OAuth writes must retain signed admission through the reviewed route.');
+if (!clickUpOauthProviderSource.includes("export type ClickUpCredentialKind = 'oauth' | 'personal'") || !clickUpOauthProviderSource.includes('personalClickUpCredential') || !clickUpOauthProviderSource.includes("if (typeof input === 'string') return oauthClickUpCredential(input)") || !clickUpOauthProviderSource.includes("credential.kind === 'personal' ? credential.token : `Bearer ${credential.token}`")) throw new Error('Reliability gate: ClickUp provider auth must preserve structural personal-token and OAuth Authorization forms without token-content inference.');
+if (!clickUpOauthVaultSource.includes("name: 'AES-GCM'") || !clickUpOauthVaultSource.includes('CLICKUP_OAUTH_VAULT_KEY')) throw new Error('Reliability gate: ClickUp provider token bytes must remain AES-GCM encrypted with the dedicated vault key.');
+if (!clickUpOauthVaultSource.includes("credential_kind TEXT NOT NULL DEFAULT 'oauth'") || !clickUpOauthVaultSource.includes("ALTER TABLE clickup_oauth_credential ADD COLUMN credential_kind TEXT NOT NULL DEFAULT 'oauth'") || !clickUpOauthVaultSource.includes('encrypted.cipher, encrypted.iv, accessToken.kind') || !clickUpOauthVaultSource.includes("row.credential_kind === 'personal'")) throw new Error('Reliability gate: ClickUp credential kind must remain a separate durable discriminator with legacy rows migrating to OAuth.');
+if (!clickUpOauthVaultSource.includes('CLICKUP_PERSONAL_TOKEN') || !clickUpOauthVaultSource.includes('connectPersonalToken')) throw new Error('Reliability gate: ClickUp personal-token activation must remain Worker-secret-only.');
+if (!clickUpOauthVaultSource.includes('clickup_oauth_nonces') || !clickUpOauthVaultSource.includes('verifySignedWrite')) throw new Error('Reliability gate: ClickUp credential-vault writes must remain signed and replay-protected durably.');
+if (!clickUpOauthRoutesSource.includes('verifySignedWrite') || !clickUpOauthRoutesSource.includes("'/clickup/oauth/personal-token'") || !clickUpOauthRoutesSource.includes("'/clickup/oauth/methods'") || !clickUpOauthRoutesSource.includes("'/clickup/oauth/connection-state'") || !workerCompositionSource.includes('handleClickUpOAuthRoute')) throw new Error('Reliability gate: public ClickUp credential writes and method discovery must retain the reviewed route boundary.');
+if (!clickUpOauthVaultSource.includes("url.pathname === '/clickup/oauth/methods'") || !clickUpOauthVaultSource.includes('return json(this.connectionMethods())')) throw new Error('Reliability gate: ClickUp connection methods must remain on their backward-compatible separate read endpoint.');
+if (!clickUpOauthVaultSource.includes("settled_epoch INTEGER NOT NULL DEFAULT 0") || !clickUpOauthVaultSource.includes('settleConnectionEpochIfCurrent') || !clickUpOauthVaultSource.includes("url.pathname === '/clickup/oauth/connection-state'") || !clickUpOauthVaultSource.includes('return json(this.connectionState())') || !clickUpOauthVaultSource.includes('intentTimestamp: row.browser_write_timestamp')) throw new Error('Reliability gate: ClickUp connection operations must expose durable pending/settled authority plus the admitted browser-intent watermark.');
+if (
+  !clickUpOauthVaultSource.includes('browser_write_timestamp INTEGER NOT NULL DEFAULT 0')
+  || !clickUpOauthVaultSource.includes('CLICKUP_CONNECTION_NONCE_PATTERN')
+  || !clickUpOauthVaultSource.includes('browserConnectionIntentTimestamp')
+  || !clickUpOauthVaultSource.includes("code: 'connection_client_upgrade_required'")
+  || !clickUpOauthVaultSource.includes("code: 'connection_intent_stale'")
+  || !clickUpOauthVaultSource.includes('reserveBrowserWriteTimestamp')
+  || !clickUpOauthVaultSource.includes('timestampMs <= row.browser_write_timestamp')
+  || !clickUpOauthVaultSource.includes("code: 'connection_superseded'")
+  || !clickUpOauthVaultSource.includes('const signedTimestampMs = writeAuth.timestampMs')
+  || !clickUpOauthVaultSource.includes('this.rejectSupersededBrowserWrite(browserIntentTimestamp)')
+) throw new Error('Reliability gate: ClickUp connection writes must be durably ordered by an HMAC-covered browser intent generation before provider/account mutation, with stale clients failing closed.');
+if (
+  !clickUpOauthVaultSource.includes('intent_timestamp INTEGER NOT NULL DEFAULT 0')
+  || !clickUpOauthVaultSource.includes('ALTER TABLE clickup_oauth_states ADD COLUMN intent_timestamp INTEGER NOT NULL DEFAULT 0')
+  || !clickUpOauthVaultSource.includes('INSERT INTO clickup_oauth_states (state, redirect_uri, created_at, intent_timestamp)')
+  || !clickUpOauthVaultSource.includes('SELECT redirect_uri, created_at, intent_timestamp FROM clickup_oauth_states WHERE state = ?')
+  || !clickUpOauthVaultSource.includes('rejectOAuthExchangeIfConnectSuperseded')
+  || !clickUpOauthVaultSource.includes('this.rejectOAuthExchangeIfConnectSuperseded(acceptedState.intentTimestamp)')
+) throw new Error('Reliability gate: ClickUp OAuth exchange must remain ordered by the original Connect gesture stored with one-time OAuth state.');
+const clickUpExchangeReliabilityStart = clickUpOauthVaultSource.indexOf('private async exchange(');
+const clickUpExchangeReliabilityEnd = clickUpExchangeReliabilityStart >= 0
+  ? clickUpOauthVaultSource.indexOf('private async connectPersonalToken(', clickUpExchangeReliabilityStart)
+  : -1;
+if (
+  clickUpExchangeReliabilityStart < 0
+  || clickUpExchangeReliabilityEnd < 0
+  || clickUpOauthVaultSource.slice(clickUpExchangeReliabilityStart, clickUpExchangeReliabilityEnd)
+    .includes('this.rejectSupersededBrowserWrite(browserIntentTimestamp)')
+) throw new Error('Reliability gate: ClickUp OAuth callback-local intent must never replace the initiating Connect generation.');
+
+const clickUpBrowserAuthoritySource = readFileSync(join(root, 'src', 'clickup', 'oauth', 'authority.ts'), 'utf8');
+for (const marker of [
+  'authorityBinding: clickUpPairingAuthorityBinding(pairing)',
+  'cachedStatusRawForPairing',
+  'clearCachedStatusForPairing(pairing',
+  'expectedRaw !== undefined && raw !== expectedRaw',
+  'currentRevision > incomingRevision',
+  'PENDING_CONNECTION_KEY',
+  'ELARA_AUTH_TIMESTAMP_WINDOW_MS',
+  'CONNECTION_GENERATION_KEY',
+  'operationId: newNonce()',
+  'intentTimestamp,',
+  'writeConnectionGeneration(pairing, pending.operationId)',
+  'generationSnapshot = connectionGenerationForPairing(pairing)',
+  'connectionGenerationForPairing(pairing) !== generationSnapshot',
+  'connectionGenerationForPairing(pairing) !== pending.operationId',
+  'const browserIntentTimestamp = Date.now()',
+  'clickUpConnectionNonce(browserIntentTimestamp)',
+  'const timestamp = Date.now()',
+  'signedPost(pairing, path, payload, parse, browserIntentTimestamp)',
+  'expectedOperationId && pending.operationId !== expectedOperationId',
+  'ELARA_AUTH_TIMESTAMP_WINDOW_MS + WORKER_TIMEOUT_MS + 5_000',
+  "'connection_pending'",
+  'ensureConnectionSettled(pairing',
+  'workerState.intentTimestamp >= localBefore.value.intentTimestamp',
+  "intentTimestamp: typeof record.intentTimestamp === 'number' ? record.intentTimestamp : null",
+  'localBefore.value.intentTimestamp !== null',
+  'bearerConnectionState',
+  "'/clickup/oauth/connection-state'",
+  'stateAfter.epoch !== stateBefore.epoch',
+  'stateAfter.settledEpoch !== stateBefore.settledEpoch',
+  'markConnectionPending(pairing, operation, browserIntentTimestamp)',
+]) {
+  if (!clickUpBrowserAuthoritySource.includes(marker)) throw new Error(`Reliability gate: ClickUp browser connection race authority is missing ${marker}.`);
+}
+
 
 // The scheduler seam exists and names its contracts.
 const portsSource = readFileSync(join(root, 'worker', 'src', 'autonomy', 'ports.ts'), 'utf8');

@@ -54,8 +54,38 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
           ]) {
             this.ctx.storage.sql.exec(`DELETE FROM ${table}`);
           }
-          this.ctx.storage.sql.exec('UPDATE clickup_connection_epoch SET epoch = 0 WHERE slot = 1');
+          this.ctx.storage.sql.exec(
+            'UPDATE clickup_connection_epoch SET epoch = 0, settled_epoch = 0, browser_write_timestamp = 0 WHERE slot = 1',
+          );
         });
+        return json({ ok: true });
+      }
+
+      if (request.method === 'POST' && url.pathname === '/__test/clickup/credential') {
+        const body = await bodyRecord(request);
+        const accessCipher = typeof body.accessCipher === 'string' ? body.accessCipher : '';
+        const accessIv = typeof body.accessIv === 'string' ? body.accessIv : '';
+        const userId = typeof body.userId === 'string' ? body.userId : '';
+        const username = typeof body.username === 'string' ? body.username : null;
+        const email = typeof body.email === 'string' ? body.email : null;
+        const workspacesJson = typeof body.workspacesJson === 'string' ? body.workspacesJson : '';
+        const updatedAt = typeof body.updatedAt === 'number' && Number.isSafeInteger(body.updatedAt) ? body.updatedAt : 0;
+        if (!accessCipher || !accessIv || !userId || !workspacesJson || updatedAt <= 0) {
+          return json({ code: 'validation' }, 400);
+        }
+        this.ctx.storage.sql.exec(`
+          INSERT INTO clickup_oauth_credential (
+            slot, access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at
+          ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(slot) DO UPDATE SET
+            access_cipher = excluded.access_cipher,
+            access_iv = excluded.access_iv,
+            user_id = excluded.user_id,
+            username = excluded.username,
+            email = excluded.email,
+            workspaces_json = excluded.workspaces_json,
+            updated_at = excluded.updated_at
+        `, accessCipher, accessIv, userId, username, email, workspacesJson, updatedAt);
         return json({ ok: true });
       }
 
@@ -63,17 +93,19 @@ export class TestClickUpOAuthVault extends ClickUpOAuthVault {
         const row = this.ctx.storage.sql.exec<{
           access_cipher: string;
           access_iv: string;
+          credential_kind: string;
           user_id: string;
           username: string | null;
           email: string | null;
           workspaces_json: string;
           updated_at: number;
         }>(
-          'SELECT access_cipher, access_iv, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
+          'SELECT access_cipher, access_iv, credential_kind, user_id, username, email, workspaces_json, updated_at FROM clickup_oauth_credential WHERE slot = 1',
         ).toArray()[0];
         return json(row ? {
           accessCipher: row.access_cipher,
           accessIv: row.access_iv,
+          credentialKind: row.credential_kind,
           userId: row.user_id,
           username: row.username,
           email: row.email,

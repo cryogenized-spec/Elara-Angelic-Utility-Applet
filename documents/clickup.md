@@ -108,9 +108,11 @@ The Worker verifies:
 
 Structured MCP results have an aggregate Worker-side byte ceiling in addition to bounded semantic projections. The browser independently caps MCP response bytes and cancels oversized streams.
 
-## 5. OAuth and credential authority
+## 5. Credential authority
 
-ClickUp uses OAuth 2.0 Authorization Code. Elara requires a paired self-hosted Worker for ClickUp because the client secret and durable access token are Worker-only.
+Elara supports two ClickUp credential-establishment modes, both behind the same paired self-hosted Worker and the same encrypted vault.
+
+OAuth 2.0 Authorization Code remains the multi-user/app path:
 
 ```text
 user gesture
@@ -126,15 +128,26 @@ user gesture
 -> browser receives bounded account / Workspace metadata only
 ```
 
-Durable state contains ciphertext/IV, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. The access token is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
+A single-user self-hosted deployment may instead configure `CLICKUP_PERSONAL_TOKEN` as a Worker secret. This is useful when the ClickUp user can create a personal API token but is not a Workspace admin and therefore cannot create an OAuth app.
+
+```text
+user gesture
+-> signed POST /clickup/oauth/personal-token with an empty JSON body
+-> Worker reads CLICKUP_PERSONAL_TOKEN from its own secret environment
+-> GET /user + GET /team validate the token and establish account / Workspaces
+-> token AES-GCM encrypted in the same installation-scoped Durable Object
+-> browser receives bounded account / Workspace metadata only
+```
+
+The personal token is never accepted from browser input, returned to the browser, placed in model-visible schemas or persisted in browser storage. Durable state contains ciphertext/IV, a separate non-secret `credential_kind` discriminator, bounded account metadata, admitted Workspace metadata and a monotonic grant revision. Provider Authorization syntax is selected from that durable discriminator rather than inferred from token characters. Existing pre-personal-token rows migrate with `credential_kind = 'oauth'` without decrypting or inspecting their token bytes. The credential is decrypted only inside `ClickUpOAuthVault` immediately before reviewed provider work.
 
 ### 5.1 Account identity and Settings surface
 
 ClickUp authorization is independent from Elara's Google Workspace authorization. Elara must never infer that the Google identity used for Gmail, Drive, Calendar or other Workspace tools is also the identity used to sign into ClickUp, and it must never reuse a Google Workspace access token for ClickUp.
 
-If a customer's ClickUp account uses Google's sign-in option, account selection happens inside ClickUp's official authorization/sign-in flow. Elara does not manufacture or force a Google account chooser on ClickUp's behalf. The Settings surface explains this boundary before authorization and then displays the bounded ClickUp account metadata returned by ClickUp so the customer can verify which identity was admitted.
+If a customer's ClickUp account uses Google's sign-in option, account selection happens inside ClickUp's official authorization/sign-in flow. Elara does not manufacture or force a Google account chooser on ClickUp's behalf. In personal-token mode the token itself identifies the ClickUp account, and Elara verifies that identity with ClickUp before sealing the credential. The Settings surface displays only bounded account metadata so the customer can verify which identity was admitted.
 
-The ClickUp Settings surface is intentionally connection-oriented rather than a second task-management client. It shows:
+The ClickUp Settings surface is intentionally connection-oriented rather than a second task-management client. The existing strict `/clickup/oauth/status` response remains unchanged for stale-service-worker/older-browser compatibility; Worker credential-method availability is discovered separately through authenticated `GET /clickup/oauth/methods`. A new browser talking to an older Worker treats a 404 on that endpoint as OAuth-only, matching the older Worker's actual capability. It shows:
 
 - connected/disconnected state;
 - the admitted ClickUp account identity when available;
@@ -142,16 +155,22 @@ The ClickUp Settings surface is intentionally connection-oriented rather than a 
 - whether Elara's first-party ClickUp MCP path is active;
 - refresh, disconnect and explicit **Switch ClickUp account** actions.
 
-Switching accounts is an explicit replacement operation. The browser creates the OAuth popup synchronously under the user's Switch gesture before awaiting disconnect or Worker state, then disconnects the old local ClickUp grant and begins a new official ClickUp OAuth flow. If replacement authorization fails, Settings re-reads the current authority instead of continuing to display stale account metadata.
+Switching accounts is an explicit replacement operation. The browser creates the OAuth popup synchronously under the user's Switch gesture before awaiting disconnect or Worker state, then disconnects the old local ClickUp grant and begins a new official ClickUp OAuth flow.
+
+OAuth exchange, personal-token activation and disconnect are identity-changing writes. Before egress, the browser records a non-secret pending marker owned by the exact Worker pairing **and by a unique browser operation ID**, then clears only that pairing's cached ClickUp identity. Other same-origin tabs therefore stop advertising the old identity immediately, and completion of one tab's older operation cannot clear a newer tab's pending marker. The Worker independently tracks a monotonic connection epoch and settled epoch; authenticated `GET /clickup/oauth/connection-state` reports whether an identity-changing operation is still in flight without changing the legacy strict status payload.
+
+If a write response is lost or times out, subsequent status reads and execution-grant acquisition consult that Worker operation state. While the Worker reports `pending`, they fail closed with `connection_pending` and Settings remains explicitly **connection state unknown**. The connection-state response also carries the highest HMAC-authenticated browser intent generation admitted by the Worker. A browser pending marker is therefore released only when the Worker is settled **and** its admitted intent watermark is at least that marker's intent; a merely-settled Worker with a lower watermark proves that the browser gesture has not reached the Worker yet and must not clear the cross-tab barrier. A status snapshot is accepted only when the connection epoch is settled and unchanged before and after the status read. Older Workers that do not expose the intent watermark keep the conservative pairing-owned fallback barrier rather than guessing that a local pending write has settled. That local barrier spans the **entire five-minute HMAC intent-admission window plus one complete Worker request deadline and margin**, so a gesture that is still admissible by the Worker cannot become locally "not pending" merely because token resolution or other pre-egress work was slow. Likewise, a pending marker written by an immediately older cached browser build (before markers carried `intentTimestamp`) is treated as legacy-pending and cannot be early-cleared from Worker state; it remains fail-closed until its bounded marker expires.
+
+Cached ClickUp connection metadata is also pairing-owned, browser-generation-bound and revision-monotonic. Every identity-changing gesture advances a non-secret connection-generation token before egress. A status read captures that generation and may persist only if the generation is still unchanged after the Worker epoch checks; this closes the final cross-tab TOCTOU window where a replacement could complete immediately after the second Worker state read. An identity-changing request may likewise resolve successfully to its caller only while it still owns that generation; a late result from an older tab becomes `connection_pending` and must reconcile instead of painting stale React state. Failure cleanup compare-and-clears only the exact cache snapshot a request started with; a late failed/read response from a superseded Worker or an older same-pairing request can neither overwrite nor erase a newer refresh. Legacy unowned cache entries are ignored until the current pairing refreshes them.
 
 
-Public OAuth bodies are streamed under a byte ceiling before signature verification/forwarding. Signed writes use timestamp + nonce + body and have durable replay protection. OAuth state is random, redirect-bound, short-lived and single-use. A new Connect gesture replaces older pending states and advances the connection epoch, so an older popup or already-in-flight exchange cannot later overwrite the newer authorization.
+Public OAuth bodies are streamed under a byte ceiling before signature verification/forwarding. Signed writes use timestamp + nonce + body and have durable replay protection. ClickUp connection authority separates **signature freshness** from **gesture ordering**: `X-Elara-Timestamp` is taken immediately before egress, while the browser's original gesture timestamp is encoded into the `clickup-v1:<intent-ms>:<random>` nonce. Because the nonce is part of the HMAC canonical message, the intent generation is authenticated without adding token material or changing the JSON request bodies. The vault durably stores the newest admitted intent generation and rejects an older or equal connection write with `connection_superseded` before it can create OAuth state, call ClickUp, disconnect, or replace the credential. A stale cached browser build that lacks the signed intent-nonce format is rejected with `connection_client_upgrade_required` and must refresh before changing ClickUp authority; reads remain backward compatible. Intent values older than the signed freshness window are rejected as `connection_intent_stale`. Equal intent generations are never both applied: the later-arriving duplicate generation is rejected and must be retried. OAuth state is random, redirect-bound, short-lived and single-use. Each state row also stores the HMAC-authenticated intent generation of the **initiating Connect gesture**. The later callback/exchange request still needs a fresh signed request for admission, but its callback-local intent is never allowed to promote that older OAuth flow above a newer personal-token, disconnect or Connect gesture. Exchange succeeds only while the Worker's admitted-intent high-water mark still exactly matches the Connect intent stored with that state. A new Connect gesture replaces older pending states and advances the connection epoch, so an older popup or already-in-flight exchange cannot later overwrite newer authorization.
 
 Connect/disconnect/reconnect use a connection epoch. A late exchange cannot resurrect a grant after disconnect. Credential replacement, local webhook/delivery removal, rate-budget removal and ClickUp task-index purge commit in one SQLite transaction, so a new account can never coexist with provider data cached under the previous grant. Provider requests retain the credential revision that issued them; a late response or 401 from an obsolete token cannot mutate the replacement grant or replacement rate budget.
 
-ClickUp currently documents OAuth access tokens as non-expiring, but Elara treats them as revocable. Provider authorization failure removes only the credential revision that actually produced that failure.
+ClickUp currently documents OAuth access tokens as non-expiring and personal API tokens as non-expiring until regenerated, but Elara treats either credential as invalidatable. Provider authorization failure removes only the durable credential revision that actually produced that failure.
 
-Disconnect deletes the local encrypted grant. ClickUp does not document a general OAuth token revocation endpoint, so Elara does not claim provider-side revocation.
+Disconnect deletes Elara's local encrypted grant and grant-scoped caches/webhooks. In personal-token mode it does not and cannot delete the deployment owner's `CLICKUP_PERSONAL_TOKEN` Cloudflare secret; removing or rotating that Worker secret is a separate deployment operation. In OAuth mode ClickUp does not document a general OAuth token revocation endpoint, so Elara does not claim provider-side revocation.
 
 ## 6. Confirmation and exact-grant binding
 
@@ -273,7 +292,7 @@ The browser attachment route requires installation bearer + admitted grant revis
 
 ## 11. Provider serialization, errors and rate limits
 
-`worker/src/clickup/provider.ts` is the only ClickUp Public API egress authority. Requests are HTTPS to the fixed ClickUp API origin and use `Authorization: Bearer <server-side token>`.
+`worker/src/clickup/provider.ts` is the only ClickUp Public API egress authority. Requests are HTTPS to the fixed ClickUp API origin. OAuth access tokens use `Authorization: Bearer <token>`; ClickUp personal API tokens (provider-defined `pk_` credentials) use the raw `Authorization: <personal_token>` form required by ClickUp.
 
 Reviewed representations include:
 
@@ -317,17 +336,18 @@ Model-facing results are bounded. The model never assembles provider query strin
 
 ## 13. Deployment contract
 
-A ClickUp-enabled self-hosted Worker requires deployment-owned configuration for:
+A ClickUp-enabled self-hosted Worker always requires:
 
-- `CLICKUP_OAUTH_CLIENT_ID`;
-- `CLICKUP_OAUTH_CLIENT_SECRET`;
 - `CLICKUP_OAUTH_VAULT_KEY`;
 - the `CLICKUP_OAUTH` Durable Object binding/migration;
 - the existing Elara installation credential used by the paired browser/Worker authority.
 
-Secrets are never browser build variables.
+It then requires one credential source:
 
-The ClickUp OAuth callback/redirect URI must be registered in the ClickUp app and must match the HTTPS Pages/deployment origin used by that installation.
+- OAuth mode: `CLICKUP_OAUTH_CLIENT_ID` + `CLICKUP_OAUTH_CLIENT_SECRET`; or
+- personal-token mode: `CLICKUP_PERSONAL_TOKEN`.
+
+Secrets are never browser build variables. OAuth mode additionally requires the ClickUp callback/redirect URI to be registered in the ClickUp app and to match the HTTPS Pages/deployment origin used by that installation. Personal-token mode does not require an OAuth app or redirect URI.
 
 ## 14. Verification contract
 
@@ -339,7 +359,8 @@ Focused tests cover:
 - exact grant/pairing confirmation binding;
 - OAuth state + signed-write replay protection;
 - disconnect/exchange and old-token/new-token races;
-- encrypted token storage and revision-guarded revocation;
+- encrypted OAuth/personal-token storage and revision-guarded invalidation;
+- proof that personal-token activation sends no token material from the browser and uses ClickUp's personal-token Authorization form;
 - adaptive/monotonic rate state and genuine-window rollover;
 - provider response byte cancellation;
 - cross-Workspace task/Folder/List/comment/field/attachment denial;

@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const oauthMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
+  getConnectionMethods: vi.fn(),
+  connectPersonalToken: vi.fn(),
   disconnect: vi.fn(),
 }));
 
@@ -16,6 +18,8 @@ const popupMocks = vi.hoisted(() => ({
 vi.mock('../../clickup/oauth/authority', () => ({
   clickUpOAuthAuthority: {
     getStatus: oauthMocks.getStatus,
+    getConnectionMethods: oauthMocks.getConnectionMethods,
+    connectPersonalToken: oauthMocks.connectPersonalToken,
     disconnect: oauthMocks.disconnect,
   },
 }));
@@ -31,7 +35,9 @@ import { ClickUpOAuthSettings } from './ClickUpOAuthSettings';
 (globalThis as unknown as { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const getStatusMock = oauthMocks.getStatus;
+const getConnectionMethodsMock = oauthMocks.getConnectionMethods;
 const connectMock = popupMocks.connect;
+const personalTokenMock = oauthMocks.connectPersonalToken;
 const switchMock = popupMocks.switchAccount;
 
 const CONNECTED: ClickUpOAuthStatus = {
@@ -49,6 +55,7 @@ async function renderSettings(): Promise<void> {
     root.render(<ClickUpOAuthSettings />);
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
   });
 }
 
@@ -64,7 +71,9 @@ describe('ClickUpOAuthSettings', () => {
     document.body.appendChild(container);
     root = createRoot(container);
     getStatusMock.mockResolvedValue(CONNECTED);
+    getConnectionMethodsMock.mockResolvedValue({ oauth: true, personalToken: false });
     connectMock.mockResolvedValue(CONNECTED);
+    personalTokenMock.mockResolvedValue(CONNECTED);
     switchMock.mockResolvedValue(CONNECTED);
   });
 
@@ -120,5 +129,110 @@ describe('ClickUpOAuthSettings', () => {
       await Promise.resolve();
     });
     expect(connectMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses a Worker-configured personal API token without opening ClickUp OAuth', async () => {
+    const tokenReady: ClickUpOAuthStatus = {
+      connected: false,
+      workspaces: [],
+    };
+    const connected: ClickUpOAuthStatus = {
+      ...CONNECTED,
+    };
+    getStatusMock.mockResolvedValueOnce(tokenReady);
+    getConnectionMethodsMock.mockResolvedValueOnce({ oauth: false, personalToken: true });
+    personalTokenMock.mockResolvedValueOnce(connected);
+
+    await renderSettings();
+
+    expect(button('Use configured API token')).toBeTruthy();
+    expect(container.textContent).toContain('without exposing the token to this browser');
+    expect(container.textContent).not.toContain('Continue to ClickUp');
+
+    await act(async () => {
+      button('Use configured API token').click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(personalTokenMock).toHaveBeenCalledTimes(1);
+    expect(connectMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain('company@example.com');
+    expect(container.textContent).not.toContain('Switch ClickUp account');
+    expect(button('Reload configured API token')).toBeTruthy();
+  });
+
+
+  it('keeps an ambiguous personal-token activation unknown until a later refresh resolves it', async () => {
+    const tokenReady: ClickUpOAuthStatus = {
+      connected: false,
+      workspaces: [],
+    };
+    const replacement: ClickUpOAuthStatus = {
+      connected: true,
+      account: { id: '200', username: 'Replacement', email: 'replacement@example.com' },
+      workspaces: [{ id: '1000', name: 'Replacement Workspace' }],
+      updatedAt: 234567,
+    };
+    getStatusMock.mockReset();
+    getStatusMock
+      .mockResolvedValueOnce(tokenReady)
+      .mockRejectedValueOnce(new Error('A ClickUp connection change may still be settling. Refresh status again shortly.'))
+      .mockResolvedValueOnce(replacement);
+    getConnectionMethodsMock
+      .mockResolvedValueOnce({ oauth: false, personalToken: true })
+      .mockResolvedValueOnce({ oauth: false, personalToken: true });
+    personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out after request send.'));
+
+    await renderSettings();
+    await act(async () => {
+      button('Use configured API token').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getStatusMock).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain('ClickUp status unavailable');
+    expect(container.textContent).toContain('Connection state unknown');
+    expect(container.textContent).toContain('Refresh status before continuing');
+    expect(container.textContent).not.toContain('replacement@example.com');
+
+    await act(async () => {
+      button('Refresh status').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(getStatusMock).toHaveBeenCalledTimes(3);
+    expect(container.textContent).toContain('replacement@example.com');
+    expect(container.textContent).toContain('Replacement Workspace');
+    expect(container.textContent).not.toContain('Connection state unknown');
+  });
+
+  it('marks ClickUp authority unknown and hides mutation-prone connection actions when reconciliation fails', async () => {
+    const tokenReady: ClickUpOAuthStatus = {
+      connected: false,
+      workspaces: [],
+    };
+    getStatusMock.mockReset();
+    getStatusMock.mockResolvedValueOnce(tokenReady).mockRejectedValueOnce(new Error('Worker unreachable.'));
+    getConnectionMethodsMock.mockResolvedValueOnce({ oauth: false, personalToken: true });
+    personalTokenMock.mockRejectedValueOnce(new Error('Connection timed out.'));
+
+    await renderSettings();
+    await act(async () => {
+      button('Use configured API token').click();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('ClickUp status unavailable');
+    expect(container.textContent).toContain('Connection state unknown');
+    expect(container.textContent).toContain('Refresh status before continuing');
+    expect(Array.from(container.querySelectorAll('button')).some((entry) => entry.textContent?.trim() === 'Use configured API token')).toBe(false);
+    expect(Array.from(container.querySelectorAll('button')).some((entry) => entry.textContent?.trim() === 'Continue to ClickUp')).toBe(false);
   });
 });

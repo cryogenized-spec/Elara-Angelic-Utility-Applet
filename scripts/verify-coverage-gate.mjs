@@ -280,6 +280,10 @@ try {
     const token = 'AIza' + 'A'.repeat(35);
     writeRelative(cwd, 'src/pass5-secret-fixture.ts', `export const leaked = '${token}';\n`);
   });
+  addMutation('synthetic ClickUp personal token leak', 'scripts/secret-scan.mjs', 'possible ClickUp personal token', (cwd) => {
+    const token = 'pk_' + 'C'.repeat(40);
+    writeRelative(cwd, 'src/pass5-clickup-secret-fixture.ts', `export const leaked = '${token}';\n`);
+  });
   addMutation('synthetic private key leak', 'scripts/secret-scan.mjs', 'possible Private key material', (cwd) => {
     const header = ['-----BEGIN', 'PRIVATE', 'KEY-----'].join(' ');
     writeRelative(cwd, 'src/pass5-private-key-fixture.txt', `${header}\nnot-a-real-key\n`);

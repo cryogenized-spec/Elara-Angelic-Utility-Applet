@@ -41,6 +41,7 @@ export function defineWorkerTestConfig(test: {
             GOOGLE_OAUTH_VAULT_KEY: 'unit-test-google-oauth-vault-key-material-please-ignore',
             CLICKUP_OAUTH_CLIENT_ID: 'test-clickup-client-id',
             CLICKUP_OAUTH_CLIENT_SECRET: 'unit-test-clickup-client-secret-value',
+            CLICKUP_PERSONAL_TOKEN: 'pk_dummy',
             CLICKUP_OAUTH_VAULT_KEY: 'unit-test-clickup-oauth-vault-key-material-please-ignore',
             C1_MODEL_STUB: '{"disposition":"noop","reason":"test stub"}',
           },

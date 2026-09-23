@@ -9,6 +9,9 @@ const REDIRECT_URI = `${ORIGIN}/clickup/oauth/callback`;
 const TOKEN_ENDPOINT = 'https://api.clickup.com/api/v2/oauth/token';
 const USER_ENDPOINT = 'https://api.clickup.com/api/v2/user';
 const WORKSPACES_ENDPOINT = 'https://api.clickup.com/api/v2/team';
+const PERSONAL_TOKEN = 'pk_dummy';
+const TEST_VAULT_KEY = 'unit-test-clickup-oauth-vault-key-material-please-ignore';
+const VAULT_KEY_CONTEXT = 'elara-clickup-oauth-vault-v1';
 
 beforeEach(async () => {
   vi.restoreAllMocks();
@@ -32,6 +35,51 @@ async function doFetch(request: Request): Promise<Response> {
     statusText: remote.statusText,
     headers: remote.headers,
   });
+}
+
+function bytesToBase64Url(bytes: Uint8Array): string {
+  let binary = '';
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function sealLegacyRawOAuthToken(token: string): Promise<{ accessCipher: string; accessIv: string }> {
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(`${VAULT_KEY_CONTEXT}\n${TEST_VAULT_KEY}`),
+  );
+  const key = await crypto.subtle.importKey('raw', digest, { name: 'AES-GCM' }, false, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    new TextEncoder().encode(token),
+  );
+  return {
+    accessCipher: bytesToBase64Url(new Uint8Array(ciphertext)),
+    accessIv: bytesToBase64Url(iv),
+  };
+}
+
+async function seedLegacyCredential(token: string, revision = Date.now()): Promise<void> {
+  const sealed = await sealLegacyRawOAuthToken(token);
+  const response = await doFetch(new Request('https://clickup-oauth-vault/__test/clickup/credential', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...sealed,
+      userId: '183',
+      username: 'Gareth',
+      email: 'gareth@example.com',
+      workspacesJson: JSON.stringify([{
+        id: '999',
+        name: 'Neon Sales',
+        members: [{ id: '183', username: 'Gareth', email: 'gareth@example.com' }],
+      }]),
+      updatedAt: revision,
+    }),
+  }));
+  expect(response.status).toBe(200);
 }
 
 type Counters = { token: number; user: number; teams: number; task: number };
@@ -141,6 +189,7 @@ async function harnessFetch(path: string): Promise<Response> {
 async function credentialSnapshot(): Promise<{
   accessCipher: string;
   accessIv: string;
+  credentialKind: 'oauth' | 'personal';
   userId: string;
   username: string | null;
   email: string | null;
@@ -152,6 +201,7 @@ async function credentialSnapshot(): Promise<{
   return await response.json() as {
     accessCipher: string;
     accessIv: string;
+    credentialKind: 'oauth' | 'personal';
     userId: string;
     username: string | null;
     email: string | null;
@@ -190,6 +240,101 @@ async function setRateLimitSnapshot(value: {
 }
 
 describe('ClickUp OAuth public boundary', () => {
+  it('serves ClickUp connection methods on a separate authenticated read endpoint', async () => {
+    const response = await SELF.fetch(await bearerRead('/clickup/oauth/methods'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ oauth: true, personalToken: true });
+  });
+
+  it('serves ClickUp connection operation state on a separate authenticated read endpoint', async () => {
+    const response = await SELF.fetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      epoch: 0,
+      settledEpoch: 0,
+      pending: false,
+      intentTimestamp: 0,
+    });
+  });
+
+
+  it('rejects unauthenticated reads and write verbs on the ClickUp methods endpoint', async () => {
+    const unauthenticated = await SELF.fetch('https://worker.example/clickup/oauth/methods', {
+      method: 'GET',
+      headers: { Origin: ORIGIN },
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const writeAttempt = await SELF.fetch(await signedWrite('/clickup/oauth/methods', '{}'));
+    expect(writeAttempt.status).toBe(405);
+  });
+
+  it('rejects unauthenticated reads and write verbs on the ClickUp connection-state endpoint', async () => {
+    const unauthenticated = await SELF.fetch('https://worker.example/clickup/oauth/connection-state', {
+      method: 'GET',
+      headers: { Origin: ORIGIN },
+    });
+    expect(unauthenticated.status).toBe(401);
+
+    const writeAttempt = await SELF.fetch(await signedWrite('/clickup/oauth/connection-state', '{}'));
+    expect(writeAttempt.status).toBe(405);
+  });
+
+  it('requires a signed installation write for personal-token activation', async () => {
+    const response = await SELF.fetch('https://worker.example/clickup/oauth/personal-token', {
+      method: 'POST',
+      headers: {
+        Origin: ORIGIN,
+        Authorization: `Bearer ${TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: '{}',
+    });
+    expect(response.status).toBe(401);
+  });
+
+  it('fails closed for stale browser connection writes that lack the signed intent generation', async () => {
+    const timestamp = Date.now();
+    const nonce = newNonce();
+    const body = '{}';
+    const signature = await signWrite(TOKEN, 'POST', '/clickup/oauth/personal-token', timestamp, nonce, body);
+    const response = await SELF.fetch(new Request('https://worker.example/clickup/oauth/personal-token', {
+      method: 'POST',
+      headers: {
+        Origin: ORIGIN,
+        Authorization: `Bearer ${TOKEN}`,
+        'Content-Type': 'application/json',
+        'X-Elara-Timestamp': String(timestamp),
+        'X-Elara-Nonce': nonce,
+        'X-Elara-Signature': signature,
+      },
+      body,
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      code: 'connection_client_upgrade_required',
+    }));
+  });
+
+  it('rejects a fresh signed write whose authenticated ClickUp intent generation is stale', async () => {
+    const timestamp = Date.now();
+    const response = await SELF.fetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp,
+      intentTimestamp: timestamp - (6 * 60_000),
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      code: 'connection_intent_stale',
+    }));
+  });
+
+  it('rejects personal-token bytes in the browser payload even when the write is correctly signed', async () => {
+    const body = JSON.stringify({ token: 'pk_dummy' });
+    const response = await SELF.fetch(await signedWrite('/clickup/oauth/personal-token', body));
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual(expect.objectContaining({ code: 'validation' }));
+  });
+
   it('rejects oversized OAuth bodies before signature verification or vault buffering', async () => {
     const response = await SELF.fetch('https://worker.example/clickup/oauth/start', {
       method: 'POST',
@@ -227,6 +372,7 @@ describe('ClickUpOAuthVault', () => {
       workspaces: [{ id: '999', name: 'Neon Sales' }],
     }));
     expect(JSON.stringify(body)).not.toContain('members');
+    expect(body).not.toHaveProperty('connectionMethods');
     expect(JSON.stringify(body)).not.toContain('clickup-access-token-never-returned');
     expect(provider.token).toBe(1);
     expect(provider.user).toBe(1);
@@ -236,6 +382,7 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.accessCipher).toBeTruthy();
     expect(snapshot?.accessCipher).not.toContain('clickup-access-token-never-returned');
     expect(snapshot?.accessIv).toBeTruthy();
+    expect(snapshot?.credentialKind).toBe('oauth');
     expect(snapshot?.userId).toBe('183');
     expect(await rateLimitSnapshot()).toEqual(expect.objectContaining({ limit: 100, remaining: 98 }));
 
@@ -257,6 +404,424 @@ describe('ClickUpOAuthVault', () => {
     const status = await doFetch(await bearerRead('/clickup/oauth/status'));
     expect(await status.json()).toEqual(expect.objectContaining({ connected: true }));
   });
+
+  it('loads legacy raw encrypted OAuth credentials as OAuth without changing Authorization semantics', async () => {
+    const legacyToken = 'legacy-oauth-token-without-envelope';
+    let teamCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        teamCalls += 1;
+        expect(request.headers.get('Authorization')).toBe(`Bearer ${legacyToken}`);
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '999',
+            name: 'Neon Sales',
+            members: [{ user: { id: 183, username: 'Gareth', email: 'gareth@example.com' } }],
+          }],
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 600),
+          },
+        });
+      }
+      throw new Error(`Unexpected legacy credential provider request: ${request.method} ${request.url}`);
+    });
+
+    await seedLegacyCredential(legacyToken);
+    expect((await credentialSnapshot())?.credentialKind).toBe('oauth');
+
+    const context = await internalCommand({
+      operation: 'getWorkspaceAuthorizationContext',
+      workspaceId: '999',
+    });
+    expect(context.status).toBe(200);
+    expect(teamCalls).toBe(1);
+    expect(await context.json()).toEqual(expect.objectContaining({
+      ok: true,
+      result: expect.objectContaining({ id: '999', name: 'Neon Sales' }),
+    }));
+  });
+
+  it('preserves OAuth credential kind across vault encryption when token text collides with the former marker', async () => {
+    const collisionToken = 'elara-clickup-personal-v1:collision-oauth-token';
+    let teamCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT && request.method === 'POST') {
+        return new Response(JSON.stringify({ access_token: collisionToken }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        expect(request.headers.get('Authorization')).toBe(`Bearer ${collisionToken}`);
+        return new Response(JSON.stringify({
+          user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        teamCalls += 1;
+        expect(request.headers.get('Authorization')).toBe(`Bearer ${collisionToken}`);
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '999',
+            name: 'Neon Sales',
+            members: [{ user: { id: 183, username: 'Gareth', email: 'gareth@example.com' } }],
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected collision-token provider request: ${request.method} ${request.url}`);
+    });
+
+    const begun = await start();
+    expect((await exchange(begun.state, 'collision-code')).status).toBe(200);
+    expect(teamCalls).toBe(1);
+
+    // This second provider call occurs only after the credential has been
+    // encrypted, persisted, decrypted and reconstructed by accessGrant().
+    const context = await internalCommand({
+      operation: 'getWorkspaceAuthorizationContext',
+      workspaceId: '999',
+    });
+    expect(context.status).toBe(200);
+    expect(teamCalls).toBe(2);
+
+    const snapshot = await credentialSnapshot();
+    expect(snapshot?.accessCipher).toBeTruthy();
+    expect(snapshot?.accessCipher).not.toContain(collisionToken);
+    expect(snapshot?.credentialKind).toBe('oauth');
+  });
+
+  it('binds OAuth exchange ordering to the initiating Connect gesture, not the callback gesture', async () => {
+    const baseTimestamp = Date.now();
+    const oauthAccessToken = 'oauth-access-token-bound-to-connect-intent';
+    let oauthTokenCalls = 0;
+    let oauthUserCalls = 0;
+    let personalUserCalls = 0;
+    let teamCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const authorization = request.headers.get('Authorization') ?? '';
+
+      if (request.url === TOKEN_ENDPOINT && request.method === 'POST') {
+        oauthTokenCalls += 1;
+        return new Response(JSON.stringify({ access_token: oauthAccessToken }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        if (authorization === `Bearer ${oauthAccessToken}`) {
+          oauthUserCalls += 1;
+          return new Response(JSON.stringify({
+            user: { id: 183, username: 'OAuth User', email: 'oauth@example.com' },
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (authorization === PERSONAL_TOKEN) {
+          personalUserCalls += 1;
+          return new Response(JSON.stringify({
+            user: { id: 456, username: 'Personal User', email: 'personal@example.com' },
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        teamCalls += 1;
+        const personal = authorization === PERSONAL_TOKEN;
+        return new Response(JSON.stringify({
+          teams: [{
+            id: personal ? '1000' : '999',
+            name: personal ? 'Personal Workspace' : 'OAuth Workspace',
+            members: [],
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected Connect-intent ordering request: ${request.method} ${request.url}`);
+    });
+
+    // A starts OAuth first. This original Connect gesture must own the entire
+    // OAuth flow even though the callback will be signed later.
+    const startBody = JSON.stringify({ redirectUri: REDIRECT_URI });
+    const started = await doFetch(await signedWrite('/clickup/oauth/start', startBody, {
+      timestamp: baseTimestamp + 1_000,
+      intentTimestamp: baseTimestamp,
+    }));
+    expect(started.status).toBe(200);
+    const startedBody = await started.json() as { state: string };
+
+    // A's callback arrives later and carries a *newer* callback-local intent.
+    // That fresh callback intent must not promote A above a later user gesture.
+    const exchangeBody = JSON.stringify({
+      code: 'oauth-code-bound-to-original-connect',
+      state: startedBody.state,
+      redirectUri: REDIRECT_URI,
+    });
+    const exchanged = await doFetch(await signedWrite('/clickup/oauth/exchange', exchangeBody, {
+      timestamp: baseTimestamp + 4_000,
+      intentTimestamp: baseTimestamp + 3_000,
+    }));
+    expect(exchanged.status).toBe(200);
+    expect(oauthTokenCalls).toBe(1);
+    expect(oauthUserCalls).toBe(1);
+
+    const stateAfterExchange = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(await stateAfterExchange.json()).toEqual(expect.objectContaining({
+      intentTimestamp: baseTimestamp,
+      pending: false,
+    }));
+
+    // B's personal-token gesture happened after A's original Connect but its
+    // request reaches the Worker only after A's OAuth callback. It must still
+    // win because B's browser intent (base+2000) is newer than A's Connect
+    // intent (base), even though it is older than A's callback-local nonce.
+    const personal = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: baseTimestamp + 5_000,
+      intentTimestamp: baseTimestamp + 2_000,
+    }));
+    expect(personal.status).toBe(200);
+    expect(personalUserCalls).toBe(1);
+    expect(teamCalls).toBe(2);
+
+    const finalStatus = await personal.json() as Record<string, unknown>;
+    expect(finalStatus).toEqual(expect.objectContaining({
+      connected: true,
+      account: { id: '456', username: 'Personal User', email: 'personal@example.com' },
+      workspaces: [{ id: '1000', name: 'Personal Workspace' }],
+    }));
+    expect((await credentialSnapshot())?.userId).toBe('456');
+
+    const finalState = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(await finalState.json()).toEqual(expect.objectContaining({
+      intentTimestamp: baseTimestamp + 2_000,
+      pending: false,
+    }));
+  });
+
+  it('rejects an older signed connection write that arrives after a newer replacement committed', async () => {
+    let userCalls = 0;
+    let workspaceCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        userCalls += 1;
+        return new Response(JSON.stringify({
+          user: { id: 456, username: 'Newer', email: 'newer@example.com' },
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        workspaceCalls += 1;
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '1000',
+            name: 'Newer Workspace',
+            members: [{ user: { id: 456, username: 'Newer', email: 'newer@example.com' } }],
+          }],
+        }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      throw new Error(`Unexpected ordered ClickUp request: ${request.method} ${request.url}`);
+    });
+
+    const baseTimestamp = Date.now();
+    const newer = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: baseTimestamp + 2_000,
+      intentTimestamp: baseTimestamp + 1_000,
+    }));
+    expect(newer.status).toBe(200);
+    expect(userCalls).toBe(1);
+    expect(workspaceCalls).toBe(1);
+    expect((await credentialSnapshot())?.userId).toBe('456');
+    const stateAfterNewer = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(await stateAfterNewer.json()).toEqual(expect.objectContaining({
+      intentTimestamp: baseTimestamp + 1_000,
+      pending: false,
+    }));
+
+    // This request represents an older browser gesture whose network delivery
+    // was delayed until after the newer replacement reached the Worker.
+    const delayedOlder = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      // It signs/sends later, but its HMAC-covered intent generation is older.
+      timestamp: baseTimestamp + 3_000,
+      intentTimestamp: baseTimestamp,
+    }));
+    expect(delayedOlder.status).toBe(409);
+    expect(await delayedOlder.json()).toEqual(expect.objectContaining({
+      code: 'connection_superseded',
+    }));
+    expect(userCalls).toBe(1);
+    expect(workspaceCalls).toBe(1);
+    expect((await credentialSnapshot())?.userId).toBe('456');
+
+    // Older OAuth-start gestures are ordered by the same signed watermark and
+    // therefore cannot recreate a stale popup authority after replacement.
+    const staleStartBody = JSON.stringify({ redirectUri: REDIRECT_URI });
+    const staleStart = await doFetch(await signedWrite('/clickup/oauth/start', staleStartBody, {
+      timestamp: baseTimestamp + 4_000,
+      intentTimestamp: baseTimestamp + 500,
+    }));
+    expect(staleStart.status).toBe(409);
+    expect(await staleStart.json()).toEqual(expect.objectContaining({
+      code: 'connection_superseded',
+    }));
+  });
+
+  it('fails closed when two signed connection writes carry the same millisecond timestamp', async () => {
+    let userCalls = 0;
+    let workspaceCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        userCalls += 1;
+        return new Response(JSON.stringify({
+          user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        workspaceCalls += 1;
+        return new Response(JSON.stringify({
+          teams: [{ id: '999', name: 'Neon Sales', members: [] }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected same-timestamp ClickUp request: ${request.method} ${request.url}`);
+    });
+
+    const intentTimestamp = Date.now();
+    const first = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: intentTimestamp + 1_000,
+      intentTimestamp,
+    }));
+    expect(first.status).toBe(200);
+
+    const second = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: intentTimestamp + 2_000,
+      intentTimestamp,
+    }));
+    expect(second.status).toBe(409);
+    expect(await second.json()).toEqual(expect.objectContaining({ code: 'connection_superseded' }));
+    expect(userCalls).toBe(1);
+    expect(workspaceCalls).toBe(1);
+  });
+
+  it('activates a configured personal API token entirely inside the Worker and stores only encrypted material', async () => {
+    let userCalls = 0;
+    let workspaceCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        userCalls += 1;
+        expect(request.headers.get('Authorization')).toBe(PERSONAL_TOKEN);
+        expect(request.headers.get('Authorization')).not.toContain('Bearer ');
+        return new Response(JSON.stringify({
+          user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '99',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 600),
+          },
+        });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        workspaceCalls += 1;
+        expect(request.headers.get('Authorization')).toBe(PERSONAL_TOKEN);
+        return new Response(JSON.stringify({
+          teams: [{
+            id: '999',
+            name: 'Neon Sales',
+            members: [{ user: { id: 183, username: 'Gareth', email: 'gareth@example.com' } }],
+          }],
+        }), {
+          status: 200,
+          headers: {
+            'content-type': 'application/json',
+            'X-RateLimit-Limit': '100',
+            'X-RateLimit-Remaining': '98',
+            'X-RateLimit-Reset': String(Math.floor(Date.now() / 1000) + 600),
+          },
+        });
+      }
+      throw new Error(`Unexpected ClickUp personal-token request: ${request.method} ${request.url}`);
+    });
+
+    const methods = await doFetch(await bearerRead('/clickup/oauth/methods'));
+    expect(methods.status).toBe(200);
+    expect(await methods.json()).toEqual({ oauth: true, personalToken: true });
+
+    const response = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}'));
+    expect(response.status).toBe(200);
+    const body = await response.json() as Record<string, unknown>;
+    expect(body).toEqual(expect.objectContaining({
+      connected: true,
+      account: { id: '183', username: 'Gareth', email: 'gareth@example.com' },
+      workspaces: [{ id: '999', name: 'Neon Sales' }],
+    }));
+    expect(body).not.toHaveProperty('connectionMethods');
+    expect(JSON.stringify(body)).not.toContain(PERSONAL_TOKEN);
+    expect(userCalls).toBe(1);
+    expect(workspaceCalls).toBe(1);
+
+    const snapshot = await credentialSnapshot();
+    expect(snapshot?.accessCipher).toBeTruthy();
+    expect(snapshot?.accessCipher).not.toContain(PERSONAL_TOKEN);
+    expect(snapshot?.accessIv).toBeTruthy();
+    expect(snapshot?.credentialKind).toBe('personal');
+    expect(snapshot?.userId).toBe('183');
+
+    const context = await internalCommand({
+      operation: 'getWorkspaceAuthorizationContext',
+      workspaceId: '999',
+    });
+    expect(context.status).toBe(200);
+    expect(workspaceCalls).toBe(2);
+  });
+
+  it('invalidates a pending OAuth popup when the user chooses the configured personal token', async () => {
+    let oauthTokenCalls = 0;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      if (request.url === TOKEN_ENDPOINT) {
+        oauthTokenCalls += 1;
+        throw new Error('A stale OAuth state must be rejected before token exchange.');
+      }
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        expect(request.headers.get('Authorization')).toBe(PERSONAL_TOKEN);
+        return new Response(JSON.stringify({
+          user: { id: 183, username: 'Gareth', email: 'gareth@example.com' },
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        expect(request.headers.get('Authorization')).toBe(PERSONAL_TOKEN);
+        return new Response(JSON.stringify({
+          teams: [{ id: '999', name: 'Neon Sales', members: [] }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected ClickUp request: ${request.method} ${request.url}`);
+    });
+
+    const pendingOAuth = await start();
+    const personal = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}'));
+    expect(personal.status).toBe(200);
+    expect((await credentialSnapshot())?.userId).toBe('183');
+
+    const staleOAuth = await exchange(pendingOAuth.state, 'stale-oauth-code');
+    expect(staleOAuth.status).toBe(409);
+    expect(await staleOAuth.json()).toEqual(expect.objectContaining({ code: 'oauth_state' }));
+    expect(oauthTokenCalls).toBe(0);
+    expect((await credentialSnapshot())?.userId).toBe('183');
+  });
+
 
   it('rejects an older OAuth popup state after a newer Connect flow starts', async () => {
     const provider = mockProvider();
@@ -339,7 +904,7 @@ describe('ClickUpOAuthVault', () => {
   it('rejects replay of a signed OAuth start request', async () => {
     const body = JSON.stringify({ redirectUri: REDIRECT_URI });
     const timestamp = Date.now();
-    const nonce = newNonce();
+    const nonce = `clickup-v1:${timestamp}:${newNonce()}`;
     const signature = await signWrite(TOKEN, 'POST', '/clickup/oauth/start', timestamp, nonce, body);
     expect((await doFetch(await signedWrite('/clickup/oauth/start', body, { timestamp, nonce, signature }))).status).toBe(200);
     const replay = await doFetch(await signedWrite('/clickup/oauth/start', body, { timestamp, nonce, signature }));
@@ -553,7 +1118,10 @@ describe('ClickUpOAuthVault', () => {
     expect(await credentialSnapshot()).toBeNull();
 
     const status = await doFetch(await bearerRead('/clickup/oauth/status'));
-    expect(await status.json()).toEqual({ connected: false, workspaces: [] });
+    expect(await status.json()).toEqual({
+      connected: false,
+      workspaces: [],
+    });
   });
 
   it('disconnects locally without pretending ClickUp revoked the provider grant', async () => {
@@ -565,6 +1133,11 @@ describe('ClickUpOAuthVault', () => {
     expect(disconnected.status).toBe(200);
     expect(await disconnected.json()).toEqual({ disconnected: true, providerRevoked: false });
     expect(await credentialSnapshot()).toBeNull();
+
+    const operationState = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    const operationBody = await operationState.json() as { epoch: number; settledEpoch: number; pending: boolean };
+    expect(operationBody.pending).toBe(false);
+    expect(operationBody.settledEpoch).toBe(operationBody.epoch);
   });
 
   it('does not let an in-flight OAuth exchange resurrect a grant after disconnect', async () => {
@@ -595,6 +1168,11 @@ describe('ClickUpOAuthVault', () => {
     }
     expect(tokenFetchStarted).toBe(true);
 
+    const pendingState = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(await pendingState.json()).toEqual(expect.objectContaining({
+      pending: true,
+    }));
+
     const disconnected = await doFetch(await signedWrite('/clickup/oauth/disconnect', '{}'));
     expect(disconnected.status).toBe(200);
 
@@ -602,6 +1180,10 @@ describe('ClickUpOAuthVault', () => {
     expect(lateExchange.status).toBe(409);
     expect(await lateExchange.json()).toEqual(expect.objectContaining({ code: 'oauth_superseded' }));
     expect(await credentialSnapshot()).toBeNull();
+    const settledState = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    const settledBody = await settledState.json() as { epoch: number; settledEpoch: number; pending: boolean };
+    expect(settledBody.pending).toBe(false);
+    expect(settledBody.settledEpoch).toBe(settledBody.epoch);
   });
 
   it('does not let a delayed old-token failure delete or rate-limit a newer grant', async () => {

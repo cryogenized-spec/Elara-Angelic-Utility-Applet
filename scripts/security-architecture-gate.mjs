@@ -424,6 +424,7 @@ for (const marker of [
   'writeConnectionGeneration(pairing, pending.operationId)',
   'generationSnapshot = connectionGenerationForPairing(pairing)',
   'connectionGenerationForPairing(pairing) !== generationSnapshot',
+  'connectionGenerationForPairing(pairing) !== pending.operationId',
   'expectedOperationId && pending.operationId !== expectedOperationId',
   'CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000',
   "new ClickUpOAuthError(\n    'connection_pending'",

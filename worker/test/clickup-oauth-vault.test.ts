@@ -497,6 +497,111 @@ describe('ClickUpOAuthVault', () => {
     expect(snapshot?.credentialKind).toBe('oauth');
   });
 
+  it('binds OAuth exchange ordering to the initiating Connect gesture, not the callback gesture', async () => {
+    const baseTimestamp = Date.now();
+    const oauthAccessToken = 'oauth-access-token-bound-to-connect-intent';
+    let oauthTokenCalls = 0;
+    let oauthUserCalls = 0;
+    let personalUserCalls = 0;
+    let teamCalls = 0;
+
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const request = input instanceof Request ? input : new Request(input, init);
+      const authorization = request.headers.get('Authorization') ?? '';
+
+      if (request.url === TOKEN_ENDPOINT && request.method === 'POST') {
+        oauthTokenCalls += 1;
+        return new Response(JSON.stringify({ access_token: oauthAccessToken }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      if (request.url === USER_ENDPOINT && request.method === 'GET') {
+        if (authorization === `Bearer ${oauthAccessToken}`) {
+          oauthUserCalls += 1;
+          return new Response(JSON.stringify({
+            user: { id: 183, username: 'OAuth User', email: 'oauth@example.com' },
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+        if (authorization === PERSONAL_TOKEN) {
+          personalUserCalls += 1;
+          return new Response(JSON.stringify({
+            user: { id: 456, username: 'Personal User', email: 'personal@example.com' },
+          }), { status: 200, headers: { 'content-type': 'application/json' } });
+        }
+      }
+      if (request.url === WORKSPACES_ENDPOINT && request.method === 'GET') {
+        teamCalls += 1;
+        const personal = authorization === PERSONAL_TOKEN;
+        return new Response(JSON.stringify({
+          teams: [{
+            id: personal ? '1000' : '999',
+            name: personal ? 'Personal Workspace' : 'OAuth Workspace',
+            members: [],
+          }],
+        }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }
+      throw new Error(`Unexpected Connect-intent ordering request: ${request.method} ${request.url}`);
+    });
+
+    // A starts OAuth first. This original Connect gesture must own the entire
+    // OAuth flow even though the callback will be signed later.
+    const startBody = JSON.stringify({ redirectUri: REDIRECT_URI });
+    const started = await doFetch(await signedWrite('/clickup/oauth/start', startBody, {
+      timestamp: baseTimestamp + 1_000,
+      intentTimestamp: baseTimestamp,
+    }));
+    expect(started.status).toBe(200);
+    const startedBody = await started.json() as { state: string };
+
+    // A's callback arrives later and carries a *newer* callback-local intent.
+    // That fresh callback intent must not promote A above a later user gesture.
+    const exchangeBody = JSON.stringify({
+      code: 'oauth-code-bound-to-original-connect',
+      state: startedBody.state,
+      redirectUri: REDIRECT_URI,
+    });
+    const exchanged = await doFetch(await signedWrite('/clickup/oauth/exchange', exchangeBody, {
+      timestamp: baseTimestamp + 4_000,
+      intentTimestamp: baseTimestamp + 3_000,
+    }));
+    expect(exchanged.status).toBe(200);
+    expect(oauthTokenCalls).toBe(1);
+    expect(oauthUserCalls).toBe(1);
+
+    const stateAfterExchange = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(await stateAfterExchange.json()).toEqual(expect.objectContaining({
+      intentTimestamp: baseTimestamp,
+      pending: false,
+    }));
+
+    // B's personal-token gesture happened after A's original Connect but its
+    // request reaches the Worker only after A's OAuth callback. It must still
+    // win because B's browser intent (base+2000) is newer than A's Connect
+    // intent (base), even though it is older than A's callback-local nonce.
+    const personal = await doFetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp: baseTimestamp + 5_000,
+      intentTimestamp: baseTimestamp + 2_000,
+    }));
+    expect(personal.status).toBe(200);
+    expect(personalUserCalls).toBe(1);
+    expect(teamCalls).toBe(2);
+
+    const finalStatus = await personal.json() as Record<string, unknown>;
+    expect(finalStatus).toEqual(expect.objectContaining({
+      connected: true,
+      account: { id: '456', username: 'Personal User', email: 'personal@example.com' },
+      workspaces: [{ id: '1000', name: 'Personal Workspace' }],
+    }));
+    expect((await credentialSnapshot())?.userId).toBe('456');
+
+    const finalState = await doFetch(await bearerRead('/clickup/oauth/connection-state'));
+    expect(await finalState.json()).toEqual(expect.objectContaining({
+      intentTimestamp: baseTimestamp + 2_000,
+      pending: false,
+    }));
+  });
+
   it('rejects an older signed connection write that arrives after a newer replacement committed', async () => {
     let userCalls = 0;
     let workspaceCalls = 0;

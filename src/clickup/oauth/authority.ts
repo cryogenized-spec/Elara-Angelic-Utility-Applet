@@ -35,6 +35,7 @@ type PendingConnectionChange = {
   readonly authorityBinding: string;
   readonly operationId: string;
   readonly operation: 'oauth-exchange' | 'personal-token' | 'disconnect';
+  readonly intentTimestamp: number;
   readonly until: number;
 };
 
@@ -287,6 +288,9 @@ function parsePendingConnection(raw: string | null): PendingConnectionChange | n
         && operation !== 'personal-token'
         && operation !== 'disconnect'
       )
+      || typeof record.intentTimestamp !== 'number'
+      || !Number.isSafeInteger(record.intentTimestamp)
+      || record.intentTimestamp <= 0
       || typeof record.until !== 'number'
       || !Number.isFinite(record.until)
     ) return null;
@@ -294,6 +298,7 @@ function parsePendingConnection(raw: string | null): PendingConnectionChange | n
       authorityBinding: record.authorityBinding,
       operationId: record.operationId,
       operation,
+      intentTimestamp: record.intentTimestamp,
       until: record.until,
     };
   } catch {
@@ -319,11 +324,13 @@ function pendingConnectionSnapshotForPairing(pairing: AutonomyPairing): PendingC
 function markConnectionPending(
   pairing: AutonomyPairing,
   operation: PendingConnectionChange['operation'],
+  intentTimestamp: number,
 ): PendingConnectionChange {
   const pending: PendingConnectionChange = {
     authorityBinding: clickUpPairingAuthorityBinding(pairing),
     operationId: newNonce(),
     operation,
+    intentTimestamp,
     until: Date.now() + CLICKUP_CONNECTION_SETTLE_MS,
   };
   if (typeof localStorage !== 'undefined' && samePairing(pairing)) {
@@ -391,11 +398,21 @@ async function ensureConnectionSettled(
     throw connectionPendingError();
   }
 
-  if (workerState) {
+  if (
+    workerState
+    && workerState.intentTimestamp !== undefined
+    && workerState.intentTimestamp >= localBefore.value.intentTimestamp
+  ) {
+    // The Worker has durably admitted this browser intent (or a newer one)
+    // and reports the resulting connection epoch settled. Only now is it safe
+    // for another tab to release this local marker.
     clearPendingConnectionForPairing(pairing, localBefore.value.operationId);
     return workerState;
   }
 
+  // A Worker that omits the watermark is an older compatible build. Likewise,
+  // a lower watermark means this browser gesture has not reached the Worker
+  // yet. In both cases the bounded local barrier remains authoritative.
   throw connectionPendingError();
 }
 
@@ -527,7 +544,7 @@ async function connectionWrite<T>(
   await ensureConnectionSettled(pairing);
   // Mark before egress so every same-origin tab immediately stops advertising
   // the old identity while an account-changing request is in flight.
-  const pending = markConnectionPending(pairing, operation);
+  const pending = markConnectionPending(pairing, operation, browserIntentTimestamp);
   try {
     const result = await signedPost(pairing, path, payload, parse, browserIntentTimestamp);
     if (connectionGenerationForPairing(pairing) !== pending.operationId) {

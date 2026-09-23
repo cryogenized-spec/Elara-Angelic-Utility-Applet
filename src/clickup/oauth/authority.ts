@@ -20,6 +20,13 @@ const PENDING_CONNECTION_KEY = 'elara.clickup.connection.pending.v1';
 const CONNECTION_GENERATION_KEY = 'elara.clickup.connection.generation.v1';
 export const CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000;
 
+let lastSignedWriteTimestamp = 0;
+
+function nextSignedWriteTimestamp(): number {
+  lastSignedWriteTimestamp = Math.max(Date.now(), lastSignedWriteTimestamp + 1);
+  return lastSignedWriteTimestamp;
+}
+
 type StoredClickUpStatus = {
   readonly authorityBinding: string;
   readonly generationId: string | null;
@@ -397,7 +404,12 @@ async function ensureConnectionSettled(
 
 function ambiguousConnectionWriteFailure(cause: unknown): boolean {
   if (!(cause instanceof ClickUpOAuthError)) return true;
-  if (cause.code === 'configuration' || cause.code === 'oauth_superseded' || cause.code === 'grant_changed') return false;
+  if (
+    cause.code === 'configuration'
+    || cause.code === 'oauth_superseded'
+    || cause.code === 'connection_superseded'
+    || cause.code === 'grant_changed'
+  ) return false;
   return cause.code === 'timeout'
     || cause.code === 'network'
     || cause.code === 'response_too_large'
@@ -481,7 +493,7 @@ async function signedPost<T>(
 ): Promise<T> {
   const token = await workerToken(pairing);
   const body = JSON.stringify(payload);
-  const timestamp = Date.now();
+  const timestamp = nextSignedWriteTimestamp();
   const nonce = newNonce();
   const signature = await signWrite(token, 'POST', path, timestamp, nonce, body);
   assertPairingStillCurrent(pairing);

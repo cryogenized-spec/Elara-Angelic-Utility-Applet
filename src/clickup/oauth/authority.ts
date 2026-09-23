@@ -1,4 +1,4 @@
-import { newNonce, signWrite } from '../../autonomy/protocol';
+import { ELARA_AUTH_TIMESTAMP_WINDOW_MS, newNonce, signWrite } from '../../autonomy/protocol';
 import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../../autonomy/cloud/pairing';
 import {
   clickUpConnectionMethodsSchema,
@@ -18,7 +18,12 @@ const MAX_WORKER_RESPONSE_BYTES = 64 * 1024;
 const STORAGE_KEY = 'elara.clickup.authorization.v1';
 const PENDING_CONNECTION_KEY = 'elara.clickup.connection.pending.v1';
 const CONNECTION_GENERATION_KEY = 'elara.clickup.connection.generation.v1';
-export const CLICKUP_CONNECTION_SETTLE_MS = (WORKER_TIMEOUT_MS * 2) + 5_000;
+// Keep the local pending barrier alive for the complete HMAC-covered browser
+// intent admission window plus one full Worker request deadline and margin.
+// A connection intent that can still be accepted by the Worker must never
+// become locally "not pending" merely because pre-egress work was slow.
+export const CLICKUP_CONNECTION_SETTLE_MS =
+  ELARA_AUTH_TIMESTAMP_WINDOW_MS + WORKER_TIMEOUT_MS + 5_000;
 
 type StoredClickUpStatus = {
   readonly authorityBinding: string;

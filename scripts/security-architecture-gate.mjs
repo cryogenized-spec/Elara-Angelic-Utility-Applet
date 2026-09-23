@@ -441,7 +441,7 @@ for (const marker of [
   "'/clickup/oauth/connection-state'",
   'stateAfter.epoch !== stateBefore.epoch',
   'stateAfter.settledEpoch !== stateBefore.settledEpoch',
-  'markConnectionPending(pairing, operation)',
+  'markConnectionPending(pairing, operation, browserIntentTimestamp)',
 ]) {
   if (!clickUpOAuthAuthority.includes(marker)) fail(`ClickUp pairing-owned cache/settle authority is missing: ${marker}`);
 }

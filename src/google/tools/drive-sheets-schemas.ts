@@ -12,7 +12,65 @@ const valuesSchema = z.array(rowSchema).min(1).max(1000).superRefine((rows, cont
   if (cellCount > 10_000) context.addIssue({ code: 'custom', message: 'Google Sheets writes are limited to 10,000 cells per operation.' });
   if (new TextEncoder().encode(JSON.stringify({ values: rows })).byteLength > 1_000_000) context.addIssue({ code: 'custom', message: 'Google Sheets write exceeds the application request limit.' });
 });
-const updateRequestSchema = z.record(z.string(), z.unknown());
+const updateRequestSchema = z.record(z.string().min(1).max(200), z.unknown());
+const BATCH_UPDATE_MAX_DEPTH = 10;
+const BATCH_UPDATE_MAX_NODES = 12_000;
+const BATCH_UPDATE_MAX_BYTES = 1_000_000;
+
+function validateBoundedJsonShape(value: unknown): string | null {
+  const stack: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const seen = new WeakSet<object>();
+  let nodes = 0;
+
+  while (stack.length) {
+    const current = stack.pop()!;
+    nodes += 1;
+    if (nodes > BATCH_UPDATE_MAX_NODES) return 'Google Sheets batch update contains too many nested values.';
+    if (current.depth > BATCH_UPDATE_MAX_DEPTH) return 'Google Sheets batch update is nested too deeply.';
+
+    const item = current.value;
+    if (item === null || typeof item === 'string' || typeof item === 'boolean') continue;
+    if (typeof item === 'number') {
+      if (!Number.isFinite(item)) return 'Google Sheets batch update contains a non-finite number.';
+      continue;
+    }
+    if (typeof item !== 'object') return 'Google Sheets batch update contains a non-JSON value.';
+
+    const object = item as object;
+    if (seen.has(object)) return 'Google Sheets batch update contains a cyclic value.';
+    seen.add(object);
+
+    if (Array.isArray(item)) {
+      for (let index = item.length - 1; index >= 0; index -= 1) {
+        stack.push({ value: item[index], depth: current.depth + 1 });
+      }
+      continue;
+    }
+
+    const entries = Object.entries(item as Record<string, unknown>);
+    for (let index = entries.length - 1; index >= 0; index -= 1) {
+      const [key, nested] = entries[index]!;
+      if (!key || key.length > 200) return 'Google Sheets batch update contains an invalid field name.';
+      stack.push({ value: nested, depth: current.depth + 1 });
+    }
+  }
+  return null;
+}
+
+const batchUpdateRequestsSchema = z.array(updateRequestSchema).min(1).max(100).superRefine((requests, context) => {
+  const shapeError = validateBoundedJsonShape(requests);
+  if (shapeError) {
+    context.addIssue({ code: 'custom', message: shapeError });
+    return;
+  }
+  try {
+    if (new TextEncoder().encode(JSON.stringify({ requests })).byteLength > BATCH_UPDATE_MAX_BYTES) {
+      context.addIssue({ code: 'custom', message: 'Google Sheets batch update exceeds the application request limit.' });
+    }
+  } catch {
+    context.addIssue({ code: 'custom', message: 'Google Sheets batch update could not be serialized safely.' });
+  }
+});
 const inputModeSchema = z.enum(['literal', 'userEntered']).optional();
 
 function singleCellPart(value: string): string | undefined {
@@ -129,7 +187,7 @@ export const driveSheetsToolArgumentSchemas = {
     startIndex: z.number().int().min(0).max(100_000),
     count: z.number().int().min(1).max(100),
   }).strict(),
-  'sheets.batchUpdate': z.object({ spreadsheetId: fileIdSchema, requests: z.array(updateRequestSchema).min(1).max(100) }).strict(),
+  'sheets.batchUpdate': z.object({ spreadsheetId: fileIdSchema, requests: batchUpdateRequestsSchema }).strict(),
 } as const;
 
 export type DriveSheetsToolName = keyof typeof driveSheetsToolArgumentSchemas;

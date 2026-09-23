@@ -117,9 +117,19 @@ describe('ClickUp integration with Elara model-tool authority', () => {
   it('presents ClickUp comments and attachments without debug-oriented payload details', () => {
     const comment = confirmationRequestForCall({
       tool: 'clickup.createTaskComment',
-      arguments: { workspaceId: '999', taskId: '86task', text: 'Inspection complete.' },
+      arguments: {
+        workspaceId: '999',
+        taskId: '86task',
+        text: 'Inspection complete.',
+        mentionUserIds: ['183', '456'],
+        notifyAll: true,
+      },
     });
-    expect(comment?.reviewText).toBe('Inspection complete.');
+    expect(comment?.reviewText).toContain('Comment text: “Inspection complete.”');
+    expect(comment?.reviewText).toContain('Mentioned ClickUp users:');
+    expect(comment?.reviewText).toContain('Item 1: “183”');
+    expect(comment?.reviewText).toContain('Item 2: “456”');
+    expect(comment?.reviewText).toContain('Notify everyone: Yes');
     expect(comment?.reviewText).not.toContain('workspaceId');
 
     const attachment = confirmationRequestForCall({

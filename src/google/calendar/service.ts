@@ -29,6 +29,12 @@ const DATE_TIME_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.
 const CONCRETE_ETAG_PATTERN = /^"[^"]+"$/;
 
 export type CalendarSendUpdates = 'all' | 'externalOnly';
+
+export interface GoogleCalendarMutationOptions {
+  readonly signal?: AbortSignal;
+  readonly isGenerationActive?: () => boolean;
+  readonly beforeProviderFetch?: () => void | Promise<void>;
+}
 export type CalendarMinAccessRole = 'freeBusyReader' | 'reader' | 'writerWithoutPrivateAccess' | 'writer' | 'owner';
 
 export interface CalendarEventSummary {
@@ -518,6 +524,20 @@ function throwMutationFailure(response: Response, action: string): never {
   throw new Error(`Google Calendar ${action} request failed (${response.status}).`);
 }
 
+function requireCalendarMutationCurrent(options: GoogleCalendarMutationOptions, operation: string): void {
+  if (options.signal?.aborted || options.isGenerationActive?.() === false) {
+    throw new DOMException(`${operation} lost turn authority.`, 'AbortError');
+  }
+}
+
+function calendarProviderMutationGuard(options: GoogleCalendarMutationOptions, operation: string): () => Promise<void> {
+  return async () => {
+    requireCalendarMutationCurrent(options, operation);
+    await options.beforeProviderFetch?.();
+    requireCalendarMutationCurrent(options, operation);
+  };
+}
+
 export class GoogleCalendarService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
@@ -705,7 +725,7 @@ export class GoogleCalendarService {
     };
   }
 
-  async createSemanticEvent(input: CalendarEventSemanticInput): Promise<CalendarEventDetail> {
+  async createSemanticEvent(input: CalendarEventSemanticInput, options: GoogleCalendarMutationOptions = {}): Promise<CalendarEventDetail> {
     const safeSummary = boundedText(input.summary, 'event summary', MAX_EVENT_SUMMARY_LENGTH);
     const safeStart = boundedText(input.start, 'event start', MAX_TIME_PARAMETER_LENGTH);
     const safeEnd = boundedText(input.end, 'event end', MAX_TIME_PARAMETER_LENGTH);
@@ -727,22 +747,28 @@ export class GoogleCalendarService {
     if (safeDescription !== undefined) event.description = safeDescription;
     if (safeAttendees?.length) event.attendees = safeAttendees.map((email) => ({ email }));
     if (safeRecurrence?.length) event.recurrence = [...safeRecurrence];
-    return this.createEvent({ calendarId: input.calendarId, event, sendUpdates: input.sendUpdates, idempotencyKey: input.idempotencyKey });
+    return this.createEvent({ calendarId: input.calendarId, event, sendUpdates: input.sendUpdates, idempotencyKey: input.idempotencyKey }, options);
   }
 
-  async createEvent({ calendarId = 'primary', event, sendUpdates, idempotencyKey }: CalendarEventCreateInput): Promise<CalendarEventDetail> {
+  async createEvent({ calendarId = 'primary', event, sendUpdates, idempotencyKey }: CalendarEventCreateInput, options: GoogleCalendarMutationOptions = {}): Promise<CalendarEventDetail> {
     const safeCalendarId = boundedText(calendarId, 'calendar ID', MAX_CALENDAR_ID_LENGTH) ?? 'primary';
     const generatedId = idempotencyKey ? await calendarEventIdForCallId(idempotencyKey) : undefined;
     const safeEvent = boundedEvent(generatedId && event.id === undefined ? { ...event, id: generatedId } : event);
+    requireCalendarMutationCurrent(options, 'Google Calendar create');
     const access = await this.oauth.authorize('calendar.events.write');
+    requireCalendarMutationCurrent(options, 'Google Calendar create');
     const url = withSendUpdates(new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(safeCalendarId)}/events`), sendUpdates);
-    const response = await access.fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(safeEvent) });
-    if (response.status === 409 && generatedId) return this.getEventWithAccess(access, safeCalendarId, generatedId);
+    const response = await access.fetch(
+      url,
+      { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(safeEvent), ...(options.signal ? { signal: options.signal } : {}) },
+      calendarProviderMutationGuard(options, 'Google Calendar create'),
+    );
+    if (response.status === 409 && generatedId) return this.getEventWithAccess(access, safeCalendarId, generatedId, undefined, calendarProviderMutationGuard(options, 'Google Calendar create replay'));
     if (!response.ok) throw new Error(`Google Calendar create request failed (${response.status}).`);
     return normalizeEventDetail(await readBoundedProviderJson<CalendarApiEvent>(response, { operation: 'Google Calendar event request', maxBytes: MAX_PROVIDER_JSON_BYTES }));
   }
 
-  async updateSemanticEvent(input: CalendarEventSemanticUpdateInput): Promise<CalendarEventDetail> {
+  async updateSemanticEvent(input: CalendarEventSemanticUpdateInput, options: GoogleCalendarMutationOptions = {}): Promise<CalendarEventDetail> {
     const safeEventId = boundedText(input.eventId, 'event ID', MAX_EVENT_ID_LENGTH);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
     const updatesStart = input.start !== undefined;
@@ -778,38 +804,50 @@ export class GoogleCalendarService {
     if (input.attendees !== undefined) patch.attendees = (boundedStringArray(input.attendees, 'attendee', MAX_ATTENDEES, 320) ?? []).map((email) => ({ email }));
     if (input.recurrence !== undefined) patch.recurrence = [...(safeRecurrence ?? [])];
     if (Object.keys(patch).length === 0) throw new Error('Google Calendar update requires at least one event change.');
-    return this.updateEvent(input.calendarId, safeEventId, input.etag, patch, input.sendUpdates);
+    return this.updateEvent(input.calendarId, safeEventId, input.etag, patch, input.sendUpdates, options);
   }
 
-  async updateEvent(calendarId = 'primary', eventId: string, etag: string, patch: Readonly<Record<string, unknown>>, sendUpdates?: CalendarSendUpdates): Promise<CalendarEventDetail> {
+  async updateEvent(calendarId = 'primary', eventId: string, etag: string, patch: Readonly<Record<string, unknown>>, sendUpdates?: CalendarSendUpdates, options: GoogleCalendarMutationOptions = {}): Promise<CalendarEventDetail> {
     const safeCalendarId = boundedText(calendarId, 'calendar ID', MAX_CALENDAR_ID_LENGTH) ?? 'primary';
     const safeEventId = boundedText(eventId, 'event ID', MAX_EVENT_ID_LENGTH);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
     const safePatch = boundedEvent(patch);
     const headers = { 'content-type': 'application/json', ...conditionalHeaders(etag) };
+    requireCalendarMutationCurrent(options, 'Google Calendar update');
     const access = await this.oauth.authorize('calendar.events.write');
+    requireCalendarMutationCurrent(options, 'Google Calendar update');
     const url = withSendUpdates(new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(safeCalendarId)}/events/${encodeURIComponent(safeEventId)}`), sendUpdates);
-    const response = await access.fetch(url, { method: 'PATCH', headers, body: JSON.stringify(safePatch) });
+    const response = await access.fetch(
+      url,
+      { method: 'PATCH', headers, body: JSON.stringify(safePatch), ...(options.signal ? { signal: options.signal } : {}) },
+      calendarProviderMutationGuard(options, 'Google Calendar update'),
+    );
     if (!response.ok) throwMutationFailure(response, 'update');
     return normalizeEventDetail(await readBoundedProviderJson<CalendarApiEvent>(response, { operation: 'Google Calendar event request', maxBytes: MAX_PROVIDER_JSON_BYTES }));
   }
 
-  async deleteEvent(calendarId = 'primary', eventId: string, etag: string, sendUpdates?: CalendarSendUpdates): Promise<{ deleted: true; calendarId: string; eventId: string }> {
+  async deleteEvent(calendarId = 'primary', eventId: string, etag: string, sendUpdates?: CalendarSendUpdates, options: GoogleCalendarMutationOptions = {}): Promise<{ deleted: true; calendarId: string; eventId: string }> {
     const safeCalendarId = boundedText(calendarId, 'calendar ID', MAX_CALENDAR_ID_LENGTH) ?? 'primary';
     const safeEventId = boundedText(eventId, 'event ID', MAX_EVENT_ID_LENGTH);
     if (!safeEventId) throw new Error('Google Calendar event ID is required.');
     const headers = conditionalHeaders(etag);
+    requireCalendarMutationCurrent(options, 'Google Calendar delete');
     const access = await this.oauth.authorize('calendar.events.write');
+    requireCalendarMutationCurrent(options, 'Google Calendar delete');
     const url = withSendUpdates(new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(safeCalendarId)}/events/${encodeURIComponent(safeEventId)}`), sendUpdates);
-    const response = await access.fetch(url, { method: 'DELETE', headers });
+    const response = await access.fetch(
+      url,
+      { method: 'DELETE', headers, ...(options.signal ? { signal: options.signal } : {}) },
+      calendarProviderMutationGuard(options, 'Google Calendar delete'),
+    );
     if (!response.ok) throwMutationFailure(response, 'delete');
     return { deleted: true, calendarId: safeCalendarId, eventId: safeEventId };
   }
 
-  private async getEventWithAccess(access: AuthorizedGoogleRequest, calendarId: string, eventId: string, timeZone?: string): Promise<CalendarEventDetail> {
+  private async getEventWithAccess(access: AuthorizedGoogleRequest, calendarId: string, eventId: string, timeZone?: string, beforeProviderFetch?: () => void | Promise<void>): Promise<CalendarEventDetail> {
     const url = new URL(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`);
     if (timeZone) url.searchParams.set('timeZone', timeZone);
-    const response = await access.fetch(url);
+    const response = await access.fetch(url, undefined, beforeProviderFetch);
     if (!response.ok) throw new Error(`Google Calendar event request failed (${response.status}).`);
     return normalizeEventDetail(await readBoundedProviderJson<CalendarApiEvent>(response, { operation: 'Google Calendar event request', maxBytes: MAX_PROVIDER_JSON_BYTES }));
   }

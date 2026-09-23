@@ -200,7 +200,8 @@ describe('Drive and Sheets executable parity', () => {
 
     expect(update?.resourceSummary).toContain('Sheet1!B2');
     expect(update?.resourceSummary).toContain('sheet-1');
-    expect(update?.reviewText).toBe(cellValue);
+    expect(update?.reviewText).toContain(`Cell input: “${cellValue}”`);
+    expect(update?.reviewText).toContain('Input handling: “literal”');
     expect(insert?.resourceSummary).toContain('sheet 42');
     expect(insert?.resourceSummary).toContain('sheet-1');
     expect(insert?.resourceSummary).toContain('starting at row 4');

@@ -21,6 +21,27 @@ describe('Drive and Sheets tool argument schemas', () => {
     expect(() => validateDriveSheetsToolArguments('sheets.writeRange', { spreadsheetId: 'sheet-1', range: 'Sheet1!A:A', values })).toThrow();
   });
 
+  it('rejects deeply nested Sheets structural writes before confirmation/provider work', () => {
+    let nested: unknown = 'leaf';
+    for (let index = 0; index < 12; index += 1) nested = { child: nested };
+    expect(() => validateDriveSheetsToolArguments('sheets.batchUpdate', {
+      spreadsheetId: 'sheet-1',
+      requests: [{ updateCells: nested }],
+    })).toThrow(/nested too deeply/i);
+  });
+
+  it('rejects non-JSON values and oversized Sheets structural writes', () => {
+    expect(() => validateDriveSheetsToolArguments('sheets.batchUpdate', {
+      spreadsheetId: 'sheet-1',
+      requests: [{ updateCells: { value: Number.POSITIVE_INFINITY } }],
+    })).toThrow(/non-finite/i);
+
+    expect(() => validateDriveSheetsToolArguments('sheets.batchUpdate', {
+      spreadsheetId: 'sheet-1',
+      requests: [{ updateCells: { text: 'x'.repeat(1_000_001) } }],
+    })).toThrow(/request limit/i);
+  });
+
   it('requires at least one Drive update field', () => {
     expect(() => validateDriveSheetsToolArguments('drive.updateFile', { fileId: 'file-1', patch: {} })).toThrow();
   });

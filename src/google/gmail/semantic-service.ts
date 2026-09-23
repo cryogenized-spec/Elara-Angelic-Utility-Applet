@@ -337,6 +337,7 @@ function actionLabels(action: GmailOrganizeAction, labelId?: string): { addLabel
 export interface GmailTurnGuard {
   readonly signal?: AbortSignal;
   readonly isGenerationActive?: () => boolean;
+  readonly beforeProviderFetch?: () => void | Promise<void>;
 }
 
 function assertTurnActive(guard: GmailTurnGuard | undefined): void {
@@ -345,8 +346,13 @@ function assertTurnActive(guard: GmailTurnGuard | undefined): void {
   }
 }
 
-function providerWriteGuard(guard: GmailTurnGuard | undefined): (() => void) | undefined {
-  return guard ? () => assertTurnActive(guard) : undefined;
+function providerWriteGuard(guard: GmailTurnGuard | undefined): (() => Promise<void>) | undefined {
+  if (!guard) return undefined;
+  return async () => {
+    assertTurnActive(guard);
+    await guard.beforeProviderFetch?.();
+    assertTurnActive(guard);
+  };
 }
 
 export class GoogleGmailSemanticService {

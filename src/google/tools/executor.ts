@@ -2,7 +2,7 @@ import { googleToolCallSchema, type GoogleToolCall, type GoogleToolDescriptor, t
 import { googleToolRegistry } from './registry';
 import { evaluateWriteConfirmation, isConfirmationFresh, MAX_CONFIRMATION_REVIEW_CHARS, writeConfirmationSchema, type WriteConfirmationRequest } from '../confirmation/policy';
 import { requestGoogleToolConfirmation } from '../confirmation/broker';
-import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus } from '../oauth/contracts';
+import { googleCapabilityKeySchema, type GoogleCapabilityKey, type GoogleExecutionGrant, type GoogleOAuthAuthority, type GoogleOAuthStatus } from '../oauth/contracts';
 import { isCapabilityAuthorized } from '../oauth/capability-policy';
 import { classifyGoogleToolFailure, type GoogleToolFailure } from './diagnostics';
 import { validateDriveSheetsToolArguments, driveSheetsToolArgumentSchemas, type DriveSheetsToolName } from './drive-sheets-schemas';
@@ -52,6 +52,8 @@ export interface GoogleToolExecutionContext {
   readonly signal?: AbortSignal;
   readonly generationId?: string;
   readonly isGenerationActive?: () => boolean;
+  /** Exact Google account/grant snapshot captured before consequential approval. */
+  readonly googleExecutionGrant?: GoogleExecutionGrant;
   /** Provider grant checked by the executor; never model-supplied. */
   readonly providerGrantRevision?: number;
   /** Paired Worker identity checked by the executor; never model-supplied. */
@@ -64,6 +66,8 @@ export type GoogleToolHandlers = Partial<Record<GoogleToolName, GoogleToolHandle
 export interface GoogleToolExecutorOptions {
   readonly oauth: GoogleOAuthAuthority;
   readonly clickupOAuth?: ClickUpOAuthAuthority;
+  /** Exact Google grant captured before an external/grouped confirmation UI. */
+  readonly expectedGoogleGrant?: GoogleExecutionGrant;
   /** Exact ClickUp grant captured before an external/grouped confirmation UI. */
   readonly expectedClickUpGrant?: ClickUpExecutionGrant;
   /** Exact attachment payload captured before an external/grouped confirmation UI. */
@@ -174,6 +178,22 @@ export async function googleToolAuthorizationRequirement(
   const requirement = await toolAuthorizationRequirement(call, oauth);
   return requirement?.provider === 'google' ? requirement.capability : null;
 }
+
+/**
+ * Capture the exact Google authority a consequential model mutation will be
+ * reviewed against. Local-only and ClickUp tools intentionally return no grant.
+ */
+export async function captureGoogleExecutionGrantForCall(
+  call: GoogleToolCall,
+  oauth: GoogleOAuthAuthority,
+): Promise<GoogleExecutionGrant | undefined> {
+  const parsed = googleToolCallSchema.safeParse(call);
+  if (!parsed.success) return undefined;
+  const descriptor = findDescriptor(parsed.data.tool);
+  if (!descriptor || !oauthCapabilitiesForDescriptor(descriptor).length || !oauth.getExecutionGrant) return undefined;
+  try { validateArguments(parsed.data.tool, parsed.data.arguments); } catch { return undefined; }
+  return oauth.getExecutionGrant();
+}
 function value(args: Readonly<Record<string, unknown>>, key: string): string | undefined {
   return typeof args[key] === 'string' && args[key].trim() ? args[key].trim() : undefined;
 }
@@ -227,16 +247,47 @@ function friendlyFieldLabel(key: string): string {
   return spaced ? spaced.charAt(0).toUpperCase() + spaced.slice(1) : 'Value';
 }
 
+const REVIEW_MAX_DEPTH = 10;
+const REVIEW_MAX_NODES = 12_000;
+const INTERNAL_REVIEW_FIELDS = new Set([
+  'etag',
+  'revisionId',
+  'targetRef',
+  'artifactId',
+]);
+
+interface ReviewTraversalBudget { nodes: number; }
+
 function friendlyScalar(value: unknown): string {
   if (value === null) return 'None';
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
-  if (typeof value === 'string') return value || '(empty)';
+  if (typeof value === 'string') return value.length ? `“${value.replaceAll('“', '❝').replaceAll('”', '❞').replaceAll('\n', '↵')}”` : '(empty)';
   if (typeof value === 'number') return String(value);
   return String(value);
 }
 
-function appendFriendlyReview(lines: string[], label: string, entry: unknown, depth = 0): void {
+function appendTextBlock(lines: string[], indent: string, label: string, text: string): void {
+  lines.push(`${indent}${label}:`);
+  const parts = text.split('\n');
+  if (!parts.length) {
+    lines.push(`${indent}  │`);
+    return;
+  }
+  for (const line of parts) lines.push(`${indent}  │ ${line}`);
+}
+
+function appendFriendlyReview(
+  lines: string[],
+  label: string,
+  entry: unknown,
+  depth = 0,
+  budget: ReviewTraversalBudget = { nodes: 0 },
+): void {
+  budget.nodes += 1;
+  if (budget.nodes > REVIEW_MAX_NODES) throw new Error('Confirmation review exceeds the traversal budget.');
+  if (depth > REVIEW_MAX_DEPTH) throw new Error('Confirmation review is nested too deeply.');
   const indent = '  '.repeat(depth);
+
   if (Array.isArray(entry)) {
     if (entry.length === 0) {
       lines.push(`${indent}${label}: None`);
@@ -244,53 +295,113 @@ function appendFriendlyReview(lines: string[], label: string, entry: unknown, de
     }
     if (entry.every((item) => Array.isArray(item))) {
       lines.push(`${indent}${label}:`);
-      entry.forEach((row, index) => {
-        const values = (row as unknown[]).map(friendlyScalar).join(' | ');
-        lines.push(`${indent}  Row ${index + 1}: ${values}`);
+      entry.forEach((row, rowIndex) => {
+        lines.push(`${indent}  Row ${rowIndex + 1}:`);
+        (row as unknown[]).forEach((cell, cellIndex) => {
+          if (cell && typeof cell === 'object') {
+            appendFriendlyReview(lines, `Cell ${cellIndex + 1}`, cell, depth + 2, budget);
+          } else if (typeof cell === 'string' && cell.includes('\n')) {
+            appendTextBlock(lines, '  '.repeat(depth + 2), `Cell ${cellIndex + 1}`, cell);
+          } else {
+            lines.push(`${'  '.repeat(depth + 2)}Cell ${cellIndex + 1}: ${friendlyScalar(cell)}`);
+          }
+        });
       });
       return;
     }
-    if (entry.every((item) => item === null || ['string', 'number', 'boolean'].includes(typeof item))) {
-      lines.push(`${indent}${label}: ${entry.map(friendlyScalar).join(', ')}`);
-      return;
-    }
     lines.push(`${indent}${label}:`);
-    entry.forEach((item, index) => appendFriendlyReview(lines, `Item ${index + 1}`, item, depth + 1));
-    return;
-  }
-  if (entry && typeof entry === 'object') {
-    lines.push(`${indent}${label}:`);
-    Object.entries(entry as Record<string, unknown>).forEach(([key, nested]) => {
-      appendFriendlyReview(lines, friendlyFieldLabel(key), nested, depth + 1);
+    entry.forEach((item, index) => {
+      if (item && typeof item === 'object') appendFriendlyReview(lines, `Item ${index + 1}`, item, depth + 1, budget);
+      else if (typeof item === 'string' && item.includes('\n')) appendTextBlock(lines, '  '.repeat(depth + 1), `Item ${index + 1}`, item);
+      else lines.push(`${'  '.repeat(depth + 1)}Item ${index + 1}: ${friendlyScalar(item)}`);
     });
     return;
   }
-  if (typeof entry === 'string' && entry.includes('\n')) {
+
+  if (entry && typeof entry === 'object') {
     lines.push(`${indent}${label}:`);
-    entry.split('\n').forEach((line) => lines.push(`${indent}  ${line}`));
+    for (const [key, nested] of Object.entries(entry as Record<string, unknown>)) {
+      if (INTERNAL_REVIEW_FIELDS.has(key)) continue;
+      appendFriendlyReview(lines, friendlyFieldLabel(key), nested, depth + 1, budget);
+    }
+    return;
+  }
+
+  if (typeof entry === 'string' && entry.includes('\n')) {
+    appendTextBlock(lines, indent, label, entry);
     return;
   }
   lines.push(`${indent}${label}: ${friendlyScalar(entry)}`);
 }
 
 function friendlyArgumentReview(args: Readonly<Record<string, unknown>>): string | undefined {
-  try {
-    const lines: string[] = [];
-    Object.entries(args).forEach(([key, entry]) => appendFriendlyReview(lines, friendlyFieldLabel(key), entry));
-    return lines.join('\n');
-  } catch {
-    return undefined;
+  const lines: string[] = [];
+  const budget: ReviewTraversalBudget = { nodes: 0 };
+  for (const [key, entry] of Object.entries(args)) {
+    if (INTERNAL_REVIEW_FIELDS.has(key)) continue;
+    appendFriendlyReview(lines, friendlyFieldLabel(key), entry, 0, budget);
   }
+  return lines.length ? lines.join('\n') : undefined;
+}
+
+function specializedReview(fields: readonly [string, unknown][]): string {
+  const lines: string[] = [];
+  const budget: ReviewTraversalBudget = { nodes: 0 };
+  for (const [label, entry] of fields) appendFriendlyReview(lines, label, entry, 0, budget);
+  return lines.join('\n');
 }
 
 function confirmationReviewText(tool: GoogleToolName, args: Readonly<Record<string, unknown>>): string | undefined {
-  if (tool === 'memory.save' || tool === 'memory.reconcile') return value(args, 'body');
-  if ((tool === 'gmail.sendMessage' || tool === 'gmail.replyMessage') && typeof args.body === 'string') return args.body;
-  if (tool === 'clickup.createTaskComment' || tool === 'clickup.replyToComment') return value(args, 'text');
-  if (tool === 'sheets.updateCell' && typeof args.value === 'string') return args.value || '(empty string)';
+  if (tool === 'memory.save') {
+    return specializedReview([
+      ['Title', args.title],
+      ['Body', args.body],
+      ['Memory kind', args.kind ?? 'CONTEXTUAL'],
+      ['Confidence', args.confidence ?? 0.7],
+      ['Importance', args.importance ?? 0.5],
+      ['Tags', args.tags ?? []],
+    ]);
+  }
+  if (tool === 'memory.reconcile') {
+    return specializedReview([
+      ['Relation', args.relation],
+      ['Evidence / replacement title', args.title],
+      ['Proposed body', args.body],
+      ['Tags', args.tags ?? []],
+    ]);
+  }
+  if (tool === 'gmail.sendMessage') {
+    return specializedReview([
+      ['To', args.to],
+      ['Cc', args.cc ?? []],
+      ['Subject', args.subject],
+      ['Body', args.body],
+    ]);
+  }
+  if (tool === 'gmail.replyMessage') {
+    return specializedReview([
+      ['To', args.to],
+      ['Subject', args.subject],
+      ['Body', args.body],
+    ]);
+  }
+  if (tool === 'clickup.createTaskComment' || tool === 'clickup.replyToComment') {
+    return specializedReview([
+      ['Comment text', args.text],
+      ['Mentioned ClickUp users', args.mentionUserIds ?? []],
+      ['Notify everyone', args.notifyAll ?? false],
+    ]);
+  }
+  if (tool === 'sheets.updateCell') {
+    return specializedReview([
+      ['Cell input', args.value],
+      ['Input handling', args.inputMode ?? 'literal'],
+    ]);
+  }
   if (tool === 'clickup.attachArtifact') return undefined;
-  // Every other mutation still exposes the full validated payload for human
-  // inspection, but the presentation is plain language rather than raw JSON.
+  // Every other mutation exposes the consequential validated payload through a
+  // bounded, delimiter-safe projection. Authority-only preconditions stay
+  // internal and remain bound by execution/replay logic.
   return friendlyArgumentReview(args);
 }
 function gmailActionSummary(action?: string): string {
@@ -505,6 +616,18 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
       if (authorizationNeeded(status, required)) return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }), requiredCapability: required };
     }
   }
+
+  const decision = evaluateWriteConfirmation(descriptor.risk);
+  let googleGrant = options.expectedGoogleGrant;
+  if (decision.requiresConfirmation && oauthCapabilities.length && options.oauth.getExecutionGrant) {
+    try {
+      if (googleGrant && options.oauth.assertExecutionGrant) await options.oauth.assertExecutionGrant(googleGrant);
+      else googleGrant = await options.oauth.getExecutionGrant();
+    } catch {
+      return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+    }
+  }
+
   let clickupArtifactSnapshot = options.expectedClickUpArtifactSnapshot;
   if (validCall.tool === 'clickup.attachArtifact') {
     try {
@@ -517,7 +640,6 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
     }
   }
 
-  const decision = evaluateWriteConfirmation(descriptor.risk);
   if (decision.requiresConfirmation) {
     const confirmation = confirmationRequestForCall(validCall, options.now?.() ?? new Date(), {
       conversationId: options.conversationId,
@@ -531,6 +653,13 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
     let confirmationInvoked = false;
     try { confirmationInvoked = true; approved = await confirm(confirmation) && isConfirmationFresh(confirmation.requestedAt, options.now?.() ?? new Date()); } catch { approved = false; }
     if (!approved) return { ok: false, correlationId: id, tool: validCall.tool, code: confirmationInvoked ? 'USER_DECLINED' : 'CONFIRMATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'confirmation' }), confirmation };
+  }
+  if (googleGrant && decision.requiresConfirmation && options.oauth.assertExecutionGrant) {
+    try {
+      await options.oauth.assertExecutionGrant(googleGrant);
+    } catch {
+      return { ok: false, correlationId: id, tool: validCall.tool, code: 'AUTHORIZATION_REQUIRED', failure: classifyGoogleToolFailure({ kind: 'authorization' }) };
+    }
   }
   if (isClickUpTool && clickupGrant && decision.requiresConfirmation) {
     try {
@@ -557,6 +686,7 @@ export async function executeGoogleTool(call: GoogleToolInvocation, options: Goo
       signal: options.signal,
       generationId: options.generationId,
       isGenerationActive: options.isGenerationActive,
+      ...(googleGrant ? { googleExecutionGrant: googleGrant } : {}),
       ...(clickupGrant ? {
         providerGrantRevision: clickupGrant.revision,
         providerAuthorityBinding: clickupGrant.authorityBinding,

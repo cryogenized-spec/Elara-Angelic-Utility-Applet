@@ -342,6 +342,38 @@ describe('Google tool loop adversarial confirmation lifecycle', () => {
     expect(executeGoogleTool).toHaveBeenCalledTimes(2);
   });
 
+  it('carries the pre-confirmation Google execution grant through grouped approval even if the account changes while the watchdog is open', async () => {
+    let account = 'one@example.com';
+    const grantFor = () => ({
+      accountEmail: account,
+      authorityBinding: 'browser#https://app.example',
+      authorityFingerprint: `account:${account}`,
+    });
+    const boundOauth: GoogleOAuthAuthority = {
+      ...oauth,
+      getExecutionGrant: async () => grantFor(),
+      assertExecutionGrant: async () => undefined,
+    };
+
+    arrangeWriteTurn();
+    requestGoogleToolConfirmations.mockImplementationOnce(async () => {
+      account = 'two@example.com';
+      return [true];
+    });
+    executeGoogleTool.mockResolvedValueOnce({ ok: false, code: 'AUTHORIZATION_REQUIRED' });
+
+    await consumeWriteTurn(() => new Date('2026-09-15T12:00:00.000Z'), undefined, boundOauth);
+
+    expect(executeGoogleTool).toHaveBeenCalledOnce();
+    expect(executeGoogleTool.mock.calls[0]?.[1]).toEqual(expect.objectContaining({
+      expectedGoogleGrant: {
+        accountEmail: 'one@example.com',
+        authorityBinding: 'browser#https://app.example',
+        authorityFingerprint: 'account:one@example.com',
+      },
+    }));
+  });
+
   it('does not execute a grouped mutation after the confirmation the user saw has expired', async () => {
     let now = new Date('2026-09-15T12:00:00.000Z');
     arrangeWriteTurn();

@@ -239,6 +239,26 @@ function assignmentSurface(value: string | undefined): GoogleTaskAssignmentSurfa
   return value === 'CONTEXT_TYPE_UNSPECIFIED' || value === 'GMAIL' || value === 'DOCUMENT' || value === 'SPACE' ? value : undefined;
 }
 
+export interface GoogleTasksMutationOptions {
+  readonly signal?: AbortSignal;
+  readonly isGenerationActive?: () => boolean;
+  readonly beforeProviderFetch?: () => void | Promise<void>;
+}
+
+function requireTaskMutationCurrent(options: GoogleTasksMutationOptions, operation: string): void {
+  if (options.signal?.aborted || options.isGenerationActive?.() === false) {
+    throw new DOMException(`${operation} lost turn authority.`, 'AbortError');
+  }
+}
+
+function taskProviderMutationGuard(options: GoogleTasksMutationOptions, operation: string): () => Promise<void> {
+  return async () => {
+    requireTaskMutationCurrent(options, operation);
+    await options.beforeProviderFetch?.();
+    requireTaskMutationCurrent(options, operation);
+  };
+}
+
 export class GoogleTasksService {
   constructor(private readonly oauth: GoogleOAuthAuthority) {}
 
@@ -280,35 +300,43 @@ export class GoogleTasksService {
     return this.mapTaskList(await this.readJson<TaskListPayload>(response));
   }
 
-  async createTaskList(title: string): Promise<TaskListSummary> {
+  async createTaskList(title: string, options: GoogleTasksMutationOptions = {}): Promise<TaskListSummary> {
     const safeTitle = boundedText(title, 'task list title', MAX_TITLE_LENGTH);
+    requireTaskMutationCurrent(options, 'Google Tasks create list');
     const access = await this.oauth.authorize('tasks.write');
+    requireTaskMutationCurrent(options, 'Google Tasks create list');
     const response = await access.fetch('https://tasks.googleapis.com/tasks/v1/users/@me/lists', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ title: safeTitle }),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, taskProviderMutationGuard(options, 'Google Tasks create list'));
     const result = this.mapTaskList(await this.readJson<TaskListPayload>(response));
     this.changed();
     return result;
   }
 
-  async updateTaskList(taskListId: string, title: string, etag?: string): Promise<TaskListSummary> {
+  async updateTaskList(taskListId: string, title: string, etag?: string, options: GoogleTasksMutationOptions = {}): Promise<TaskListSummary> {
+    requireTaskMutationCurrent(options, 'Google Tasks update list');
     const access = await this.oauth.authorize('tasks.write');
+    requireTaskMutationCurrent(options, 'Google Tasks update list');
     const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, {
       method: 'PATCH',
       headers: { 'content-type': 'application/json', ...(etag ? { 'If-Match': etag } : {}) },
       body: JSON.stringify({ title: boundedText(title, 'task list title', MAX_TITLE_LENGTH) }),
-    });
+      ...(options.signal ? { signal: options.signal } : {}),
+    }, taskProviderMutationGuard(options, 'Google Tasks update list'));
     const result = this.mapTaskList(await this.readJson<TaskListPayload>(response));
     this.changed();
     return result;
   }
 
-  async deleteTaskList(taskListId: string, etag?: string): Promise<void> {
+  async deleteTaskList(taskListId: string, etag?: string, options: GoogleTasksMutationOptions = {}): Promise<void> {
     boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH);
+    requireTaskMutationCurrent(options, 'Google Tasks delete list');
     const access = await this.oauth.authorize('tasks.write');
-    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {} });
+    requireTaskMutationCurrent(options, 'Google Tasks delete list');
+    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/users/@me/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {}, ...(options.signal ? { signal: options.signal } : {}) }, taskProviderMutationGuard(options, 'Google Tasks delete list'));
     await this.assertOk(response);
     this.changed();
   }
@@ -352,7 +380,7 @@ export class GoogleTasksService {
     return this.mapTask(await this.readJson<TaskPayload>(response));
   }
 
-  async createSemanticTask(input: CreateSemanticTaskInput): Promise<GoogleTask> {
+  async createSemanticTask(input: CreateSemanticTaskInput, options: GoogleTasksMutationOptions = {}): Promise<GoogleTask> {
     const body: Record<string, unknown> = { title: boundedText(input.title, 'task title', MAX_TITLE_LENGTH) };
     if (input.notes !== undefined) body.notes = boundedText(input.notes, 'task notes', MAX_NOTES_LENGTH, true);
     if (input.scheduledDate !== undefined) body.due = providerDueForScheduledDate(input.scheduledDate);
@@ -361,10 +389,11 @@ export class GoogleTasksService {
       `lists/${encodeURIComponent(boundedId(input.taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks`,
       body,
       { parent: input.parent, previous: input.previous },
+      options,
     );
   }
 
-  async updateSemanticTask(input: UpdateSemanticTaskInput): Promise<GoogleTask> {
+  async updateSemanticTask(input: UpdateSemanticTaskInput, options: GoogleTasksMutationOptions = {}): Promise<GoogleTask> {
     if (input.scheduledDate !== undefined && input.clearScheduledDate) throw new Error('Google Tasks update cannot set and clear the scheduled date at the same time.');
     const body: Record<string, unknown> = {};
     if (input.title !== undefined) body.title = boundedText(input.title, 'task title', MAX_TITLE_LENGTH);
@@ -378,41 +407,50 @@ export class GoogleTasksService {
       `lists/${encodeURIComponent(boundedId(input.taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(input.taskId, 'task ID', MAX_TASK_ID_LENGTH))}`,
       body,
       { etag: input.etag },
+      options,
     );
   }
 
-  async deleteTask(taskListId: string, taskId: string, etag?: string): Promise<void> {
+  async deleteTask(taskListId: string, taskId: string, etag?: string, options: GoogleTasksMutationOptions = {}): Promise<void> {
+    requireTaskMutationCurrent(options, 'Google Tasks delete task');
     const access = await this.oauth.authorize('tasks.write');
-    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {} });
+    requireTaskMutationCurrent(options, 'Google Tasks delete task');
+    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}`, { method: 'DELETE', headers: etag ? { 'If-Match': etag } : {}, ...(options.signal ? { signal: options.signal } : {}) }, taskProviderMutationGuard(options, 'Google Tasks delete task'));
     await this.assertOk(response);
     this.changed();
   }
 
-  async moveTask(taskListId: string, taskId: string, parent?: string, previous?: string, destinationTaskListId?: string): Promise<GoogleTask> {
+  async moveTask(taskListId: string, taskId: string, parent?: string, previous?: string, destinationTaskListId?: string, options: GoogleTasksMutationOptions = {}): Promise<GoogleTask> {
+    requireTaskMutationCurrent(options, 'Google Tasks move task');
     const access = await this.oauth.authorize('tasks.write');
+    requireTaskMutationCurrent(options, 'Google Tasks move task');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/tasks/${encodeURIComponent(boundedId(taskId, 'task ID', MAX_TASK_ID_LENGTH))}/move`);
     if (destinationTaskListId) url.searchParams.set('destinationTasklist', boundedId(destinationTaskListId, 'destination task list ID', MAX_TASK_LIST_ID_LENGTH));
     if (parent) url.searchParams.set('parent', boundedId(parent, 'parent ID', MAX_TASK_ID_LENGTH));
     if (previous) url.searchParams.set('previous', boundedId(previous, 'previous task ID', MAX_TASK_ID_LENGTH));
-    const response = await access.fetch(url, { method: 'POST' });
+    const response = await access.fetch(url, { method: 'POST', ...(options.signal ? { signal: options.signal } : {}) }, taskProviderMutationGuard(options, 'Google Tasks move task'));
     const result = this.mapTask(await this.readJson<TaskPayload>(response));
     this.changed();
     return result;
   }
 
-  async clearCompleted(taskListId: string): Promise<void> {
+  async clearCompleted(taskListId: string, options: GoogleTasksMutationOptions = {}): Promise<void> {
+    requireTaskMutationCurrent(options, 'Google Tasks clear completed');
     const access = await this.oauth.authorize('tasks.write');
-    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/clear`, { method: 'POST' });
+    requireTaskMutationCurrent(options, 'Google Tasks clear completed');
+    const response = await access.fetch(`https://tasks.googleapis.com/tasks/v1/lists/${encodeURIComponent(boundedId(taskListId, 'task list ID', MAX_TASK_LIST_ID_LENGTH))}/clear`, { method: 'POST', ...(options.signal ? { signal: options.signal } : {}) }, taskProviderMutationGuard(options, 'Google Tasks clear completed'));
     await this.assertOk(response);
     this.changed();
   }
 
-  private async writeTask(method: 'POST' | 'PATCH', path: string, body: Record<string, unknown>, params: { parent?: string; previous?: string; etag?: string } = {}): Promise<GoogleTask> {
+  private async writeTask(method: 'POST' | 'PATCH', path: string, body: Record<string, unknown>, params: { parent?: string; previous?: string; etag?: string } = {}, options: GoogleTasksMutationOptions = {}): Promise<GoogleTask> {
+    requireTaskMutationCurrent(options, 'Google Tasks write task');
     const access = await this.oauth.authorize('tasks.write');
+    requireTaskMutationCurrent(options, 'Google Tasks write task');
     const url = new URL(`https://tasks.googleapis.com/tasks/v1/${path}`);
     if (params.parent) url.searchParams.set('parent', boundedId(params.parent, 'parent ID', MAX_TASK_ID_LENGTH));
     if (params.previous) url.searchParams.set('previous', boundedId(params.previous, 'previous task ID', MAX_TASK_ID_LENGTH));
-    const response = await access.fetch(url, { method, headers: { 'content-type': 'application/json', ...(params.etag ? { 'If-Match': params.etag } : {}) }, body: JSON.stringify(body) });
+    const response = await access.fetch(url, { method, headers: { 'content-type': 'application/json', ...(params.etag ? { 'If-Match': params.etag } : {}) }, body: JSON.stringify(body), ...(options.signal ? { signal: options.signal } : {}) }, taskProviderMutationGuard(options, 'Google Tasks write task'));
     const result = this.mapTask(await this.readJson<TaskPayload>(response));
     this.changed();
     return result;

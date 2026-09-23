@@ -7,6 +7,7 @@ import { GoogleDriveService } from '../drive/service';
 import { runGmailSendOnce } from '../gmail/send-replay';
 import { GoogleGmailSemanticService, type GmailTurnGuard } from '../gmail/semantic-service';
 import { googleOAuthAuthority } from '../oauth/authority';
+import type { GoogleExecutionGrant } from '../oauth/contracts';
 import { GoogleSheetsService, type GoogleSheetInputMode } from '../sheets/service';
 import { runTaskCreateOnce } from '../tasks/create-replay';
 import { assertGooglePickerFileAllowed, filterRevokedGooglePickerFiles } from '../../persistence/google-picker-admissions';
@@ -91,19 +92,38 @@ function sheetsInputMode(args: Record<string, unknown>): GoogleSheetInputMode {
   if (value !== 'literal' && value !== 'userEntered') throw new Error('Google Sheets inputMode must be literal or userEntered.');
   return value;
 }
-function mutationGuard(signal: AbortSignal | undefined, isGenerationActive: (() => boolean) | undefined) {
-  return { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) };
+function approvedGoogleGrantGuard(grant: GoogleExecutionGrant | undefined): (() => Promise<void>) | undefined {
+  if (!grant || !googleOAuthAuthority.assertExecutionGrant) return undefined;
+  return () => googleOAuthAuthority.assertExecutionGrant!(grant);
 }
-function gmailTurnGuard(signal: AbortSignal | undefined, isGenerationActive: (() => boolean) | undefined): GmailTurnGuard {
+function mutationGuard(
+  signal: AbortSignal | undefined,
+  isGenerationActive: (() => boolean) | undefined,
+  googleExecutionGrant?: GoogleExecutionGrant,
+) {
+  const beforeProviderFetch = approvedGoogleGrantGuard(googleExecutionGrant);
   return {
     ...(signal ? { signal } : {}),
     ...(isGenerationActive ? { isGenerationActive } : {}),
+    ...(beforeProviderFetch ? { beforeProviderFetch } : {}),
+  };
+}
+function gmailTurnGuard(
+  signal: AbortSignal | undefined,
+  isGenerationActive: (() => boolean) | undefined,
+  googleExecutionGrant?: GoogleExecutionGrant,
+): GmailTurnGuard {
+  const beforeProviderFetch = approvedGoogleGrantGuard(googleExecutionGrant);
+  return {
+    ...(signal ? { signal } : {}),
+    ...(isGenerationActive ? { isGenerationActive } : {}),
+    ...(beforeProviderFetch ? { beforeProviderFetch } : {}),
   };
 }
 export const googleServiceToolHandlers: GoogleToolHandlers = {
   ...googleReadToolHandlers,
 
-  'calendar.createEvent': async ({ arguments: raw, callId }) => {
+  'calendar.createEvent': async ({ arguments: raw, callId, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     const attendees = stringArrayArg(args, 'attendees');
     const recurrence = stringArrayArg(args, 'recurrence');
@@ -119,9 +139,9 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       ...(recurrence ? { recurrence } : {}),
       sendUpdates: calendarSendUpdates(args),
       ...(callId ? { idempotencyKey: callId } : {}),
-    });
+    }, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'calendar.updateEvent': async ({ arguments: raw }) => {
+  'calendar.updateEvent': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     const attendees = stringArrayArg(args, 'attendees');
     const recurrence = stringArrayArg(args, 'recurrence');
@@ -138,33 +158,34 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       ...(attendees ? { attendees } : {}),
       ...(recurrence ? { recurrence } : {}),
       sendUpdates: calendarSendUpdates(args),
-    });
+    }, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'calendar.deleteEvent': async ({ arguments: raw }) => {
+  'calendar.deleteEvent': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     return calendar.deleteEvent(
       stringArg(args, 'calendarId', false),
       stringArg(args, 'eventId')!,
       stringArg(args, 'etag')!,
       calendarSendUpdates(args),
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
 
-  'tasks.createTaskList': async ({ arguments: raw, callId, conversationId, messageId, generationId }) => {
+  'tasks.createTaskList': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const title = stringArg(objectArgs(raw), 'title')!;
     const payload = { title };
     return runTaskCreateOnce(
       { tool: 'tasks.createTaskList', callId, conversationId, messageId, generationId },
       payload,
-      () => tasks.createTaskList(title),
+      () => tasks.createTaskList(title, mutationGuard(signal, isGenerationActive, googleExecutionGrant)),
     );
   },
-  'tasks.updateTaskList': async ({ arguments: raw }) => {
+  'tasks.updateTaskList': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
-    return tasks.updateTaskList(stringArg(args, 'taskListId')!, stringArg(args, 'title')!);
+    return tasks.updateTaskList(stringArg(args, 'taskListId')!, stringArg(args, 'title')!, undefined, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'tasks.deleteTaskList': async ({ arguments: raw }) => tasks.deleteTaskList(stringArg(objectArgs(raw), 'taskListId')!),
-  'tasks.createTask': async ({ arguments: raw, callId, conversationId, messageId, generationId }) => {
+  'tasks.deleteTaskList': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => tasks.deleteTaskList(stringArg(objectArgs(raw), 'taskListId')!, undefined, mutationGuard(signal, isGenerationActive, googleExecutionGrant)),
+  'tasks.createTask': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     const input = {
       taskListId: stringArg(args, 'taskListId')!,
@@ -177,10 +198,10 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     return runTaskCreateOnce(
       { tool: 'tasks.createTask', callId, conversationId, messageId, generationId },
       input,
-      () => tasks.createSemanticTask(input),
+      () => tasks.createSemanticTask(input, mutationGuard(signal, isGenerationActive, googleExecutionGrant)),
     );
   },
-  'tasks.updateTask': async ({ arguments: raw }) => {
+  'tasks.updateTask': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     return tasks.updateSemanticTask({
       etag: stringArg(args, 'etag', false),
@@ -191,9 +212,9 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       scheduledDate: stringArg(args, 'scheduledDate', false),
       clearScheduledDate: optionalBoolean(args, 'clearScheduledDate'),
       status: taskStatus(args),
-    });
+    }, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'tasks.moveTask': async ({ arguments: raw }) => {
+  'tasks.moveTask': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     return tasks.moveTask(
       stringArg(args, 'taskListId')!,
@@ -201,13 +222,14 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'parent', false),
       stringArg(args, 'previous', false),
       stringArg(args, 'destinationTaskListId', false),
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
-  'tasks.deleteTask': async ({ arguments: raw }) => {
+  'tasks.deleteTask': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
-    return tasks.deleteTask(stringArg(args, 'taskListId')!, stringArg(args, 'taskId')!);
+    return tasks.deleteTask(stringArg(args, 'taskListId')!, stringArg(args, 'taskId')!, undefined, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'tasks.clearCompleted': async ({ arguments: raw }) => tasks.clearCompleted(stringArg(objectArgs(raw), 'taskListId')!),
+  'tasks.clearCompleted': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => tasks.clearCompleted(stringArg(objectArgs(raw), 'taskListId')!, mutationGuard(signal, isGenerationActive, googleExecutionGrant)),
 
   'docs.getDocument': async ({ arguments: raw }) => {
     const documentId = stringArg(objectArgs(raw), 'documentId')!;
@@ -219,14 +241,14 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     await assertGooglePickerFileAllowed(documentId);
     return docs.inspectDocument(documentId);
   },
-  'docs.exportDocument': async ({ arguments: raw, conversationId, generationId, signal, isGenerationActive }) => {
+  'docs.exportDocument': async ({ arguments: raw, conversationId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     const documentId = stringArg(args, 'documentId')!;
     await assertGooglePickerFileAllowed(documentId);
     const inspected = await docs.inspectDocument(documentId);
     const format = stringArg(args, 'format') as 'pdf' | 'docx';
     const maxBytes = optionalNumber(args, 'maxBytes');
-    const guard = mutationGuard(signal, isGenerationActive);
+    const guard = mutationGuard(signal, isGenerationActive, googleExecutionGrant);
     return saveGoogleWorkspaceExportArtifact({
       fileId: documentId,
       baseName: inspected.title,
@@ -240,17 +262,17 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       },
     });
   },
-  'docs.createDocument': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
+  'docs.createDocument': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const title = stringArg(objectArgs(raw), 'title')!;
     const payload = { title };
-    const guard = mutationGuard(signal, isGenerationActive);
+    const guard = mutationGuard(signal, isGenerationActive, googleExecutionGrant);
     return runWorkspaceCreateOnce(
       { tool: 'docs.createDocument', callId, conversationId, messageId, generationId, ...guard },
       payload,
       () => docs.createDocument(title, guard),
     );
   },
-  'docs.insertText': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'docs.insertText': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'documentId')!);
     return docs.insertText(
@@ -259,10 +281,10 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'revisionId')!,
       optionalNumber(args, 'index') ?? 1,
       stringArg(args, 'text')!,
-      mutationGuard(signal, isGenerationActive),
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
-  'docs.appendParagraph': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'docs.appendParagraph': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'documentId')!);
     return docs.appendParagraph(
@@ -270,10 +292,10 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'tabId')!,
       stringArg(args, 'revisionId')!,
       stringArg(args, 'text')!,
-      mutationGuard(signal, isGenerationActive),
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
-  'docs.replaceText': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'docs.replaceText': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'documentId')!);
     return docs.replaceText(
@@ -283,13 +305,13 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'findText')!,
       stringArg(args, 'replaceText')!,
       optionalBoolean(args, 'matchCase') ?? false,
-      mutationGuard(signal, isGenerationActive),
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
-  'docs.batchUpdate': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'docs.batchUpdate': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'documentId')!);
-    return docs.batchUpdate(stringArg(args, 'documentId')!, recordArrayArg(args, 'requests'), recordArg(args, 'writeControl', false), mutationGuard(signal, isGenerationActive));
+    return docs.batchUpdate(stringArg(args, 'documentId')!, recordArrayArg(args, 'requests'), recordArg(args, 'writeControl', false), mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
 
   'chat.listMessages': async ({ arguments: raw }) => {
@@ -297,67 +319,72 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     return chat.listMessages(stringArg(args, 'spaceName')!, optionalNumber(args, 'pageSize'), stringArg(args, 'pageToken', false), stringArg(args, 'filter', false));
   },
   'chat.getMessage': async ({ arguments: raw }) => chat.getMessage(stringArg(objectArgs(raw), 'messageName')!),
-  'chat.createMessage': async ({ arguments: raw }) => {
+  'chat.createMessage': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
-    return chat.createMessage(stringArg(args, 'spaceName')!, recordArg(args, 'message')!, stringArg(args, 'requestId', false));
+    return chat.createMessage(
+      stringArg(args, 'spaceName')!,
+      recordArg(args, 'message')!,
+      stringArg(args, 'requestId', false),
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
+    );
   },
-  'chat.updateMessage': async ({ arguments: raw }) => {
+  'chat.updateMessage': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
-    return chat.updateMessage(stringArg(args, 'messageName')!, recordArg(args, 'message')!, stringArg(args, 'updateMask')!);
+    return chat.updateMessage(stringArg(args, 'messageName')!, recordArg(args, 'message')!, stringArg(args, 'updateMask')!, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'chat.deleteMessage': async ({ arguments: raw }) => chat.deleteMessage(stringArg(objectArgs(raw), 'messageName')!),
+  'chat.deleteMessage': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => chat.deleteMessage(stringArg(objectArgs(raw), 'messageName')!, mutationGuard(signal, isGenerationActive, googleExecutionGrant)),
 
-  'gmail.modifyMessage': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'gmail.modifyMessage': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     return gmail.organizeMessage(
       stringArg(args, 'messageId')!,
       gmailAction(args),
       stringArg(args, 'labelId', false),
-      gmailTurnGuard(signal, isGenerationActive),
+      gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
-  'gmail.modifyThread': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'gmail.modifyThread': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     return gmail.organizeThread(
       stringArg(args, 'threadId')!,
       gmailAction(args),
       stringArg(args, 'labelId', false),
-      gmailTurnGuard(signal, isGenerationActive),
+      gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
-  'gmail.trashMessage': async ({ arguments: raw, signal, isGenerationActive }) => gmail.trashMessage(
+  'gmail.trashMessage': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => gmail.trashMessage(
     stringArg(objectArgs(raw), 'messageId')!,
-    gmailTurnGuard(signal, isGenerationActive),
+    gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
   ),
-  'gmail.untrashMessage': async ({ arguments: raw, signal, isGenerationActive }) => gmail.untrashMessage(
+  'gmail.untrashMessage': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => gmail.untrashMessage(
     stringArg(objectArgs(raw), 'messageId')!,
-    gmailTurnGuard(signal, isGenerationActive),
+    gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
   ),
-  'gmail.trashThread': async ({ arguments: raw, signal, isGenerationActive }) => gmail.trashThread(
+  'gmail.trashThread': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => gmail.trashThread(
     stringArg(objectArgs(raw), 'threadId')!,
-    gmailTurnGuard(signal, isGenerationActive),
+    gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
   ),
-  'gmail.untrashThread': async ({ arguments: raw, signal, isGenerationActive }) => gmail.untrashThread(
+  'gmail.untrashThread': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => gmail.untrashThread(
     stringArg(objectArgs(raw), 'threadId')!,
-    gmailTurnGuard(signal, isGenerationActive),
+    gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
   ),
-  'gmail.createLabel': async ({ arguments: raw, signal, isGenerationActive }) => gmail.createLabel(
+  'gmail.createLabel': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => gmail.createLabel(
     stringArg(objectArgs(raw), 'name')!,
-    gmailTurnGuard(signal, isGenerationActive),
+    gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
   ),
-  'gmail.updateLabel': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'gmail.updateLabel': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     return gmail.updateLabel(
       stringArg(args, 'labelId')!,
       stringArg(args, 'name')!,
-      gmailTurnGuard(signal, isGenerationActive),
+      gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
-  'gmail.deleteLabel': async ({ arguments: raw, signal, isGenerationActive }) => gmail.deleteLabel(
+  'gmail.deleteLabel': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => gmail.deleteLabel(
     stringArg(objectArgs(raw), 'labelId')!,
-    gmailTurnGuard(signal, isGenerationActive),
+    gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant),
   ),
-  'gmail.sendMessage': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
+  'gmail.sendMessage': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     const payload = {
       to: stringArrayArg(args, 'to') ?? [],
@@ -365,14 +392,14 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       subject: stringArg(args, 'subject')!,
       body: stringArg(args, 'body')!,
     };
-    const guard = gmailTurnGuard(signal, isGenerationActive);
+    const guard = gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant);
     return runGmailSendOnce(
       { tool: 'gmail.sendMessage', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
       payload,
       () => gmail.sendMessage(payload, guard),
     );
   },
-  'gmail.replyMessage': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
+  'gmail.replyMessage': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     const payload = {
       threadId: stringArg(args, 'threadId')!,
@@ -381,7 +408,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       body: stringArg(args, 'body')!,
       inReplyTo: stringArg(args, 'inReplyTo')!,
     };
-    const guard = gmailTurnGuard(signal, isGenerationActive);
+    const guard = gmailTurnGuard(signal, isGenerationActive, googleExecutionGrant);
     return runGmailSendOnce(
       { tool: 'gmail.replyMessage', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
       payload,
@@ -426,7 +453,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       isGenerationActive,
     });
   },
-  'drive.createFile': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
+  'drive.createFile': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     const parents = stringArrayArg(args, 'parents');
     const mimeType = stringArg(args, 'mimeType', false);
@@ -437,10 +464,10 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     return runDriveCreateOnce(
       { tool: 'drive.createFile', callId, conversationId, messageId, generationId, ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
       input,
-      () => drive.createFile(input, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) }),
+      () => drive.createFile(input, mutationGuard(signal, isGenerationActive, googleExecutionGrant)),
     );
   },
-  'drive.updateFile': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'drive.updateFile': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'fileId')!);
     const patch = recordArg(args, 'patch')!;
@@ -451,9 +478,9 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       ...(name !== undefined ? { name } : {}),
       ...(description !== undefined ? { description } : {}),
       ...(starred !== undefined ? { starred } : {}),
-    }, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
+    }, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'drive.moveFile': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'drive.moveFile': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'fileId')!);
     return drive.moveFile(
@@ -461,13 +488,13 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       stringArg(args, 'etag')!,
       stringArg(args, 'parentId')!,
       stringArg(args, 'previousParentId', false),
-      { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) },
+      mutationGuard(signal, isGenerationActive, googleExecutionGrant),
     );
   },
-  'drive.trashFile': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'drive.trashFile': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'fileId')!);
-    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, { ...(signal ? { signal } : {}), ...(isGenerationActive ? { isGenerationActive } : {}) });
+    return drive.trashFile(stringArg(args, 'fileId')!, stringArg(args, 'etag')!, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
 
   'sheets.getSpreadsheet': async ({ arguments: raw }) => {
@@ -487,7 +514,7 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     const inspected = await sheets.getSpreadsheet(spreadsheetId);
     const format = stringArg(args, 'format') as 'pdf' | 'xlsx';
     const maxBytes = optionalNumber(args, 'maxBytes');
-    const guard = mutationGuard(signal, isGenerationActive);
+    const guard = mutationGuard(signal, isGenerationActive, googleExecutionGrant);
     return saveGoogleWorkspaceExportArtifact({
       fileId: spreadsheetId,
       baseName: inspected.title,
@@ -501,19 +528,19 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
       },
     });
   },
-  'sheets.createSpreadsheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
+  'sheets.createSpreadsheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     const title = stringArg(args, 'title')!;
     const firstSheetTitle = stringArg(args, 'firstSheetTitle', false);
     const payload = { title, ...(firstSheetTitle ? { firstSheetTitle } : {}) };
-    const guard = mutationGuard(signal, isGenerationActive);
+    const guard = mutationGuard(signal, isGenerationActive, googleExecutionGrant);
     return runWorkspaceCreateOnce(
       { tool: 'sheets.createSpreadsheet', callId, conversationId, messageId, generationId, ...guard },
       payload,
       () => sheets.createSpreadsheet(title, firstSheetTitle, guard),
     );
   },
-  'sheets.addSheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive }) => {
+  'sheets.addSheet': async ({ arguments: raw, callId, conversationId, messageId, generationId, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     const spreadsheetId = stringArg(args, 'spreadsheetId')!;
@@ -521,41 +548,41 @@ export const googleServiceToolHandlers: GoogleToolHandlers = {
     const rowCount = optionalNumber(args, 'rowCount') ?? 1000;
     const columnCount = optionalNumber(args, 'columnCount') ?? 26;
     const payload = { spreadsheetId, title, rowCount, columnCount };
-    const guard = mutationGuard(signal, isGenerationActive);
+    const guard = mutationGuard(signal, isGenerationActive, googleExecutionGrant);
     return runWorkspaceCreateOnce(
       { tool: 'sheets.addSheet', callId, conversationId, messageId, generationId, ...guard },
       payload,
       () => sheets.addSheet(spreadsheetId, title, rowCount, columnCount, guard),
     );
   },
-  'sheets.writeRange': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'sheets.writeRange': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
-    return sheets.writeRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args), sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
+    return sheets.writeRange(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args), sheetsInputMode(args), mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'sheets.appendRows': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'sheets.appendRows': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
-    return sheets.appendRows(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args), sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
+    return sheets.appendRows(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, valuesArg(args), sheetsInputMode(args), mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'sheets.updateCell': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'sheets.updateCell': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
-    return sheets.updateCell(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, args.value, sheetsInputMode(args), mutationGuard(signal, isGenerationActive));
+    return sheets.updateCell(stringArg(args, 'spreadsheetId')!, stringArg(args, 'range')!, args.value, sheetsInputMode(args), mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
-  'sheets.insertRows': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'sheets.insertRows': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
     const spreadsheetId = stringArg(args, 'spreadsheetId')!;
     const sheetId = optionalNumber(args, 'sheetId')!;
     const startIndex = optionalNumber(args, 'startIndex')!;
     const count = optionalNumber(args, 'count')!;
-    await sheets.insertRows(spreadsheetId, sheetId, startIndex, count, mutationGuard(signal, isGenerationActive));
+    await sheets.insertRows(spreadsheetId, sheetId, startIndex, count, mutationGuard(signal, isGenerationActive, googleExecutionGrant));
     return { inserted: true, spreadsheetId, sheetId, startIndex, count };
   },
-  'sheets.batchUpdate': async ({ arguments: raw, signal, isGenerationActive }) => {
+  'sheets.batchUpdate': async ({ arguments: raw, signal, isGenerationActive, googleExecutionGrant }) => {
     const args = objectArgs(raw);
     await assertGooglePickerFileAllowed(stringArg(args, 'spreadsheetId')!);
-    return sheets.batchUpdate(stringArg(args, 'spreadsheetId')!, recordArrayArg(args, 'requests'), mutationGuard(signal, isGenerationActive));
+    return sheets.batchUpdate(stringArg(args, 'spreadsheetId')!, recordArrayArg(args, 'requests'), mutationGuard(signal, isGenerationActive, googleExecutionGrant));
   },
 };

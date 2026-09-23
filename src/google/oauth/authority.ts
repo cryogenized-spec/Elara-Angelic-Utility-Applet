@@ -1,6 +1,6 @@
 import { newNonce, signWrite } from '../../autonomy/protocol';
 import { loadPairing, resolvePairingToken, type AutonomyPairing } from '../../autonomy/cloud/pairing';
-import { googleCapabilityKeySchema, type AuthorizedGoogleRequest, type GoogleCapabilityKey, type GoogleOAuthAuthority, type GoogleOAuthStatus as GoogleOAuthStatusContract } from './contracts';
+import { googleCapabilityKeySchema, type AuthorizedGoogleRequest, type GoogleCapabilityKey, type GoogleExecutionGrant, type GoogleOAuthAuthority, type GoogleOAuthStatus as GoogleOAuthStatusContract } from './contracts';
 import { classifyGoogleOAuthFailure } from './diagnostics';
 import { getGoogleScope } from './scope-registry';
 import { requestGoogleAccessToken, revokeGoogleAccessToken } from './gis';
@@ -191,6 +191,19 @@ function authorizationAuthorityFingerprint(value: StoredAuthorization): string {
     grantedProviderScopes: [...value.grantedProviderScopes].sort(),
     needsReauthorization: Boolean(value.needsReauthorization),
   });
+}
+
+function googleAuthorityBinding(pairing: AutonomyPairing | null): string {
+  if (pairing) return `${normalizeWorkerBaseUrl(pairing.workerUrl)}#${pairing.installationId}`;
+  const origin = typeof window !== 'undefined' ? window.location.origin : 'browser';
+  return `browser#${origin}`;
+}
+
+function sameGoogleExecutionGrant(left: GoogleExecutionGrant, right: GoogleExecutionGrant): boolean {
+  return left.authorityBinding === right.authorityBinding
+    && left.authorityFingerprint === right.authorityFingerprint
+    && normalizedAccountEmail(left.accountEmail) === normalizedAccountEmail(right.accountEmail)
+    && (left.providerRevision ?? null) === (right.providerRevision ?? null);
 }
 
 function storedAuthorizationFromEvent(raw: string | null): StoredAuthorization | null {
@@ -696,9 +709,47 @@ async function authorizeCapability(capability: GoogleCapabilityKey, allowInterac
   return { capability: parsed, fetch: (input, init, beforeProviderFetch) => authorizedFetch(parsed, input, init, beforeProviderFetch) } satisfies AuthorizedGoogleRequest;
 }
 
+async function googleExecutionGrant(): Promise<GoogleExecutionGrant> {
+  const pairing = activePairing();
+  let providerRevision: number | undefined;
+  if (pairing) {
+    const remote = await synchronizeDurableStatus(pairing);
+    if (!remote.connected) throw new GoogleAuthorizationStateChangedError('Google authorization is no longer connected.');
+    providerRevision = durableRevision(remote.updatedAt);
+  }
+  const current = loadStored();
+  const status = currentStatus();
+  if (
+    status.state === 'disconnected'
+    || status.state === 'needs-consent'
+    || status.state === 'revoked'
+    || status.state === 'reauthorization-required'
+    || !status.account?.email
+  ) {
+    throw new GoogleAuthorizationStateChangedError('Google authorization is unavailable for a consequential action.');
+  }
+  return Object.freeze({
+    accountEmail: normalizedAccountEmail(status.account.email),
+    authorityBinding: googleAuthorityBinding(pairing),
+    authorityFingerprint: authorizationAuthorityFingerprint(current),
+    ...(providerRevision !== undefined ? { providerRevision } : {}),
+  });
+}
+
 export const googleOAuthAuthority: GoogleOAuthAuthority = {
   authorize(capability) {
     return authorizeCapability(capability, true);
+  },
+
+  getExecutionGrant() {
+    return googleExecutionGrant();
+  },
+
+  async assertExecutionGrant(expected) {
+    const current = await googleExecutionGrant();
+    if (!sameGoogleExecutionGrant(expected, current)) {
+      throw new GoogleAuthorizationStateChangedError('Google account or authorization changed after this action was approved.');
+    }
   },
 
   authorizeExisting(capability) {

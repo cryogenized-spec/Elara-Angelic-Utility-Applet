@@ -8,6 +8,13 @@ import type { ElaraRoutine } from '../../src/autonomy/contracts';
 export const TOKEN = 'test-installation-token-please-ignore';
 const ORIGIN = 'https://cryogenized-spec.github.io';
 
+let lastTestSignedWriteTimestamp = 0;
+
+function nextTestSignedWriteTimestamp(): number {
+  lastTestSignedWriteTimestamp = Math.max(Date.now(), lastTestSignedWriteTimestamp + 1);
+  return lastTestSignedWriteTimestamp;
+}
+
 export function makeRoutine(overrides: Partial<ElaraRoutine> = {}): ElaraRoutine {
   return {
     id: 'routine-cloud-1',
@@ -31,7 +38,7 @@ export function configPayload(generation: number, routines: ElaraRoutine[], enab
 
 /** A fully signed write request exactly the way the app client signs it. */
 export async function signedWrite(path: string, body: string, overrides: { timestamp?: number; nonce?: string; signature?: string; token?: string } = {}): Promise<Request> {
-  const timestamp = overrides.timestamp ?? Date.now();
+  const timestamp = overrides.timestamp ?? nextTestSignedWriteTimestamp();
   const nonce = overrides.nonce ?? newNonce();
   const signature = overrides.signature ?? await signWrite(overrides.token ?? TOKEN, 'POST', path, timestamp, nonce, body);
   return new Request(`https://worker.example${path}`, {

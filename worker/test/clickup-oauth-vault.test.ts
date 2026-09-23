@@ -311,6 +311,18 @@ describe('ClickUp OAuth public boundary', () => {
     }));
   });
 
+  it('rejects a fresh signed write whose authenticated ClickUp intent generation is stale', async () => {
+    const timestamp = Date.now();
+    const response = await SELF.fetch(await signedWrite('/clickup/oauth/personal-token', '{}', {
+      timestamp,
+      intentTimestamp: timestamp - (6 * 60_000),
+    }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual(expect.objectContaining({
+      code: 'connection_intent_stale',
+    }));
+  });
+
   it('rejects personal-token bytes in the browser payload even when the write is correctly signed', async () => {
     const body = JSON.stringify({ token: 'pk_dummy' });
     const response = await SELF.fetch(await signedWrite('/clickup/oauth/personal-token', body));

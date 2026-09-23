@@ -36,6 +36,21 @@ const STATUS = {
   updatedAt: 123456,
 };
 
+function connectionState(epoch = 0, pending = false) {
+  return {
+    epoch,
+    settledEpoch: pending ? Math.max(0, epoch - 1) : epoch,
+    pending,
+  };
+}
+
+function jsonResponse(value: unknown, status = 200): Response {
+  return new Response(JSON.stringify(value), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
 describe('ClickUp OAuth browser authority', () => {
   beforeEach(() => {
     localStorage.clear();
@@ -107,34 +122,63 @@ describe('ClickUp OAuth browser authority', () => {
       updatedAt: 234567,
     };
 
-    let releaseOld: ((response: Response) => void) | undefined;
-    const oldResponse = new Promise<Response>((resolve) => { releaseOld = resolve; });
+    let releaseOldStatus: ((response: Response) => void) | undefined;
+    const oldStatusResponse = new Promise<Response>((resolve) => { releaseOldStatus = resolve; });
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
       const url = input instanceof Request ? input.url : String(input);
-      if (url.startsWith('https://worker.example/')) return oldResponse;
-      if (url.startsWith('https://replacement.example/')) {
-        return new Response(JSON.stringify(replacementStatus), {
-          status: 200,
-          headers: { 'content-type': 'application/json' },
-        });
+      if (url === 'https://worker.example/clickup/oauth/connection-state') {
+        return jsonResponse(connectionState());
+      }
+      if (url === 'https://worker.example/clickup/oauth/status') return oldStatusResponse;
+      if (url === 'https://replacement.example/clickup/oauth/connection-state') {
+        return jsonResponse(connectionState(5));
+      }
+      if (url === 'https://replacement.example/clickup/oauth/status') {
+        return jsonResponse(replacementStatus);
       }
       throw new Error(`Unexpected URL ${url}`);
     }) as unknown as typeof fetch;
 
     const staleRead = clickUpOAuthAuthority.getStatus();
     await Promise.resolve();
+    await Promise.resolve();
     pairingMock.mockReturnValue(replacementPairing);
 
     await expect(clickUpOAuthAuthority.getStatus()).resolves.toEqual(replacementStatus);
     expect(loadStoredClickUpStatus()).toEqual(replacementStatus);
 
-    releaseOld?.(new Response(JSON.stringify(STATUS), {
-      status: 200,
-      headers: { 'content-type': 'application/json' },
-    }));
+    releaseOldStatus?.(jsonResponse(STATUS));
     await expect(staleRead).rejects.toMatchObject({ code: 'grant_changed', status: 409 });
 
     expect(loadStoredClickUpStatus()).toEqual(replacementStatus);
+  });
+
+  it('rejects a status snapshot when another tab changes the Worker connection epoch mid-read', async () => {
+    let stateReads = 0;
+    let releaseStatus: ((response: Response) => void) | undefined;
+    const delayedStatus = new Promise<Response>((resolve) => { releaseStatus = resolve; });
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        stateReads += 1;
+        return jsonResponse(connectionState(stateReads === 1 ? 7 : 8));
+      }
+      if (url.endsWith('/clickup/oauth/status')) return delayedStatus;
+      throw new Error(`Unexpected URL ${url}`);
+    }) as unknown as typeof fetch;
+
+    const pending = clickUpOAuthAuthority.getStatus();
+    await Promise.resolve();
+    await Promise.resolve();
+    releaseStatus?.(jsonResponse(STATUS));
+
+    await expect(pending).rejects.toMatchObject({
+      code: 'connection_pending',
+      status: 409,
+    });
+    expect(loadStoredClickUpStatus()).toBeNull();
+    expect(stateReads).toBe(2);
   });
 
   it('ignores legacy unowned cached ClickUp status until the current pairing refreshes it', () => {
@@ -439,8 +483,11 @@ describe('ClickUp OAuth browser authority', () => {
       const url = input instanceof Request ? input.url : String(input);
       const headers = new Headers(init?.headers);
       expect(headers.get('Authorization')).toBe('Bearer installation-token-for-test');
+      if (url.endsWith('/clickup/oauth/connection-state')) {
+        return jsonResponse(connectionState());
+      }
       if (url.endsWith('/clickup/oauth/status')) {
-        return new Response(JSON.stringify(STATUS), { status: 200, headers: { 'content-type': 'application/json' } });
+        return jsonResponse(STATUS);
       }
       if (url.endsWith('/clickup/oauth/disconnect')) {
         return new Response(JSON.stringify({ disconnected: true, providerRevoked: false }), {
@@ -455,6 +502,6 @@ describe('ClickUp OAuth browser authority', () => {
     expect(loadStoredClickUpStatus()).toEqual(STATUS);
     await clickUpOAuthAuthority.disconnect();
     expect(loadStoredClickUpStatus()).toBeNull();
-    expect(calls).toBe(2);
+    expect(calls).toBe(4);
   });
 });
